@@ -24,11 +24,11 @@
   },
   "wsk": {
     "target": "aws",
-    "name": "spacecat/api-service@${version}",
+    "name": "spacecat-services/api-service@${version}",
     "memory": 4096,
-    "awsRole!important": "arn:aws:iam::118435662149:role/spacecat-service-role-s3-rw",
+    "awsRole!important": "arn:aws:iam::282898975672:role/spacecat-role-services",
     "testUrl": "/_status_check/healthcheck.json",
-    "awsAttachAuthorizer": "spacecat-token-authorizer_v1",
+    "awsAttachAuthorizer": "",
     "dev": {
       "params-file": "secrets/dev-secrets.json"
     },
@@ -51,6 +51,13 @@
     "recursive": "true",
     "reporter": "mocha-multi-reporters",
     "reporter-options": "configFile=.mocha-multi.json"
+  },
+  "dependencies": {
+    "@adobe/fetch": "4.1.0",
+    "@adobe/helix-shared-secrets": "2.1.2",
+    "@adobe/helix-shared-wrap": "2.0.0",
+    "@adobe/helix-status": "10.0.10",
+    "@adobe/helix-universal-logger": "3.0.11"
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.3",
