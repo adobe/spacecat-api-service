@@ -28,6 +28,8 @@ paths:
     $ref: "./sites-api.yaml#/sites"
   /organizations/{organizationId}/sites/{siteId}:
     $ref: "./site-api.yaml#/site"
+  /sites/{siteId}/runAudit:
+    $ref: "./site-api.yaml#/runAudit"
   /organizations/{organizationId}/sites/{siteId}/audits:
     $ref: "./audits-api.yaml#/audits"
   /organizations/{organizationId}/sites/{siteId}/audits/{auditId}:
