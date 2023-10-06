@@ -1,0 +1,75 @@
+audit:
+  parameters:
+    - $ref: "./parameters.yaml#/organizationId"
+    - $ref: "./parameters.yaml#/siteId"
+    - $ref: "./parameters.yaml#/auditId"
+  get:
+    operationId: getAudit
+    tags:
+      - audits
+    summary: Retrieve a single audit
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: An audit object
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Audit'
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+  put:
+    operationId: updateAudit
+    tags:
+      - audits
+    summary: Update an audit
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/Audit'
+    responses:
+      '200':
+        description: Audit updated successfully
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+  delete:
+    operationId: deleteAudit
+    tags:
+      - audits
+    summary: Delete an audit
+    security:
+      - admin_key: [ ]
+    responses:
+      '204':
+        description: Audit deleted successfully
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"

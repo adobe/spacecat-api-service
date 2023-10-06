@@ -1,0 +1,105 @@
+site:
+  parameters:
+    - $ref: "./parameters.yaml#/organizationId"
+    - $ref: "./parameters.yaml#/siteId"
+  get:
+    operationId: getSite
+    tags:
+      - sites
+    summary: Retrieve a single site
+    security:
+      - api_key: [ ]
+    responses:
+      200:
+        description: A site object
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Site'
+      404:
+        description: Site not found
+  put:
+    operationId: updateSite
+    tags:
+      - sites
+    summary: Update a site
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/Site'
+    responses:
+      '200':
+        description: Site updated successfully
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+  delete:
+    operationId: deleteSite
+    tags:
+      - sites
+    summary: Delete a site
+    security:
+      - admin_key: [ ]
+    responses:
+      '204':
+        description: Site deleted successfully
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+runAudit:
+  post:
+    operationId: runAudit
+    tags:
+      - sites
+    summary: Initiate an asynchronous audit for a site
+    security:
+      - admin_key: [ ]
+    parameters:
+      - name: siteId
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      202:
+        description: Audit initiated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                auditRequestId:
+                  type: string
+                  format: uuid
+                statusCheckUrl:
+                  type: string
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"

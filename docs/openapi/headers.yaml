@@ -1,0 +1,10 @@
+xError:
+  description: A short descriptive error message
+  schema:
+    format: none
+    type: string
+
+location:
+  description: The redirect location
+  schema:
+    type: string

@@ -1,0 +1,55 @@
+sites:
+  parameters:
+    - $ref: "./parameters.yaml#/organizationId"
+  post:
+    operationId: createSite
+    tags:
+      - sites
+    summary: Create a new site
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/Site'
+    responses:
+      '201':
+        description: Site created successfully
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+  get:
+    operationId: getSites
+    tags:
+      - sites
+    summary: Retrieve all sites for a given organization
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: A list of sites
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"

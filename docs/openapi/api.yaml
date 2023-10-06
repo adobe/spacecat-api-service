@@ -1,0 +1,53 @@
+openapi: 3.0.0
+info:
+  version:
+    $ref: "../../package.json#/version"
+  title: SpaceCat API
+  description: The SpaceCat API is used to manage edge delivery site directory and obtain audit information.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: 'https://spacecat.hlx.page'
+
+tags:
+  - name: organizations
+    description: Organization operations
+  - name: sites
+    description: Site operations
+  - name: audits
+    description: Audit operations
+
+paths:
+  /organizations:
+    $ref: "./organizations-api.yaml#/organizations"
+  /organizations/{organizationId}:
+    $ref: "./organization-api.yaml#/organization"
+  /organizations/{organizationId}/sites:
+    $ref: "./sites-api.yaml#/sites"
+  /organizations/{organizationId}/sites/{siteId}:
+    $ref: "./site-api.yaml#/site"
+  /sites/{siteId}/runAudit:
+    $ref: "./site-api.yaml#/runAudit"
+  /organizations/{organizationId}/sites/{siteId}/audits:
+    $ref: "./audits-api.yaml#/audits"
+  /organizations/{organizationId}/sites/{siteId}/audits/{auditId}:
+    $ref: "./audit-api.yaml#/audit"
+  /sites:
+    $ref: "./sites-query-api.yaml#/sites"
+  /sites.xlsx:
+    $ref: "./sites-query-api.yaml#/export-xlsx"
+  /sites.csv:
+    $ref: "./sites-query-api.yaml#/export-csv"
+
+components:
+  securitySchemes:
+    api_key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    admin_key:
+      type: apiKey
+      in: header
+      name: X-Admin-Key

@@ -1,0 +1,82 @@
+sites:
+  parameters:
+    - $ref: "./parameters.yaml#/domainQuery"
+    - $ref: "./parameters.yaml#/pathQuery"
+  get:
+    operationId: querySites
+    tags:
+      - sites
+    summary: Retrieve sites by domain and path
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: A list of sites matching the query parameters
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+export-xlsx:
+  get:
+    operationId: exportSitesXlsx
+    tags:
+      - sites
+    summary: Download sites data in XLSX format
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Sites data file in XLSX format
+        content:
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema:
+              type: string
+              format: binary
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+export-csv:
+  get:
+    operationId: exportSitesCsv
+    tags:
+      - sites
+    summary: Download sites data in CSV format
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Sites data file in CSV format
+        content:
+          text/csv:
+            schema:
+              type: string
+              format: binary
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"

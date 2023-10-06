@@ -1,0 +1,29 @@
+'400':
+  description: Invalid request url.
+  headers:
+    X-Error:
+      $ref: "./headers.yaml#/xError"
+'401':
+  description: Not authenticated
+'403':
+  description: Access role does not have the required permission
+'404':
+  description: Resource not found.
+  headers:
+    X-Error:
+      $ref: "./headers.yaml#/xError"
+'405':
+  description: Method not allowed.
+  headers:
+    X-Error:
+      $ref: "./headers.yaml#/xError"
+'409':
+  description: Conflict. The requested operation is not allowed by the current state of tte resource.
+  headers:
+    X-Error:
+      $ref: "./headers.yaml#/xError"
+'500':
+  description: Operation failed due to an internal error.
+  headers:
+    X-Error:
+      $ref: "./headers.yaml#/xError"
