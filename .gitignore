@@ -7,4 +7,5 @@ tmp
 logs
 .DS_Store
 test-results.xml
-.env
+admin-idp-p*.json
+*.env
