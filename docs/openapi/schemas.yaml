@@ -1,0 +1,102 @@
+Organization:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    ims_org_id:
+      type: string
+    sales_force_id:
+      type: string
+    github_org_id:
+      type: string
+    name:
+      type: string
+    vertical:
+      type: string
+      enum:
+        - AEM-CS
+    created_at:
+      type: string
+      format: date-time
+
+Site:
+  type: object
+  properties:
+    organization_id:
+      type: string
+      format: uuid
+    domain:
+      type: string
+    path:
+      type: string
+    type:
+      type: string
+      enum:
+        - edge
+        - cs
+        - other
+    github_repo_id:
+      type: string
+    content_source:
+      type: string
+    slack_channels:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          description:
+            type: string
+    status:
+      type: string
+      enum:
+        - new
+        - wip
+        - certification
+        - live
+        - attrition
+    intended_go_live_date:
+      type: string
+      format: date
+    actual_go_live_date:
+      type: string
+      format: date
+    previous_cms:
+      type: string
+    implemented_by:
+      type: string
+    created_at:
+      type: string
+      format: date-time
+
+Audit:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    site_id:
+      type: string
+      format: uuid
+    audited_at:
+      type: string
+      format: date-time
+    type:
+      type: string
+      enum:
+        - psi
+        # Additional audit types...
+    is_error:
+      type: boolean
+    is_live:
+      type: boolean
+    markdown_content:
+      type: string
+    markdown_diff:
+      type: string
+    github_diff:
+      type: string
+    audit_results:
+      type: object

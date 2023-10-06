@@ -1,0 +1,30 @@
+organizationId:
+  name: organizationId
+  in: path
+  required: true
+  schema:
+    type: string
+siteId:
+  name: siteId
+  in: path
+  required: true
+  schema:
+    type: string
+auditId:
+  name: auditId
+  in: path
+  required: true
+  schema:
+    type: string
+domainQuery:
+  name: domain
+  in: query
+  required: false
+  schema:
+    type: string
+pathQuery:
+  name: path
+  in: query
+  required: false
+  schema:
+    type: string

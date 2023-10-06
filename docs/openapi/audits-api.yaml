@@ -1,0 +1,48 @@
+audits:
+  parameters:
+    - $ref: "./parameters.yaml#/organizationId"
+    - $ref: "./parameters.yaml#/siteId"
+  post:
+    operationId: createAudit
+    tags:
+      - audits
+    summary: Create a new audit
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/Audit'
+    responses:
+      201:
+        description: Audit created successfully
+      400:
+        description: Invalid request body
+  get:
+    operationId: getAudits
+    tags:
+      - audits
+    summary: Retrieve all audits for a given site
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: A list of audits
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Audit'
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
