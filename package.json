@@ -87,5 +87,13 @@
   "lint-staged": {
     "*.js": "eslint",
     "*.cjs": "eslint"
+  },
+  "nodemonConfig": {
+    "exec": "node --inspect ./test/dev/server.mjs",
+    "watch": [
+      ".env",
+      "."
+    ],
+    "ext": ".js, .cjs, .ejs, .css"
   }
 }

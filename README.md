@@ -26,6 +26,21 @@ See the [API documentation](docs/API.md).
 
 ## Development
 
+To set up local development for `spacecat-api-service`, follow these steps:
+
+1. Create an `.env` file in your project root and define the following environment variables with your AWS credentials:
+
+```plaintext
+AWS_REGION=your_aws_region
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
+```   
+2. Start the development server
+
+```
+npm start
+```
+
 ### Build
 
 ```bash
