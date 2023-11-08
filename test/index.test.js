@@ -15,9 +15,13 @@
 import assert from 'assert';
 import { main } from '../src/index.js';
 
+const baseUrl = 'https://base.spacecat';
+
 describe('Index Tests', () => {
   it('index function is present', async () => {
-    const result = await main();
-    assert.strictEqual(result, 'Hello, world.');
+    const result = await main(new Request(baseUrl), {
+      log: console,
+    });
+    assert.strictEqual(await result.text(), 'Hello, world.');
   });
 });
