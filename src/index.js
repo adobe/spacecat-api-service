@@ -23,7 +23,7 @@ import secrets from '@adobe/helix-shared-secrets';
 function run(request, context) {
   const name = new URL(request.url).searchParams.get('name') || 'world';
   context.log.info(`Saying hello to: ${name}.`);
-  return new Response(`Hello, ${name} (${process.env.NAME}).`);
+  return new Response(`Hello, ${name}.`);
 }
 
 export const main = wrap(run)
