@@ -22,6 +22,6 @@ describe('Index Tests', () => {
     const result = await main(new Request(baseUrl), {
       log: console,
     });
-    assert.strictEqual(result, 'Hello, world.');
+    assert.strictEqual(await result.text(), 'Hello, world.');
   });
 });
