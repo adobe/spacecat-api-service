@@ -53,12 +53,12 @@ jobs:
           path: junit
       # see https://circleci.com/orbs/registry/orb/adobe/helix-post-deploy
       # for more available parameters
-      - helix-post-deploy/monitoring:
-          statuspage_name: Franklin Service
-          statuspage_group: Development
-          newrelic_group_policy: Development Repeated Failure
-          targets: aws
-          incubator: true # remove only when promoting service to production
+#      - helix-post-deploy/monitoring:
+#          statuspage_name: Franklin Service
+#          statuspage_group: Development
+#          newrelic_group_policy: Development Repeated Failure
+#          targets: aws
+#          incubator: true # remove only when promoting service to production
 
   branch-deploy:
     executor: node18
