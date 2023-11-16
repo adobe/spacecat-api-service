@@ -27,8 +27,7 @@ const { expect } = chai;
 
 const sandbox = sinon.createSandbox();
 
-describe('sqs', function () {
-  this.timeout(10000);
+describe('sqs', () => {
   let context;
 
   beforeEach('setup', () => {
