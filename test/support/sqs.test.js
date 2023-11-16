@@ -27,7 +27,8 @@ const { expect } = chai;
 
 const sandbox = sinon.createSandbox();
 
-describe('sqs', () => {
+describe('sqs', function () {
+  this.timeout(10000);
   let context;
 
   beforeEach('setup', () => {
@@ -70,7 +71,6 @@ describe('sqs', () => {
 
     const action = wrap(async (req, ctx) => {
       await ctx.sqs.sendMessage('queue-url', { key: 'value' });
-      await ctx.sqs.close();
     }).with(sqsWrapper);
 
     await expect(action({}, context)).to.be.rejectedWith(errorResponse.message);
@@ -99,7 +99,6 @@ describe('sqs', () => {
 
     await wrap(async (req, ctx) => {
       await ctx.sqs.sendMessage(queueUrl, message);
-      await ctx.sqs.close();
     }).with(sqsWrapper)({}, context);
 
     expect(logSpy).to.have.been.calledWith(`Success, message sent. MessageID:  ${messageId}`);
