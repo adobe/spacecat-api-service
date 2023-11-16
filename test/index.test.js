@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Adobe. All rights reserved.
+ * Copyright 2023 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -12,16 +12,87 @@
 
 /* eslint-env mocha */
 
-import assert from 'assert';
+import { expect } from 'chai';
+import { Request } from '@adobe/fetch';
 import { main } from '../src/index.js';
 
 const baseUrl = 'https://base.spacecat';
 
 describe('Index Tests', () => {
-  it('index function is present', async () => {
-    const result = await main(new Request(baseUrl), {
+  let context;
+  let request;
+  const apiKey = 'api-key';
+
+  beforeEach('setup', () => {
+    context = {
       log: console,
+      runtime: {
+        region: 'us-east-1',
+      },
+      pathInfo: {
+        suffix: '',
+      },
+      env: {
+        USER_API_KEY: apiKey,
+        ADMIN_API_KEY: apiKey,
+      },
+    };
+    request = new Request(baseUrl, {
+      headers: {
+        'x-api-key': apiKey,
+      },
     });
-    assert.strictEqual(await result.text(), 'Hello, world.');
+  });
+
+  it('sends 404 for missing suffix', async () => {
+    delete context.pathInfo.suffix;
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(404);
+    expect(resp.headers.plain()['x-error']).to.equal('wrong path format');
+  });
+
+  it('index function is present', async () => {
+    context.pathInfo.suffix = '/test';
+
+    request = new Request(baseUrl, {
+      method: 'OPTIONS',
+      headers: {
+        'x-api-key': apiKey,
+      },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(204);
+    expect(resp.headers.plain()).to.eql({
+      'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS, DELETE',
+      'access-control-allow-headers': 'x-api-key',
+      'access-control-max-age': '86400',
+      'content-type': 'text/plain; charset=utf-8',
+    });
+  });
+
+  it('returns 404 when unknown route', async () => {
+    context.pathInfo.suffix = '/unknown-handler';
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(404);
+    expect(resp.headers.plain()['x-error']).to.equal('no such route /unknown-handler');
+  });
+
+  it('handle errors', async () => {
+    context.pathInfo.suffix = '/trigger';
+
+    request = new Request(`${baseUrl}/trigger?url=all&type=cwv`, {
+      headers: {
+        'x-api-key': apiKey,
+      },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(500);
+    expect(resp.headers.plain()['x-error']).to.equal('internal server error');
   });
 });
