@@ -52,7 +52,7 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('wrong path format');
   });
 
-  it('index function is present', async () => {
+  it('handles options request', async () => {
     context.pathInfo.suffix = '/test';
 
     request = new Request(baseUrl, {
@@ -81,7 +81,7 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('no such route /unknown-handler');
   });
 
-  it('handle errors', async () => {
+  it('handles errors', async () => {
     context.pathInfo.suffix = '/trigger';
 
     request = new Request(`${baseUrl}/trigger?url=all&type=cwv`, {

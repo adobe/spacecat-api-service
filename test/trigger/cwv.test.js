@@ -26,7 +26,7 @@ const { expect } = chai;
 
 const sandbox = sinon.createSandbox();
 
-describe('sqs', () => {
+describe('cwv handler', () => {
   let context;
 
   beforeEach('setup', () => {
