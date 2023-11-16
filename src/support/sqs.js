@@ -42,6 +42,10 @@ class SQS {
       throw e;
     }
   }
+
+  async close() {
+    this.sqsClient.destroy();
+  }
 }
 
 export default function sqsWrapper(fn) {
