@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.0.2...v1.0.3) (2023-11-17)
+
+
+### Bug Fixes
+
+* change env variable ([47bd082](https://github.com/adobe-rnd/spacecat-api-service/commit/47bd082b2930335aa4f260058e46a4a242832f32))
+
 ## [1.0.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.0.1...v1.0.2) (2023-11-17)
 
 
