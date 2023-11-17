@@ -1,6 +1,6 @@
 # SpaceCat API Service
 
-> Provides an HTTP API to interact with SpaceCat data.
+> Provides an HTTP API to interact with SpaceCat data
 
 ## Status
 [![codecov](https://img.shields.io/codecov/c/github/adobe-rnd/spacecat-api-service.svg)](https://codecov.io/gh/adobe-rnd/spacecat-api-service)
