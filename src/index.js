@@ -48,7 +48,7 @@ async function run(request, context) {
   const { route, suffix, method } = pathInfo;
 
   if (!route) {
-    log.info(`Unable to extract path info, wrong format: ${suffix}`);
+    log.info(`Unable to extract path info. Wrong format: ${suffix}`);
     return new Response('', {
       status: 404,
       headers: {
