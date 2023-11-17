@@ -13,7 +13,4 @@
 module.exports = {
   root: true,
   extends: '@adobe/helix',
-  rules: {
-    'no-unused-vars': ["error", { "varsIgnorePattern": "^_$" }],
-  }
 };
