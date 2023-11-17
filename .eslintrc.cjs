@@ -12,5 +12,8 @@
 
 module.exports = {
   root: true,
-  extends: '@adobe/helix',
+  extends: '@adobe/helix-config-eslint',
+  rules: {
+    'no-unused-vars': ["error", { "varsIgnorePattern": "^_$" }],
+  }
 };

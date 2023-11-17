@@ -18,8 +18,8 @@ const AUDITS = {
 };
 
 export default async function triggerHandler(context) {
-  const { log } = context;
-  const { type, url } = context.data;
+  const { log, data } = context;
+  const { type, url } = data;
 
   if (!type || !url) {
     return new Response('', {

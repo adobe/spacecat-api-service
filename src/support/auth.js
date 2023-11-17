@@ -18,19 +18,32 @@ export const ADMIN_ENDPOINTS = ['trigger']; // export for testing
  */
 export default function authWrapper(fn) {
   return async (request, context) => {
-    const { pathInfo: info } = context;
+    const { log, pathInfo: { headers, route } } = context;
 
-    const apiKeyFromHeader = info.headers['x-api-key'];
-    const apiKey = ADMIN_ENDPOINTS.includes(info.route)
+    const apiKeyFromHeader = headers['x-api-key'];
+
+    if (!apiKeyFromHeader) {
+      return new Response('API key missing in headers', {
+        status: 400,
+        headers: { 'x-error': 'API key missing' },
+      });
+    }
+
+    const expectedApiKey = ADMIN_ENDPOINTS.includes(route)
       ? context.env.ADMIN_API_KEY
       : context.env.USER_API_KEY;
 
-    if (apiKey !== apiKeyFromHeader) {
-      return new Response('', {
+    if (!expectedApiKey) {
+      log.error(`API key was not configured`);
+      return new Response('Server configuration error', {
+        status: 500,
+      });
+    }
+
+    if (apiKeyFromHeader !== expectedApiKey) {
+      return new Response('Not authorized', {
         status: 401,
-        headers: {
-          'x-error': 'not authorized',
-        },
+        headers: { 'x-error': 'Incorrect or missing API key' },
       });
     }
 

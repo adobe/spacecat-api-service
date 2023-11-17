@@ -38,13 +38,38 @@ describe('auth', () => {
     };
   });
 
-  it('no api key should', async () => {
-    const resp = await action(new Request('https://space.cat/'), context);
+  it('no user key provided in env variables results in internal server error', async () => {
+    context.env = {};
+    const resp = await action(new Request('https://space.cat/', {
+      headers: {
+        'x-api-key': context.env.USER_API_KEY,
+      },
+    }), context);
 
-    expect(resp.status).to.equal(401);
+    expect(await resp.text()).to.equal('Server configuration error');
+    expect(resp.status).to.equal(500);
   });
 
-  it('no api key should2', async () => {
+  it('no admin key provided in env variables results in internal server error', async () => {
+    context.env = {};
+    context.pathInfo.suffix = `/${ADMIN_ENDPOINTS[0]}`;
+    const resp = await action(new Request('https://space.cat/', {
+      headers: {
+        'x-api-key': context.env.ADMIN_API_KEY,
+      },
+    }), context);
+
+    expect(await resp.text()).to.equal('Server configuration error');
+    expect(resp.status).to.equal(500);
+  });
+
+  it('no user api key in header results in bad request', async () => {
+    const resp = await action(new Request('https://space.cat/'), context);
+
+    expect(resp.status).to.equal(400);
+  });
+
+  it('wrong user api key in header results in unauthorized', async () => {
     const resp = await action(new Request('https://space.cat/', {
       headers: {
         'x-api-key': 'wrong-key',
@@ -54,7 +79,7 @@ describe('auth', () => {
     expect(resp.status).to.equal(401);
   });
 
-  it('no api key should33', async () => {
+  it('correct user key invokes the user scoped handler', async () => {
     const resp = await action(new Request('https://space.cat/', {
       headers: {
         'x-api-key': context.env.USER_API_KEY,
@@ -64,14 +89,14 @@ describe('auth', () => {
     expect(resp).to.equal(42);
   });
 
-  it('no api key should3', async () => {
+  it('no admin api key in header results in bad request', async () => {
     context.pathInfo.suffix = `/${ADMIN_ENDPOINTS[0]}`;
     const resp = await action(new Request('https://space.cat/'), context);
 
-    expect(resp.status).to.equal(401);
+    expect(resp.status).to.equal(400);
   });
 
-  it('no api key should4', async () => {
+  it('wrong admin api key in header results in unauthorized', async () => {
     context.pathInfo.suffix = `/${ADMIN_ENDPOINTS[0]}`;
     const resp = await action(new Request('https://space.cat/', {
       headers: {
@@ -82,7 +107,7 @@ describe('auth', () => {
     expect(resp.status).to.equal(401);
   });
 
-  it('no api key should5', async () => {
+  it('correct admin key invokes the admin scoped handler', async () => {
     context.pathInfo.suffix = `/${ADMIN_ENDPOINTS[0]}`;
     const resp = await action(new Request('https://space.cat/', {
       headers: {

@@ -24,12 +24,13 @@ const HANDLERS = {
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
+    const [_, route] = context?.pathInfo?.suffix?.split(/\/+/) || [];
     context.pathInfo = {
       ...context.pathInfo,
       ...{
         method: request.method.toUpperCase(),
         headers: request.headers.plain(),
-        route: context?.pathInfo?.suffix?.split(/\/+/)[1],
+        route,
       },
     };
     return fn(request, context);

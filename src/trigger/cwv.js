@@ -42,11 +42,10 @@ export default async function triggerCWVAudit(context) {
   const resp = await fetch(createUrl(DOMAIN_LIST_URL, params));
   const respJson = await resp.json();
 
-  const respUrls = respJson?.results?.data?.map((result) => result.hostname);
-  const matchedUrls = respUrls
+  const filteredUrls = respJson?.results?.data?.map((result) => result.hostname)
     .filter((respUrl) => url.toUpperCase() === ALL_URLS || url === respUrl);
 
-  if (matchedUrls.length === 0) {
+  if (filteredUrls.length === 0) {
     return new Response('', {
       status: 404,
       headers: {
@@ -55,12 +54,12 @@ export default async function triggerCWVAudit(context) {
     });
   }
 
-  for (const matchedUrl of matchedUrls) {
+  for (const filteredUrl of filteredUrls) {
     // eslint-disable-next-line no-await-in-loop
-    await sqs.sendMessage(queueUrl, { type, url: matchedUrl });
+    await sqs.sendMessage(queueUrl, { type, url: filteredUrl });
   }
 
-  const message = `Successfully queued ${type} audit jobs for ${matchedUrls.length} url/s`;
+  const message = `Successfully queued ${type} audit jobs for ${filteredUrls.length} url/s`;
   log.info(message);
 
   return new Response(JSON.stringify({ message }));
