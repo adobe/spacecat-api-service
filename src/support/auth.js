@@ -34,7 +34,7 @@ export default function authWrapper(fn) {
       : context.env.USER_API_KEY;
 
     if (!expectedApiKey) {
-      log.error(`API key was not configured`);
+      log.error('API key was not configured');
       return new Response('Server configuration error', {
         status: 500,
       });
