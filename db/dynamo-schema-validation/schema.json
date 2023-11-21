@@ -1,0 +1,107 @@
+{
+  "DataModel": [
+    {
+      "TableName": "sites",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "id",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "baseURL",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "imsOrgId",
+          "AttributeType": "S"
+        }
+      ]
+    },
+    {
+      "TableName": "audits",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "siteId",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "SK",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "auditedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "auditResult",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "fullAuditRef",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "auditType",
+          "AttributeType": "S"
+        }
+      ]
+    },
+    {
+      "TableName": "latest_audits",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "siteId",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "SK",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "auditedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "auditResult",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "fullAuditRef",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "GSI1SK",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "auditType",
+          "AttributeType": "S"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "latest_audit_scores",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "siteId",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "GSI1SK",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ]
+    }
+  ]
+}
