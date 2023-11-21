@@ -35,20 +35,30 @@ describe('slack', () => {
   it('fails when slack bot token is missing', async () => {
     delete context.env.SLACK_BOT_TOKEN;
 
-    await expect(postSlackMessage('ch', 'msg', context)).to.be.rejectedWith('Missing slack bot token');
+    await expect(postSlackMessage('ch', 'msg', undefined)).to.be.rejectedWith('Missing slack bot token');
   });
 
   it('fails when message sending fails', async () => {
-    nock('https://slack.com')
+    const token = context.env.SLACK_BOT_TOKEN;
+    nock('https://slack.com', {
+      reqheaders: {
+        authorization: `Bearer ${token}`,
+      },
+    })
       .get('/api/chat.postMessage')
       .query(getQueryParams('ch', 'msg'))
       .reply(400);
 
-    await expect(postSlackMessage('ch', 'msg', context)).to.be.rejectedWith('Failed to send initial slack message. Status: 400');
+    await expect(postSlackMessage('ch', 'msg', token)).to.be.rejectedWith('Failed to send initial slack message. Status: 400');
   });
 
   it('fails when message was not acknowledged', async () => {
-    nock('https://slack.com')
+    const token = context.env.SLACK_BOT_TOKEN;
+    nock('https://slack.com', {
+      reqheaders: {
+        authorization: `Bearer ${token}`,
+      },
+    })
       .get('/api/chat.postMessage')
       .query(getQueryParams('ch', 'msg'))
       .reply(200, {
@@ -56,11 +66,16 @@ describe('slack', () => {
         error: 'invalid_blocks',
       });
 
-    await expect(postSlackMessage('ch', 'msg', context)).to.be.rejectedWith('Slack message was not acknowledged. Error: invalid_blocks');
+    await expect(postSlackMessage('ch', 'msg', token)).to.be.rejectedWith('Slack message was not acknowledged. Error: invalid_blocks');
   });
 
   it('returns channel and thread info when message was sent successfully', async () => {
-    nock('https://slack.com')
+    const token = context.env.SLACK_BOT_TOKEN;
+    nock('https://slack.com', {
+      reqheaders: {
+        authorization: `Bearer ${token}`,
+      },
+    })
       .get('/api/chat.postMessage')
       .query(getQueryParams('ch1', 'msg'))
       .reply(200, {
@@ -69,7 +84,7 @@ describe('slack', () => {
         ts: 'ts1',
       });
 
-    const resp = await postSlackMessage('ch1', 'msg', context);
+    const resp = await postSlackMessage('ch1', 'msg', token);
 
     expect(resp.channel).to.equal('ch1');
     expect(resp.ts).to.equal('ts1');

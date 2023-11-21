@@ -30,12 +30,9 @@ export function getQueryParams(channelId, message) {
   };
 }
 
-export async function postSlackMessage(channelId, message, context) {
-  const { log, env: { SLACK_BOT_TOKEN: token } } = context;
+export async function postSlackMessage(channelId, message, token) {
   if (!token) {
-    const errMsg = 'Missing slack bot token';
-    log.error(errMsg);
-    throw new Error(errMsg);
+    throw new Error('Missing slack bot token');
   }
 
   const params = getQueryParams(channelId, message);
@@ -46,17 +43,13 @@ export async function postSlackMessage(channelId, message, context) {
   });
 
   if (resp.status !== 200) {
-    const errMsg = `Failed to send initial slack message. Status: ${resp.status}`;
-    log.error(errMsg);
-    throw new Error(errMsg);
+    throw new Error(`Failed to send initial slack message. Status: ${resp.status}`);
   }
 
   const respJson = await resp.json();
 
   if (!respJson.ok) {
-    const errMsg = `Slack message was not acknowledged. Error: ${respJson.error}`;
-    log.error(errMsg);
-    throw new Error(errMsg);
+    throw new Error(`Slack message was not acknowledged. Error: ${respJson.error}`);
   }
 
   return {

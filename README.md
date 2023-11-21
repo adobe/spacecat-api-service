@@ -58,3 +58,39 @@ $ npm test
 ```bash
 $ npm run lint
 ```
+
+## Message Body Formats
+
+Spacecat-api-service queues audit jobs to `AUDIT_JOBS_QUEUE` to be processed later on.
+
+Output message body format sent to `AUDIT_JOBS_QUEUE` is:
+
+```json
+{
+  "type": "string",
+  "url": "string",
+  "auditContext": "object|optional"
+}
+```
+
+Currently, only `slackContext` property exist in the `auditContext`:
+
+```json
+{
+  "slackContext": {
+    "channel": "string",
+    "ts": "string|optional"
+  }
+}
+```
+
+## Required ENV Variables
+
+Currently, audit worker requires two env variables:
+
+```plaintext
+AUDIT_JOBS_QUEUE_URL=url of the queue to send audit jobs to
+RUM_DOMAIN_KEY=global domain key for the rum api
+TARGET_SLACK_CHANNELS=comma separated key values containing slack channel names and ids,
+SLACK_BOT_TOKEN=slack bot's token,
+```

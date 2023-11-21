@@ -55,10 +55,6 @@ async function fetchDomainList(domainkey, url) {
     .filter((respUrl) => isAuditForAll(url) || url === respUrl);
 }
 
-function getSlackContext(target, targetChannels, ) {
-
-}
-
 export default async function triggerCWVAudit(context) {
   const { log, sqs } = context;
   const { type, url, target } = context.data;
@@ -66,6 +62,7 @@ export default async function triggerCWVAudit(context) {
     RUM_DOMAIN_KEY: domainkey,
     AUDIT_JOBS_QUEUE_URL: queueUrl,
     TARGET_SLACK_CHANNELS: targetChannels,
+    SLACK_BOT_TOKEN: token,
   } = context.env;
 
   if (!domainkey || !queueUrl) {
@@ -89,7 +86,7 @@ export default async function triggerCWVAudit(context) {
   // If audit is triggered for a single url, then only channel id is added to uudit context
   if (isAuditForAll(url)) {
     const channelId = getSlackChannelId(target, targetChannels);
-    slackContext = await postSlackMessage(channelId, INITIAL_SLACK_MESSAGE, context);
+    slackContext = await postSlackMessage(channelId, INITIAL_SLACK_MESSAGE, token);
   } else {
     slackContext = { channel: getSlackChannelId(target, targetChannels) };
   }
