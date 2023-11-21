@@ -16,6 +16,28 @@
         {
           "AttributeName": "imsOrgId",
           "AttributeType": "S"
+        },
+        {
+          "AttributeName": "GSI1PK",
+          "AttributeType": "S"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "sites_all",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "GSI1PK",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "baseURL",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
         }
       ]
     },
@@ -90,6 +112,22 @@
           "KeyAttributes": {
             "PartitionKey": {
               "AttributeName": "siteId",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "GSI1SK",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        },
+        {
+          "IndexName": "latest_audits_all",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "GSI1PK",
               "AttributeType": "S"
             },
             "SortKey": {

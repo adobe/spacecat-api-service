@@ -27,6 +27,7 @@ async function generateSiteData(i) {
             id: siteId,
             baseURL: `https://example${i}.com`,
             imsOrgId: `${i}-1234@AdobeOrg`,
+            GSI1PK: 'ALL_SITES'
         }
     };
 
@@ -58,6 +59,7 @@ async function handleLatestAudit(latestAudit) {
         } else {
             GSI1SK += Object.values(latestAudit.auditResult).join('#');
         }
+        latestAudit.GSI1PK = 'ALL_LATEST_AUDITS';
         latestAudit.GSI1SK = GSI1SK;
 
         await client.put({ TableName: 'latest_audits', Item: latestAudit });
