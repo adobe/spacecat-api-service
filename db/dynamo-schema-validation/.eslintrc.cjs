@@ -9,14 +9,11 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-const randomDate = (start, end) => new Date(
-  start.getTime() + Math.random() * (end.getTime() - start.getTime()),
-);
 
-// Generates a random decimal number with given precision
-const getRandomDecimal = (precision) => parseFloat(Math.random().toFixed(precision));
-
-// Generates a random integer up to a given maximum
-const getRandomInt = (max) => Math.floor(Math.random() * max);
-
-module.exports = { randomDate, getRandomDecimal, getRandomInt };
+module.exports = {
+    root: true,
+    extends: '@adobe/helix',
+    "env": {
+        "jest": true
+    }
+};
