@@ -65,7 +65,21 @@ describe('cwv handler', () => {
     await expect(cwv(context)).to.be.rejectedWith('Required env variables is missing');
   });
 
+  it('rejects when response is not in expected shape', async () => {
+    context.data.url = 'space.cat';
+    nock('https://helix-pages.anywhere.run')
+      .get('/helix-services/run-query@v3/dash/domain-list')
+      .query({
+        ...DEFAULT_PARAMS,
+        domainkey: context.env.RUM_DOMAIN_KEY,
+      })
+      .reply(200, '{"key": "value"}');
+
+    await expect(cwv(context)).to.be.rejectedWith('Unexpected response format. $.results.data is not array');
+  });
+
   it('return 404 when empty response is received from the rum api', async () => {
+    context.data.url = 'all';
     nock('https://helix-pages.anywhere.run')
       .get('/helix-services/run-query@v3/dash/domain-list')
       .query({
@@ -166,8 +180,14 @@ describe('cwv handler', () => {
   });
 
   it('fallbacks to default slack channel when no configured', async () => {
-    const channelId = getSlackChannelId(null, '');
-    expect(channelId).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId(undefined, undefined)).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId(null, '')).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId(undefined, '')).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId(undefined, ',')).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId(undefined, '=')).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId(undefined, '=,')).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId('channel', 'channel1=,channel2=')).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId(null, 'asd')).to.equal(FALLBACK_SLACK_CHANNEL);
   });
 
   it('fallbacks to default slack channel when no found in env', async () => {

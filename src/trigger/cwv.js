@@ -31,15 +31,18 @@ function isAuditForAll(url) {
 }
 
 /**
- *
- * @param target
- * @param targetChannels
+ * Destructs the env variable in name1=lid1,name2=id2 comma separated pairs and matches the
+ * channel name which is provided by the target variable. Then returns the matched channel id
+ * If no channel is matched to the given target param, then id of the fallback channel is returned
+ * @param target name of the channel to match
+ * @param targetChannels env variable in name=id,name=id form
  * @returns {*|string}
  */
 export function getSlackChannelId(target, targetChannels = '') {
   const channel = targetChannels.split(',')
-    .filter((pair) => pair.startsWith(`${target}=`));
-  return channel[0] ? channel[0].split('=')[1] : FALLBACK_SLACK_CHANNEL;
+    .filter((pair) => pair.startsWith(`${target}=`))
+    .find((pair) => pair.length > target.length + 1);
+  return channel ? channel.split('=')[1] : FALLBACK_SLACK_CHANNEL;
 }
 
 async function fetchDomainList(domainkey, url) {
@@ -49,10 +52,15 @@ async function fetchDomainList(domainkey, url) {
   };
 
   const resp = await fetch(createUrl(DOMAIN_LIST_URL, params));
-  const respJson = await resp.json();
+  const respJson = await resp.json(); // intentionally not catching parse error here.
 
-  return respJson?.results?.data?.map((result) => result.hostname)
-    .filter((respUrl) => isAuditForAll(url) || url === respUrl);
+  const data = respJson?.results?.data;
+  if (!Array.isArray(data)) {
+    throw new Error('Unexpected response format. $.results.data is not array');
+  }
+
+  const urls = data.map((row) => row.hostname);
+  return isAuditForAll(url) ? urls : urls.filter((row) => url === row);
 }
 
 export default async function triggerCWVAudit(context) {
@@ -84,11 +92,11 @@ export default async function triggerCWVAudit(context) {
   // if audit triggered for all urls, then an initial message sent to the channel and the slack
   // thread id is added to auditContext for downstream components to send messages under same thread
   // If audit is triggered for a single url, then only channel id is added to uudit context
+  const channelId = getSlackChannelId(target, targetChannels);
   if (isAuditForAll(url)) {
-    const channelId = getSlackChannelId(target, targetChannels);
     slackContext = await postSlackMessage(channelId, INITIAL_SLACK_MESSAGE, token);
   } else {
-    slackContext = { channel: getSlackChannelId(target, targetChannels) };
+    slackContext = { channel: channelId };
   }
 
   for (const filteredUrl of filteredUrls) {
