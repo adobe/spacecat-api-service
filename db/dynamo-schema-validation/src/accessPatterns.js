@@ -1,103 +1,108 @@
-const { docClient: client } = require('./db.js');
+const {docClient: client, queryDb} = require('./db.js');
 
-async function getSiteByBaseURLWithAudits(baseUrl) {
-    // Query the 'sites' table GSI using 'baseURL'
+async function getAuditsForSite(siteId, auditType) {
+    return queryDb({
+        TableName: 'audits',
+        KeyConditionExpression: 'siteId = :siteId AND begins_with(SK, :auditType)',
+        ExpressionAttributeValues: {
+            ':siteId': siteId,
+            ':auditType': `${auditType}#`
+        }
+    });
+}
+
+async function getSiteByBaseURLWithAuditInfo(baseUrl, auditType, latestOnly = false) {
     const site = await getSiteByBaseURL(baseUrl);
 
     if (!site) {
         return null;
     }
 
-    // Query the 'audits' table to get audits for the site
-    const auditsData = await client.query({
-        TableName: 'audits',
-        KeyConditionExpression: 'siteId = :siteId',
-        ExpressionAttributeValues: {
-            ':siteId': site.id
-        }
-    });
-
-    // Merge audits with the site data
-    site.audits = auditsData.Items;
+    if (latestOnly) {
+        site.latestAudit = await getLatestAuditForSite(site.id, auditType);
+    } else {
+        site.audits = await getAuditsForSite(site.id, auditType);
+    }
 
     return site;
 }
 
+async function getSiteByBaseURLWithAudits(baseUrl, auditType) {
+    return getSiteByBaseURLWithAuditInfo(baseUrl, auditType, false);
+}
+
+async function getSiteByBaseURLWithLatestAudit(baseUrl, auditType) {
+    return getSiteByBaseURLWithAuditInfo(baseUrl, auditType, true);
+}
+
 async function getSiteByBaseURL(baseUrl) {
-    const result = await client.query({
+    const sites = await queryDb({
         TableName: 'sites',
         IndexName: 'sites_all', // Replace with your GSI name
         KeyConditionExpression: 'GSI1PK = :gsi1pk AND baseURL = :baseUrl',
         ExpressionAttributeValues: {
             ':gsi1pk': 'ALL_SITES',
             ':baseUrl': baseUrl
-        }
+        },
+        Limit: 1
     });
 
-    if (result.Items.length === 0) {
-        return null;
-    }
-
-    return result.Items[0];
+    return sites.length ? sites[0] : null;
 }
 
-async function getSitesWithLatestAudit(auditType) {
-    // Fetch all sites
-    const sites = await getSites();
-
-    // Fetch all latest audits of the specified type
-    const auditsResult = await client.query({
+async function getLatestAudits(auditType) {
+    return queryDb({
         TableName: 'latest_audits',
         IndexName: 'latest_audits_all',
         KeyConditionExpression: 'GSI1PK = :gsi1pk AND begins_with(GSI1SK, :auditType)',
         ExpressionAttributeValues: {
             ':gsi1pk': 'ALL_LATEST_AUDITS',
             ':auditType': `${auditType}#`
-        }
-    });
-
-    // Create a map of siteId to latest audits for efficient lookup
-    const auditMap = auditsResult.Items.reduce((map, audit) => {
-        map[audit.siteId] = audit;
-        return map;
-    }, {});
-
-    // Merge sites with their corresponding latest audits
-    return sites.Items.map(site => {
-        return {
-            ...site,
-            latestAudit: auditMap[site.id]
-        };
+        },
+        ScanIndexForward: false // Audits already sorted in descending order by GSK1SK
     });
 }
 
-
-async function getSiteByBaseURLWithLatestAudit(baseUrl, auditType) {
-    const site = await getSiteByBaseURL(baseUrl);
-
-    if (!site) {
-        return null;
-    }
-
-    // Query the 'latest_audits' table to get the latest audit for the site
-    const latestAuditData = await client.query({
+async function getLatestAuditForSite(siteId, auditType) {
+    const latestAudit = await queryDb({
         TableName: 'latest_audits',
         IndexName: 'latest_audit_scores',
         KeyConditionExpression: 'siteId = :siteId AND begins_with(GSI1SK, :auditType)',
         ExpressionAttributeValues: {
-            ':siteId': site.id,
+            ':siteId': siteId,
             ':auditType': `${auditType}#`
         },
         Limit: 1
     });
 
-    site.latestAudit = latestAuditData.Items.length > 0 ? latestAuditData.Items[0] : null;
-
-    return site;
+    return latestAudit.length > 0 ? latestAudit[0] : null;
 }
 
+async function getSitesWithLatestAudit(auditType) {
+    const [sites, latestAudits] = await Promise.all([
+        getSites(),
+        getLatestAudits(auditType)
+    ]);
+
+    const sitesMap = new Map(sites.map(site => [site.id, site]));
+
+    const sitesWithLatestAudit = latestAudits.reduce((result, audit) => {
+        const site = sitesMap.get(audit.siteId);
+        if (site) {
+            result.push({
+                ...site,
+                latestAudit: audit
+            });
+        }
+        return result;
+    }, []);
+
+    return sitesWithLatestAudit;
+}
+
+
 async function getSites() {
-    return client.query({
+    return queryDb({
         TableName: 'sites',
         IndexName: 'sites_all', // GSI name
         KeyConditionExpression: 'GSI1PK = :gsi1pk',
@@ -108,15 +113,17 @@ async function getSites() {
 }
 
 async function getSitesToAudit() {
-    const result = await getSites();
+    const sites = await getSites();
 
-    return result.Items.map(item => item.baseURL);
+    return sites.map(item => item.baseURL);
 }
 
 module.exports = {
-    getSiteByBaseURLWithAudits,
+    getAuditsForSite,
+    getLatestAudits,
     getSiteByBaseURL,
-    getSitesWithLatestAudit,
+    getSiteByBaseURLWithAudits,
     getSiteByBaseURLWithLatestAudit,
-    getSitesToAudit
+    getSitesToAudit,
+    getSitesWithLatestAudit,
 };

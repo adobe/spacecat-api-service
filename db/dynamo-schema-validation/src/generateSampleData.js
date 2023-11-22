@@ -1,4 +1,3 @@
-// Import AWS SDK and other necessary modules
 const { docClient: client, dbClient } = require('./db.js');
 const { v4: uuidv4 } = require('uuid');
 const { getRandomInt } = require('./util.js');
@@ -7,13 +6,11 @@ const { createTable, deleteTable } = require('./tableOperations.js');
 
 const schema = require('../schema.json');
 
-// Function to create tables from schema
 async function createTablesFromSchema() {
     const creationPromises = schema.DataModel.map(tableDefinition => createTable(dbClient, tableDefinition));
     await Promise.all(creationPromises);
 }
 
-// Function to delete existing tables
 async function deleteExistingTables() {
     const deletionPromises = ['sites', 'audits', 'latest_audits'].map(tableName => deleteTable(dbClient, tableName));
     await Promise.all(deletionPromises);

@@ -10,4 +10,14 @@ const config = {
 const dbClient = new DynamoDB(config);
 const docClient = DynamoDBDocument.from(dbClient);
 
-module.exports = { dbClient, docClient };
+async function queryDb(params) {
+    try {
+        const data = await docClient.query(params);
+        return data.Items;
+    } catch (error) {
+        console.error('DB Query Error:', error);
+        throw error;
+    }
+}
+
+module.exports = { dbClient, docClient, queryDb };
