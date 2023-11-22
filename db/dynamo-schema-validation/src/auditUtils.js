@@ -13,11 +13,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { randomDate } = require('./util.js');
 
-// Function to generate random audit data
-function generateRandomAudit(siteId) {
-  const auditTypes = ['lhs', 'cwv'];
-  const selectedType = auditTypes[Math.floor(Math.random() * auditTypes.length)];
-
+function generateRandomAudit(siteId, auditType) {
   let auditResult = {};
   const auditedAt = randomDate(new Date(2020, 0, 1), new Date()).toISOString();
   const fullAuditRef = `s3://audit-results/${uuidv4()}.json`;
@@ -30,14 +26,14 @@ function generateRandomAudit(siteId) {
     return Math.floor(Math.random() * max);
   }
 
-  if (selectedType === 'lhs') {
+  if (auditType === 'lhs') {
     auditResult = {
       performance: getRandomDecimal(2),
       accessibility: getRandomDecimal(2),
       bestPractices: getRandomDecimal(2),
       SEO: getRandomDecimal(2),
     };
-  } else if (selectedType === 'cwv') {
+  } else if (auditType === 'cwv') {
     auditResult = {
       LCP: getRandomInt(4000), // LCP in milliseconds
       FID: getRandomInt(100), // FID in milliseconds
@@ -47,8 +43,8 @@ function generateRandomAudit(siteId) {
 
   return {
     siteId,
-    SK: `${selectedType}#${auditedAt}`,
-    auditType: selectedType,
+    SK: `${auditType}#${auditedAt}`,
+    auditType,
     auditedAt,
     auditResult,
     fullAuditRef,

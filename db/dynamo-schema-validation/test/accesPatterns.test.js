@@ -17,39 +17,83 @@ const {
   getSitesToAudit,
 } = require('../src/accessPatterns.js');
 
+const TOTAL_SITES = 10000;
+const AUDITS_PER_TYPE = 5;
+const AUDIT_TYPES = ['lhs', 'cwv'];
+
 describe('DynamoDB Access Patterns Tests', () => {
   test('getSiteByBaseURLWithAudits', async () => {
-    const baseUrl = 'https://example1.com'; // Use an existing baseURL for testing
+    const baseUrl = 'https://example1.com';
     const siteWithAudits = await getSiteByBaseURLWithAudits(baseUrl);
 
-    expect(siteWithAudits).not.toBeNull();
     expect(siteWithAudits).toBeDefined();
     expect(siteWithAudits.baseURL).toBe(baseUrl);
     expect(siteWithAudits.audits).toBeInstanceOf(Array);
+    expect(siteWithAudits.audits).toHaveLength(AUDITS_PER_TYPE * AUDIT_TYPES.length);
+  });
+
+  test('getSiteByBaseURLWithAuditsOfType', async () => {
+    const baseUrl = 'https://example1.com';
+    const siteWithAudits = await getSiteByBaseURLWithAudits(baseUrl, 'lhs');
+
+    expect(siteWithAudits).toBeDefined();
+    expect(siteWithAudits.baseURL).toBe(baseUrl);
+    expect(siteWithAudits.audits).toBeInstanceOf(Array);
+    expect(siteWithAudits.audits).toHaveLength(AUDITS_PER_TYPE);
   });
 
   test('getSiteByBaseURL', async () => {
-    const result = await getSiteByBaseURL('https://example1.com');
-    expect(result).not.toBeNull();
-    expect(result).toBeDefined();
-    expect(result.baseURL).toBe('https://example1.com');
+    const baseUrl = 'https://example1.com';
+    const site = await getSiteByBaseURL(baseUrl);
+
+    expect(site).toBeDefined();
+    expect(site.baseURL).toBe(baseUrl);
+    expect(site.id).toBeDefined();
+    expect(site.imsOrgId).toBe('1-1234@AdobeOrg');
   });
 
   test('getSitesWithLatestAudit', async () => {
-    const results = await getSitesWithLatestAudit('lhs');
-    expect(results).toBeInstanceOf(Array);
+    const sites = await getSitesWithLatestAudit('lhs');
+    const expectedNumberOfSitesWithLhsAudits = TOTAL_SITES - (TOTAL_SITES / 10);
+
+    expect(sites).toBeInstanceOf(Array);
+    expect(sites).toHaveLength(expectedNumberOfSitesWithLhsAudits);
+
+    sites.forEach((site) => {
+      expect(site.latestAudit).toBeDefined();
+      expect(site.latestAudit.auditType).toBe('lhs');
+      expect(site.latestAudit.siteId).toBe(site.id);
+      expect(site.latestAudit.GSI1PK).toBe('ALL_LATEST_AUDITS');
+      expect(site.latestAudit.GSI1SK).toBeDefined();
+      expect(site.latestAudit.SK).toBeDefined();
+      expect(site.latestAudit.fullAuditRef).toBeDefined();
+    });
   });
 
   test('getSiteByBaseURLWithLatestAudit', async () => {
-    const result = await getSiteByBaseURLWithLatestAudit('https://example1.com', 'cwv');
-    expect(result).not.toBeNull();
-    expect(result).toBeDefined();
-    expect(result.latestAudit).not.toBeNull();
-    expect(result.latestAudit).toBeDefined();
+    const baseUrl = 'https://example1.com';
+    const site = await getSiteByBaseURLWithLatestAudit(baseUrl, 'lhs');
+
+    expect(site).toBeDefined();
+    expect(site.latestAudit).toBeDefined();
+    expect(site.latestAudit.auditType).toBe('lhs');
+    expect(site.latestAudit.siteId).toBe(site.id);
+    expect(site.latestAudit.GSI1PK).toBe('ALL_LATEST_AUDITS');
+    expect(site.latestAudit.GSI1SK).toBeDefined();
+    expect(site.latestAudit.SK).toBeDefined();
+    expect(site.latestAudit.fullAuditRef).toBeDefined();
   });
 
   test('getSitesToAudit', async () => {
-    const baseURLs = await getSitesToAudit();
-    expect(baseURLs).toBeInstanceOf(Array);
+    const sites = await getSitesToAudit();
+
+    expect(sites).toBeInstanceOf(Array);
+    expect(sites).toHaveLength(TOTAL_SITES);
+
+    // Verify that all expected base URLs are present
+    const expectedBaseURLs = Array.from({ length: TOTAL_SITES }, (_, i) => `https://example${i}.com`);
+    expectedBaseURLs.forEach((expectedUrl) => {
+      expect(sites).toContain(expectedUrl);
+    });
   });
 });

@@ -11,8 +11,40 @@
  */
 const { CreateTableCommand, DeleteTableCommand } = require('@aws-sdk/client-dynamodb');
 
-// Function to create a single table
-
+/**
+ * Creates a DynamoDB table based on the provided table definition.
+ *
+ * The function defines key schema and attribute definitions for the table,
+ * including the partition key and optional sort key. It also handles the
+ * configuration of global secondary indexes (GSIs) if provided
+ * in the table definition.
+ *
+ * @param {Object} dbClient - The DynamoDB client instance used for sending commands.
+ * @param {Object} tableDefinition - An object describing the table to be created. It should contain
+ *                                   the table name, key attributes, and optionally GSIs.
+ *
+ * @example
+ * // Example of tableDefinition object
+ * {
+ *   TableName: 'MyTable',
+ *   KeyAttributes: {
+ *     PartitionKey: { AttributeName: 'Id', AttributeType: 'S' },
+ *     SortKey: { AttributeName: 'SortKey', AttributeType: 'N' }
+ *   },
+ *   GlobalSecondaryIndexes: [
+ *     {
+ *       IndexName: 'MyGSI',
+ *       KeyAttributes: {
+ *         PartitionKey: { AttributeName: 'GSIKey', AttributeType: 'S' },
+ *         SortKey: { AttributeName: 'GSISortKey', AttributeType: 'N' }
+ *       },
+ *       Projection: {
+ *         ProjectionType: 'ALL'
+ *       }
+ *     }
+ *   ]
+ * }
+ */
 async function createTable(dbClient, tableDefinition) {
   const keySchema = [];
   const attributeDefinitions = [];
@@ -94,7 +126,20 @@ async function createTable(dbClient, tableDefinition) {
   }
 }
 
-// Function to delete a single table
+/**
+ * Deletes a specified DynamoDB table.
+ *
+ * The function sends a command to delete the table with the given table name.
+ * It handles the response and logs the result of the operation, including handling the case
+ * where the table does not exist.
+ *
+ * @param {Object} dbClient - The DynamoDB client instance used for sending commands.
+ * @param {string} tableName - The name of the table to be deleted.
+ *
+ * @example
+ * // Example usage
+ * deleteTable(dynamoDBClient, 'MyTable');
+ */
 async function deleteTable(dbClient, tableName) {
   const deleteParams = {
     TableName: tableName,
