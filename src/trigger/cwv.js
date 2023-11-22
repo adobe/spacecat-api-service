@@ -41,8 +41,8 @@ function isAuditForAll(url) {
 export function getSlackChannelId(target, targetChannels = '') {
   const channel = targetChannels.split(',')
     .filter((pair) => pair.startsWith(`${target}=`))
-    .find((pair) => pair.length > target.length + 1);
-  return channel ? channel.split('=')[1] : FALLBACK_SLACK_CHANNEL;
+    .find((pair) => pair.trim().length > target.length + 1);
+  return channel ? channel.split('=')[1].trim() : FALLBACK_SLACK_CHANNEL;
 }
 
 async function fetchDomainList(domainkey, url) {

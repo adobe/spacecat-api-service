@@ -184,9 +184,9 @@ describe('cwv handler', () => {
     expect(getSlackChannelId(null, '')).to.equal(FALLBACK_SLACK_CHANNEL);
     expect(getSlackChannelId(undefined, '')).to.equal(FALLBACK_SLACK_CHANNEL);
     expect(getSlackChannelId(undefined, ',')).to.equal(FALLBACK_SLACK_CHANNEL);
-    expect(getSlackChannelId(undefined, '=')).to.equal(FALLBACK_SLACK_CHANNEL);
     expect(getSlackChannelId(undefined, '=,')).to.equal(FALLBACK_SLACK_CHANNEL);
-    expect(getSlackChannelId('channel', 'channel1=,channel2=')).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId(undefined, 'ch= ,')).to.equal(FALLBACK_SLACK_CHANNEL);
+    expect(getSlackChannelId('channel', 'channel1=,channel2= ')).to.equal(FALLBACK_SLACK_CHANNEL);
     expect(getSlackChannelId(null, 'asd')).to.equal(FALLBACK_SLACK_CHANNEL);
   });
 
