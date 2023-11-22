@@ -5,6 +5,62 @@ This DynamoDB Sample Data Generator is designed to create structured sample data
 data access patterns. It's tailored to generate data for three primary entities: `sites`, `audits`, and `latest_audits`,
 following a predefined schema.
 
+## Prerequisites
+- Node.js (Version 12.x or later) must be installed.
+- Local DynamoDB instance, which can be installed and run locally using Homebrew.
+
+## Installation
+
+### Install DynamoDB Locally
+1. **Install Local DynamoDB**: If you don't have DynamoDB installed locally, you can install it using Homebrew:
+   ```bash
+   brew install dynamodb-local
+   ```
+2. **Run Local DynamoDB**: Start the local DynamoDB instance:
+   ```bash
+   /opt/homebrew/bin/dynamodb-local
+   ```
+
+### Setup Sample Data Generator
+3. **Clone the Repository**: Clone this repository to your local machine.
+4. **Navigate to Project Directory**: Change to the directory containing the cloned code.
+5. **Install Dependencies**: Run `npm install` to install the required Node.js dependencies.
+
+## Configuration
+
+Create `.env` File for Local DynamoDB Access
+Before generating sample data, create a .env file in the root of the project with the following content to configure access to the local DynamoDB instance:
+```dotenv
+DYNAMODB_ENDPOINT=http://localhost:8000
+AWS_REGION=localhost
+```
+
+## Generating Sample Data
+
+### Using NPM Script
+You can generate sample data using an NPM script. The script allows you to specify the number of sites and audits per type as arguments.
+
+To generate sample data, run:
+
+```bash
+npm run generate-data -- [number-of-sites] [number-of-audits-per-type]
+```
+
+For example, to generate 20 sites with 10 audits per type:
+
+```bash
+npm run generate-data -- 20 10
+```
+
+If no arguments are provided, the script will use default values for the number of sites and audits per type.
+
+## Adjust Test
+Set the expected number of sites and audits per type in the `accessPatterns.test.js` file. Then, run the test using:
+
+```bash
+npm run test
+```
+
 ## Database Schema and Entities
 
 ### Entities
@@ -50,16 +106,3 @@ following a predefined schema.
    - **Example**:
       - `{ siteId: "site-1", SK: "latest#lhs", auditedAt: "2021-01-01T00:00:00Z", auditResult: { performance: 0.9, accessibility: 0.8 }, fullAuditRef: "ref123", GSI1SK: "lhs#90#80", auditType: "lhs" }`
 
-## Functionality
-The tool's functionality revolves around the creation of these entities in DynamoDB, providing a rich dataset for 
-testing various database queries and access patterns.
-
-## Usage
-To generate sample data:
-
-1. **Configure AWS Credentials**: Ensure correct setup for DynamoDB access.
-2. **Adjust Parameters**: Modify the parameters in `generateSampleData.js` to customize the data generation.
-3. **Run the Script**: Execute `node src/generateSampleData.js` to generate and populate data.
-4. **RUn the Tests**: Run `npm test` to execute the test suite.
-
-Customize data generation by modifying parameters in the `generateSampleData` function call.

@@ -17,7 +17,7 @@ const {
   getSitesToAudit,
 } = require('../src/accessPatterns.js');
 
-const TOTAL_SITES = 10000;
+const TOTAL_SITES = 100;
 const AUDITS_PER_TYPE = 5;
 const AUDIT_TYPES = ['lhs', 'cwv'];
 

@@ -4,6 +4,7 @@
   "description": "A module to set up and validate DynamoDB schema for auditing websites.",
   "main": "index.js",
   "scripts": {
+    "generate-data": "node src/generateSampleData.js",
     "lint": "eslint .",
     "start": "node index.js",
     "test": "jest"

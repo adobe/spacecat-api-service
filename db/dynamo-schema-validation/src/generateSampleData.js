@@ -161,6 +161,13 @@ async function generateSampleData(numberOfSites = 10, numberOfAuditsPerType = 5)
   console.timeEnd('Sample data generated in');
 }
 
-generateSampleData(100, 5)
+const defaultNumberOfSites = 100;
+const defaultNumberOfAuditsPerType = 5;
+
+// Get command-line arguments
+const numberOfSites = parseInt(process.argv[2], 10) || defaultNumberOfSites;
+const numberOfAuditsPerType = parseInt(process.argv[3], 10) || defaultNumberOfAuditsPerType;
+
+generateSampleData(numberOfSites, numberOfAuditsPerType)
   .then(() => console.log('Sample data generation complete.'))
   .catch((error) => console.error('Error generating sample data:', error));
