@@ -73,7 +73,7 @@ npm run test
       - `imsOrgId` (String): An ID representing the organization to which the site belongs.
       - `GSI1PK` (String): A partition key used for global secondary index queries.
    - **Global Secondary Index**:
-      - `sites_all`: Index to facilitate queries across all sites, with `GSI1PK` as the partition key and `baseURL` as the sort key.
+      - `all_sites`: Index to facilitate queries across all sites, with `GSI1PK` as the partition key and `baseURL` as the sort key.
    - **Example**:
       - `{ id: "site-1", baseURL: "https://example1.com", imsOrgId: "org-123", GSI1PK: "ALL_SITES" }`
 
@@ -98,13 +98,14 @@ npm run test
       - `auditedAt` (String): The timestamp of the audit.
       - `auditResult` (Map): Results of the audit, similar to the `audits` table.
       - `fullAuditRef` (String): Reference to the full audit report.
+      - `GSI1PK` (String): A secondary partition key with a constant value "ALL_LATEST_AUDITS"
       - `GSI1SK` (String): A secondary sort key used in global secondary indexes, composed of "<auditType>#<scores>"
       - `auditType` (String): The type of the audit.
    - **Global Secondary Indexes**:
-      - `latest_audit_scores`: Index to access the latest audits based on scores.
-      - `latest_audits_all`: Index to access all latest audits.
+      - `all_latest_audit_scores`: Index to access the latest audits sorted by scores.
    - **Example**:
       - `{ siteId: "site-1", SK: "latest#lhs", auditedAt: "2021-01-01T00:00:00Z", auditResult: { performance: 0.9, accessibility: 0.8 }, fullAuditRef: "ref123", GSI1SK: "lhs#90#80", auditType: "lhs" }`
 
 ## Access Patterns
-![Star Catalogue (SpaceCat) - Dynamo Patterns](https://github.com/adobe-rnd/spacecat-api-service/assets/1872195/de70cfd9-52e7-4579-a982-9e82be925e35)
+![Star Catalogue (SpaceCat) - Dynamo Patterns-2](https://github.com/adobe-rnd/spacecat-api-service/assets/1872195/3986bbba-b066-4fbb-aca0-85ddb38c04f2)
+
