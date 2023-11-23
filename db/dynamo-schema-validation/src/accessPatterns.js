@@ -69,7 +69,7 @@ async function getLatestAuditForSite(siteId, auditType) {
 async function getSiteByBaseURL(baseUrl) {
   const sites = await queryDb({
     TableName: 'sites',
-    IndexName: 'sites_all', // Replace with your GSI name
+    IndexName: 'all_sites', // Replace with your GSI name
     KeyConditionExpression: 'GSI1PK = :gsi1pk AND baseURL = :baseUrl',
     ExpressionAttributeValues: {
       ':gsi1pk': 'ALL_SITES',
@@ -134,7 +134,7 @@ async function getSiteByBaseURLWithLatestAudit(baseUrl, auditType) {
 async function getSites() {
   return queryDb({
     TableName: 'sites',
-    IndexName: 'sites_all', // GSI name
+    IndexName: 'all_sites', // GSI name
     KeyConditionExpression: 'GSI1PK = :gsi1pk',
     ExpressionAttributeValues: {
       ':gsi1pk': 'ALL_SITES',

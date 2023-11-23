@@ -33,7 +33,7 @@
       ],
       "GlobalSecondaryIndexes": [
         {
-          "IndexName": "sites_all",
+          "IndexName": "all_sites",
           "KeyAttributes": {
             "PartitionKey": {
               "AttributeName": "GSI1PK",
