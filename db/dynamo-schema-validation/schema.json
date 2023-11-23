@@ -209,23 +209,7 @@
       ],
       "GlobalSecondaryIndexes": [
         {
-          "IndexName": "latest_audit_scores",
-          "KeyAttributes": {
-            "PartitionKey": {
-              "AttributeName": "siteId",
-              "AttributeType": "S"
-            },
-            "SortKey": {
-              "AttributeName": "GSI1SK",
-              "AttributeType": "S"
-            }
-          },
-          "Projection": {
-            "ProjectionType": "ALL"
-          }
-        },
-        {
-          "IndexName": "latest_audits_all",
+          "IndexName": "all_latest_audit_scores",
           "KeyAttributes": {
             "PartitionKey": {
               "AttributeName": "GSI1PK",

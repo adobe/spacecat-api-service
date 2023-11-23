@@ -48,8 +48,7 @@ async function getAuditsForSite(siteId, auditType) {
 async function getLatestAuditForSite(siteId, auditType) {
   const latestAudit = await queryDb({
     TableName: 'latest_audits',
-    IndexName: 'latest_audit_scores',
-    KeyConditionExpression: 'siteId = :siteId AND begins_with(GSI1SK, :auditType)',
+    KeyConditionExpression: 'siteId = :siteId AND begins_with(SK, :auditType)',
     ExpressionAttributeValues: {
       ':siteId': siteId,
       ':auditType': `${auditType}#`,
@@ -154,7 +153,7 @@ async function getSites() {
 async function getLatestAudits(auditType, ascending = true) {
   return queryDb({
     TableName: 'latest_audits',
-    IndexName: 'latest_audits_all',
+    IndexName: 'all_latest_audit_scores',
     KeyConditionExpression: 'GSI1PK = :gsi1pk AND begins_with(GSI1SK, :auditType)',
     ExpressionAttributeValues: {
       ':gsi1pk': 'ALL_LATEST_AUDITS',
