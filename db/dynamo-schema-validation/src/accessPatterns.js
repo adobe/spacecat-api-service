@@ -98,11 +98,9 @@ async function getSiteByBaseURLWithAuditInfo(baseUrl, auditType, latestOnly = fa
     return null;
   }
 
-  if (latestOnly) {
-    site.latestAudit = await getLatestAuditForSite(site.id, auditType);
-  } else {
-    site.audits = await getAuditsForSite(site.id, auditType);
-  }
+  site.audits = latestOnly
+    ? [await getLatestAuditForSite(site.id, auditType)].filter((audit) => audit != null)
+    : await getAuditsForSite(site.id, auditType);
 
   return site;
 }
@@ -149,10 +147,11 @@ async function getSites() {
  * Retrieves the latest audits of a specific type across all sites.
  *
  * @param {string} auditType - The type of audits to retrieve.
+ * @param ascending - Determines if the audits should be sorted ascending or descending by scores.
  * @returns {Promise<Array>} A promise that resolves to an array of the latest
  * audits of the specified type.
  */
-async function getLatestAudits(auditType) {
+async function getLatestAudits(auditType, ascending = true) {
   return queryDb({
     TableName: 'latest_audits',
     IndexName: 'latest_audits_all',
@@ -161,7 +160,7 @@ async function getLatestAudits(auditType) {
       ':gsi1pk': 'ALL_LATEST_AUDITS',
       ':auditType': `${auditType}#`,
     },
-    ScanIndexForward: false, // Audits already sorted in descending order by GSK1SK
+    ScanIndexForward: ascending, // Sorts ascending if true, descending if false
   });
 }
 
@@ -169,13 +168,15 @@ async function getLatestAudits(auditType) {
  * Retrieves sites with their latest audit of a specified type.
  *
  * @param {string} auditType - The type of the latest audits to retrieve for each site.
+ * @param sortAuditsAscending - Determines if the audits should be sorted ascending or
+ * descending by scores.
  * @returns {Promise<Array>} A promise that resolves to an array of site objects,
  * each with its latest audit of the specified type.
  */
-async function getSitesWithLatestAudit(auditType) {
+async function getSitesWithLatestAudit(auditType, sortAuditsAscending = true) {
   const [sites, latestAudits] = await Promise.all([
     getSites(),
-    getLatestAudits(auditType),
+    getLatestAudits(auditType, sortAuditsAscending),
   ]);
 
   const sitesMap = new Map(sites.map((site) => [site.id, site]));
@@ -183,10 +184,8 @@ async function getSitesWithLatestAudit(auditType) {
   return latestAudits.reduce((result, audit) => {
     const site = sitesMap.get(audit.siteId);
     if (site) {
-      result.push({
-        ...site,
-        latestAudit: audit,
-      });
+      site.audits = [audit];
+      result.push(site);
     }
     return result;
   }, []);

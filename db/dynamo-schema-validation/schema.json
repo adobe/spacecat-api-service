@@ -1,4 +1,13 @@
 {
+  "ModelName": "StarCatalogue",
+  "ModelMetadata": {
+    "Author": "Dominique Jäggi",
+    "DateCreated": "Nov 23, 2023, 07:00 AM",
+    "DateLastModified": "Nov 23, 2023, 07:00 AM",
+    "Description": "",
+    "AWSService": "Amazon DynamoDB",
+    "Version": "3.0"
+  },
   "DataModel": [
     {
       "TableName": "sites",
@@ -39,7 +48,51 @@
             "ProjectionType": "ALL"
           }
         }
-      ]
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "id": [
+          "identifiers",
+          "UUID"
+        ],
+        "baseURL": [
+          "identifiers",
+          "URL"
+        ],
+        "imsOrgId": [
+          "identifiers",
+          "UUID"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
     },
     {
       "TableName": "audits",
@@ -70,7 +123,51 @@
           "AttributeName": "auditType",
           "AttributeType": "S"
         }
-      ]
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "siteId": [
+          "identifiers",
+          "UUID"
+        ],
+        "auditedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "fullAuditRef": [
+          "identifiers",
+          "URL"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
     },
     {
       "TableName": "latest_audits",
@@ -95,6 +192,10 @@
         },
         {
           "AttributeName": "fullAuditRef",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "GSI1PK",
           "AttributeType": "S"
         },
         {
@@ -139,7 +240,51 @@
             "ProjectionType": "ALL"
           }
         }
-      ]
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "siteId": [
+          "identifiers",
+          "UUID"
+        ],
+        "auditedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "fullAuditRef": [
+          "identifiers",
+          "URL"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
     }
   ]
 }
