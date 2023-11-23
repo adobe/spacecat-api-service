@@ -106,3 +106,5 @@ npm run test
    - **Example**:
       - `{ siteId: "site-1", SK: "latest#lhs", auditedAt: "2021-01-01T00:00:00Z", auditResult: { performance: 0.9, accessibility: 0.8 }, fullAuditRef: "ref123", GSI1SK: "lhs#90#80", auditType: "lhs" }`
 
+## Access Patterns
+![Star Catalogue (SpaceCat) - Dynamo Patterns](https://github.com/adobe-rnd/spacecat-api-service/assets/1872195/de70cfd9-52e7-4579-a982-9e82be925e35)
