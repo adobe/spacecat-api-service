@@ -48,7 +48,7 @@ async function run(request, context) {
   const { route, suffix, method } = pathInfo;
 
   if (!route) {
-    log.info(`Unable to extract path info, wrong format: ${suffix}`);
+    log.info(`Unable to extract path info. Wrong format: ${suffix}`);
     return new Response('', {
       status: 404,
       headers: {
@@ -86,7 +86,7 @@ async function run(request, context) {
     return await handler(context);
   } catch (e) {
     const t1 = Date.now();
-    log.error(`Handler exception after ${t1 - t0}ms`, e);
+    log.error(`Handler exception after ${t1 - t0} ms`, e);
     return new Response('', {
       status: e.statusCode || 500,
       headers: {

@@ -42,25 +42,25 @@ describe('trigger handler', () => {
     sandbox.restore();
   });
 
-  it('rejects when domainkey is not set', async () => {
+  it('rejects when url is missing', async () => {
     delete context.data.type;
     const resp = await handler(context);
     expect(resp.status).to.equal(400);
   });
 
-  it('rejects when domainkey is not set2', async () => {
+  it('rejects when type is missing', async () => {
     delete context.data.url;
     const resp = await handler(context);
     expect(resp.status).to.equal(400);
   });
 
-  it('rejects when domainkey is not set3', async () => {
+  it('rejects when audit type is unknown', async () => {
     context.data.type = 'unknown-audit-type';
     const resp = await handler(context);
     expect(resp.status).to.equal(400);
   });
 
-  it('rejects when domainkey is not set4', async () => {
+  it('rejects when RUM API response is not in json format', async () => {
     context.env = {
       RUM_DOMAIN_KEY: 'domainkey',
       AUDIT_JOBS_QUEUE_URL: 'queueUrl',
