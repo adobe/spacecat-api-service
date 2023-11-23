@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.0.3...v1.1.0) (2023-11-23)
+
+
+### Features
+
+* test suite for dynamo data model ([#14](https://github.com/adobe-rnd/spacecat-api-service/issues/14)) ([ed04e12](https://github.com/adobe-rnd/spacecat-api-service/commit/ed04e121d293fb2b9992f84da90b4d2dd5c393b4))
+
 ## [1.0.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.0.2...v1.0.3) (2023-11-20)
 
 
