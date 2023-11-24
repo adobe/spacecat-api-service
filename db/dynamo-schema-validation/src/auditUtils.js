@@ -16,6 +16,8 @@ const { randomDate } = require('./util.js');
 function generateRandomAudit(siteId, auditType) {
   let auditResult = {};
   const auditedAt = randomDate(new Date(2020, 0, 1), new Date()).toISOString();
+  const expiresAt = new Date(auditedAt);
+  expiresAt.setDate(expiresAt.getDate() + 30);
   const fullAuditRef = `s3://audit-results/${uuidv4()}.json`;
 
   function getRandomDecimal(precision) {
@@ -47,6 +49,7 @@ function generateRandomAudit(siteId, auditType) {
     auditType,
     auditedAt,
     auditResult,
+    expiresAt: Math.floor(expiresAt.getTime() / 1000), // AWS expects unix epoch in seconds
     fullAuditRef,
   };
 }

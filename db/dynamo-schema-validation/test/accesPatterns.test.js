@@ -24,6 +24,8 @@ const NUM_AUDITS_PER_TYPE_EXPECTED = TOTAL_SITES - (TOTAL_SITES / 10);
 
 function checkSite(site, latestOnly = false) {
   expect(site.audits).toBeInstanceOf(Array);
+  expect(site.createdAt).toBeDefined();
+  expect(site.updatedAt).toBeDefined();
   if (latestOnly) {
     expect(site.audits).toHaveLength(1);
     const latestAudit = site.audits[0];
@@ -33,6 +35,7 @@ function checkSite(site, latestOnly = false) {
     expect(latestAudit.GSI1SK).toBeDefined();
     expect(latestAudit.SK).toBeDefined();
     expect(latestAudit.fullAuditRef).toBeDefined();
+    expect(latestAudit.expiresAt).toBeDefined();
   }
 }
 

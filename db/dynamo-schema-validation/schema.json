@@ -29,6 +29,14 @@
         {
           "AttributeName": "GSI1PK",
           "AttributeType": "S"
+        },
+        {
+          "AttributeName": "createdAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedAt",
+          "AttributeType": "S"
         }
       ],
       "GlobalSecondaryIndexes": [
@@ -116,11 +124,15 @@
           "AttributeType": "M"
         },
         {
-          "AttributeName": "fullAuditRef",
+          "AttributeName": "auditType",
           "AttributeType": "S"
         },
         {
-          "AttributeName": "auditType",
+          "AttributeName": "expiresAt",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "fullAuditRef",
           "AttributeType": "S"
         }
       ],
@@ -191,6 +203,14 @@
           "AttributeType": "M"
         },
         {
+          "AttributeName": "auditType",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "expiresAt",
+          "AttributeType": "N"
+        },
+        {
           "AttributeName": "fullAuditRef",
           "AttributeType": "S"
         },
@@ -200,10 +220,6 @@
         },
         {
           "AttributeName": "GSI1SK",
-          "AttributeType": "S"
-        },
-        {
-          "AttributeName": "auditType",
           "AttributeType": "S"
         }
       ],
