@@ -136,6 +136,7 @@ async function generateSampleData(numberOfSites = 10, numberOfAuditsPerType = 5)
   const sites = [];
   const auditItems = [];
   const latestAuditItems = [];
+  const nowIso = new Date().toISOString();
 
   // Generate site data
   for (let i = 0; i < numberOfSites; i += 1) {
@@ -145,6 +146,8 @@ async function generateSampleData(numberOfSites = 10, numberOfAuditsPerType = 5)
       baseURL: `https://example${i}.com`,
       imsOrgId: `${i}-1234@AdobeOrg`,
       GSI1PK: 'ALL_SITES',
+      createdAt: nowIso,
+      updatedAt: nowIso,
     });
 
     if (i % 10 !== 0) { // Every tenth site will not have any audits
