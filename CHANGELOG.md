@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.1.0...v1.1.1) (2023-11-24)
+
+
+### Bug Fixes
+
+* add expires, created and updated at ([#15](https://github.com/adobe-rnd/spacecat-api-service/issues/15)) ([ac7bc95](https://github.com/adobe-rnd/spacecat-api-service/commit/ac7bc9589514c5d2f956db7402a38d7b58230efc))
+
 # [1.1.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.0.3...v1.1.0) (2023-11-23)
 
 
