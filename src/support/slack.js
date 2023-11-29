@@ -11,6 +11,7 @@
  */
 
 import { createUrl } from '@adobe/fetch';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { fetch } from './utils.js';
 
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
@@ -31,7 +32,7 @@ export function getQueryParams(channelId, message) {
 }
 
 export async function postSlackMessage(channelId, message, token) {
-  if (!token) {
+  if (!hasText(token)) {
     throw new Error('Missing slack bot token');
   }
 

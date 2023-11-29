@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import { Response } from '@adobe/fetch';
+import { hasText } from '@adobe/spacecat-shared-utils';
 
 export const ADMIN_ENDPOINTS = ['trigger']; // export for testing
 
@@ -22,7 +23,7 @@ export default function authWrapper(fn) {
 
     const apiKeyFromHeader = headers['x-api-key'];
 
-    if (!apiKeyFromHeader) {
+    if (!hasText(apiKeyFromHeader)) {
       return new Response('API key missing in headers', {
         status: 400,
         headers: { 'x-error': 'API key missing' },
@@ -33,7 +34,7 @@ export default function authWrapper(fn) {
       ? context.env.ADMIN_API_KEY
       : context.env.USER_API_KEY;
 
-    if (!expectedApiKey) {
+    if (!hasText(expectedApiKey)) {
       log.error('API key was not configured');
       return new Response('Server configuration error', {
         status: 500,

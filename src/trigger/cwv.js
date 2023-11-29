@@ -11,6 +11,7 @@
  */
 
 import { createUrl, Response } from '@adobe/fetch';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { fetch } from '../support/utils.js';
 import { postSlackMessage } from '../support/slack.js';
 
@@ -73,7 +74,7 @@ export default async function triggerCWVAudit(context) {
     SLACK_BOT_TOKEN: token,
   } = context.env;
 
-  if (!domainkey || !queueUrl) {
+  if (!hasText(domainkey) || !hasText(queueUrl)) {
     throw Error('Required env variables is missing');
   }
 
