@@ -21,7 +21,7 @@ export const DEFAULT_PARAMS = { // export for testing
 };
 
 const DOMAIN_LIST_URL = 'https://helix-pages.anywhere.run/helix-services/run-query@v3/dash/domain-list';
-export const INITIAL_SLACK_MESSAGE = '*PERFORMANCE DEGRADATION (CWV) REPORT* for the *last week* :thread:';
+export const INITIAL_SLACK_MESSAGE = '*404 REPORT* for the *last week* :thread:';
 // fallback slack channel (franklin-spacecat-internal-test) hardcoded to use when no appropriate
 // slack channel was provided as parameter
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
