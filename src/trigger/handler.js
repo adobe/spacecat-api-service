@@ -12,9 +12,11 @@
 
 import { Response } from '@adobe/fetch';
 import cwv from './cwv.js';
+import notfound from './notfound.js';
 
 const AUDITS = {
   cwv,
+  404: notfound,
 };
 
 export default async function triggerHandler(context) {

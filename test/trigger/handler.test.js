@@ -73,4 +73,20 @@ describe('trigger handler', () => {
 
     await expect(handler(context)).to.be.rejectedWith('Failed to trigger cwv audit for space.cat');
   });
+
+  it('successfully executes when RUM API response is correct json format', async () => {
+    context.env = {
+      RUM_DOMAIN_KEY: 'domainkey',
+      AUDIT_JOBS_QUEUE_URL: 'queueUrl',
+    };
+    context.data.type = '404';
+    context.sqs = { sendMessage: () => {} };
+
+    nock('https://helix-pages.anywhere.run')
+      .get('/helix-services/run-query@v3/dash/domain-list')
+      .query(true)
+      .reply(200, { results: { data: [{ hostname: 'space.cat' }] } });
+
+    await expect(handler(context)).to.be.fulfilled;
+  });
 });
