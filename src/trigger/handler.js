@@ -12,10 +12,13 @@
 
 import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
+
 import cwv from './cwv.js';
+import lhs from './lhs.js';
 
 const AUDITS = {
   cwv,
+  lhs,
 };
 
 export default async function triggerHandler(context) {

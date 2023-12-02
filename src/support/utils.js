@@ -15,3 +15,5 @@ import { context as h2, h1 } from '@adobe/fetch';
 export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
   ? h1()
   : h2();
+
+export const isAuditForAll = (url) => url.toUpperCase() === 'ALL';
