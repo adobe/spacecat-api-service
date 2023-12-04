@@ -11,7 +11,8 @@
  */
 
 import { createUrl, Response } from '@adobe/fetch';
-import { fetch } from '../support/utils.js';
+import { hasText } from '@adobe/spacecat-shared-utils';
+import { fetch, isAuditForAll } from '../support/utils.js';
 import { postSlackMessage } from '../support/slack.js';
 
 export const DEFAULT_PARAMS = { // export for testing
@@ -25,10 +26,6 @@ export const INITIAL_SLACK_MESSAGE = '*PERFORMANCE DEGRADATION (CWV) REPORT* for
 // fallback slack channel (franklin-spacecat-internal-test) hardcoded to use when no appropriate
 // slack channel was provided as parameter
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
-
-function isAuditForAll(url) {
-  return url.toUpperCase() === 'ALL';
-}
 
 /**
  * Destructs the env variable in name1=lid1,name2=id2 comma separated pairs and matches the
@@ -73,7 +70,7 @@ export default async function triggerCWVAudit(context) {
     SLACK_BOT_TOKEN: token,
   } = context.env;
 
-  if (!domainkey || !queueUrl) {
+  if (!hasText(domainkey) || !hasText(queueUrl)) {
     throw Error('Required env variables is missing');
   }
 

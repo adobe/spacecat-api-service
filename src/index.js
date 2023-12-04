@@ -14,6 +14,9 @@ import { helixStatus } from '@adobe/helix-status';
 import { Response } from '@adobe/fetch';
 import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
+import dataAccess from '@adobe/spacecat-shared-data-access';
+import { hasText } from '@adobe/spacecat-shared-utils';
+
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
 import trigger from './trigger/handler.js';
@@ -47,7 +50,7 @@ async function run(request, context) {
   const { log, pathInfo } = context;
   const { route, suffix, method } = pathInfo;
 
-  if (!route) {
+  if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
     return new Response('', {
       status: 404,
@@ -97,6 +100,7 @@ async function run(request, context) {
 }
 
 export const main = wrap(run)
+  .with(dataAccess)
   .with(auth)
   .with(enrichPathInfo)
   .with(bodyData)

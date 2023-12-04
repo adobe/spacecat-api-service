@@ -11,17 +11,21 @@
  */
 
 import { Response } from '@adobe/fetch';
+import { hasText } from '@adobe/spacecat-shared-utils';
+
 import cwv from './cwv.js';
+import lhs from './lhs.js';
 
 const AUDITS = {
   cwv,
+  lhs,
 };
 
 export default async function triggerHandler(context) {
   const { log, data } = context;
   const { type, url } = data;
 
-  if (!type || !url) {
+  if (!hasText(type) || !hasText(url)) {
     return new Response('', {
       status: 400,
       headers: {
