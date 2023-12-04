@@ -11,12 +11,11 @@
  */
 
 import { Response } from '@adobe/fetch';
-import cwv from './cwv.js';
-import notfound from './notfound.js';
+import audit from './audit.js';
 
 const AUDITS = {
-  cwv,
-  404: notfound,
+  cwv: 'cwv',
+  404: '404',
 };
 
 export default async function triggerHandler(context) {
@@ -32,9 +31,9 @@ export default async function triggerHandler(context) {
     });
   }
 
-  const audit = AUDITS[type];
+  const auditType = AUDITS[type];
 
-  if (!audit) {
+  if (!auditType) {
     return new Response('', {
       status: 400,
       headers: {

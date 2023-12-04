@@ -20,8 +20,12 @@ export const DEFAULT_PARAMS = { // export for testing
   limit: 100000,
 };
 
+export const SLACK_MESSAGE = {
+  cwv: '*PERFORMANCE DEGRADATION (CWV) REPORT* for the *last week* :thread:',
+  404: '*404 REPORT* for the *last week* :thread:',
+};
+
 const DOMAIN_LIST_URL = 'https://helix-pages.anywhere.run/helix-services/run-query@v3/dash/domain-list';
-export const INITIAL_SLACK_MESSAGE = '*404 REPORT* for the *last week* :thread:';
 // fallback slack channel (franklin-spacecat-internal-test) hardcoded to use when no appropriate
 // slack channel was provided as parameter
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
@@ -63,7 +67,7 @@ async function fetchDomainList(domainkey, url) {
   return isAuditForAll(url) ? urls : urls.filter((row) => url === row);
 }
 
-export default async function triggerCWVAudit(context) {
+export default async function triggerAudit(context) {
   const { log, sqs } = context;
   const { type, url, target } = context.data;
   const {
@@ -94,7 +98,7 @@ export default async function triggerCWVAudit(context) {
   // If audit is triggered for a single url, then only channel id is added to uudit context
   const channelId = getSlackChannelId(target, targetChannels);
   if (isAuditForAll(url)) {
-    slackContext = await postSlackMessage(channelId, INITIAL_SLACK_MESSAGE, token);
+    slackContext = await postSlackMessage(channelId, SLACK_MESSAGE[type], token);
   } else {
     slackContext = { channel: channelId };
   }
