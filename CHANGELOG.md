@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.1.1...v1.2.0) (2023-12-04)
+
+
+### Features
+
+* trigger lhs audit ([#17](https://github.com/adobe-rnd/spacecat-api-service/issues/17)) ([fe4a575](https://github.com/adobe-rnd/spacecat-api-service/commit/fe4a57524e5f60063d105962655457478fabb301))
+
 ## [1.1.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.1.0...v1.1.1) (2023-11-24)
 
 
