@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.2.1...v1.3.0) (2023-12-05)
+
+
+### Features
+
+* use latest data access and getSiteByID ([#28](https://github.com/adobe-rnd/spacecat-api-service/issues/28)) ([a48ab8e](https://github.com/adobe-rnd/spacecat-api-service/commit/a48ab8e2de89b4f447b1790950789d762fe6e989))
+
 ## [1.2.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.2.0...v1.2.1) (2023-12-05)
 
 
