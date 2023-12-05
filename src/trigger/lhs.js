@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { Response } from '@adobe/fetch';
+
 import { isAuditForAll } from '../support/utils.js';
 
 /**
