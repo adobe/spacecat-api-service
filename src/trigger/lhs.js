@@ -20,7 +20,7 @@ import { isAuditForAll } from '../support/utils.js';
 const SITE_NOT_FOUND_ERROR = 'Site not found';
 
 /**
- * Retrieves base URLs for auditing based on the input URL. If the input URL has the value
+ * Retrieves site IDs for auditing based on the input URL. If the input URL has the value
  * 'all', then all sites will be audited. Otherwise, the input URL is assumed to be a base URL.
  *
  * @param {Object} dataAccess - The data access object for site operations.
@@ -28,7 +28,7 @@ const SITE_NOT_FOUND_ERROR = 'Site not found';
  * @returns {Promise<Array<string>>} A promise that resolves to an array of base URLs.
  * @throws {Error} Throws an error if the site is not found.
  */
-async function getBaseURLsToAudit(dataAccess, url) {
+async function getSiteIDsToAudit(dataAccess, url) {
   if (isAuditForAll(url)) {
     return dataAccess.getSitesToAudit();
   }
@@ -37,7 +37,7 @@ async function getBaseURLsToAudit(dataAccess, url) {
   if (!site) {
     throw new Error(SITE_NOT_FOUND_ERROR);
   }
-  return [site.getBaseURL()];
+  return [site.getId()];
 }
 
 /**
@@ -50,8 +50,8 @@ async function getBaseURLsToAudit(dataAccess, url) {
  * @param {string} baseURL - The base URL to audit.
  * @returns {Promise} A promise representing the message sending operation.
  */
-function sendAuditMessage(sqs, queueUrl, type, auditContext, baseURL) {
-  return sqs.sendMessage(queueUrl, { type, url: baseURL, auditContext });
+function sendAuditMessage(sqs, queueUrl, type, auditContext, siteId) {
+  return sqs.sendMessage(queueUrl, { type, url: siteId, auditContext });
 }
 
 /**
@@ -61,7 +61,7 @@ function sendAuditMessage(sqs, queueUrl, type, auditContext, baseURL) {
  * @param {string} queueUrl - The SQS queue URL.
  * @param {string} type - The type of audit.
  * @param {Object} auditContext - The audit context object.
- * @param {Array<string>} baseURLsToAudit - An array of base URLs to audit.
+ * @param {Array<string>} siteIDsToAudit - An array of site IDs to audit.
  * @returns {Promise<string>} A promise that resolves to a status message.
  */
 async function sendAuditMessages(
@@ -69,13 +69,13 @@ async function sendAuditMessages(
   queueUrl,
   type,
   auditContext,
-  baseURLsToAudit,
+  siteIDsToAudit,
 ) {
-  for (const baseURL of baseURLsToAudit) {
+  for (const siteId of siteIDsToAudit) {
     // eslint-disable-next-line no-await-in-loop
-    await sendAuditMessage(sqs, queueUrl, type, auditContext, baseURL);
+    await sendAuditMessage(sqs, queueUrl, type, auditContext, siteId);
   }
-  return `Triggering ${type} audit for ${baseURLsToAudit.length > 1 ? `all ${baseURLsToAudit.length} sites` : baseURLsToAudit[0]}`;
+  return `Triggered ${type} audit for ${siteIDsToAudit.length > 1 ? `all ${siteIDsToAudit.length} sites` : siteIDsToAudit[0]}`;
 }
 
 /**
@@ -114,13 +114,13 @@ export default async function trigger(context) {
     const { type, url, auditContext } = context.data;
     const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
 
-    const baseURLsToAudit = await getBaseURLsToAudit(dataAccess, url);
+    const siteIDsToAudit = await getSiteIDsToAudit(dataAccess, url);
     const message = await sendAuditMessages(
       sqs,
       queueUrl,
       type,
       auditContext,
-      baseURLsToAudit,
+      siteIDsToAudit,
     );
     return createResponse({ message });
   } catch (e) {

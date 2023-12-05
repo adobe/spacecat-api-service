@@ -28,6 +28,7 @@ describe('trigger function', () => {
     dataAccessMock = {
       getSitesToAudit: sandbox.stub(),
       getSiteByBaseURL: sandbox.stub(),
+      getSiteByID: sandbox.stub(),
     };
 
     sqsMock = {
@@ -47,32 +48,35 @@ describe('trigger function', () => {
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
-    dataAccessMock.getSitesToAudit.resolves(['http://site1.com', 'http://site2.com']);
+    dataAccessMock.getSitesToAudit.resolves(['site1', 'site2']);
 
     const response = await trigger(context);
     const result = await response.json();
 
     expect(dataAccessMock.getSitesToAudit.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
-    expect(result.message).to.equal('Triggering auditType audit for all 2 sites');
+    expect(result.message).to.equal('Triggered auditType audit for all 2 sites');
   });
 
   it('triggers an audit for a single site when url is specific', async () => {
     context = {
       dataAccess: dataAccessMock,
       sqs: sqsMock,
-      data: { type: 'auditType', url: 'http://example.com' },
+      data: { type: 'auditType', url: 'http://site1.com' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
-    dataAccessMock.getSiteByBaseURL.resolves({ getBaseURL: () => 'http://site1.com' });
+    dataAccessMock.getSiteByBaseURL.resolves({
+      getBaseURL: () => 'http://site1.com',
+      getId: () => 'site1',
+    });
 
     const response = await trigger(context);
     const result = await response.json();
 
-    expect(dataAccessMock.getSiteByBaseURL.calledOnceWith('http://example.com')).to.be.true;
+    expect(dataAccessMock.getSiteByBaseURL.calledOnceWith('http://site1.com')).to.be.true;
     expect(sqsMock.sendMessage.calledOnce).to.be.true;
-    expect(result.message).to.equal('Triggering auditType audit for http://site1.com');
+    expect(result.message).to.equal('Triggered auditType audit for site1');
   });
 
   it('returns a 404 response when the site is not found', async () => {
