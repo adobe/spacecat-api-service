@@ -18,7 +18,8 @@ import lhs from './lhs.js';
 
 const AUDITS = {
   cwv,
-  lhs,
+  'lhs-mobile': lhs,
+  'lhs-desktop': lhs,
 };
 
 export default async function triggerHandler(context) {
