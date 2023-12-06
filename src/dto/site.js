@@ -59,7 +59,9 @@ export const SiteDto = {
     updatedAt: site.getUpdatedAt(),
   }),
 
+  // TODO: implement toCSV
   toCSV: () => '',
 
+  // TODO: implement toXLS
   toXLS: () => null,
 };

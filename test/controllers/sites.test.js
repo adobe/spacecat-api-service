@@ -12,11 +12,16 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import chai from 'chai';
+import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import SitesController from '../../src/controllers/sites.js';
 import { SiteDto } from '../../src/dto/site.js';
+
+chai.use(chaiAsPromised);
+
+const { expect } = chai;
 
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -97,7 +102,7 @@ describe('Sites Controller', () => {
   });
 
   it('gets a site by ID', async () => {
-    const result = await sitesController.getByID('site1');
+    const result = await sitesController.getByID({ params: { siteId: 'site1' } });
 
     expect(mockDataAccess.getSiteByID.calledOnce).to.be.true;
 
@@ -107,7 +112,7 @@ describe('Sites Controller', () => {
   });
 
   it('gets a site by base URL', async () => {
-    const result = await sitesController.getByBaseURL('https://site1.com');
+    const result = await sitesController.getByBaseURL({ params: { baseURL: 'https://site1.com' } });
 
     expect(mockDataAccess.getSiteByBaseURL.calledOnce).to.be.true;
 
@@ -119,16 +124,24 @@ describe('Sites Controller', () => {
   it('returns null when site is not found by id', async () => {
     mockDataAccess.getSiteByID.resolves(null);
 
-    const result = await sitesController.getByID('site1');
+    const result = await sitesController.getByID({ params: { siteId: 'site1' } });
 
     expect(result).to.be.null;
+  });
+
+  it('throws an error if site ID is not provided', async () => {
+    await expect(sitesController.getByID({ params: {} })).to.be.rejectedWith('Site ID required');
   });
 
   it('returns null when site is not found by baseURL', async () => {
     mockDataAccess.getSiteByBaseURL.resolves(null);
 
-    const result = await sitesController.getByBaseURL('site1');
+    const result = await sitesController.getByBaseURL({ params: { baseURL: 'https://site1.com' } });
 
     expect(result).to.be.null;
+  });
+
+  it('throws an error if base URL is not provided', async () => {
+    await expect(sitesController.getByBaseURL({ params: {} })).to.be.rejectedWith('Base URL required');
   });
 });

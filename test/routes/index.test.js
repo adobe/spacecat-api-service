@@ -40,7 +40,10 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /sites.csv']).to.equal(mockSitesController.getAllAsCsv);
     expect(staticRoutes['GET /sites.xlsx']).to.equal(mockSitesController.getAllAsExcel);
 
-    expect(dynamicRoutes).to.have.key('GET /sites/:siteId');
+    expect(dynamicRoutes).to.have.all.keys(
+      'GET /sites/:siteId',
+      'GET /sites/by-base-url/:baseURL',
+    );
     expect(dynamicRoutes['GET /sites/:siteId'].handler).to.equal(mockSitesController.getByID);
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
   });

@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { isObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import { SiteDto } from '../dto/site.js';
 
@@ -25,6 +25,12 @@ function SitesController(dataAccess) {
     throw new Error('Data access required');
   }
 
+  /**
+   * Creates a site.
+   * @param siteData
+   * @return {Promise<{id: string, baseURL, gitHubURL: string, imsOrgId: string,
+   * isLive: boolean, createdAt: string, updatedAt: string}>}
+   */
   const createSite = async (siteData) => {
     const site = await dataAccess.addSite(siteData);
     return SiteDto.toJSON(site);
@@ -59,20 +65,34 @@ function SitesController(dataAccess) {
 
   /**
    * Gets a site by ID.
-   * @param {string} id - Site ID.
+   * @param {object} context - Context of the request.
    * @returns {Promise<object>} Site.
+   * @throws {Error} If site ID is not provided.
    */
-  const getByID = async (id) => {
-    const site = await dataAccess.getSiteByID(id);
+  const getByID = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!hasText(siteId)) {
+      throw new Error('Site ID required');
+    }
+
+    const site = await dataAccess.getSiteByID(siteId);
     return site ? SiteDto.toJSON(site) : null;
   };
 
   /**
    * Gets a site by base URL.
-   * @param {string} baseURL - Site base URL.
+   * @param {object} context - Context of the request.
    * @returns {Promise<object>} Site.
+   * @throws {Error} If base URL is not provided.
    */
-  const getByBaseURL = async (baseURL) => {
+  const getByBaseURL = async (context) => {
+    const baseURL = context.params?.baseURL;
+
+    if (!hasText(baseURL)) {
+      throw new Error('Base URL required');
+    }
+
     const site = await dataAccess.getSiteByBaseURL(baseURL);
     return site ? SiteDto.toJSON(site) : null;
   };
