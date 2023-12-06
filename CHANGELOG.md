@@ -1,3 +1,11 @@
+## [1.3.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.0...v1.3.1) (2023-12-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/fetch to v4.1.1 ([#29](https://github.com/adobe-rnd/spacecat-api-service/issues/29)) ([2c51799](https://github.com/adobe-rnd/spacecat-api-service/commit/2c51799428db9a3029ad3db13acddd6d0d28a280))
+* **deps:** update dependency @adobe/helix-shared-secrets to v2.1.3 ([#30](https://github.com/adobe-rnd/spacecat-api-service/issues/30)) ([2ca4c8d](https://github.com/adobe-rnd/spacecat-api-service/commit/2ca4c8dd67230969f033895b83a63eed28fd9fa1))
+
 # [1.3.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.2.1...v1.3.0) (2023-12-05)
 
 
