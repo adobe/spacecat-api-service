@@ -18,15 +18,24 @@ function isStaticRoute(routePattern) {
   return !routePattern.split('/').some((segment) => segment.startsWith(':'));
 }
 
-export default function getRouteHandlers(sitesController, triggerHandler) {
+export default function getRouteHandlers(
+  auditsController,
+  sitesController,
+  triggerHandler,
+) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
+    'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /sites': sitesController.getAll,
     'GET /sites.csv': sitesController.getAllAsCsv,
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
+    'GET /sites/:siteId/audits': auditsController.getAllForSite,
+    'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
+    'GET /sites/:siteId/audits/latest/:auditType': auditsController.getAllLatestForSite,
+    'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'POST /sites': sitesController.createSite,
     'GET /trigger': triggerHandler,

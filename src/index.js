@@ -9,6 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
 import wrap from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
 import { Response } from '@adobe/fetch';
@@ -22,6 +23,7 @@ import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath from './utils/route-utils.js';
 import trigger from './controllers/trigger.js';
+import AuditsController from './controllers/audits.js';
 import SitesController from './controllers/sites.js';
 
 export function enrichPathInfo(fn) { // export for testing
@@ -76,6 +78,7 @@ async function run(request, context) {
 
   try {
     const routeHandlers = getRouteHandlers(
+      AuditsController(context.dataAccess),
       SitesController(context.dataAccess),
       trigger,
     );

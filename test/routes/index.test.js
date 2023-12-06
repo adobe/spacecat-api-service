@@ -18,6 +18,13 @@ import sinon from 'sinon';
 import getRouteHandlers from '../../src/routes/index.js';
 
 describe('getRouteHandlers', () => {
+  const mockAuditsController = {
+    getAllForSite: sinon.stub(),
+    getAllLatest: sinon.stub(),
+    getAllLatestForSite: sinon.stub(),
+    getLatestForSite: sinon.stub(),
+  };
+
   const mockSitesController = {
     getAll: sinon.stub(),
     getAllAsCsv: sinon.stub(),
@@ -28,7 +35,11 @@ describe('getRouteHandlers', () => {
   const mockTrigger = sinon.stub();
 
   it('segregates static and dynamic routes', () => {
-    const { staticRoutes, dynamicRoutes } = getRouteHandlers(mockSitesController, mockTrigger);
+    const { staticRoutes, dynamicRoutes } = getRouteHandlers(
+      mockAuditsController,
+      mockSitesController,
+      mockTrigger,
+    );
 
     expect(staticRoutes).to.have.all.keys(
       'GET /sites',
@@ -37,17 +48,36 @@ describe('getRouteHandlers', () => {
       'GET /trigger',
       'POST /sites',
     );
+
     expect(staticRoutes['GET /sites']).to.equal(mockSitesController.getAll);
     expect(staticRoutes['GET /sites.csv']).to.equal(mockSitesController.getAllAsCsv);
     expect(staticRoutes['GET /sites.xlsx']).to.equal(mockSitesController.getAllAsExcel);
+    expect(staticRoutes['GET /trigger']).to.equal(mockTrigger);
+    expect(staticRoutes['POST /sites']).to.equal(mockSitesController.createSite);
 
     expect(dynamicRoutes).to.have.all.keys(
+      'GET /audits/latest/:auditType',
       'GET /sites/:siteId',
       'GET /sites/by-base-url/:baseURL',
+      'GET /sites/:siteId/audits',
+      'GET /sites/:siteId/audits/:auditType',
+      'GET /sites/:siteId/audits/latest/:auditType',
+      'GET /sites/:siteId/latest-audit/:auditType',
     );
+
+    expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
+    expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /sites/:siteId'].handler).to.equal(mockSitesController.getByID);
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].handler).to.equal(mockSitesController.getByBaseURL);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].paramNames).to.deep.equal(['baseURL']);
+    expect(dynamicRoutes['GET /sites/:siteId/audits'].handler).to.equal(mockAuditsController.getAllForSite);
+    expect(dynamicRoutes['GET /sites/:siteId/audits'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/audits/:auditType'].handler).to.equal(mockAuditsController.getAllForSite);
+    expect(dynamicRoutes['GET /sites/:siteId/audits/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
+    expect(dynamicRoutes['GET /sites/:siteId/audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatestForSite);
+    expect(dynamicRoutes['GET /sites/:siteId/audits/latest/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
+    expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].handler).to.equal(mockAuditsController.getLatestForSite);
+    expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
   });
 });

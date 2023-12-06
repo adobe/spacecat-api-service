@@ -135,7 +135,9 @@ describe('Sites Controller', () => {
   });
 
   it('throws an error if site ID is not provided', async () => {
-    await expect(sitesController.getByID({ params: {} })).to.be.rejectedWith('Site ID required');
+    const result = await sitesController.getByID({ params: {} });
+
+    expect(result.status).to.equal(400);
   });
 
   it('returns 404 when site is not found by baseURL', async () => {
@@ -147,6 +149,8 @@ describe('Sites Controller', () => {
   });
 
   it('throws an error if base URL is not provided', async () => {
-    await expect(sitesController.getByBaseURL({ params: {} })).to.be.rejectedWith('Base URL required');
+    const result = await sitesController.getByBaseURL({ params: {} });
+
+    expect(result.status).to.equal(400);
   });
 });

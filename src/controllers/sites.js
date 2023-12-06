@@ -10,24 +10,15 @@
  * governing permissions and limitations under the License.
  */
 
-import { Response } from '@adobe/fetch';
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
+import {
+  createBadRequestResponse,
+  createNotFoundResponse,
+  createResponse,
+} from '../utils/response-utils.js';
+
 import { SiteDto } from '../dto/site.js';
-
-function createResponse(body, status = 200) {
-  return new Response(
-    JSON.stringify(body),
-    {
-      headers: { 'content-type': 'application/json' },
-      status,
-    },
-  );
-}
-
-function createNotFoundResponse(message) {
-  return createResponse({ message }, 404);
-}
 
 /**
  * Sites controller.
@@ -87,7 +78,7 @@ function SitesController(dataAccess) {
     const siteId = context.params?.siteId;
 
     if (!hasText(siteId)) {
-      throw new Error('Site ID required');
+      return createBadRequestResponse('Site ID required');
     }
 
     const site = await dataAccess.getSiteByID(siteId);
@@ -108,7 +99,7 @@ function SitesController(dataAccess) {
     const encodedBaseURL = context.params?.baseURL;
 
     if (!hasText(encodedBaseURL)) {
-      throw new Error('Base URL required');
+      return createBadRequestResponse('Base URL required');
     }
 
     const decodedBaseURL = Buffer.from(encodedBaseURL, 'base64').toString('utf-8').trim();
