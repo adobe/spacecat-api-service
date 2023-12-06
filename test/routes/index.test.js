@@ -29,13 +29,19 @@ describe('getRouteHandlers', () => {
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(mockSitesController, mockTrigger);
 
-    expect(staticRoutes).to.have.all.keys('sites', 'sites.csv', 'sites.xlsx', 'trigger');
-    expect(staticRoutes.sites).to.equal(mockSitesController.getAll);
-    expect(staticRoutes['sites.csv']).to.equal(mockSitesController.getAllAsCsv);
-    expect(staticRoutes['sites.xlsx']).to.equal(mockSitesController.getAllAsExcel);
+    expect(staticRoutes).to.have.all.keys(
+      'GET /sites',
+      'GET /sites.csv',
+      'GET /sites.xlsx',
+      'GET /trigger',
+      'POST /sites',
+    );
+    expect(staticRoutes['GET /sites']).to.equal(mockSitesController.getAll);
+    expect(staticRoutes['GET /sites.csv']).to.equal(mockSitesController.getAllAsCsv);
+    expect(staticRoutes['GET /sites.xlsx']).to.equal(mockSitesController.getAllAsExcel);
 
-    expect(dynamicRoutes).to.have.key('sites/:siteId');
-    expect(dynamicRoutes['sites/:siteId'].handler).to.equal(mockSitesController.getSiteById);
-    expect(dynamicRoutes['sites/:siteId'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes).to.have.key('GET /sites/:siteId');
+    expect(dynamicRoutes['GET /sites/:siteId'].handler).to.equal(mockSitesController.getSiteById);
+    expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
   });
 });

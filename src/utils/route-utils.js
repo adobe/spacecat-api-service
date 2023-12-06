@@ -48,8 +48,14 @@ export default function matchPath(httpMethod, incomingPath, routeDefinitions) {
   ) => {
     if (matched) return matched; // If already matched, return the result
 
-    const routeSegments = routePattern.split('/').filter(Boolean);
-    if (routeSegments.length !== incomingSegments.length) return null;
+    const [patternMethod, ...patternPathSegments] = routePattern.split(' ');
+    const patternPath = patternPathSegments.join('/');
+    const routeSegments = patternPath.split('/').filter(Boolean);
+
+    if (patternMethod.toUpperCase() !== httpMethod.toUpperCase()
+      || routeSegments.length !== incomingSegments.length) {
+      return matched; // Continue reducing if no match
+    }
 
     const isMatch = routeSegments.every((segment, index) => {
       if (segment.startsWith(':')) {
@@ -73,5 +79,5 @@ export default function matchPath(httpMethod, incomingPath, routeDefinitions) {
     }
 
     return null; // Continue reducing if no match
-  }, null); // Initial value is null (
+  }, null); // Initial value is null
 }

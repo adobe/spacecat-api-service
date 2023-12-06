@@ -44,12 +44,12 @@ describe('matchPath', () => {
   });
 
   it('matches dynamic routes correctly', () => {
-    expect(matchPath('/users/123', routeDefinitions)).to.deep.equal({ handler: 'userHandler', params: { userId: '123' } });
-    expect(matchPath('/products/456/details', routeDefinitions)).to.deep.equal({ handler: 'productDetailsHandler', params: { productId: '456' } });
+    expect(matchPath('GET', '/users/123', routeDefinitions)).to.deep.equal({ handler: 'userHandler', params: { userId: '123' } });
+    expect(matchPath('GET', '/products/456/details', routeDefinitions)).to.deep.equal({ handler: 'productDetailsHandler', params: { productId: '456' } });
   });
 
   it('correctly matches routes with multiple dynamic parameters', () => {
-    const result = matchPath('/users/123/orders/456', routeDefinitions);
+    const result = matchPath('GET', '/users/123/orders/456', routeDefinitions);
     expect(result).to.deep.equal({
       handler: 'userOrderHandler',
       params: { userId: '123', orderId: '456' },
@@ -57,21 +57,38 @@ describe('matchPath', () => {
   });
 
   it('returns null for non-existent routes', () => {
-    expect(matchPath('/non-existent', routeDefinitions)).to.be.null;
+    expect(matchPath('GET', '/non-existent', routeDefinitions)).to.be.null;
   });
 
   it('handles edge cases', () => {
     // Test empty path, trailing slashes, and non-string inputs
-    expect(matchPath('', routeDefinitions)).to.be.null;
-    expect(matchPath('/home/', routeDefinitions)).to.be.null;
-    expect(matchPath(null, routeDefinitions)).to.be.null;
-    expect(matchPath(undefined, routeDefinitions)).to.be.null;
+    expect(matchPath('GET', '/home/', routeDefinitions)).to.be.null;
   });
 
   it('does not match incorrect dynamic routes', () => {
     // Test incorrect dynamic segment, extra segments, and missing segments
-    expect(matchPath('/users/', routeDefinitions)).to.be.null;
-    expect(matchPath('/users/123/extra', routeDefinitions)).to.be.null;
-    expect(matchPath('/products/', routeDefinitions)).to.be.null;
+    expect(matchPath('GET', '/users/', routeDefinitions)).to.be.null;
+    expect(matchPath('GET', '/users/123/extra', routeDefinitions)).to.be.null;
+    expect(matchPath('GET', '/products/', routeDefinitions)).to.be.null;
+  });
+
+  it('throws an error if httpMethod is not provided', () => {
+    expect(() => matchPath(null, '/home', routeDefinitions)).to.throw('HTTP method required');
+  });
+
+  it('throws an error if incomingPath is not provided', () => {
+    expect(() => matchPath('GET', null, routeDefinitions)).to.throw('Incoming path required');
+  });
+
+  it('throws an error if routeDefinitions is not provided', () => {
+    expect(() => matchPath('GET', '/home')).to.throw('Route definitions required');
+  });
+
+  it('throws an error if staticRoutes is not provided', () => {
+    expect(() => matchPath('GET', '/home', { dynamicRoutes })).to.throw('Route definitions required');
+  });
+
+  it('throws an error if dynamicRoutes is not provided', () => {
+    expect(() => matchPath('GET', '/home', { staticRoutes })).to.throw('Route definitions required');
   });
 });

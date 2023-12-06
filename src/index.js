@@ -78,7 +78,7 @@ async function run(request, context) {
       trigger,
     );
 
-    const routeMatch = matchPath(method, route, routeHandlers);
+    const routeMatch = matchPath(method, suffix, routeHandlers);
 
     if (routeMatch) {
       const { handler, params } = routeMatch;
