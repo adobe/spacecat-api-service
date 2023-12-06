@@ -1,3 +1,10 @@
+## [1.3.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.2...v1.3.3) (2023-12-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-status to v10.0.11 ([#31](https://github.com/adobe-rnd/spacecat-api-service/issues/31)) ([e15e2da](https://github.com/adobe-rnd/spacecat-api-service/commit/e15e2dae9c8f811e63d4052870c487e0dba44e3d))
+
 ## [1.3.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.1...v1.3.2) (2023-12-06)
 
 
