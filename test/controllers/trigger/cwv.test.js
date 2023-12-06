@@ -19,9 +19,9 @@ import chaiAsPromised from 'chai-as-promised';
 import nock from 'nock';
 import cwv, {
   getSlackChannelId, DEFAULT_PARAMS, FALLBACK_SLACK_CHANNEL, INITIAL_SLACK_MESSAGE,
-} from '../../src/trigger/cwv.js';
+} from '../../../src/controllers/trigger/cwv.js';
 import { emptyResponse, fullResponse } from './data.js';
-import { getQueryParams } from '../../src/support/slack.js';
+import { getQueryParams } from '../../../src/support/slack.js';
 
 chai.use(sinonChai);
 chai.use(chaiAsPromised);
