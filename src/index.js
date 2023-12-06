@@ -49,6 +49,8 @@ async function run(request, context) {
   const { log, pathInfo } = context;
   const { route, suffix, method } = pathInfo;
 
+  log.info(JSON.stringify(context, null, 2));
+
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
     return new Response('', {
