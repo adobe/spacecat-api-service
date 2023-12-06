@@ -23,6 +23,7 @@ describe('getRouteHandlers', () => {
     getAllAsCsv: sinon.stub(),
     getAllAsExcel: sinon.stub(),
     getByID: sinon.stub(),
+    getByBaseURL: sinon.stub(),
   };
   const mockTrigger = sinon.stub();
 
@@ -46,5 +47,7 @@ describe('getRouteHandlers', () => {
     );
     expect(dynamicRoutes['GET /sites/:siteId'].handler).to.equal(mockSitesController.getByID);
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].handler).to.equal(mockSitesController.getByBaseURL);
+    expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].paramNames).to.deep.equal(['baseURL']);
   });
 });

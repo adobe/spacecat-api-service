@@ -34,6 +34,10 @@ describe('matchPath', () => {
       handler: 'productDetailsHandler',
       paramNames: ['productId'],
     },
+    'GET /products/by-title/:productTitle': {
+      handler: 'productTitleHandler',
+      paramNames: ['productTitle'],
+    },
   };
 
   const routeDefinitions = { staticRoutes, dynamicRoutes };
@@ -46,6 +50,7 @@ describe('matchPath', () => {
   it('matches dynamic routes correctly', () => {
     expect(matchPath('GET', '/users/123', routeDefinitions)).to.deep.equal({ handler: 'userHandler', params: { userId: '123' } });
     expect(matchPath('GET', '/products/456/details', routeDefinitions)).to.deep.equal({ handler: 'productDetailsHandler', params: { productId: '456' } });
+    expect(matchPath('GET', '/products/by-title/some-title', routeDefinitions)).to.deep.equal({ handler: 'productTitleHandler', params: { productTitle: 'some-title' } });
   });
 
   it('correctly matches routes with multiple dynamic parameters', () => {
