@@ -26,7 +26,7 @@ export default function getRouteHandlers(sitesController, triggerHandler) {
     'GET /sites': sitesController.getAll,
     'GET /sites.csv': sitesController.getAllAsCsv,
     'GET /sites.xlsx': sitesController.getAllAsExcel,
-    'GET /sites/:siteId': sitesController.getSiteById,
+    'GET /sites/:siteId': sitesController.getByID,
     'POST /sites': sitesController.createSite,
     'GET /trigger': triggerHandler,
   };

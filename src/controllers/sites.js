@@ -17,8 +17,7 @@ import { SiteDto } from '../dto/site.js';
 /**
  * Sites controller.
  * @param dataAccess
- * @returns {{getAllAsCSV(): Promise<string>, getAllAsXLS(): Promise<Buffer>,
- * getByID(*): Promise<object>, getByBaseURL(*): Promise<object>, getAll(): Promise<Array<object>>}}
+ * @returns {object} Sites controller.
  * @constructor
  */
 function SitesController(dataAccess) {
