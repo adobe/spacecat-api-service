@@ -44,7 +44,7 @@ function AuditsController(dataAccess) {
     }
 
     const audits = (await dataAccess.getAuditsForSite(siteId, auditType))
-      .map((audit) => AuditDto.toJSON(audit));
+      .map((audit) => AuditDto.toAbbreviatedJSON(audit));
 
     return createResponse(audits);
   };
@@ -62,7 +62,7 @@ function AuditsController(dataAccess) {
     }
 
     const audits = (await dataAccess.getLatestAudits(auditType, ascending))
-      .map((audit) => AuditDto.toJSON(audit));
+      .map((audit) => AuditDto.toAbbreviatedJSON(audit));
 
     return createResponse(audits);
   };

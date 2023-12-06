@@ -58,4 +58,29 @@ export const AuditDto = {
     isLive: audit.isLive(),
     siteId: audit.getSiteId(),
   }),
+
+  /**
+   * Converts an Audit object into a JSON object.
+   * @param {Readonly<Audit>} audit - Audit object.
+   * @returns {{
+   * auditResult: string,
+   * auditType: string,
+   * auditedAt: string,
+   * expiresAt: string,
+   * fullAuditRef: string,
+   * isLive: boolean,
+   * siteId: string
+   * }} JSON object.
+   */
+  toAbbreviatedJSON: (audit) => ({
+    auditResult: {
+      scores: audit.getAuditResult()?.scores,
+    },
+    auditType: audit.getAuditType(),
+    auditedAt: audit.getAuditedAt(),
+    expiresAt: audit.getExpiresAt().toISOString(),
+    fullAuditRef: audit.getFullAuditRef(),
+    isLive: audit.isLive(),
+    siteId: audit.getSiteId(),
+  }),
 };
