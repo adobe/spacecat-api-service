@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.1...v1.3.2) (2023-12-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-universal-logger to v3.0.13 ([#32](https://github.com/adobe-rnd/spacecat-api-service/issues/32)) ([97d68c6](https://github.com/adobe-rnd/spacecat-api-service/commit/97d68c6527f481dd5c001c49977e334e8d8a56d0))
+
 ## [1.3.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.0...v1.3.1) (2023-12-06)
 
 
