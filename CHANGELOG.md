@@ -1,3 +1,10 @@
+## [1.3.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.3...v1.3.4) (2023-12-06)
+
+
+### Bug Fixes
+
+* debug log context ([49bd92a](https://github.com/adobe-rnd/spacecat-api-service/commit/49bd92a6390ee712bbe759e14cc5bd769776304c))
+
 ## [1.3.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.2...v1.3.3) (2023-12-06)
 
 
