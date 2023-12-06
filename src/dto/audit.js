@@ -74,6 +74,7 @@ export const AuditDto = {
    */
   toAbbreviatedJSON: (audit) => ({
     auditResult: {
+      finalUrl: audit.getAuditResult()?.finalUrl,
       scores: audit.getAuditResult()?.scores,
     },
     auditType: audit.getAuditType(),
