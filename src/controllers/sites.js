@@ -105,13 +105,15 @@ function SitesController(dataAccess) {
    * @throws {Error} If base URL is not provided.
    */
   const getByBaseURL = async (context) => {
-    const baseURL = context.params?.baseURL;
+    const encodedBaseURL = context.params?.baseURL;
 
-    if (!hasText(baseURL)) {
+    if (!hasText(encodedBaseURL)) {
       throw new Error('Base URL required');
     }
 
-    const site = await dataAccess.getSiteByBaseURL(baseURL);
+    const decodedBaseURL = Buffer.from(encodedBaseURL, 'base64').toString('utf-8').trim();
+
+    const site = await dataAccess.getSiteByBaseURL(decodedBaseURL);
     if (!site) {
       return createNotFoundResponse('Site not found');
     }

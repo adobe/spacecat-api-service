@@ -116,10 +116,10 @@ describe('Sites Controller', () => {
   });
 
   it('gets a site by base URL', async () => {
-    const result = await sitesController.getByBaseURL({ params: { baseURL: 'https%3A%2F%2Fsite1.com' } });
+    const result = await sitesController.getByBaseURL({ params: { baseURL: 'aHR0cHM6Ly9zaXRlMS5jb20K' } });
     const site = await result.json();
 
-    expect(mockDataAccess.getSiteByBaseURL.calledOnce).to.be.true;
+    expect(mockDataAccess.getSiteByBaseURL.calledOnceWith('https://site1.com')).to.be.true;
 
     expect(site).to.be.an('object');
     expect(site).to.have.property('id', 'site1');
