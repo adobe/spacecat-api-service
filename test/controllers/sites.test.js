@@ -66,10 +66,12 @@ describe('Sites Controller', () => {
   });
 
   it('creates a site', async () => {
-    const site = await sitesController.createSite({ baseURL: 'https://site1.com' });
+    const response = await sitesController.createSite({ baseURL: 'https://site1.com' });
 
     expect(mockDataAccess.addSite.calledOnce).to.be.true;
-    expect(site).to.be.an('object');
+    expect(response.status).to.equal(201);
+
+    const site = await response.json();
     expect(site).to.have.property('id', 'site1');
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
@@ -78,67 +80,70 @@ describe('Sites Controller', () => {
     mockDataAccess.getSites.resolves(sites);
 
     const result = await sitesController.getAll();
+    const resultSites = await result.json();
 
     expect(mockDataAccess.getSites.calledOnce).to.be.true;
-    expect(result).to.be.an('array').with.lengthOf(2);
-    expect(result[0]).to.have.property('id', 'site1');
-    expect(result[0]).to.have.property('baseURL', 'https://site1.com');
-    expect(result[1]).to.have.property('id', 'site2');
-    expect(result[1]).to.have.property('baseURL', 'https://site2.com');
+    expect(resultSites).to.be.an('array').with.lengthOf(2);
+    expect(resultSites[0]).to.have.property('id', 'site1');
+    expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
+    expect(resultSites[1]).to.have.property('id', 'site2');
+    expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
   });
 
   it('gets all sites as CSV', async () => {
     const result = await sitesController.getAllAsCSV();
 
     // expect(mockDataAccess.getSites.calledOnce).to.be.true;
-    expect(result).to.be.a('string');
+    expect(result).to.not.be.null;
   });
 
   it('gets all sites as XLS', async () => {
     const result = await sitesController.getAllAsXLS();
 
     // expect(mockDataAccess.getSites.calledOnce).to.be.true;
-    expect(result).to.be.null;
+    expect(result).to.not.be.null;
   });
 
   it('gets a site by ID', async () => {
     const result = await sitesController.getByID({ params: { siteId: 'site1' } });
+    const site = await result.json();
 
     expect(mockDataAccess.getSiteByID.calledOnce).to.be.true;
 
-    expect(result).to.be.an('object');
-    expect(result).to.have.property('id', 'site1');
-    expect(result).to.have.property('baseURL', 'https://site1.com');
+    expect(site).to.be.an('object');
+    expect(site).to.have.property('id', 'site1');
+    expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
   it('gets a site by base URL', async () => {
     const result = await sitesController.getByBaseURL({ params: { baseURL: 'https://site1.com' } });
+    const site = await result.json();
 
     expect(mockDataAccess.getSiteByBaseURL.calledOnce).to.be.true;
 
-    expect(result).to.be.an('object');
-    expect(result).to.have.property('id', 'site1');
-    expect(result).to.have.property('baseURL', 'https://site1.com');
+    expect(site).to.be.an('object');
+    expect(site).to.have.property('id', 'site1');
+    expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
-  it('returns null when site is not found by id', async () => {
+  it('returns 404 when site is not found by id', async () => {
     mockDataAccess.getSiteByID.resolves(null);
 
     const result = await sitesController.getByID({ params: { siteId: 'site1' } });
 
-    expect(result).to.be.null;
+    expect(result.status).to.equal(404);
   });
 
   it('throws an error if site ID is not provided', async () => {
     await expect(sitesController.getByID({ params: {} })).to.be.rejectedWith('Site ID required');
   });
 
-  it('returns null when site is not found by baseURL', async () => {
+  it('returns 404 when site is not found by baseURL', async () => {
     mockDataAccess.getSiteByBaseURL.resolves(null);
 
     const result = await sitesController.getByBaseURL({ params: { baseURL: 'https://site1.com' } });
 
-    expect(result).to.be.null;
+    expect(result.status).to.equal(404);
   });
 
   it('throws an error if base URL is not provided', async () => {

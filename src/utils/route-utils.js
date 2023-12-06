@@ -12,6 +12,13 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+/**
+ * Matches the http method and path to a route handler.
+ * @param httpMethod - HTTP method
+ * @param incomingPath - Incoming path
+ * @param routeDefinitions - Route definitions
+ * @return {{handler: *, params: {}}|[string, unknown]|null}
+ */
 export default function matchPath(httpMethod, incomingPath, routeDefinitions) {
   if (!hasText(httpMethod)) {
     throw new Error('HTTP method required');

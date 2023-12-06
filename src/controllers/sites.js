@@ -10,9 +10,24 @@
  * governing permissions and limitations under the License.
  */
 
+import { Response } from '@adobe/fetch';
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import { SiteDto } from '../dto/site.js';
+
+function createResponse(body, status = 200) {
+  return new Response(
+    JSON.stringify(body),
+    {
+      headers: { 'content-type': 'application/json' },
+      status,
+    },
+  );
+}
+
+function createNotFoundResponse(message) {
+  return createResponse({ message }, 404);
+}
 
 /**
  * Sites controller.
@@ -28,39 +43,38 @@ function SitesController(dataAccess) {
   /**
    * Creates a site.
    * @param siteData
-   * @return {Promise<{id: string, baseURL, gitHubURL: string, imsOrgId: string,
-   * isLive: boolean, createdAt: string, updatedAt: string}>}
+   * @return {Promise<Response>} Site response.
    */
   const createSite = async (siteData) => {
     const site = await dataAccess.addSite(siteData);
-    return SiteDto.toJSON(site);
+    return createResponse(SiteDto.toJSON(site), 201);
   };
 
   /**
    * Gets all sites.
-   * @returns {Promise<Array<object>>} Array of sites.
+   * @returns {Promise<Response>} Array of sites response.
    */
   const getAll = async () => {
-    const sites = await dataAccess.getSites();
-    return sites.map((site) => SiteDto.toJSON(site));
+    const sites = (await dataAccess.getSites()).map((site) => SiteDto.toJSON(site));
+    return createResponse(sites);
   };
 
   /**
    * Gets all sites as an XLS file.
-   * @returns {Promise<Buffer>} XLS file.
+   * @returns {Promise<Response>} XLS file.
    */
   const getAllAsXLS = async () => {
     const sites = await dataAccess.getSites();
-    return SiteDto.toXLS(sites);
+    return createResponse(SiteDto.toXLS(sites));
   };
 
   /**
    * Gets all sites as a CSV file.
-   * @returns {Promise<string>} CSV file.
+   * @returns {Promise<Response>} CSV file.
    */
   const getAllAsCSV = async () => {
     const sites = await dataAccess.getSites();
-    return SiteDto.toCSV(sites);
+    return createResponse(SiteDto.toCSV(sites));
   };
 
   /**
@@ -77,7 +91,11 @@ function SitesController(dataAccess) {
     }
 
     const site = await dataAccess.getSiteByID(siteId);
-    return site ? SiteDto.toJSON(site) : null;
+    if (!site) {
+      return createNotFoundResponse('Site not found');
+    }
+
+    return createResponse(SiteDto.toJSON(site));
   };
 
   /**
@@ -94,7 +112,11 @@ function SitesController(dataAccess) {
     }
 
     const site = await dataAccess.getSiteByBaseURL(baseURL);
-    return site ? SiteDto.toJSON(site) : null;
+    if (!site) {
+      return createNotFoundResponse('Site not found');
+    }
+
+    return createResponse(SiteDto.toJSON(site));
   };
 
   return {
