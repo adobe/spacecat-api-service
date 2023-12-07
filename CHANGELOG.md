@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.4...v1.4.0) (2023-12-07)
+
+
+### Features
+
+* http api routes ([#37](https://github.com/adobe-rnd/spacecat-api-service/issues/37)) ([a9230db](https://github.com/adobe-rnd/spacecat-api-service/commit/a9230dbe56c216e412f55edbad466348c303e71b))
+
 ## [1.3.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.3...v1.3.4) (2023-12-06)
 
 
