@@ -9,18 +9,23 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
 import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-export const ADMIN_ENDPOINTS = ['trigger']; // export for testing
+const ADMIN_ENDPOINTS = [
+  'GET /trigger',
+  'POST /sites',
+];
 
 /*
  * Placeholder authwrapper until a better one replaces
  */
 export default function authWrapper(fn) {
   return async (request, context) => {
-    const { log, pathInfo: { headers, route } } = context;
+    const { log, pathInfo: { method, suffix, headers } } = context;
 
+    const route = `${method.toUpperCase()} ${suffix}`;
     const apiKeyFromHeader = headers['x-api-key'];
 
     if (!hasText(apiKeyFromHeader)) {

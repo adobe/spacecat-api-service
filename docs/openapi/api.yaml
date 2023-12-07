@@ -12,34 +12,36 @@ servers:
   - url: 'https://spacecat.hlx.page'
 
 tags:
-  - name: organizations
-    description: Organization operations
   - name: sites
     description: Site operations
   - name: audits
     description: Audit operations
 
 paths:
-  /organizations:
-    $ref: "./organizations-api.yaml#/organizations"
-  /organizations/{organizationId}:
-    $ref: "./organization-api.yaml#/organization"
-  /organizations/{organizationId}/sites:
-    $ref: "./sites-api.yaml#/sites"
-  /organizations/{organizationId}/sites/{siteId}:
-    $ref: "./site-api.yaml#/site"
-  /sites/{siteId}/runAudit:
-    $ref: "./site-api.yaml#/runAudit"
-  /organizations/{organizationId}/sites/{siteId}/audits:
+  /audits/latest/{auditType}:
     $ref: "./audits-api.yaml#/audits"
-  /organizations/{organizationId}/sites/{siteId}/audits/{auditId}:
-    $ref: "./audit-api.yaml#/audit"
   /sites:
-    $ref: "./sites-query-api.yaml#/sites"
+    $ref: "./sites-api.yaml#/sites"
+  /sites/by-base-url/{base64BaseUrl}:
+    $ref: "./site-api.yaml#/site-by-base-url"
+  /sites/{siteId}:
+    $ref: "./site-api.yaml#/site"
+  /sites/{siteId}/audits:
+    $ref: "./audits-api.yaml#/audits-for-site"
+  /sites/{siteId}/run-audit/{auditType}:
+    $ref: "./site-api.yaml#/run-audit"
+  /sites/{siteId}/audits/{auditType}:
+    $ref: "./audits-api.yaml#/audits-for-site-and-type"
+  /sites/{siteId}/audits/latest/{auditType}:
+    $ref: "./audits-api.yaml#/audits-for-site"
+  /sites/{siteId}/latest-audit/{auditType}:
+    $ref: "./audit-api.yaml#/audit-for-site"
   /sites.xlsx:
-    $ref: "./sites-query-api.yaml#/export-xlsx"
+    $ref: "./sites-api.yaml#/export-xls"
   /sites.csv:
-    $ref: "./sites-query-api.yaml#/export-csv"
+    $ref: "./sites-api.yaml#/export-csv"
+  /trigger:
+    $ref: "./trigger-api.yaml#/trigger"
 
 components:
   securitySchemes:
@@ -51,3 +53,5 @@ components:
       type: apiKey
       in: header
       name: X-Admin-Key
+  schemas:
+    $ref: "./schemas.yaml"

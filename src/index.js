@@ -9,6 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
 import wrap from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
 import { Response } from '@adobe/fetch';
@@ -19,11 +20,11 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
-import trigger from './trigger/handler.js';
-
-const HANDLERS = {
-  trigger,
-};
+import getRouteHandlers from './routes/index.js';
+import matchPath from './utils/route-utils.js';
+import trigger from './controllers/trigger.js';
+import AuditsController from './controllers/audits.js';
+import SitesController from './controllers/sites.js';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
@@ -50,8 +51,6 @@ async function run(request, context) {
   const { log, pathInfo } = context;
   const { route, suffix, method } = pathInfo;
 
-  log.info(JSON.stringify(context, null, 2));
-
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
     return new Response('', {
@@ -73,22 +72,32 @@ async function run(request, context) {
     });
   }
 
-  const handler = HANDLERS[route];
-  if (!handler) {
-    const msg = `no such route /${route}`;
-    log.error(msg);
-    return new Response('', {
-      status: 404,
-      headers: {
-        'x-error': msg,
-      },
-    });
-  }
-
   const t0 = Date.now();
 
   try {
-    return await handler(context);
+    const routeHandlers = getRouteHandlers(
+      AuditsController(context.dataAccess),
+      SitesController(context.dataAccess),
+      trigger,
+    );
+
+    const routeMatch = matchPath(method, suffix, routeHandlers);
+
+    if (routeMatch) {
+      const { handler, params } = routeMatch;
+      context.params = params;
+
+      return await handler(context);
+    } else {
+      const msg = `no such route /${route}`;
+      log.error(msg);
+      return new Response('', {
+        status: 404,
+        headers: {
+          'x-error': msg,
+        },
+      });
+    }
   } catch (e) {
     const t1 = Date.now();
     log.error(`Handler exception after ${t1 - t0} ms`, e);

@@ -13,8 +13,8 @@
 import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import cwv from './cwv.js';
-import lhs from './lhs.js';
+import cwv from './trigger/cwv.js';
+import lhs from './trigger/lhs.js';
 
 const AUDITS = {
   cwv,
@@ -22,6 +22,11 @@ const AUDITS = {
   'lhs-desktop': lhs,
 };
 
+/**
+ * Trigger handler.
+ * @param {object} context - Context.
+ * @return {Promise<Response|*>} Response.
+ */
 export default async function triggerHandler(context) {
   const { log, data } = context;
   const { type, url } = data;

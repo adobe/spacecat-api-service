@@ -12,7 +12,7 @@
 
 import { Response } from '@adobe/fetch';
 
-import { isAuditForAll } from '../support/utils.js';
+import { isAuditForAll } from '../../support/utils.js';
 
 /**
  * Constant for error message when a site is not found.

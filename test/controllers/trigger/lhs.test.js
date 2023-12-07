@@ -14,7 +14,7 @@
 
 import { expect } from 'chai';
 import sinon from 'sinon';
-import trigger from '../../src/trigger/lhs.js';
+import trigger from '../../../src/controllers/trigger/lhs.js';
 
 describe('trigger function', () => {
   let context;
