@@ -13,11 +13,15 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
- * Matches the http method and path to a route handler.
- * @param httpMethod - HTTP method
- * @param incomingPath - Incoming path
- * @param routeDefinitions - Route definitions
- * @return {{handler: *, params: {}}|[string, unknown]|null}
+ * Matches the http method and path to a route handler. Returns null if no match.
+ * @param {string} httpMethod - HTTP method
+ * @param {string} incomingPath - Incoming path
+ * @param {object} routeDefinitions - Route definitions
+ * @param {object} routeDefinitions.staticRoutes - Static routes
+ * @param {object} routeDefinitions.dynamicRoutes - Dynamic routes
+ * @return {object} Route match result
+ * @return {function} Route match result.handler - Route handler
+ * @return {object} Route match result.params - Route params
  */
 export default function matchPath(httpMethod, incomingPath, routeDefinitions) {
   if (!hasText(httpMethod)) {

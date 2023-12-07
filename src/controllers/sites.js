@@ -21,8 +21,8 @@ import {
 import { SiteDto } from '../dto/site.js';
 
 /**
- * Sites controller.
- * @param dataAccess
+ * Sites controller. Provides methods to create, read, update and delete sites.
+ * @param {DataAccess} dataAccess - Data access.
  * @returns {object} Sites controller.
  * @constructor
  */
@@ -32,8 +32,8 @@ function SitesController(dataAccess) {
   }
 
   /**
-   * Creates a site.
-   * @param siteData
+   * Creates a site. The site ID is generated automatically.
+   * @param {object} siteData - Site data.
    * @return {Promise<Response>} Site response.
    */
   const createSite = async (siteData) => {
@@ -90,7 +90,8 @@ function SitesController(dataAccess) {
   };
 
   /**
-   * Gets a site by base URL.
+   * Gets a site by base URL. The base URL is base64 encoded. This is to allow
+   * for URLs with special characters to be used as path parameters.
    * @param {object} context - Context of the request.
    * @returns {Promise<object>} Site.
    * @throws {Error} If base URL is not provided.
@@ -113,8 +114,8 @@ function SitesController(dataAccess) {
   };
 
   /**
-   * Removes a site
-   * @param siteId - The site ID.
+   * Removes a site.
+   * @param {string} siteId - The site ID.
    * @return {Promise<Response>} Delete response.
    */
   const removeSite = async (siteId) => {
@@ -124,7 +125,7 @@ function SitesController(dataAccess) {
 
   /**
    * Updates a site
-   * @param siteData - The site data.
+   * @param {object} siteData - Site data.
    * @return {Promise<Response>} Site response.
    */
   const updateSite = async (siteData) => {

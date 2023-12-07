@@ -16,4 +16,9 @@ export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
   ? h1()
   : h2();
 
+/**
+ * Checks if the url parameter "url" equals "ALL".
+ * @param {string} url - URL parameter.
+ * @returns {boolean} True if url equals "ALL", false otherwise.
+ */
 export const isAuditForAll = (url) => url.toUpperCase() === 'ALL';

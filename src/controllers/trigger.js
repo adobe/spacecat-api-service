@@ -22,6 +22,11 @@ const AUDITS = {
   'lhs-desktop': lhs,
 };
 
+/**
+ * Trigger handler.
+ * @param {object} context - Context.
+ * @return {Promise<Response|*>} Response.
+ */
 export default async function triggerHandler(context) {
   const { log, data } = context;
   const { type, url } = data;

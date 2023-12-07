@@ -22,7 +22,7 @@ import { AuditDto } from '../dto/audit.js';
 
 /**
  * Audits controller.
- * @param dataAccess
+ * @param {DataAccess} dataAccess - Data access.
  * @returns {object} Audits controller.
  * @constructor
  */
@@ -32,7 +32,9 @@ function AuditsController(dataAccess) {
   }
 
   /**
-   * Gets all audits for a given site.
+   * Gets all audits for a given site and audit type. If no audit type is specified,
+   * all audits are returned.
+   *
    * @returns {Promise<Response>} Array of audits response.
    */
   const getAllForSite = async (context) => {
@@ -50,7 +52,9 @@ function AuditsController(dataAccess) {
   };
 
   /**
-   * Gets all audits for a given site.
+   * Gets all audits for a given site and audit type. Sorts by auditedAt descending.
+   * If the url parameter ascending is set to true, sorts by auditedAt ascending.
+   *
    * @returns {Promise<Response>} Array of audits response.
    */
   const getAllLatest = async (context) => {

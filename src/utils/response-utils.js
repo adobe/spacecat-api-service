@@ -12,6 +12,12 @@
 
 import { Response } from '@adobe/fetch';
 
+/**
+ * Creates a response with a JSON body. Defaults to 200 status.
+ * @param {object} body - JSON body.
+ * @param {number} status - Optional status code.
+ * @return {Response} Response.
+ */
 export function createResponse(body, status = 200) {
   return new Response(
     JSON.stringify(body),
@@ -22,10 +28,20 @@ export function createResponse(body, status = 200) {
   );
 }
 
+/**
+ * Creates a 400 response with a JSON body.
+ * @param {string} message - Error message.
+ * @return {Response} Response.
+ */
 export function createBadRequestResponse(message) {
   return createResponse({ message }, 400);
 }
 
+/**
+ * Creates a 404 response with a JSON body.
+ * @param {string} message - Error message.
+ * @return {Response} Response.
+ */
 export function createNotFoundResponse(message) {
   return createResponse({ message }, 404);
 }
