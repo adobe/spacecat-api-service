@@ -95,4 +95,19 @@ describe('Index Tests', () => {
     expect(resp.status).to.equal(500);
     expect(resp.headers.plain()['x-error']).to.equal('internal server error');
   });
+
+  it('handles dynamic route errors', async () => {
+    context.pathInfo.suffix = '/sites/123';
+
+    request = new Request(`${baseUrl}/sites/123`, {
+      headers: {
+        'x-api-key': apiKey,
+      },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(500);
+    expect(resp.headers.plain()['x-error']).to.equal('internal server error');
+  });
 });

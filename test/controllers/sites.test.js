@@ -88,7 +88,10 @@ describe('Sites Controller', () => {
   });
 
   it('updates a site', async () => {
-    const response = await sitesController.updateSite({ baseURL: 'https://site1.com' });
+    const response = await sitesController.updateSite({
+      params: { siteId: 'site1' },
+      data: { imsOrgId: 'abcd124' },
+    });
 
     expect(mockDataAccess.updateSite.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
@@ -99,7 +102,7 @@ describe('Sites Controller', () => {
   });
 
   it('removes a site', async () => {
-    const response = await sitesController.removeSite('site1');
+    const response = await sitesController.removeSite({ params: { siteId: 'site1' } });
 
     expect(mockDataAccess.removeSite.calledOnce).to.be.true;
     expect(response.status).to.equal(204);

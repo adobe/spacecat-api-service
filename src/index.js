@@ -17,14 +17,18 @@ import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import dataAccess from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import App from '@slack/bolt';
 
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath from './utils/route-utils.js';
-import trigger from './controllers/trigger.js';
+
 import AuditsController from './controllers/audits.js';
 import SitesController from './controllers/sites.js';
+import SlackController from './controllers/slack.js';
+import trigger from './controllers/trigger.js';
+import SlackHandler from './support/slack-handler.js';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
@@ -39,6 +43,43 @@ export function enrichPathInfo(fn) { // export for testing
     };
     return fn(request, context);
   };
+}
+
+function initSlackBot(lambdaContext) {
+  const { env, log } = lambdaContext;
+  const { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN } = env;
+
+  const slackHandler = SlackHandler();
+
+  if (!hasText(SLACK_SIGNING_SECRET)) {
+    throw new Error('Missing SLACK_SIGNING_SECRET');
+  }
+
+  if (!hasText(SLACK_BOT_TOKEN)) {
+    throw new Error('Missing SLACK_BOT_TOKEN');
+  }
+
+  const app = new App({
+    signingSecret: SLACK_SIGNING_SECRET,
+    token: SLACK_BOT_TOKEN,
+    logger: {
+      getLevel: () => log.level,
+      setLevel: () => true,
+      debug: log.debug.bind(log),
+      info: log.info.bind(log),
+      warn: log.warn.bind(log),
+      error: log.error.bind(log),
+    },
+  });
+
+  app.use(async ({ context, next }) => {
+    context.dataAccess = lambdaContext.dataAccess;
+    await next();
+  });
+
+  app.event('app_mention', slackHandler.onAppMention);
+
+  return app;
 }
 
 /**
@@ -78,6 +119,7 @@ async function run(request, context) {
     const routeHandlers = getRouteHandlers(
       AuditsController(context.dataAccess),
       SitesController(context.dataAccess),
+      SlackController(initSlackBot(context)),
       trigger,
     );
 

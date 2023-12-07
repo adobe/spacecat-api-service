@@ -36,11 +36,11 @@ site:
               $ref: './schemas.yaml#/Site'
       404:
         description: Site not found
-  put:
-    operationId: updateSite
+  patch:
+    operationId: patchSite
     tags:
       - sites
-    summary: Update a site
+    summary: Update a site. Only the fields as per the request body schema will be updated.
     security:
       - admin_key: [ ]
     requestBody:
@@ -48,7 +48,7 @@ site:
       content:
         application/json:
           schema:
-            $ref: './schemas.yaml#/Site'
+            $ref: './schemas.yaml#/SiteUpdate'
     responses:
       '200':
         description: Site updated successfully

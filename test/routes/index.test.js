@@ -32,21 +32,29 @@ describe('getRouteHandlers', () => {
     getByID: sinon.stub(),
     getByBaseURL: sinon.stub(),
   };
+
+  const mockSlackController = {
+    handleEvent: sinon.stub(),
+  };
+
   const mockTrigger = sinon.stub();
 
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
       mockSitesController,
+      mockSlackController,
       mockTrigger,
     );
 
     expect(staticRoutes).to.have.all.keys(
       'GET /sites',
+      'POST /sites',
       'GET /sites.csv',
       'GET /sites.xlsx',
+      'GET /slack/events',
+      'POST /slack/events',
       'GET /trigger',
-      'POST /sites',
     );
 
     expect(staticRoutes['GET /sites']).to.equal(mockSitesController.getAll);
@@ -58,7 +66,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
       'GET /sites/:siteId',
-      'PUT /sites/:siteId',
+      'PATCH /sites/:siteId',
       'DELETE /sites/:siteId',
       'GET /sites/by-base-url/:baseURL',
       'GET /sites/:siteId/audits',

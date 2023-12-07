@@ -19,6 +19,13 @@ Site:
     updatedAt:
       type: string
       format: date-time
+SiteUpdate:
+  type: object
+  properties:
+    imsOrgId:
+      type: string
+    isLive:
+      type: boolean
 Audit:
   type: object
   properties:
