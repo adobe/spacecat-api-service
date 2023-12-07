@@ -30,10 +30,21 @@ describe('Sites Controller', () => {
     { id: 'site2', baseURL: 'https://site2.com' },
   ].map((site) => SiteDto.fromJson(site));
 
-  const siteFunctions = ['createSite', 'getAll', 'getAllAsCSV', 'getAllAsXLS', 'getByBaseURL', 'getByID'];
+  const siteFunctions = [
+    'createSite',
+    'getAll',
+    'getAllAsCSV',
+    'getAllAsXLS',
+    'getByBaseURL',
+    'getByID',
+    'removeSite',
+    'updateSite',
+  ];
 
   const mockDataAccess = {
     addSite: sandbox.stub().resolves(sites[0]),
+    updateSite: sandbox.stub().resolves(sites[0]),
+    removeSite: sandbox.stub().resolves(),
     getSites: sandbox.stub().resolves(sites),
     getSiteByBaseURL: sandbox.stub().resolves(sites[0]),
     getSiteByID: sandbox.stub().resolves(sites[0]),
@@ -74,6 +85,24 @@ describe('Sites Controller', () => {
     const site = await response.json();
     expect(site).to.have.property('id', 'site1');
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('updates a site', async () => {
+    const response = await sitesController.updateSite({ baseURL: 'https://site1.com' });
+
+    expect(mockDataAccess.updateSite.calledOnce).to.be.true;
+    expect(response.status).to.equal(200);
+
+    const site = await response.json();
+    expect(site).to.have.property('id', 'site1');
+    expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('removes a site', async () => {
+    const response = await sitesController.removeSite('site1');
+
+    expect(mockDataAccess.removeSite.calledOnce).to.be.true;
+    expect(response.status).to.equal(204);
   });
 
   it('gets all sites', async () => {

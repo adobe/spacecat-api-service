@@ -29,15 +29,17 @@ export default function getRouteHandlers(
   const routeDefinitions = {
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /sites': sitesController.getAll,
+    'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
+    'PUT /sites/:siteId': sitesController.updateSite,
+    'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/latest/:auditType': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
-    'POST /sites': sitesController.createSite,
     'GET /trigger': triggerHandler,
   };
 

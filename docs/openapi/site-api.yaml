@@ -1,6 +1,24 @@
+site-by-base-url:
+  parameters:
+    - $ref: "./parameters.yaml#/base64BaseUrl"
+  get:
+    operationId: getSiteByBaseUrl
+    tags:
+      - sites
+    summary: Retrieve a single site by its Base URL
+    security:
+      - api_key: [ ]
+    responses:
+      200:
+        description: A site object
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Site'
+      404:
+        description: Site not found
 site:
   parameters:
-    - $ref: "./parameters.yaml#/organizationId"
     - $ref: "./parameters.yaml#/siteId"
   get:
     operationId: getSite
@@ -64,16 +82,21 @@ site:
         $ref: "./responses.yaml#/404"
       '500':
         $ref: "./responses.yaml#/500"
-runAudit:
+run-audit:
   post:
     operationId: runAudit
     tags:
       - sites
-    summary: Initiate an asynchronous audit for a site
+    summary: Trigger an audit of given type for a site
     security:
       - admin_key: [ ]
     parameters:
       - name: siteId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: auditType
         in: path
         required: true
         schema:
@@ -87,11 +110,6 @@ runAudit:
               type: object
               properties:
                 message:
-                  type: string
-                auditRequestId:
-                  type: string
-                  format: uuid
-                statusCheckUrl:
                   type: string
       '400':
         $ref: "./responses.yaml#/400"

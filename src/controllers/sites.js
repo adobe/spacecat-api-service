@@ -112,6 +112,26 @@ function SitesController(dataAccess) {
     return createResponse(SiteDto.toJSON(site));
   };
 
+  /**
+   * Removes a site
+   * @param siteId - The site ID.
+   * @return {Promise<Response>} Delete response.
+   */
+  const removeSite = async (siteId) => {
+    await dataAccess.removeSite(siteId);
+    return createResponse('', 204);
+  };
+
+  /**
+   * Updates a site
+   * @param siteData - The site data.
+   * @return {Promise<Response>} Site response.
+   */
+  const updateSite = async (siteData) => {
+    const site = await dataAccess.updateSite(siteData);
+    return createResponse(SiteDto.toJSON(site));
+  };
+
   return {
     createSite,
     getAll,
@@ -119,6 +139,8 @@ function SitesController(dataAccess) {
     getAllAsCSV,
     getByBaseURL,
     getByID,
+    removeSite,
+    updateSite,
   };
 }
 

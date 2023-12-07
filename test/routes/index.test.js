@@ -58,6 +58,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
       'GET /sites/:siteId',
+      'PUT /sites/:siteId',
+      'DELETE /sites/:siteId',
       'GET /sites/by-base-url/:baseURL',
       'GET /sites/:siteId/audits',
       'GET /sites/:siteId/audits/:auditType',
