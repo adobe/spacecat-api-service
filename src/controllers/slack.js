@@ -52,7 +52,7 @@ function SlackController(SlackApp) {
     const payload = parsePayload(data);
 
     // Suppress retry events due to HTTP timeout (usually caused by cold starts)
-    if (headers.get('x-slack-retry-reason') === 'http_timeout') {
+    if (headers['x-slack-retry-reason'] === 'http_timeout') {
       log.info(`Ignoring retry event: ${payload.event_id}`);
       return new Response('', { headers: { 'x-error': 'ignored-event' } });
     }

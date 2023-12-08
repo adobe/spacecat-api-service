@@ -64,7 +64,7 @@ describe('SlackController', () => {
       },
       log: logStub,
       data: {},
-      pathInfo: { headers: new Map() },
+      pathInfo: { headers: { } },
     };
 
     context.data = testPayload;
@@ -107,7 +107,7 @@ describe('SlackController', () => {
     });
 
     it('ignores retry events due to http_timeout', async () => {
-      context.pathInfo.headers.set('x-slack-retry-reason', 'http_timeout');
+      context.pathInfo.headers['x-slack-retry-reason'] = 'http_timeout';
       context.data = { event_id: '123' };
 
       const controller = SlackController(mockSlackApp);
