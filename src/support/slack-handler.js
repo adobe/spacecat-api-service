@@ -18,6 +18,26 @@
  */
 function SlackHandler(log) {
   /**
+   * Determines if the event is part of a thread.
+   * @param {object} event - The Slack event.
+   * @return {string} The thread timestamp (thread_ts).
+   */
+  const getThreadTimestamp = (event) => event.thread_ts || event.ts;
+
+  /**
+   * Responds to a message in the appropriate thread.
+   * @param {function} say - The say function from Bolt.
+   * @param {string} threadTs - The thread timestamp.
+   * @param {string} message - The message to send.
+   */
+  const respondInThread = async (say, threadTs, message) => {
+    await say({
+      thread_ts: threadTs,
+      text: message,
+    });
+  };
+
+  /**
    * Handles app_mention event.
    * @param {object} event - The event.
    * @param {function} say - The say function.
@@ -25,8 +45,12 @@ function SlackHandler(log) {
    * @return {Promise<void>}
    */
   const onAppMention = async ({ event, say, context }) => {
-    await say(`Hello, <@${event.user}>!`);
-    log.info(`app_mention event received from user ${event.user} with context ${JSON.stringify(context)}`);
+    const threadTs = getThreadTimestamp(event);
+    const responseMessage = `Hello, <@${event.user}>!`;
+
+    await respondInThread(say, threadTs, responseMessage);
+
+    log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);
   };
 
   return {

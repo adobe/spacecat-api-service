@@ -47,15 +47,33 @@ describe('Slack Handler', async () => {
     expect(slackHandler).to.have.property('onAppMention');
   });
 
-  it('calls log on app_mention', async () => {
+  it('responds via app_mention in thread', async () => {
     await slackHandler.onAppMention({
-      event: { user: 'test-user' },
+      event: { user: 'test-user', thread_ts: 1609459200.0002 },
       say: sayStub,
       context: {},
     });
 
     expect(sayStub.calledOnce).to.be.true;
-    expect(sayStub.firstCall.firstArg).to.equal('Hello, <@test-user>!');
+    expect(sayStub.firstCall.firstArg).to.deep.equal({
+      text: 'Hello, <@test-user>!',
+      thread_ts: 1609459200.0002,
+    });
+    expect(logStub.info.calledOnce).to.be.true;
+  });
+
+  it('responds via app_mention outside of thread', async () => {
+    await slackHandler.onAppMention({
+      event: { user: 'test-user', ts: 1609459200.0002 },
+      say: sayStub,
+      context: {},
+    });
+
+    expect(sayStub.calledOnce).to.be.true;
+    expect(sayStub.firstCall.firstArg).to.deep.equal({
+      text: 'Hello, <@test-user>!',
+      thread_ts: 1609459200.0002,
+    });
     expect(logStub.info.calledOnce).to.be.true;
   });
 });
