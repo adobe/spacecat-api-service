@@ -16,7 +16,6 @@ import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import dataAccess from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
-import Bolt from '@slack/bolt';
 
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
@@ -33,7 +32,8 @@ import {
   createNotFoundResponse,
 } from './utils/response-utils.js';
 
-const { App } = Bolt;
+// prevents webpack build error
+import { App } from './utils/bolt.cjs';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
