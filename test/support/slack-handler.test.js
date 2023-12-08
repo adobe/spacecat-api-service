@@ -36,7 +36,7 @@ describe('Slack Handler', async () => {
 
     sayStub = sandbox.stub().resolves();
 
-    slackHandler = SlackHandler(logStub);
+    slackHandler = SlackHandler([], logStub);
   });
 
   afterEach(() => {

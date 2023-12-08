@@ -25,11 +25,11 @@ import commands from '../support/slack/commands.js';
  * @param {object} lambdaContext - The lambda context.
  * @return {App} The bolt app.
  */
-export function initSlackBot(dataAccess, App, lambdaContext) {
+export function initSlackBot(lambdaContext, App) {
   const { boltApp, env, log } = lambdaContext;
   const { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN } = env;
 
-  const slackHandler = SlackHandler(commands(dataAccess), log);
+  const slackHandler = SlackHandler(commands(lambdaContext), log);
 
   if (!hasText(SLACK_SIGNING_SECRET)) {
     throw new Error('Missing SLACK_SIGNING_SECRET');

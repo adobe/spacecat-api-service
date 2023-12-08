@@ -12,8 +12,9 @@
 
 import { createUrl, Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
+
 import { fetch, isAuditForAll } from '../../support/utils.js';
-import { postSlackMessage } from '../../support/slack.js';
+import { postSlackMessage } from '../../utils/slack/base.js';
 
 export const DEFAULT_PARAMS = { // export for testing
   interval: 30,

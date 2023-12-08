@@ -285,6 +285,10 @@ function GetSitesCommand(context) {
   const init = (ctx) => {
     baseCommand.init(ctx);
 
+    if (!ctx.boltApp?.action) {
+      return;
+    }
+
     ctx.boltApp.action('sites_overflow_action', overflowActionHandler);
     ctx.boltApp.action(/^paginate_sites_(prev|next|page_\d+)$/, paginationHandler);
     ctx.boltApp.action('reply_in_thread');

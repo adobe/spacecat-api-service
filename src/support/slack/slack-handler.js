@@ -14,11 +14,12 @@ import { BOT_MENTION_REGEX } from '../../utils/slack/base.js';
 
 /**
  * Creates a slack handler.
+ * @param {object} commands - The commands.
  * @param {object} log - The logger.
  * @return {SlackHandler} The slack handler.
  * @constructor
  */
-function SlackHandler(log) {
+function SlackHandler(commands, log) {
   /**
    * Determines if the event is part of a thread.
    * @param {object} event - The Slack event.
@@ -26,7 +27,7 @@ function SlackHandler(log) {
    */
   const getThreadTimestamp = (event) => event.thread_ts || event.ts;
 
-  const getMessageFromEvent = (event) => event.text.replace(BOT_MENTION_REGEX, '').trim();
+  const getMessageFromEvent = (event) => event.text?.replace(BOT_MENTION_REGEX, '').trim();
 
   /**
    * Responds to a message in the appropriate thread.
@@ -50,10 +51,7 @@ function SlackHandler(log) {
    */
   const onAppMention = async ({ event, say, context }) => {
     const threadTs = getThreadTimestamp(event);
-    const message = getMessageFromEvent(event);
-
-    log.info(JSON.stringify(message));
-
+    getMessageFromEvent(event);
     const responseMessage = `Hello, <@${event.user}>!`;
 
     await respondInThread(say, threadTs, responseMessage);

@@ -11,12 +11,11 @@
  */
 
 import { isAuditForAll, sendAuditMessages } from '../../support/utils.js';
-import { createErrorResponse, createResponse } from '../../utils/response-utils.js';
+import { createErrorResponse, createNotFoundResponse, createResponse } from '../../utils/response-utils.js';
 
 /**
  * Constant for error message when a site is not found.
  */
-const SITE_NOT_FOUND_ERROR = 'Site not found';
 
 /**
  * Retrieves site IDs for auditing based on the input URL. If the input URL has the value
@@ -33,10 +32,8 @@ async function getSiteIDsToAudit(dataAccess, url) {
   }
 
   const site = await dataAccess.getSiteByBaseURL(url);
-  if (!site) {
-    throw new Error(SITE_NOT_FOUND_ERROR);
-  }
-  return [site.getId()];
+
+  return site ? [site.getId()] : [];
 }
 
 /**
@@ -52,6 +49,10 @@ export default async function trigger(context) {
     const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
 
     const siteIDsToAudit = await getSiteIDsToAudit(dataAccess, url);
+    if (!siteIDsToAudit.length) {
+      return createNotFoundResponse('Site not found');
+    }
+
     const message = await sendAuditMessages(
       sqs,
       queueUrl,

@@ -16,7 +16,7 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import trigger from '../../../src/controllers/trigger/lhs.js';
 
-describe('trigger function', () => {
+describe('LHS Trigger', () => {
   let context;
   let dataAccessMock;
   let sqsMock;
@@ -93,7 +93,7 @@ describe('trigger function', () => {
     const result = await response.json();
 
     expect(response.status).to.equal(404);
-    expect(result.error).to.equal('Site not found');
+    expect(result.message).to.equal('Site not found');
   });
 
   it('should handle unexpected errors gracefully', async () => {
@@ -107,9 +107,8 @@ describe('trigger function', () => {
     dataAccessMock.getSiteByBaseURL.rejects(new Error('Unexpected error'));
 
     const response = await trigger(context);
-    const result = await response.json();
 
     expect(response.status).to.equal(500);
-    expect(result.error).to.equal('Unexpected error');
+    expect(response.headers.get('x-error')).to.equal('internal server error: Error: Unexpected error');
   });
 });

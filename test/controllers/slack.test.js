@@ -23,6 +23,7 @@ import SlackController from '../../src/controllers/slack.js';
 describe('SlackController', () => {
   let testPayload;
   let mockSlackApp;
+  let mockDataAccess;
   let context;
   let logStub;
   let processEventStub;
@@ -49,6 +50,9 @@ describe('SlackController', () => {
     middlewares = [];
     processEventStub = sinon.stub().resolves();
     mockSlackApp = createMockSlackApp(processEventStub);
+    mockDataAccess = {
+
+    };
     logStub = {
       level: 'info',
       debug: sinon.stub(),
@@ -63,11 +67,10 @@ describe('SlackController', () => {
         SLACK_SIGNING_SECRET: 'test-signing-secret',
       },
       log: logStub,
-      data: {},
+      data: testPayload,
       pathInfo: { headers: { } },
+      dataAccess: mockDataAccess,
     };
-
-    context.data = testPayload;
   });
 
   afterEach(() => {
@@ -78,7 +81,7 @@ describe('SlackController', () => {
     it('throws error when slack signing secret is missing', async () => {
       delete context.env.SLACK_SIGNING_SECRET;
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
 
       expect(response.status).to.equal(500);
@@ -88,7 +91,7 @@ describe('SlackController', () => {
     it('throws error when slack bot token is missing', async () => {
       delete context.env.SLACK_BOT_TOKEN;
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
 
       expect(response.status).to.equal(500);
@@ -98,7 +101,7 @@ describe('SlackController', () => {
     it('responds to URL verification', async () => {
       context.data = { type: 'url_verification', challenge: 'challenge_token' };
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
       const json = await response.json();
 
@@ -110,7 +113,7 @@ describe('SlackController', () => {
       context.pathInfo.headers['x-slack-retry-reason'] = 'http_timeout';
       context.data = { event_id: '123' };
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
 
       expect(logStub.info.calledWith('Ignoring retry event: 123')).to.be.true;
@@ -119,9 +122,12 @@ describe('SlackController', () => {
     });
 
     it('does not initialize the slack bot if it already exists', async () => {
-      context.boltApp = { processEvent: processEventStub, prexisiting: true };
+      context.boltApp = {
+        processEvent: processEventStub,
+        prexisiting: true,
+      };
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
 
       expect(context.boltApp).to.have.property('prexisiting').that.is.true;
@@ -142,7 +148,7 @@ describe('SlackController', () => {
           ts: '123',
         });
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
 
       expect(context.boltApp).to.not.be.undefined;
@@ -164,7 +170,7 @@ describe('SlackController', () => {
 
       mockSlackApp = createMockSlackApp(processEventStub);
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
 
       expect(processEventStub.calledOnce).to.be.true;
@@ -176,7 +182,7 @@ describe('SlackController', () => {
     it('processes Slack events with data payload', async () => {
       context.data.payload = '{ "test": "payload" }';
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
 
       expect(processEventStub.calledOnce).to.be.true;
@@ -191,7 +197,7 @@ describe('SlackController', () => {
       processEventStub.rejects(testError);
       mockSlackApp = createMockSlackApp(processEventStub);
 
-      const controller = SlackController(mockSlackApp);
+      const controller = SlackController(mockDataAccess, mockSlackApp);
       const response = await controller.handleEvent(context);
 
       expect(processEventStub.calledOnce).to.be.true;

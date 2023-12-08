@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-const { extractLastAudit } = require('./audit.js');
-
 const PERCENT_MULTIPLIER = 100;
 
 function addEllipsis(string, limit = 24) {
@@ -20,14 +18,6 @@ function addEllipsis(string, limit = 24) {
   }
   return string;
 }
-
-/**
- * Extracts the last word from a sentence.
- *
- * @param {string} sentence - The sentence to extract the last word from.
- * @return {string} - The last word of the sentence.
- */
-const getLastWord = (sentence) => sentence.trim().split(' ').pop();
 
 /**
  * Formats an ISO date.
@@ -62,16 +52,13 @@ function formatScore(score) {
 }
 
 const printSiteDetails = (site) => {
-  const psiURL = `https://developers.google.com/speed/pagespeed/insights/?url=${site.domain}&strategy=mobile`;
-
-  const lastAuditedAt = formatDate(extractLastAudit(site)?.auditedAt);
+  const psiURL = `https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=mobile`;
 
   return `
-      :mars-team: Domain: https://${site.domain}
-      :github-4173: GitHub: ${site.gitHubURL ? site.gitHubURL : '_not set_'}
-      ${site.isLive ? ':rocket:' : ':submarine:'} Is Live: ${site.isLive ? 'Yes' : 'No'}
+      :mars-team: Domain: ${site.getBaseURL()}
+      :github-4173: GitHub: ${site.getGitHubURL() || '_not set_'}
+      ${site.isLive() ? ':rocket:' : ':submarine:'} Is Live: ${site.isLive() ? 'Yes' : 'No'}
       :lighthouse: <${psiURL}|Run PSI check>
-      :clock1: Last audit on ${lastAuditedAt}
     `;
 };
 
@@ -105,6 +92,5 @@ export {
   formatScore,
   formatSize,
   formatURL,
-  getLastWord,
   printSiteDetails,
 };
