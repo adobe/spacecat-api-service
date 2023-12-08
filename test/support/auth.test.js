@@ -79,6 +79,14 @@ describe('auth', () => {
     expect(resp.status).to.equal(401);
   });
 
+  it('passes anonymous route', async () => {
+    context.pathInfo.suffix = '/slack/events';
+
+    const resp = await action(new Request('https://space.cat/slack/events'), context);
+
+    expect(resp).to.equal(42);
+  });
+
   it('correct user key invokes the user scoped handler', async () => {
     const resp = await action(new Request('https://space.cat/', {
       headers: {

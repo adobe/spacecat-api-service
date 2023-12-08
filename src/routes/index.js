@@ -44,6 +44,7 @@ function isStaticRoute(routePattern) {
  *
  * @param auditsController
  * @param sitesController
+ * @param slackController
  * @param triggerHandler
  * @return {{staticRoutes: {}, dynamicRoutes: {}}}
  */
