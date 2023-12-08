@@ -10,10 +10,23 @@
  * governing permissions and limitations under the License.
  */
 
-function SlackHandler() {
+/**
+ * Creates a slack handler.
+ * @param {object} log - The logger.
+ * @return {SlackHandler} The slack handler.
+ * @constructor
+ */
+function SlackHandler(log) {
+  /**
+   * Handles app_mention event.
+   * @param {object} event - The event.
+   * @param {function} say - The say function.
+   * @param {object} context - The slack bot context.
+   * @return {Promise<void>}
+   */
   const onAppMention = async ({ event, say, context }) => {
     await say(`Hello, <@${event.user}>!`);
-    context.logger.info(`app_mention: ${JSON.stringify(event)}`);
+    log.info(`app_mention event received from user ${event.user} with context ${JSON.stringify(context)}`);
   };
 
   return {

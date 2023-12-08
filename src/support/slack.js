@@ -27,7 +27,7 @@ export function initSlackBot(App, lambdaContext) {
   const { boltApp, env, log } = lambdaContext;
   const { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN } = env;
 
-  const slackHandler = SlackHandler();
+  const slackHandler = SlackHandler(log);
 
   if (!hasText(SLACK_SIGNING_SECRET)) {
     throw new Error('Missing SLACK_SIGNING_SECRET');

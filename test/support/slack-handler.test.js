@@ -36,7 +36,7 @@ describe('Slack Handler', async () => {
 
     sayStub = sandbox.stub().resolves();
 
-    slackHandler = SlackHandler();
+    slackHandler = SlackHandler(logStub);
   });
 
   afterEach(() => {
@@ -48,7 +48,11 @@ describe('Slack Handler', async () => {
   });
 
   it('calls log on app_mention', async () => {
-    await slackHandler.onAppMention({ event: { user: 'test-user' }, say: sayStub, context: { logger: logStub } });
+    await slackHandler.onAppMention({
+      event: { user: 'test-user' },
+      say: sayStub,
+      context: {},
+    });
 
     expect(sayStub.calledOnce).to.be.true;
     expect(sayStub.firstCall.firstArg).to.equal('Hello, <@test-user>!');
