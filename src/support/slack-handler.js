@@ -13,7 +13,7 @@
 function SlackHandler() {
   const onAppMention = async ({ event, say, context }) => {
     await say(`Hello, <@${event.user}>!`);
-    context.log.info(`app_mention: ${JSON.stringify(event)}`);
+    context.logger.info(`app_mention: ${JSON.stringify(event)}`);
   };
 
   return {

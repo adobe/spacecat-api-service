@@ -48,7 +48,7 @@ describe('Slack Handler', async () => {
   });
 
   it('calls log on app_mention', async () => {
-    await slackHandler.onAppMention({ event: { user: 'test-user' }, say: sayStub, context: { log: logStub } });
+    await slackHandler.onAppMention({ event: { user: 'test-user' }, say: sayStub, context: { logger: logStub } });
 
     expect(sayStub.calledOnce).to.be.true;
     expect(sayStub.firstCall.firstArg).to.equal('Hello, <@test-user>!');
