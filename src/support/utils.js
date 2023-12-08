@@ -22,3 +22,45 @@ export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
  * @returns {boolean} True if url equals "ALL", false otherwise.
  */
 export const isAuditForAll = (url) => url.toUpperCase() === 'ALL';
+
+/**
+ * Sends an audit message for a single URL.
+ *
+ * @param {Object} sqs - The SQS service object.
+ * @param {string} queueUrl - The SQS queue URL.
+ * @param {string} type - The type of audit.
+ * @param {Object} auditContext - The audit context object.
+ * @param {string} siteId - The site ID to audit.
+ * @returns {Promise} A promise representing the message sending operation.
+ */
+export const sendAuditMessage = async (
+  sqs,
+  queueUrl,
+  type,
+  auditContext,
+  siteId,
+) => sqs.sendMessage(queueUrl, { type, url: siteId, auditContext });
+
+/**
+ * Sends audit messages for each URL.
+ *
+ * @param {Object} sqs - The SQS service object.
+ * @param {string} queueUrl - The SQS queue URL.
+ * @param {string} type - The type of audit.
+ * @param {Object} auditContext - The audit context object.
+ * @param {Array<string>} siteIDsToAudit - An array of site IDs to audit.
+ * @returns {Promise<string>} A promise that resolves to a status message.
+ */
+export const sendAuditMessages = async (
+  sqs,
+  queueUrl,
+  type,
+  auditContext,
+  siteIDsToAudit,
+) => {
+  for (const siteId of siteIDsToAudit) {
+    // eslint-disable-next-line no-await-in-loop
+    await sendAuditMessage(sqs, queueUrl, type, auditContext, siteId);
+  }
+  return `Triggered ${type} audit for ${siteIDsToAudit.length > 1 ? `all ${siteIDsToAudit.length} sites` : siteIDsToAudit[0]}`;
+};

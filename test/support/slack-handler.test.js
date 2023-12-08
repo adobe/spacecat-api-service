@@ -15,7 +15,7 @@
 import chai from 'chai';
 import sinon from 'sinon';
 
-import SlackHandler from '../../src/support/slack-handler.js';
+import SlackHandler from '../../src/support/slack/slack-handler.js';
 
 const { expect } = chai;
 

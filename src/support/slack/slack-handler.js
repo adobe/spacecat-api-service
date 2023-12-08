@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { BOT_MENTION_REGEX } from '../../utils/slack/base.js';
+
 /**
  * Creates a slack handler.
  * @param {object} log - The logger.
@@ -23,6 +25,8 @@ function SlackHandler(log) {
    * @return {string} The thread timestamp (thread_ts).
    */
   const getThreadTimestamp = (event) => event.thread_ts || event.ts;
+
+  const getMessageFromEvent = (event) => event.text.replace(BOT_MENTION_REGEX, '').trim();
 
   /**
    * Responds to a message in the appropriate thread.
@@ -46,6 +50,10 @@ function SlackHandler(log) {
    */
   const onAppMention = async ({ event, say, context }) => {
     const threadTs = getThreadTimestamp(event);
+    const message = getMessageFromEvent(event);
+
+    log.info(JSON.stringify(message));
+
     const responseMessage = `Hello, <@${event.user}>!`;
 
     await respondInThread(say, threadTs, responseMessage);

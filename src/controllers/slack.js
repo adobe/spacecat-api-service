@@ -12,8 +12,64 @@
 
 import { Response } from '@adobe/fetch';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
+import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { initSlackBot } from '../support/slack.js';
+import SlackHandler from '../support/slack/slack-handler.js';
+import commands from '../support/slack/commands.js';
+
+/**
+ * Initializes the slack bot.
+ *
+ * @param {DataAccess} dataAccess - Data access object.
+ * @param {App} App - The bolt app class.
+ * @param {object} lambdaContext - The lambda context.
+ * @return {App} The bolt app.
+ */
+export function initSlackBot(dataAccess, App, lambdaContext) {
+  const { boltApp, env, log } = lambdaContext;
+  const { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN } = env;
+
+  const slackHandler = SlackHandler(commands(dataAccess), log);
+
+  if (!hasText(SLACK_SIGNING_SECRET)) {
+    throw new Error('Missing SLACK_SIGNING_SECRET');
+  }
+
+  if (!hasText(SLACK_BOT_TOKEN)) {
+    throw new Error('Missing SLACK_BOT_TOKEN');
+  }
+
+  if (boltApp) {
+    return boltApp;
+  }
+
+  const logger = {
+    getLevel: () => log.level,
+    setLevel: () => true,
+    debug: log.debug.bind(log),
+    info: log.info.bind(log),
+    warn: log.warn.bind(log),
+    error: log.error.bind(log),
+  };
+
+  const app = new App({
+    signingSecret: SLACK_SIGNING_SECRET,
+    token: SLACK_BOT_TOKEN,
+    logger,
+  });
+
+  app.use(async ({ context, next }) => {
+    context.dataAccess = lambdaContext.dataAccess;
+    await next();
+  });
+
+  app.event('app_mention', slackHandler.onAppMention);
+
+  // eslint-disable-next-line no-param-reassign
+  lambdaContext.boltApp = app;
+
+  return app;
+}
 
 /**
  * Parses the payload from the incoming data.
@@ -28,10 +84,11 @@ function parsePayload(data) {
 /**
  * Slack Controller for handling incoming Slack events.
  *
+ * @param {DataAccess} dataAccess - Data access object.
  * @param {App} SlackApp - Slack bot implementation.
  * @returns {Object} An object containing the handleEvent function.
  */
-function SlackController(SlackApp) {
+function SlackController(dataAccess, SlackApp) {
   // Acknowledge function for Slack events (no operation)
   const ack = () => {};
 
@@ -59,7 +116,7 @@ function SlackController(SlackApp) {
 
     // Process the incoming Slack event
     try {
-      const slackBot = initSlackBot(SlackApp, context);
+      const slackBot = initSlackBot(context, SlackApp);
 
       await slackBot.processEvent({ body: payload, ack });
     } catch (error) {

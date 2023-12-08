@@ -33,7 +33,7 @@ import {
 } from './utils/response-utils.js';
 
 // prevents webpack build error
-import { App } from './utils/bolt.cjs';
+import { App } from './utils/slack/bolt.cjs';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
