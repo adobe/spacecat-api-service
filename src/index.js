@@ -27,7 +27,6 @@ import AuditsController from './controllers/audits.js';
 import SitesController from './controllers/sites.js';
 import SlackController from './controllers/slack.js';
 import trigger from './controllers/trigger.js';
-import SlackHandler from './support/slack-handler.js';
 import {
   createErrorResponse,
   createNoContentResponse,
@@ -49,50 +48,6 @@ export function enrichPathInfo(fn) { // export for testing
     };
     return fn(request, context);
   };
-}
-
-function initSlackBot(lambdaContext) {
-  const { boltApp, env, log } = lambdaContext;
-  const { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN } = env;
-
-  const slackHandler = SlackHandler();
-
-  if (!hasText(SLACK_SIGNING_SECRET)) {
-    throw new Error('Missing SLACK_SIGNING_SECRET');
-  }
-
-  if (!hasText(SLACK_BOT_TOKEN)) {
-    throw new Error('Missing SLACK_BOT_TOKEN');
-  }
-
-  if (boltApp) {
-    return boltApp;
-  }
-
-  const app = new App({
-    signingSecret: SLACK_SIGNING_SECRET,
-    token: SLACK_BOT_TOKEN,
-    logger: {
-      getLevel: () => log.level,
-      setLevel: () => true,
-      debug: log.debug.bind(log),
-      info: log.info.bind(log),
-      warn: log.warn.bind(log),
-      error: log.error.bind(log),
-    },
-  });
-
-  app.use(async ({ context, next }) => {
-    context.dataAccess = lambdaContext.dataAccess;
-    await next();
-  });
-
-  app.event('app_mention', slackHandler.onAppMention);
-
-  // eslint-disable-next-line no-param-reassign
-  lambdaContext.boltApp = app;
-
-  return app;
 }
 
 /**
@@ -126,7 +81,7 @@ async function run(request, context) {
     const routeHandlers = getRouteHandlers(
       AuditsController(context.dataAccess),
       SitesController(context.dataAccess),
-      SlackController(initSlackBot(context)),
+      SlackController(App),
       trigger,
     );
 

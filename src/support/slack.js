@@ -12,9 +12,62 @@
 
 import { createUrl } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
+
 import { fetch } from './utils.js';
+import SlackHandler from './slack-handler.js';
 
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
+
+/**
+ * Initializes the slack bot.
+ * @param {object} lambdaContext - The lambda context.
+ * @return {App} The bolt app.
+ */
+export function initSlackBot(App, lambdaContext) {
+  const { boltApp, env, log } = lambdaContext;
+  const { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN } = env;
+
+  const slackHandler = SlackHandler();
+
+  if (!hasText(SLACK_SIGNING_SECRET)) {
+    throw new Error('Missing SLACK_SIGNING_SECRET');
+  }
+
+  if (!hasText(SLACK_BOT_TOKEN)) {
+    throw new Error('Missing SLACK_BOT_TOKEN');
+  }
+
+  if (boltApp) {
+    return boltApp;
+  }
+
+  const logger = {
+    getLevel: () => log.level,
+    setLevel: () => true,
+    debug: log.debug.bind(log),
+    info: log.info.bind(log),
+    warn: log.warn.bind(log),
+    error: log.error.bind(log),
+  };
+
+  const app = new App({
+    signingSecret: SLACK_SIGNING_SECRET,
+    token: SLACK_BOT_TOKEN,
+    logger,
+  });
+
+  app.use(async ({ context, next }) => {
+    context.dataAccess = lambdaContext.dataAccess;
+    await next();
+  });
+
+  app.event('app_mention', slackHandler.onAppMention);
+
+  // eslint-disable-next-line no-param-reassign
+  lambdaContext.boltApp = app;
+
+  return app;
+}
 
 export function getQueryParams(channelId, message) {
   return {

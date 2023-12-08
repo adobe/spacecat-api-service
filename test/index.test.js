@@ -14,7 +14,6 @@
 
 import { Request } from '@adobe/fetch';
 import { expect } from 'chai';
-import nock from 'nock';
 
 import { main } from '../src/index.js';
 
@@ -61,50 +60,6 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(404);
     expect(resp.headers.plain()['x-error']).to.equal('wrong path format');
-  });
-
-  it('throws error when slack signing secret is missing', async () => {
-    context.pathInfo.suffix = '/test';
-    delete context.env.SLACK_SIGNING_SECRET;
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('internal server error: Missing SLACK_SIGNING_SECRET');
-  });
-
-  it('throws error when slack bot token is missing', async () => {
-    context.pathInfo.suffix = '/test';
-    delete context.env.SLACK_BOT_TOKEN;
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('internal server error: Missing SLACK_BOT_TOKEN');
-  });
-
-  it('initializes the slack bot', async () => {
-    context.pathInfo.suffix = '/test';
-    delete context.boltApp;
-
-    nock('https://slack.com', { reqheaders: { authorization: `Bearer ${slackBotToken}` } })
-      .post('/api/auth.test')
-      .reply(200, {
-        ok: true,
-        ts: '123',
-      });
-
-    const resp = await main(request, context);
-
-    expect(context.boltApp).to.not.be.undefined;
-    expect(context.boltApp).to.have.property('use');
-    expect(context.boltApp).to.have.property('event');
-    expect(context.boltApp).to.have.property('processEvent');
-
-    await context.boltApp.middleware[2]({ context, next: () => true });
-
-    expect(resp.status).to.equal(404);
-    expect(resp.headers.plain()['x-error']).to.equal('no such route /test');
   });
 
   it('handles options request', async () => {

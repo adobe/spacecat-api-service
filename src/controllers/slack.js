@@ -12,6 +12,7 @@
 
 import { Response } from '@adobe/fetch';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
+import { initSlackBot } from '../support/slack.js';
 
 /**
  * Parses the payload from the incoming data.
@@ -26,10 +27,10 @@ function parsePayload(data) {
 /**
  * Slack Controller for handling incoming Slack events.
  *
- * @param {App} slackBot - Slack bot instance from the Bolt framework.
+ * @param {App} SlackApp - Slack bot implementation.
  * @returns {Object} An object containing the handleEvent function.
  */
-function SlackController(slackBot) {
+function SlackController(SlackApp) {
   // Acknowledge function for Slack events (no operation)
   const ack = () => {};
 
@@ -57,6 +58,8 @@ function SlackController(slackBot) {
 
     // Process the incoming Slack event
     try {
+      const slackBot = initSlackBot(SlackApp, context);
+
       await slackBot.processEvent({ body: payload, ack });
     } catch (error) {
       const errorMessage = cleanupHeaderValue(error.message);
