@@ -19,23 +19,32 @@ import { Response } from '@adobe/fetch';
 import SlackController from '../../src/controllers/slack.js';
 
 describe('SlackController', () => {
+  let testPayload;
   let mockSlackBot;
   let context;
   let logStub;
 
   beforeEach(() => {
-    mockSlackBot = { processEvent: sinon.stub() };
+    mockSlackBot = { processEvent: sinon.stub().resolves() };
     logStub = { info: sinon.stub(), error: sinon.stub() };
+    testPayload = { type: 'event_callback', event: {} };
     context = {
       log: logStub,
       data: {},
       pathInfo: { headers: new Map() },
     };
+
+    context.data = testPayload;
+  });
+
+  afterEach(() => {
+    sinon.restore();
   });
 
   describe('handleEvent', () => {
     it('should respond to URL verification', async () => {
       context.data = { type: 'url_verification', challenge: 'challenge_token' };
+
       const controller = SlackController(mockSlackBot);
       const response = await controller.handleEvent(context);
       const json = await response.json();
@@ -44,9 +53,10 @@ describe('SlackController', () => {
       expect(json).to.deep.equal({ challenge: 'challenge_token' });
     });
 
-    it('should ignore retry events due to http_timeout', async () => {
+    it('ignores retry events due to http_timeout', async () => {
       context.pathInfo.headers.set('x-slack-retry-reason', 'http_timeout');
       context.data = { event_id: '123' };
+
       const controller = SlackController(mockSlackBot);
       const response = await controller.handleEvent(context);
 
@@ -55,10 +65,13 @@ describe('SlackController', () => {
       expect(response.headers.get('x-error')).to.equal('ignored-event');
     });
 
-    it('should process normal Slack events correctly', async () => {
-      const testPayload = { type: 'event_callback', event: {} };
-      context.data = testPayload;
-      mockSlackBot.processEvent.resolves();
+    it('processes normal Slack events correctly', async () => {
+      mockSlackBot.processEvent.callsFake((event) => {
+        expect(event.body).to.deep.equal(testPayload);
+        expect(event.ack).to.be.a('function');
+        event.ack();
+      });
+
       const controller = SlackController(mockSlackBot);
       const response = await controller.handleEvent(context);
 
@@ -68,11 +81,23 @@ describe('SlackController', () => {
       expect(response.status).to.equal(200);
     });
 
-    it('should handle errors during event processing', async () => {
-      const testPayload = { type: 'event_callback', event: {} };
+    it('processes Slack events with data payload', async () => {
+      context.data.payload = '{ "test": "payload" }';
+
+      const controller = SlackController(mockSlackBot);
+      const response = await controller.handleEvent(context);
+
+      expect(mockSlackBot.processEvent.calledOnce).to.be.true;
+      expect(mockSlackBot.processEvent.firstCall.firstArg.body).to.deep.equal({ test: 'payload' });
+      expect(response).to.be.an.instanceof(Response);
+      expect(response.status).to.equal(200);
+    });
+
+    it('handles errors during event processing', async () => {
       const testError = new Error('Test error');
-      context.data = testPayload;
+
       mockSlackBot.processEvent.rejects(testError);
+
       const controller = SlackController(mockSlackBot);
       const response = await controller.handleEvent(context);
 

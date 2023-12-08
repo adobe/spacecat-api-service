@@ -12,12 +12,11 @@
 
 import wrap from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
-import { Response } from '@adobe/fetch';
 import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import dataAccess from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
-import App from '@slack/bolt';
+import Bolt from '@slack/bolt';
 
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
@@ -29,6 +28,13 @@ import SitesController from './controllers/sites.js';
 import SlackController from './controllers/slack.js';
 import trigger from './controllers/trigger.js';
 import SlackHandler from './support/slack-handler.js';
+import {
+  createErrorResponse,
+  createNoContentResponse,
+  createNotFoundResponse,
+} from './utils/response-utils.js';
+
+const { App } = Bolt;
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
@@ -46,7 +52,7 @@ export function enrichPathInfo(fn) { // export for testing
 }
 
 function initSlackBot(lambdaContext) {
-  const { env, log } = lambdaContext;
+  const { boltApp, env, log } = lambdaContext;
   const { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN } = env;
 
   const slackHandler = SlackHandler();
@@ -57,6 +63,10 @@ function initSlackBot(lambdaContext) {
 
   if (!hasText(SLACK_BOT_TOKEN)) {
     throw new Error('Missing SLACK_BOT_TOKEN');
+  }
+
+  if (boltApp) {
+    return boltApp;
   }
 
   const app = new App({
@@ -79,6 +89,9 @@ function initSlackBot(lambdaContext) {
 
   app.event('app_mention', slackHandler.onAppMention);
 
+  // eslint-disable-next-line no-param-reassign
+  lambdaContext.boltApp = app;
+
   return app;
 }
 
@@ -94,22 +107,16 @@ async function run(request, context) {
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
-    return new Response('', {
-      status: 404,
-      headers: {
-        'x-error': 'wrong path format',
-      },
+    return createNotFoundResponse('wrong path format', {
+      'x-error': 'wrong path format',
     });
   }
 
   if (method === 'OPTIONS') {
-    return new Response('', {
-      status: 204,
-      headers: {
-        'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS, DELETE',
-        'access-control-allow-headers': 'x-api-key',
-        'access-control-max-age': '86400',
-      },
+    return createNoContentResponse({
+      'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS, DELETE',
+      'access-control-allow-headers': 'x-api-key',
+      'access-control-max-age': '86400',
     });
   }
 
@@ -131,24 +138,14 @@ async function run(request, context) {
 
       return await handler(context);
     } else {
-      const msg = `no such route /${route}`;
-      log.error(msg);
-      return new Response('', {
-        status: 404,
-        headers: {
-          'x-error': msg,
-        },
-      });
+      const notFoundMessage = `no such route /${route}`;
+      log.info(notFoundMessage);
+      return createNotFoundResponse(notFoundMessage);
     }
   } catch (e) {
     const t1 = Date.now();
     log.error(`Handler exception after ${t1 - t0} ms`, e);
-    return new Response('', {
-      status: e.statusCode || 500,
-      headers: {
-        'x-error': 'internal server error',
-      },
-    });
+    return createErrorResponse(e.message);
   }
 }
 
