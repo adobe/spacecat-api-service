@@ -17,10 +17,6 @@ import { sendMessageBlocks, postErrorMessage } from '../../../utils/slack/base.j
 
 const PAGE_SIZE = 10;
 const PHRASES = ['get sites', 'get all sites'];
-const EXPORT_FORMATS = {
-  CSV: 'csv',
-  XLSX: 'xlsx',
-};
 
 /**
  * Generate an overflow accessory object for a Slack message.
@@ -61,7 +57,7 @@ function generateOverflowAccessory() {
  * @returns {string} The formatted sites message.
  */
 // eslint-disable-next-line default-param-last
-function formatSites(sites = [], start, end) {
+export function formatSites(sites = [], start, end) {
   return sites.slice(start, end).reduce((message, site, index) => {
     const baseURL = site.getBaseURL();
     const domainText = baseURL.replace(/^main--/, '').replace(/--.*/, '');
@@ -74,17 +70,13 @@ function formatSites(sites = [], start, end) {
       const lastAudit = audits[0];
       const icon = site.isLive() ? ':rocket:' : ':submarine:';
 
-      if (!lastAudit.isError) {
-        const scores = lastAudit.getScores();
-        const {
-          performance = 0, accessibility = 0, bestPractices = 0, seo = 0,
-        } = scores;
+      const scores = lastAudit.getScores();
+      const {
+        performance = 0, accessibility = 0, bestPractices = 0, seo = 0,
+      } = scores;
 
-        siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${domainText}>`;
-        siteMessage += site.getGitHubURL() ? ` (<${site.getGitHubURL()}|GH>)` : '';
-      } else {
-        siteMessage = `${rank}. ${icon} :warning: audit error (site has 404 or other): <${formatURL(baseURL)}|${baseURL}>`;
-      }
+      siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${domainText}>`;
+      siteMessage += site.getGitHubURL() ? ` (<${site.getGitHubURL()}|GH>)` : '';
     }
 
     return `${message}\n${siteMessage.trim()}`;
@@ -149,53 +141,6 @@ function generatePaginationBlocks(start, end, totalSites, filterStatus, psiStrat
     type: 'actions',
     elements: blocks,
   };
-}
-
-/**
- * Handler for the overflow action, which allows for downloading the
- * list of sites in different formats.
- *
- * @param {Object} param0 - The object containing the body, acknowledgement function
- * (ack), client, and say function.
- */
-async function overflowActionHandler({
-  body, ack, client, say,
-}) {
-  await ack();
-
-  const selectedOption = body.actions?.[0]?.selected_option?.value;
-
-  if (!selectedOption) {
-    await say(`:nuclear-warning: Oops! No format selected. Please select either '${EXPORT_FORMATS.CSV}' or '${EXPORT_FORMATS.XLSX}'.`);
-    return;
-  }
-
-  if (selectedOption !== EXPORT_FORMATS.CSV && selectedOption !== EXPORT_FORMATS.XLSX) {
-    await say(`:nuclear-warning: Oops! The selected format '${selectedOption}' is not supported. Please select either '${EXPORT_FORMATS.CSV}' or '${EXPORT_FORMATS.XLSX}'.`);
-    return;
-  }
-
-  await say(':hourglass: Preparing the requested export for you, please wait...');
-
-  try {
-    let fileBuffer;
-    // TODO: add exporters
-    if (selectedOption === EXPORT_FORMATS.CSV) {
-      // fileBuffer = await exporters.exportSitesToCSV();
-    } else if (selectedOption === EXPORT_FORMATS.XLSX) {
-      // fileBuffer = await exporters.exportSitesToExcel();
-    }
-
-    await client.files.uploadV2({
-      channels: body.channel.id,
-      file: fileBuffer,
-      filename: `franklin-site-status.${selectedOption}`,
-      title: `Franklin Site Status Export (${selectedOption.toUpperCase()})`,
-      initial_comment: ':tada: Here is an export of all sites and their audit scores.',
-    });
-  } catch (error) {
-    await postErrorMessage(say, error);
-  }
 }
 
 /**
@@ -288,7 +233,6 @@ function GetSitesCommand(context) {
       return;
     }
 
-    ctx.boltApp.action('sites_overflow_action', overflowActionHandler);
     ctx.boltApp.action(/^paginate_sites_(prev|next|page_\d+)$/, paginationHandler);
     ctx.boltApp.action('reply_in_thread');
   };
@@ -347,6 +291,7 @@ function GetSitesCommand(context) {
   return {
     ...baseCommand,
     handleExecution,
+    paginationHandler, // for testing
     init,
   };
 }
