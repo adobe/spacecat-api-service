@@ -19,61 +19,106 @@ import SlackHandler from '../../src/support/slack/slack-handler.js';
 
 const { expect } = chai;
 
-describe('Slack Handler', async () => {
+describe('Slack Handler', () => {
   const sandbox = sinon.createSandbox();
 
   let slackHandler;
   let logStub;
   let sayStub;
+  let commandsStub;
 
   beforeEach(() => {
     logStub = {
-      debug: sandbox.stub(),
-      error: sandbox.stub(),
       info: sandbox.stub(),
-      warn: sandbox.stub(),
     };
 
     sayStub = sandbox.stub().resolves();
 
-    slackHandler = SlackHandler([], logStub);
+    commandsStub = [
+      { accepts: sandbox.stub().returns(false), execute: sandbox.stub(), phrases: ['not-help'] },
+      { accepts: sandbox.stub().returns(false), execute: sandbox.stub(), phrases: ['help'] },
+    ];
+
+    slackHandler = SlackHandler(commandsStub, logStub);
   });
 
   afterEach(() => {
     sandbox.restore();
   });
 
-  it('has expected properties', async () => {
-    expect(slackHandler).to.have.property('onAppMention');
+  it('executes the correct command when found', async () => {
+    const matchingCommand = commandsStub[0];
+    matchingCommand.accepts.returns(true);
+
+    await slackHandler.onAppMention({
+      event: { text: 'some-command', ts: '12345' },
+      say: sayStub,
+      context: {},
+    });
+
+    expect(matchingCommand.execute.calledOnce).to.be.true;
+    expect(sayStub.called).to.be.false; // No default message should be sent
   });
 
-  it('responds via app_mention in thread', async () => {
+  it('executes the help command if no command matches', async () => {
+    const helpCommand = commandsStub[1];
+
     await slackHandler.onAppMention({
-      event: { user: 'test-user', thread_ts: 1609459200.0002, text: 'some-text' },
+      event: { text: 'help', ts: '12345' },
+      say: sayStub,
+      context: {},
+    });
+
+    expect(helpCommand.execute.calledOnce).to.be.true;
+  });
+
+  it('sends a default message if no command matches and no help command found', async () => {
+    await SlackHandler([], logStub).onAppMention({
+      event: { text: 'unknown-command', ts: '12345' },
       say: sayStub,
       context: {},
     });
 
     expect(sayStub.calledOnce).to.be.true;
-    expect(sayStub.firstCall.firstArg).to.deep.equal({
-      text: 'Hello, <@test-user>!',
-      thread_ts: 1609459200.0002,
+    expect(sayStub.firstCall.args[0]).to.include({
+      text: 'Sorry, I am misconfigured, no commands found.',
     });
-    expect(logStub.info.calledOnce).to.be.true;
   });
 
-  it('responds via app_mention outside of thread', async () => {
+  it('handles non-string message types correctly', async () => {
+    const blockMessage = {
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '*Bold text*',
+          },
+        },
+      ],
+    };
+
+    // Mock command that uses the provided say function to send a block message
+    const mockCommand = {
+      accepts: () => true,
+      execute: async (_, say) => {
+        await say(blockMessage);
+      },
+      phrases: ['mock-command'],
+    };
+
+    commandsStub.push(mockCommand);
+
     await slackHandler.onAppMention({
-      event: { user: 'test-user', ts: 1609459200.0002 },
+      event: { text: 'mock-command', ts: '12345' },
       say: sayStub,
       context: {},
     });
 
     expect(sayStub.calledOnce).to.be.true;
-    expect(sayStub.firstCall.firstArg).to.deep.equal({
-      text: 'Hello, <@test-user>!',
-      thread_ts: 1609459200.0002,
+    expect(sayStub.firstCall.args[0]).to.deep.equal({
+      ...blockMessage,
+      thread_ts: '12345',
     });
-    expect(logStub.info.calledOnce).to.be.true;
   });
 });

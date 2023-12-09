@@ -30,20 +30,23 @@ function SlackHandler(commands, log) {
   const getMessageFromEvent = (event) => event.text?.replace(BOT_MENTION_REGEX, '').trim();
 
   /**
-   * Responds to a message in the appropriate thread.
-   * @param {function} say - The say function from Bolt.
-   * @param {string} threadTs - The thread timestamp.
-   * @param {string} message - The message to send.
+   * Wraps the Slack say function to respond in a thread.
+   *
+   * @param {Function} say - The original Slack say function.
+   * @param {string} threadTs - The timestamp of the thread to respond in.
+   * @returns {Function} A wrapped say function that sends messages in a thread.
    */
-  const respondInThread = async (say, threadTs, message) => {
+  const wrapSayForThread = (say, threadTs) => async (message) => {
+    const messageOptions = typeof message === 'string' ? { text: message } : message;
     await say({
+      ...messageOptions,
       thread_ts: threadTs,
-      text: message,
     });
   };
 
   /**
    * Handles app_mention event.
+   *
    * @param {object} event - The event.
    * @param {function} say - The say function.
    * @param {object} context - The slack bot context.
@@ -51,12 +54,24 @@ function SlackHandler(commands, log) {
    */
   const onAppMention = async ({ event, say, context }) => {
     const threadTs = getThreadTimestamp(event);
-    getMessageFromEvent(event);
-    const responseMessage = `Hello, <@${event.user}>!`;
-
-    await respondInThread(say, threadTs, responseMessage);
+    const threadedSay = wrapSayForThread(say, threadTs);
+    const message = getMessageFromEvent(event);
 
     log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);
+
+    const command = commands.find((cmd) => cmd.accepts(message));
+    if (command) {
+      await command.execute(message, threadedSay, commands);
+      return;
+    }
+
+    const helpCommand = commands.find((cmd) => cmd.phrases.includes('help'));
+    if (helpCommand) {
+      await helpCommand.execute(message, threadedSay, commands);
+      return;
+    }
+
+    await threadedSay('Sorry, I am misconfigured, no commands found.');
   };
 
   return {
