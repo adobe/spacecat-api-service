@@ -79,13 +79,79 @@ describe('AddRepoCommand', () => {
       expect(say.called).to.be.true;
     });
 
+    it('handles archived repository', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, { archived: true });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith(':warning: The GitHub repository \'https://github.com/valid/repo\' is archived. Please unarchive it before adding it to a site.')).to.be.true;
+    });
+
+    it('handles repo URL without scheme', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, { archived: false });
+
+      const args = ['validSite.com', 'github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith('\n'
+        + '      :white_check_mark: Github repo is successfully added to the site!\n'
+        + '      \n'
+        + '\n'
+        + '      :mars-team: Domain: undefined\n'
+        + '      :github-4173: GitHub: _not set_\n'
+        + '      :submarine: Is Live: No\n'
+        + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI check>\n'
+        + '    \n'
+        + '      \n'
+        + '      First PSI check with new repo is triggered! :adobe-run:\n'
+        + '      ')).to.be.true;
+    });
+
+    it('handles missing site URL', async () => {
+      const args = [];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith(command.usage())).to.be.true;
+    });
+
+    it('handles missing GitHub URL', async () => {
+      const args = ['validSite.com'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith(command.usage())).to.be.true;
+    });
+
     it('handles invalid GitHub repository URL', async () => {
       const args = ['validSite.com', 'invalidRepoURL.com'];
       const command = AddRepoCommand(context);
 
       await command.handleExecution(args, say);
 
-      expect(say.calledWith(":warning: 'https://invalidrepourl.com' is not a valid GitHub repository URL.")).to.be.true;
+      expect(say.calledWith(':warning: \'https://invalidrepourl.com\' is not a valid GitHub repository URL.')).to.be.true;
+    });
+
+    it('handles site not found', async () => {
+      dataAccessStub.getSiteByBaseURL.resolves(null);
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith(':warning: No site found with base URL: validsite.com')).to.be.true;
     });
   });
 
@@ -118,7 +184,7 @@ describe('AddRepoCommand', () => {
       await command.handleExecution(args, say);
 
       // Assertions to confirm handling of non-existent repository
-      expect(say.calledWith(":warning: The GitHub repository 'https://github.com/invalid/repo' could not be found (private repo?).")).to.be.true;
+      expect(say.calledWith(':warning: The GitHub repository \'https://github.com/invalid/repo\' could not be found (private repo?).')).to.be.true;
     });
 
     it('handles errors other than 404 from GitHub API', async () => {

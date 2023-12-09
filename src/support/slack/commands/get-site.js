@@ -15,8 +15,9 @@ import BaseCommand from './base.js';
 import { formatDate, formatScore, printSiteDetails } from '../../../utils/slack/format.js';
 import { extractBaseURLFromInput, sendMessageBlocks, postErrorMessage } from '../../../utils/slack/base.js';
 
+export const CHARACTER_LIMIT = 2500;
+
 const BACKTICKS = '```';
-const CHARACTER_LIMIT = 2500;
 const PHRASES = ['get site', 'get domain'];
 
 /**
@@ -28,13 +29,10 @@ const PHRASES = ['get site', 'get domain'];
  * @param {Array<string>} headers - An array of strings, each representing a header in the table.
  * @returns {string} The formatted row.
  */
-function formatRows(row, columnWidths, headers) {
+export function formatRows(row) {
   return row.map((cell, i) => {
     const cellStr = cell || '';
-    // If the row has fewer columns than headers, pad the last cell to fill the remaining space
-    const padding = (row.length < headers.length && i === row.length - 1)
-      ? columnWidths.slice(i).reduce((a, b) => a + b, 0) : columnWidths[i];
-    return cellStr.padEnd(padding + (i === 0 ? 0 : 2));
+    return cellStr.padEnd(2 + (i === 0 ? 0 : 2));
   }).join('  ');
 }
 
@@ -46,49 +44,28 @@ function formatRows(row, columnWidths, headers) {
  * @param {Array<Audit>} audits - An array of audit objects.
  * @returns {string} The audits formatted into a stringified table or a fallback message.
  */
-function formatAudits(audits) {
+export function formatAudits(audits) {
   if (!audits || !audits.length) {
     return 'No audit history available';
   }
 
-  const headers = ['Audited At (UTC)', 'Perf.', 'SEO', 'A11y', 'Best Pr.', 'Live'];
+  const headers = ['Audited At (UTC)', 'Perf', 'SEO', 'A11y', 'Best Pr.', 'Live'];
   const rows = audits.map((audit) => {
-    const { auditedAt, errorMessage, isError } = audit;
-
-    if (isError) {
-      return [formatDate(auditedAt), `Error: ${errorMessage}`];
-    } else {
-      const {
-        performance, seo, accessibility, bestPractices,
-      } = audit.getScores();
-      return [
-        formatDate(auditedAt),
-        formatScore(performance),
-        formatScore(seo),
-        formatScore(accessibility),
-        formatScore(bestPractices),
-        audit.isLive() ? 'Yes' : 'No',
-      ];
-    }
+    const {
+      performance, seo, accessibility, 'best-practices': bestPractices,
+    } = audit.getScores();
+    return [
+      formatDate(audit.getAuditedAt()),
+      formatScore(performance),
+      formatScore(seo),
+      formatScore(accessibility),
+      formatScore(bestPractices),
+      audit.isLive() ? 'Yes' : 'No',
+    ];
   });
 
   const table = [headers, ...rows];
-  const columnWidths = table.reduce((widths, row) => {
-    const rowLength = row.length;
-    return row.map((cell, i) => {
-      const currentWidth = widths[i] || 0;
-      const isColspanCase = rowLength === 2 && i !== 0;
-      const colSpan = isColspanCase ? headers.length - 1 : 1;
-
-      if (isColspanCase && i !== 0) {
-        return currentWidth;
-      }
-
-      return Math.max(currentWidth, cell.length / colSpan);
-    });
-  }, []);
-
-  const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths, headers)).join('\n')}\n${BACKTICKS}`;
+  const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, headers)).join('\n')}\n${BACKTICKS}`;
 
   // Ensure the formattedTable string does not exceed the Slack message character limit.
   return formattedTable.length > CHARACTER_LIMIT ? `${formattedTable.slice(0, CHARACTER_LIMIT)}...` : formattedTable;
@@ -140,7 +117,7 @@ function GetSiteCommand(context) {
         return;
       }
 
-      const audits = await dataAccess.getAuditsForSite(site.getId());
+      const audits = await dataAccess.getAuditsForSite(site.getId(), `lhs-${psiStrategy}`);
 
       const textSections = [{
         text: `
@@ -148,7 +125,7 @@ function GetSiteCommand(context) {
 
 ${printSiteDetails(site)}
 
-    _Audits are sorted by date descending._\n${formatAudits(audits, psiStrategy)}
+    _Audits are sorted by date descending._\n${formatAudits(audits)}
   `,
       }];
 

@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import { createUrl } from '@adobe/fetch';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, isString } from '@adobe/spacecat-shared-utils';
 
 import { URL } from 'url';
 
@@ -31,6 +31,10 @@ const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-
  * @returns {string|null} The domain extracted from the input message or null.
  */
 function extractBaseURLFromInput(input, domainOnly = true) {
+  if (!isString(input)) {
+    return null;
+  }
+
   const tokens = input.split(' ');
 
   for (const token of tokens) {

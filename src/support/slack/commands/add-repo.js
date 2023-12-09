@@ -91,7 +91,7 @@ function AddRepoCommand(context) {
         return;
       }
 
-      repoUrl = repoUrl.startsWith('https') ? '' : `https://${repoUrl}`;
+      repoUrl = `https://${repoUrl}`;
 
       if (!validateRepoUrl(repoUrl)) {
         await say(`:warning: '${repoUrl}' is not a valid GitHub repository URL.`);
@@ -100,7 +100,7 @@ function AddRepoCommand(context) {
 
       const site = await dataAccess.getSiteByBaseURL(siteURL);
       if (!isObject(site)) {
-        await say(`:warning: No site found with domain: ${siteURL}`);
+        await say(`:warning: No site found with base URL: ${siteURL}`);
         return;
       }
 

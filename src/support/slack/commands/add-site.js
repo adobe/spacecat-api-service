@@ -61,9 +61,9 @@ function AddSiteCommand(context) {
         return;
       }
 
-      const result = await dataAccess.addSite({ baseURL });
+      const newSite = await dataAccess.addSite({ baseURL });
 
-      if (!result) {
+      if (!newSite) {
         await say(':x: Problem adding the site. Please contact the admins.');
         return;
       }
@@ -73,7 +73,7 @@ function AddSiteCommand(context) {
         context.env.AUDIT_JOBS_QUEUE_URL,
         'lhs-mobile',
         {},
-        site.getId(),
+        newSite.getId(),
       );
 
       let message = `:white_check_mark: Successfully added new site '${baseURL}'.\n`;
