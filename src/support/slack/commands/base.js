@@ -63,7 +63,7 @@ function BaseCommand({
    * @param {Array[Object]} commands - List of commands existing.
    * @throws {Error} Always thrown, since this method must be overridden.
    */
-  function execute(message, say, commands) {
+  async function execute(message, say, commands) {
     const args = extractArguments(message);
 
     return this.handleExecution(args, say, commands);

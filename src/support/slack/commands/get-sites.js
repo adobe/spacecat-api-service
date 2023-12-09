@@ -12,7 +12,6 @@
 
 import BaseCommand from './base.js';
 
-import { extractAuditScores } from '../../../utils/slack/audit.js';
 import { formatScore, formatURL } from '../../../utils/slack/format.js';
 import { sendMessageBlocks, postErrorMessage } from '../../../utils/slack/base.js';
 
@@ -59,32 +58,32 @@ function generateOverflowAccessory() {
  * @param {Array} [sites=[]] - The sites to format.
  * @param {number} start - The index to start slicing the array.
  * @param {number} end - The index to end slicing the array.
- * @param {string} psiStrategy - The strategy to show scores of.
  * @returns {string} The formatted sites message.
  */
 // eslint-disable-next-line default-param-last
-function formatSites(sites = [], start, end, psiStrategy = 'mobile') {
+function formatSites(sites = [], start, end) {
   return sites.slice(start, end).reduce((message, site, index) => {
-    const { domain } = site;
-    const domainText = domain.replace(/^main--/, '').replace(/--.*/, '');
+    const baseURL = site.getBaseURL();
+    const domainText = baseURL.replace(/^main--/, '').replace(/--.*/, '');
     const rank = start + index + 1;
 
     let siteMessage = `${rank}. No audits found for ${domainText}`;
-    const { lastAudit } = site;
+    const audits = site.getAudits();
 
-    if (lastAudit) {
-      const icon = site.isLive ? ':rocket:' : ':submarine:';
+    if (audits.length) {
+      const lastAudit = audits[0];
+      const icon = site.isLive() ? ':rocket:' : ':submarine:';
 
       if (!lastAudit.isError) {
-        const scores = extractAuditScores(lastAudit, psiStrategy);
+        const scores = lastAudit.getScores();
         const {
           performance = 0, accessibility = 0, bestPractices = 0, seo = 0,
         } = scores;
 
-        siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(domain)}|${domainText}>`;
-        siteMessage += site.gitHubURL ? ` (<${site.gitHubURL}|GH>)` : '';
+        siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${domainText}>`;
+        siteMessage += site.getGitHubURL() ? ` (<${site.getGitHubURL()}|GH>)` : '';
       } else {
-        siteMessage = `${rank}. ${icon} :warning: audit error (site has 404 or other): <${formatURL(domain)}|${domain}>`;
+        siteMessage = `${rank}. ${icon} :warning: audit error (site has 404 or other): <${formatURL(baseURL)}|${baseURL}>`;
       }
     }
 

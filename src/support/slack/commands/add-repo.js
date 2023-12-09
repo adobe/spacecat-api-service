@@ -10,14 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-import { fetch } from '@adobe/fetch';
 import { isObject } from '@adobe/spacecat-shared-utils';
 
+import { fetch, sendAuditMessage } from '../../utils.js';
 import { printSiteDetails } from '../../../utils/slack/format.js';
 import { extractBaseURLFromInput, postErrorMessage } from '../../../utils/slack/base.js';
 
 import BaseCommand from './base.js';
-import { sendAuditMessage } from '../../utils.js';
 
 const PHRASES = ['add repo', 'save repo', 'add repo by site'];
 
@@ -37,7 +36,7 @@ function AddRepoCommand(context) {
     usageText: `${PHRASES.join(' or ')} {site} {githubRepoURL}`,
   });
 
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
 
   /**
    * Validates if the URL is a valid GitHub repository URL.
@@ -59,18 +58,17 @@ function AddRepoCommand(context) {
     const repoApiUrl = `https://api.github.com/repos/${repoUrl.split('github.com/')[1]}`;
     try {
       const response = await fetch(repoApiUrl);
-      return response.json();
-    } catch (error) {
-      if (error.response) {
-        if (error.response.status === 404) {
-          return null;
-        }
-        throw new Error(`Failed to fetch GitHub repository at '${repoUrl}', status: ${error.response.status}, ${error.response.statusText}`);
-      } else if (error.request) {
-        throw new Error(`No response received from GitHub when fetching repository at '${repoUrl}'.`);
+
+      if (response.ok) {
+        return response.json();
+      } else if (response.status === 404) {
+        log.warn(`Failed to fetch GitHub repository at '${repoUrl}', status: ${response.status}, ${response.statusText}`);
+        return null;
       } else {
-        throw new Error(`Failed to set up request to fetch GitHub repository at '${repoUrl}': ${error.message}`);
+        throw new Error(`Failed to fetch GitHub repository at '${repoUrl}', status: ${response.status}, ${response.statusText}`);
       }
+    } catch (error) {
+      throw new Error(`Failed to set up request to fetch GitHub repository at '${repoUrl}': ${error.message}`);
     }
   }
 
@@ -87,12 +85,13 @@ function AddRepoCommand(context) {
       const [siteDomainInput, repoUrlInput] = args;
       const siteURL = extractBaseURLFromInput(siteDomainInput, false);
       let repoUrl = extractBaseURLFromInput(repoUrlInput, false);
-      repoUrl = repoUrl.startsWith('https') ? '' : `https://${repoUrl}`;
 
       if (!siteURL || !repoUrl) {
         await say(baseCommand.usage());
         return;
       }
+
+      repoUrl = repoUrl.startsWith('https') ? '' : `https://${repoUrl}`;
 
       if (!validateRepoUrl(repoUrl)) {
         await say(`:warning: '${repoUrl}' is not a valid GitHub repository URL.`);

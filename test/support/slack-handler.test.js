@@ -49,7 +49,7 @@ describe('Slack Handler', async () => {
 
   it('responds via app_mention in thread', async () => {
     await slackHandler.onAppMention({
-      event: { user: 'test-user', thread_ts: 1609459200.0002 },
+      event: { user: 'test-user', thread_ts: 1609459200.0002, text: 'some-text' },
       say: sayStub,
       context: {},
     });
