@@ -17,9 +17,10 @@ import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit
 import { expect } from 'chai';
 import sinon from 'sinon';
 
+import { CHARACTER_LIMIT } from '../../../../src/utils/slack/base.js';
+
 import GetSiteCommand, {
   formatAudits,
-  CHARACTER_LIMIT,
   formatRows,
 } from '../../../../src/support/slack/commands/get-site.js';
 
@@ -160,15 +161,13 @@ describe('GetSiteCommand', () => {
     it('handles character limit', () => {
       const formatted = formatAudits(generateMockAudits(60));
 
-      expect(formatted.length).to.be.at.most(CHARACTER_LIMIT + 3);
+      expect(formatted.length).to.be.at.most(CHARACTER_LIMIT);
       expect(formatted).to.include('...');
     });
 
     it('handles null or undefined cell values', () => {
       const row = [null, 'Data'];
-      const columnWidths = [10, 10];
-      const headers = ['Header1', 'Header2'];
-      const formattedRow = formatRows(row, columnWidths, headers);
+      const formattedRow = formatRows(row);
 
       expect(formattedRow).to.include('Data');
     });

@@ -12,21 +12,25 @@
 
 import BaseCommand from './base.js';
 
-import { formatDate, formatScore, printSiteDetails } from '../../../utils/slack/format.js';
-import { extractBaseURLFromInput, sendMessageBlocks, postErrorMessage } from '../../../utils/slack/base.js';
+import {
+  BACKTICKS,
+  CHARACTER_LIMIT,
+  extractBaseURLFromInput,
+  sendMessageBlocks,
+  postErrorMessage,
+} from '../../../utils/slack/base.js';
+import {
+  formatDate,
+  formatScore,
+  printSiteDetails,
+} from '../../../utils/slack/format.js';
 
-export const CHARACTER_LIMIT = 2500;
-
-const BACKTICKS = '```';
 const PHRASES = ['get site', 'get domain'];
 
 /**
  * Formats a single row of the table, padding each cell according to the column widths.
  *
  * @param {Array<string>} row - An array of strings, each representing a cell in the row.
- * @param {Array<number>} columnWidths - An array of numbers, each representing the
- * maximum width of a column.
- * @param {Array<string>} headers - An array of strings, each representing a header in the table.
  * @returns {string} The formatted row.
  */
 export function formatRows(row) {
@@ -68,7 +72,7 @@ export function formatAudits(audits) {
   const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, headers)).join('\n')}\n${BACKTICKS}`;
 
   // Ensure the formattedTable string does not exceed the Slack message character limit.
-  return formattedTable.length > CHARACTER_LIMIT ? `${formattedTable.slice(0, CHARACTER_LIMIT)}...` : formattedTable;
+  return formattedTable.length > CHARACTER_LIMIT ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...` : formattedTable;
 }
 
 /**

@@ -1,0 +1,205 @@
+/*
+ * Copyright 2023 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+/* eslint-env mocha */
+
+import { expect } from 'chai';
+import sinon from 'sinon';
+
+import { CHARACTER_LIMIT } from '../../../../src/utils/slack/base.js';
+
+import MartechImpactCommand, {
+  calculateColumnWidths,
+  formatThirdPartySummary,
+  formatRows,
+  formatTotalBlockingTime,
+} from '../../../../src/support/slack/commands/martech-impact.js';
+
+/**
+ * Generates a specified number of mock third-party summaries.
+ *
+ * @param {number} count - The number of mock summaries to generate.
+ * @returns {Array<Object>} An array of mock third-party summary objects.
+ */
+function generateThirdPartySummaries(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    entity: `Third Party ${index + 1}`,
+    blockingTime: Math.floor(Math.random() * 100),
+    mainThreadTime: Math.floor(Math.random() * 200),
+    transferSize: Math.floor(Math.random() * 1024),
+  }));
+}
+
+describe('MartechImpactCommand', () => {
+  let context;
+  let say;
+  let dataAccessStub;
+
+  beforeEach(() => {
+    dataAccessStub = {
+      getSiteByBaseURL: sinon.stub(),
+      getLatestAuditForSite: sinon.stub(),
+    };
+    context = { dataAccess: dataAccessStub };
+    say = sinon.stub();
+  });
+
+  describe('Initialization and BaseCommand Integration', () => {
+    it('initializes correctly with base command properties', () => {
+      const command = MartechImpactCommand(context);
+      expect(command.id).to.equal('get-franklin-site-martech-impact');
+      expect(command.name).to.equal('Get Franklin Site Martech Impact');
+      // Additional assertions for other properties
+    });
+  });
+
+  describe('Handle Execution Method', () => {
+    it('executes command successfully with valid data', async () => {
+      dataAccessStub.getSiteByBaseURL.resolves({
+        getId: () => '123',
+        getBaseURL: () => 'example.com',
+        getGitHubURL: () => '',
+        isLive: () => true,
+      });
+      dataAccessStub.getLatestAuditForSite.resolves({
+        getAuditResult: () => (
+          { totalBlockingTime: 12, thirdPartySummary: [/* Summary data */] }
+        ),
+      });
+
+      const command = MartechImpactCommand(context);
+
+      await command.handleExecution(['example.com'], say);
+
+      expect(say.called).to.be.true;
+    });
+
+    it('responds with usage instructions for invalid input', async () => {
+      const args = [''];
+      const command = MartechImpactCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith('Usage: _get martech impact or get third party impact {baseURL};_')).to.be.true;
+    });
+
+    it('notifies when no site is found', async () => {
+      dataAccessStub.getSiteByBaseURL.resolves(null);
+
+      const args = ['nonexistent.com'];
+      const command = MartechImpactCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith(':warning: No site found with baseURL: nonexistent.com')).to.be.true;
+    });
+
+    it('notifies when no audit is found', async () => {
+      dataAccessStub.getSiteByBaseURL.resolves({
+        getId: () => '123',
+        getBaseURL: () => 'example.com',
+        getGitHubURL: () => '',
+        isLive: () => true,
+      });
+      dataAccessStub.getLatestAuditForSite.resolves(null);
+
+      const args = ['example.com'];
+      const command = MartechImpactCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith(':warning: No audit found for site: example.com')).to.be.true;
+    });
+
+    it('notifies when an error occurs', async () => {
+      dataAccessStub.getSiteByBaseURL.rejects(new Error('Test error'));
+
+      const args = ['nonexistent.com'];
+      const command = MartechImpactCommand(context);
+
+      await command.handleExecution(args, say);
+
+      expect(say.calledWith(':nuclear-warning: Oops! Something went wrong: Test error')).to.be.true;
+    });
+  });
+
+  describe('Formatting Functions', () => {
+    it('formats rows correctly', () => {
+      const row = ['Entity', '100 ms'];
+      const columnWidths = [10, 10];
+      const formattedRow = formatRows(row, columnWidths);
+
+      expect(formattedRow).to.be.a('string');
+      // Additional assertions for formatted row content
+    });
+
+    it('formats total blocking time correctly', () => {
+      const formattedTBT = formatTotalBlockingTime(123);
+      expect(formattedTBT).to.equal('123');
+    });
+
+    it('formats total blocking time when undefined', () => {
+      const formattedTBT = formatTotalBlockingTime();
+      expect(formattedTBT).to.equal('_unknown_');
+    });
+
+    it('formats third party summary correctly', () => {
+      const summary = [{
+        entity: 'Example',
+        blockingTime: 100,
+        mainThreadTime: 200,
+        transferSize: 1024,
+      }];
+      const formattedSummary = formatThirdPartySummary(summary);
+
+      expect(formattedSummary).to.be.a('string');
+    });
+
+    it('adds ellipsis when the summary exceeds the character limit', () => {
+      const summaries = generateThirdPartySummaries(100); // Generate a large number of summaries
+      const formattedSummary = formatThirdPartySummary(summaries);
+
+      expect(formattedSummary.length).to.be.at.most(CHARACTER_LIMIT);
+      expect(formattedSummary.slice(-3)).to.equal('...');
+    });
+
+    it('correctly handles colspan case in table formatting', () => {
+      // Create a row with exactly two columns
+      const row = ['Entity Name', '100 ms'];
+      const columnWidths = [15, 10]; // Mock column widths
+
+      const formattedRow = formatRows(row, columnWidths);
+
+      // The second column should take up the space of any remaining columns
+      expect(formattedRow).to.include('Entity Name      100 ms');
+    });
+
+    it('correctly calculates column widths considering colspan cases', () => {
+      const headers = ['Header1', 'Header2', 'Header3'];
+      const table = [
+        ['Data1', 'Data2', 'Data3'],
+        ['ColspanData', ''], // This row has fewer columns than headers
+      ];
+
+      const columnWidths = calculateColumnWidths(table, headers);
+
+      // In the colspan case, the first column should be wide enough to hold 'ColspanData'
+      expect(columnWidths[0]).to.be.at.least('ColspanData'.length);
+
+      // The second column's width should be calculated normally
+      expect(columnWidths[1]).to.be.at.least('Data2'.length);
+
+      // The columnWidths array should only have two entries as the second row only has two columns
+      expect(columnWidths.length).to.equal(2);
+    });
+  });
+});

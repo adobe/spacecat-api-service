@@ -9,6 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
 import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
 
@@ -16,7 +17,9 @@ import { URL } from 'url';
 
 import { fetch } from '../../support/utils.js';
 
+export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
+export const CHARACTER_LIMIT = 2500;
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;

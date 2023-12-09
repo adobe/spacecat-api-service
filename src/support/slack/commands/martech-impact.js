@@ -12,11 +12,19 @@
 
 import BaseCommand from './base.js';
 
-import { addEllipsis, formatSize, printSiteDetails } from '../../../utils/slack/format.js';
-import { extractBaseURLFromInput, sendMessageBlocks, postErrorMessage } from '../../../utils/slack/base.js';
+import {
+  BACKTICKS,
+  CHARACTER_LIMIT,
+  extractBaseURLFromInput,
+  sendMessageBlocks,
+  postErrorMessage,
+} from '../../../utils/slack/base.js';
+import {
+  addEllipsis,
+  formatSize,
+  printSiteDetails,
+} from '../../../utils/slack/format.js';
 
-const BACKTICKS = '```';
-const CHARACTER_LIMIT = 2500;
 const PHRASES = ['get martech impact', 'get third party impact'];
 
 /**
@@ -27,12 +35,30 @@ const PHRASES = ['get martech impact', 'get third party impact'];
  * the maximum width of a column.
  * @returns {string} The formatted row.
  */
-function formatRows(row, columnWidths) {
+export function formatRows(row, columnWidths) {
   return row.map((cell, i) => cell.padEnd(columnWidths[i] + (i === 0 ? 0 : 2))).join('  ');
 }
 
-function formatTotalBlockingTime(totalBlockingTime = []) {
-  return totalBlockingTime || '_unknown_';
+export function formatTotalBlockingTime(totalBlockingTime) {
+  const tbt = totalBlockingTime || '_unknown_';
+  return `${tbt}`;
+}
+
+export function calculateColumnWidths(table, headers) {
+  return table.reduce((widths, row) => {
+    const rowLength = row.length;
+    return row.map((cell, i) => {
+      const currentWidth = widths[i] || 0;
+      const isColspanCase = rowLength === 2 && i !== 0;
+      const colSpan = isColspanCase ? headers.length - 1 : 1;
+
+      if (isColspanCase && i !== 0) {
+        return currentWidth;
+      }
+
+      return Math.max(currentWidth, cell.length / colSpan);
+    });
+  }, []);
 }
 
 /**
@@ -44,7 +70,7 @@ function formatTotalBlockingTime(totalBlockingTime = []) {
  * @param {Array<Object>} summary - An array of third party summary objects.
  * @returns {string} Third party summary formatted into a stringified table or a fallback message.
  */
-function formatThirdPartySummary(summary = []) {
+export function formatThirdPartySummary(summary = []) {
   if (summary.length === 0) {
     return '    _No third party impact detected_';
   }
@@ -64,25 +90,12 @@ function formatThirdPartySummary(summary = []) {
   });
 
   const table = [headers, ...rows];
-  const columnWidths = table.reduce((widths, row) => {
-    const rowLength = row.length;
-    return row.map((cell, i) => {
-      const currentWidth = widths[i] || 0;
-      const isColspanCase = rowLength === 2 && i !== 0;
-      const colSpan = isColspanCase ? headers.length - 1 : 1;
-
-      if (isColspanCase && i !== 0) {
-        return currentWidth;
-      }
-
-      return Math.max(currentWidth, cell.length / colSpan);
-    });
-  }, []);
+  const columnWidths = calculateColumnWidths(table);
 
   const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 
   // Ensure the formattedTable string does not exceed the Slack message character limit.
-  return formattedTable.length > CHARACTER_LIMIT ? `${formattedTable.slice(0, CHARACTER_LIMIT)}...` : formattedTable;
+  return formattedTable.length > CHARACTER_LIMIT ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...` : formattedTable;
 }
 
 /**
@@ -96,9 +109,9 @@ function MartechImpactCommand(context) {
   const baseCommand = BaseCommand({
     id: 'get-franklin-site-martech-impact',
     name: 'Get Franklin Site Martech Impact',
-    description: 'Retrieves tbt and third party summary for a Franklin site by a given domain',
+    description: 'Retrieves tbt and third party summary for a Franklin site by a given site',
     phrases: PHRASES,
-    usageText: `${PHRASES.join(' or ')} {domain};`,
+    usageText: `${PHRASES.join(' or ')} {baseURL};`,
   });
 
   const { dataAccess } = context;
@@ -115,8 +128,8 @@ function MartechImpactCommand(context) {
    */
   const handleExecution = async (args, say) => {
     try {
-      const [domainInput] = args;
-      const baseURL = extractBaseURLFromInput(domainInput, false);
+      const [baseURLInput] = args;
+      const baseURL = extractBaseURLFromInput(baseURLInput, false);
 
       if (!baseURL) {
         await say(baseCommand.usage());
@@ -128,7 +141,7 @@ function MartechImpactCommand(context) {
       const site = await dataAccess.getSiteByBaseURL(baseURL);
 
       if (!site) {
-        await say(`:warning: No site found with url: ${baseURL}`);
+        await say(`:warning: No site found with baseURL: ${baseURL}`);
         return;
       }
 

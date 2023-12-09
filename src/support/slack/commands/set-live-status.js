@@ -44,19 +44,19 @@ function SetLiveStatusCommand(context) {
    */
   const handleExecution = async (args, say) => {
     try {
-      const [siteDomainInput] = args;
+      const [baseURLInput] = args;
 
-      const siteDomain = extractBaseURLFromInput(siteDomainInput, false);
+      const baseURL = extractBaseURLFromInput(baseURLInput, false);
 
-      if (!siteDomain) {
+      if (!baseURL) {
         await say(':warning: Please provide a valid site domain.');
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(siteDomain);
+      const site = await dataAccess.getSiteByBaseURL(baseURL);
 
       if (!site) {
-        await say(`:x: No site found with the domain '${siteDomain}'.`);
+        await say(`:x: No site found with the domain '${baseURL}'.`);
         return;
       }
 
@@ -64,7 +64,7 @@ function SetLiveStatusCommand(context) {
 
       await dataAccess.updateSite(site);
 
-      let message = `:white_check_mark: Successfully updated the live status of the site '${siteDomain}'.\n\n`;
+      let message = `:white_check_mark: Successfully updated the live status of the site '${baseURL}'.\n\n`;
       message += site.isLive()
         ? ':rocket: _Site is now set to live!\'._\n\n'
         : ':submarine: _Site is now set to development!_\n\n';
