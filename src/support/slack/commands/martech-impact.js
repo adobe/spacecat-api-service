@@ -15,9 +15,10 @@ import BaseCommand from './base.js';
 import {
   BACKTICKS,
   CHARACTER_LIMIT,
-  extractBaseURLFromInput,
-  sendMessageBlocks,
+  extractURLFromSlackInput,
   postErrorMessage,
+  postSiteNotFoundMessage,
+  sendMessageBlocks,
 } from '../../../utils/slack/base.js';
 import {
   addEllipsis,
@@ -129,7 +130,7 @@ function MartechImpactCommand(context) {
   const handleExecution = async (args, say) => {
     try {
       const [baseURLInput] = args;
-      const baseURL = extractBaseURLFromInput(baseURLInput, false);
+      const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!baseURL) {
         await say(baseCommand.usage());
@@ -141,7 +142,7 @@ function MartechImpactCommand(context) {
       const site = await dataAccess.getSiteByBaseURL(baseURL);
 
       if (!site) {
-        await say(`:warning: No site found with baseURL: ${baseURL}`);
+        await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 

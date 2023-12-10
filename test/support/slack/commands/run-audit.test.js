@@ -51,7 +51,7 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com'], say);
 
       expect(say.called).to.be.true;
-      expect(say.firstCall.args[0]).to.include(':white_check_mark: Audit check is triggered for validsite.com');
+      expect(say.firstCall.args[0]).to.include(':white_check_mark: Audit check is triggered for https://validsite.com');
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
@@ -69,7 +69,7 @@ describe('RunAuditCommand', () => {
 
       await command.handleExecution(['unknownsite.com'], say);
 
-      expect(say.calledWith(':x: \'unknownsite.com\' was not added previously. You can run \'@spacecat add site unknownsite.com')).to.be.true;
+      expect(say.calledWith(':x: \'https://unknownsite.com\' was not added previously. You can run \'@spacecat add site https://unknownsite.com')).to.be.true;
     });
 
     it('informs user when error occurs', async () => {

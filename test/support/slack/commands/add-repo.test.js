@@ -151,7 +151,7 @@ describe('AddRepoCommand', () => {
 
       await command.handleExecution(args, say);
 
-      expect(say.calledWith(':warning: No site found with base URL: validsite.com')).to.be.true;
+      expect(say.calledWith(':x: No site found with base URL \'https://validsite.com\'.')).to.be.true;
     });
   });
 

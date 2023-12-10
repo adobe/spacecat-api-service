@@ -94,7 +94,7 @@ describe('GetSiteCommand', () => {
 
       await command.handleExecution(args, say);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('example.com')).to.be.true;
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(dataAccessStub.getAuditsForSite.calledWith('123')).to.be.true;
       expect(say.called).to.be.true;
     });
@@ -107,7 +107,7 @@ describe('GetSiteCommand', () => {
 
       await command.handleExecution(args, say);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('example.com')).to.be.true;
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(dataAccessStub.getAuditsForSite.calledWith('123', 'lhs-desktop')).to.be.true;
       expect(say.called).to.be.true;
     });
@@ -129,7 +129,7 @@ describe('GetSiteCommand', () => {
 
       await command.handleExecution(args, say);
 
-      expect(say.calledWith(':warning: No site found with domain: nonexistent.com')).to.be.true;
+      expect(say.calledWith(':x: No site found with base URL \'https://nonexistent.com\'.')).to.be.true;
     });
 
     it('notifies when an error occurs', async () => {

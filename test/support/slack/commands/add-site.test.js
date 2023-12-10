@@ -55,7 +55,7 @@ describe('AddSiteCommand', () => {
 
       await command.handleExecution(args, say);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('example.com')).to.be.true;
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(dataAccessStub.addSite.calledOnce).to.be.true;
       expect(say.calledWith(sinon.match.string)).to.be.true;
     });
@@ -77,7 +77,7 @@ describe('AddSiteCommand', () => {
 
       await command.handleExecution(args, say);
 
-      expect(say.calledWith(":x: 'example.com' was already added before. You can run _@spacecat get site example.com_")).to.be.true;
+      expect(say.calledWith(":x: 'https://example.com' was already added before. You can run _@spacecat get site https://example.com_")).to.be.true;
     });
 
     it('handles error during site addition', async () => {

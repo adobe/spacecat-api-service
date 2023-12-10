@@ -15,107 +15,106 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 
-import { extractBaseURLFromInput, postErrorMessage, sendMessageBlocks } from '../../../src/utils/slack/base.js';
+import { extractURLFromSlackInput, postErrorMessage, sendMessageBlocks } from '../../../src/utils/slack/base.js';
 
-describe('slackUtils.js', () => {
+describe('Base Slack Utils', () => {
   describe('extractBaseURLFromInput', () => {
-    it('extractBaseURLFromInput when empty', async () => {
-      expect(extractBaseURLFromInput('')).to.be.null;
+    it('extractURLFromSlackInput when empty', async () => {
+      expect(extractURLFromSlackInput('')).to.be.null;
     });
 
-    it('extractBaseURLFromInput without path', async () => {
+    it('extractURLFromSlackInput without path', async () => {
       const expected = 'adobe.com';
+      const expectedWithScheme = `https://${expected}`;
 
-      expect(extractBaseURLFromInput('get site adobe.com', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site <adobe.com|www.adobe.com>', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site adobe.com/', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site <adobe.com/>', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site http://adobe.com', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site <http://adobe.com|www.adobe.com>', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site https://adobe.com', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site <https://adobe.com|www.adobe.com>', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site https://www.adobe.com', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site <https://www.adobe.com|www.adobe.com>', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site https://www.adobe.com/', false)).to.equal(expected);
-      expect(extractBaseURLFromInput('get site <https://www.adobe.com/>', false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site adobe.com', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site <adobe.com|www.adobe.com>', false)).to.equal(expectedWithScheme);
+      expect(extractURLFromSlackInput('get site adobe.com/', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site <adobe.com/>', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site http://adobe.com', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site <http://adobe.com|www.adobe.com>', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site https://adobe.com', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site <https://adobe.com|www.adobe.com>', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site https://www.adobe.com', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site <https://www.adobe.com|www.adobe.com>', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site https://www.adobe.com/', false, false)).to.equal(expected);
+      expect(extractURLFromSlackInput('get site <https://www.adobe.com/>', false, false)).to.equal(expected);
     });
 
-    it('extractBaseURLFromInput with path', async () => {
+    it('extractURLFromSlackInput with path', async () => {
       const expected = 'adobe.com/some/path/w1th_numb3rs';
 
-      expect(extractBaseURLFromInput('add site http://adobe.com/some/path/w1th_numb3rs', false), expected);
-      expect(extractBaseURLFromInput('add site <http://adobe.com/some/path/w1th_numb3rs|adobe.com/some/path/w1th_numb3rs>', false), expected);
-      expect(extractBaseURLFromInput('add site https://adobe.com/some/path/w1th_numb3rs', false), expected);
-      expect(extractBaseURLFromInput('add site <https://adobe.com/some/path/w1th_numb3rs|adobe.com/some/path/w1th_numb3rs>', false), expected);
-      expect(extractBaseURLFromInput('add site https://www.adobe.com/some/path/w1th_numb3rs', false), expected);
-      expect(extractBaseURLFromInput('add site <https://www.adobe.com/some/path/w1th_numb3rs|www.adobe.com/some/path/w1th_numb3rs>', false), expected);
-      expect(extractBaseURLFromInput('add site https://www.adobe.com/some/path/w1th_numb3rs/', false), `${expected}/`);
-      expect(extractBaseURLFromInput('add site <https://www.adobe.com/some/path/w1th_numb3rs/>', false), `${expected}/`);
+      expect(extractURLFromSlackInput('add site http://adobe.com/some/path/w1th_numb3rs', false), expected);
+      expect(extractURLFromSlackInput('add site <http://adobe.com/some/path/w1th_numb3rs|adobe.com/some/path/w1th_numb3rs>', false), expected);
+      expect(extractURLFromSlackInput('add site https://adobe.com/some/path/w1th_numb3rs', false), expected);
+      expect(extractURLFromSlackInput('add site <https://adobe.com/some/path/w1th_numb3rs|adobe.com/some/path/w1th_numb3rs>', false), expected);
+      expect(extractURLFromSlackInput('add site https://www.adobe.com/some/path/w1th_numb3rs', false), expected);
+      expect(extractURLFromSlackInput('add site <https://www.adobe.com/some/path/w1th_numb3rs|www.adobe.com/some/path/w1th_numb3rs>', false), expected);
+      expect(extractURLFromSlackInput('add site https://www.adobe.com/some/path/w1th_numb3rs/', false), `${expected}/`);
+      expect(extractURLFromSlackInput('add site <https://www.adobe.com/some/path/w1th_numb3rs/>', false), `${expected}/`);
     });
 
-    it('extractBaseURLFromInput with subdomain and path', async () => {
+    it('extractURLFromSlackInput with subdomain and path', async () => {
       const expected = 'business.adobe.com/some/path/w1th_numb3rs';
 
-      expect(extractBaseURLFromInput('get site http://business.adobe.com/some/path/w1th_numb3rs', false), expected);
-      expect(extractBaseURLFromInput('get site <http://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>', false), expected);
-      expect(extractBaseURLFromInput('get site https://business.adobe.com/some/path/w1th_numb3rs', false), expected);
-      expect(extractBaseURLFromInput('get site <https://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>', false), expected);
-      expect(extractBaseURLFromInput('add site https://business.adobe.com/some/path/w1th_numb3rs/', false), `${expected}/`);
-      expect(extractBaseURLFromInput('add site <https://business.adobe.com/some/path/w1th_numb3rs/>', false), `${expected}/`);
+      expect(extractURLFromSlackInput('get site http://business.adobe.com/some/path/w1th_numb3rs', false), expected);
+      expect(extractURLFromSlackInput('get site <http://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>', false), expected);
+      expect(extractURLFromSlackInput('get site https://business.adobe.com/some/path/w1th_numb3rs', false), expected);
+      expect(extractURLFromSlackInput('get site <https://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>', false), expected);
+      expect(extractURLFromSlackInput('add site https://business.adobe.com/some/path/w1th_numb3rs/', false), `${expected}/`);
+      expect(extractURLFromSlackInput('add site <https://business.adobe.com/some/path/w1th_numb3rs/>', false), `${expected}/`);
     });
 
-    it('extractBaseURLFromInput with subdomain, path and extension', async () => {
+    it('extractURLFromSlackInput with subdomain, path and extension', async () => {
       const expected = 'personal.nedbank.co.za/borrow/personal-loans.html';
 
-      expect(extractBaseURLFromInput('get site personal.nedbank.co.za/borrow/personal-loans.html', false), expected);
-      expect(extractBaseURLFromInput('get site <personal.nedbank.co.za/borrow/personal-loans.html|personal.nedbank.co.za/borrow/personal-loans.html>', false), expected);
-      expect(extractBaseURLFromInput('get site https://personal.nedbank.co.za/borrow/personal-loans.html', false), expected);
-      expect(extractBaseURLFromInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.html|personal.nedbank.co.za/borrow/personal-loans.html>', false), expected);
-      expect(extractBaseURLFromInput('get site https://personal.nedbank.co.za/borrow/personal-loans.html/', false), expected);
-      expect(extractBaseURLFromInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.html/>', false), expected);
+      expect(extractURLFromSlackInput('get site personal.nedbank.co.za/borrow/personal-loans.html', false), expected);
+      expect(extractURLFromSlackInput('get site <personal.nedbank.co.za/borrow/personal-loans.html|personal.nedbank.co.za/borrow/personal-loans.html>', false), expected);
+      expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.html', false), expected);
+      expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.html|personal.nedbank.co.za/borrow/personal-loans.html>', false), expected);
+      expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.html/', false), expected);
+      expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.html/>', false), expected);
     });
 
-    it('extractBaseURLFromInput with subdomain, path, selector and extension', async () => {
+    it('extractURLFromSlackInput with subdomain, path, selector and extension', async () => {
       const expected = 'personal.nedbank.co.za/borrow/personal-loans.plain.html';
 
-      expect(extractBaseURLFromInput('get site personal.nedbank.co.za/borrow/personal-loans.plain.html', false), expected);
-      expect(extractBaseURLFromInput('get site <personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html>', false), expected);
-      expect(extractBaseURLFromInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html', false), expected);
-      expect(extractBaseURLFromInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html>', false), expected);
-      expect(extractBaseURLFromInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html/', false), expected);
-      expect(extractBaseURLFromInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html/>', false), expected);
+      expect(extractURLFromSlackInput('get site personal.nedbank.co.za/borrow/personal-loans.plain.html', false), expected);
+      expect(extractURLFromSlackInput('get site <personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html>', false), expected);
+      expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html', false), expected);
+      expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html>', false), expected);
+      expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html/', false), expected);
+      expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html/>', false), expected);
     });
 
-    it('extractBaseURLFromInput domain only', async () => {
+    it('extractURLFromSlackInput domain only', async () => {
       const expected = 'business.adobe.com';
 
-      expect(extractBaseURLFromInput('get site http://business.adobe.com/some/path/w1th_numb3rs'), expected);
-      expect(extractBaseURLFromInput('get site <http://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>'), expected);
-      expect(extractBaseURLFromInput('get site https://business.adobe.com/some/path/w1th_numb3rs'), expected);
-      expect(extractBaseURLFromInput('get site <https://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>'), expected);
-      expect(extractBaseURLFromInput('add site https://business.adobe.com/some/path/w1th_numb3rs/'), expected);
-      expect(extractBaseURLFromInput('add site <https://business.adobe.com/some/path/w1th_numb3rs/>'), expected);
+      expect(extractURLFromSlackInput('get site http://business.adobe.com/some/path/w1th_numb3rs'), expected);
+      expect(extractURLFromSlackInput('get site <http://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>'), expected);
+      expect(extractURLFromSlackInput('get site https://business.adobe.com/some/path/w1th_numb3rs'), expected);
+      expect(extractURLFromSlackInput('get site <https://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>'), expected);
+      expect(extractURLFromSlackInput('add site https://business.adobe.com/some/path/w1th_numb3rs/'), expected);
+      expect(extractURLFromSlackInput('add site <https://business.adobe.com/some/path/w1th_numb3rs/>'), expected);
     });
 
-    it('extractBaseURLFromInput with trailing tokens', async () => {
+    it('extractURLFromSlackInput with trailing tokens', async () => {
       const expected = 'personal.nedbank.co.za/borrow/personal-loans.plain.html';
 
-      expect(extractBaseURLFromInput('get site personal.nedbank.co.za/borrow/personal-loans.plain.html test', false), expected);
-      expect(extractBaseURLFromInput('get site <personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html> test', false), expected);
-      expect(extractBaseURLFromInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html www.acme.com', false), expected);
-      expect(extractBaseURLFromInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html> www.acme.com', false), expected);
-      expect(extractBaseURLFromInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html/ extra acme.com/', false), expected);
-      expect(extractBaseURLFromInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html/> extra acme.com/ <acme.com/> <http://acme.com|acme.com>', false), expected);
+      expect(extractURLFromSlackInput('get site personal.nedbank.co.za/borrow/personal-loans.plain.html test', false), expected);
+      expect(extractURLFromSlackInput('get site <personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html> test', false), expected);
+      expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html www.acme.com', false), expected);
+      expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html> www.acme.com', false), expected);
+      expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html/ extra acme.com/', false), expected);
+      expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html/> extra acme.com/ <acme.com/> <http://acme.com|acme.com>', false), expected);
     });
   });
 
   describe('Messaging Functions', () => {
     let say;
-    let consoleErrorStub;
 
     beforeEach(() => {
       say = sinon.stub();
-      consoleErrorStub = sinon.stub(console, 'error');
     });
 
     afterEach(() => {
@@ -123,13 +122,12 @@ describe('slackUtils.js', () => {
     });
 
     describe('postErrorMessage()', () => {
-      it('sends an error message and log the error', async () => {
+      it('sends an error message', async () => {
         const error = new Error('Test error');
         await postErrorMessage(say, error);
 
         expect(say.calledOnce).to.be.true;
         expect(say.firstCall.args[0]).to.equal(':nuclear-warning: Oops! Something went wrong: Test error');
-        expect(consoleErrorStub.calledWith(error)).to.be.true;
       });
     });
 

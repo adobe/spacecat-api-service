@@ -14,7 +14,11 @@ import { isObject } from '@adobe/spacecat-shared-utils';
 
 import { fetch, sendAuditMessage } from '../../utils.js';
 import { printSiteDetails } from '../../../utils/slack/format.js';
-import { extractBaseURLFromInput, postErrorMessage } from '../../../utils/slack/base.js';
+import {
+  extractURLFromSlackInput,
+  postErrorMessage,
+  postSiteNotFoundMessage,
+} from '../../../utils/slack/base.js';
 
 import BaseCommand from './base.js';
 
@@ -82,11 +86,12 @@ function AddRepoCommand(context) {
    */
   const handleExecution = async (args, say) => {
     try {
-      const [siteDomainInput, repoUrlInput] = args;
-      const siteURL = extractBaseURLFromInput(siteDomainInput, false);
-      let repoUrl = extractBaseURLFromInput(repoUrlInput, false);
+      const [baseURLInput, repoUrlInput] = args;
 
-      if (!siteURL || !repoUrl) {
+      const baseURL = extractURLFromSlackInput(baseURLInput);
+      let repoUrl = extractURLFromSlackInput(repoUrlInput, false, false);
+
+      if (!baseURL || !repoUrl) {
         await say(baseCommand.usage());
         return;
       }
@@ -98,9 +103,9 @@ function AddRepoCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(siteURL);
+      const site = await dataAccess.getSiteByBaseURL(baseURL);
       if (!isObject(site)) {
-        await say(`:warning: No site found with base URL: ${siteURL}`);
+        await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 
@@ -136,6 +141,7 @@ ${printSiteDetails(site)}
       First PSI check with new repo is triggered! :adobe-run:
       `);
     } catch (error) {
+      log.error(error);
       await postErrorMessage(say, error);
     }
   };

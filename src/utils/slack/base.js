@@ -31,9 +31,10 @@ const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-
  *
  * @param {string} input - The input string.
  * @param domainOnly - If true, only the domain is returned. If false, the entire input is returned.
+ * @param includeScheme - If true, the scheme is included in the output.
  * @returns {string|null} The domain extracted from the input message or null.
  */
-function extractBaseURLFromInput(input, domainOnly = true) {
+function extractURLFromSlackInput(input, domainOnly = false, includeScheme = true) {
   if (!isString(input)) {
     return null;
   }
@@ -58,9 +59,11 @@ function extractBaseURLFromInput(input, domainOnly = true) {
       const finalPathname = parts.length > 1 && parts[parts.length - 1].endsWith('/')
         ? pathname.replace(/\/+$/, '')
         : pathname;
-      return !domainOnly && finalPathname && finalPathname !== '/'
+      const baseURL = !domainOnly && finalPathname && finalPathname !== '/'
         ? `${finalHostname}${finalPathname}`
         : finalHostname;
+
+      return includeScheme ? `https://${baseURL}` : baseURL;
     }
   }
   return null;
@@ -74,7 +77,16 @@ function extractBaseURLFromInput(input, domainOnly = true) {
  */
 const postErrorMessage = async (say, error) => {
   await say(`:nuclear-warning: Oops! Something went wrong: ${error.message}`);
-  console.error(error);
+};
+
+/**
+ * Sends a message to the user indicating that the site was not found.
+ * @param {Function} say - The function to send a message to the user.
+ * @param {string} baseURL - The base URL of the site.
+ * @return {Promise<void>} A promise that resolves when the operation is complete.
+ */
+const postSiteNotFoundMessage = async (say, baseURL) => {
+  await say(`:x: No site found with base URL '${baseURL}'.`);
 };
 
 /**
@@ -148,9 +160,10 @@ const postSlackMessage = async (channelId, message, token) => {
 };
 
 export {
-  extractBaseURLFromInput,
+  extractURLFromSlackInput,
   getQueryParams,
   postErrorMessage,
+  postSiteNotFoundMessage,
   postSlackMessage,
   sendMessageBlocks,
 };

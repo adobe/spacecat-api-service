@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { extractBaseURLFromInput, postErrorMessage } from '../../../utils/slack/base.js';
+import {
+  extractURLFromSlackInput,
+  postErrorMessage,
+} from '../../../utils/slack/base.js';
 
 import BaseCommand from './base.js';
 import { sendAuditMessage } from '../../utils.js';
@@ -45,9 +48,9 @@ function AddSiteCommand(context) {
    */
   const handleExecution = async (args, say) => {
     try {
-      const [siteDomainInput] = args;
+      const [baseURLInput] = args;
 
-      const baseURL = extractBaseURLFromInput(siteDomainInput, false);
+      const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!baseURL) {
         await say(':warning: Please provide a valid site domain.');

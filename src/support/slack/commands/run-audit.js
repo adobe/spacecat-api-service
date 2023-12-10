@@ -12,7 +12,7 @@
 
 import BaseCommand from './base.js';
 
-import { extractBaseURLFromInput, postErrorMessage } from '../../../utils/slack/base.js';
+import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
 import { sendAuditMessage } from '../../utils.js';
 
 const PHRASES = ['run audit'];
@@ -45,9 +45,9 @@ function RunAuditCommand(context) {
    */
   const handleExecution = async (args, say) => {
     try {
-      const [siteDomainInput] = args;
+      const [baseURLInput] = args;
 
-      const baseURL = extractBaseURLFromInput(siteDomainInput, false);
+      const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!baseURL) {
         await say(':warning: Please provide a valid site url.');

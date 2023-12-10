@@ -15,9 +15,10 @@ import BaseCommand from './base.js';
 import {
   BACKTICKS,
   CHARACTER_LIMIT,
-  extractBaseURLFromInput,
-  sendMessageBlocks,
+  extractURLFromSlackInput,
   postErrorMessage,
+  postSiteNotFoundMessage,
+  sendMessageBlocks,
 } from '../../../utils/slack/base.js';
 import {
   formatDate,
@@ -104,8 +105,10 @@ function GetSiteCommand(context) {
    */
   const handleExecution = async (args, say) => {
     try {
-      const baseURL = extractBaseURLFromInput(args[0], false);
-      const psiStrategy = args[1] === 'desktop' ? 'desktop' : 'mobile';
+      const [baseURLInput, psiStrategyInput] = args;
+
+      const baseURL = extractURLFromSlackInput(baseURLInput);
+      const psiStrategy = psiStrategyInput === 'desktop' ? 'desktop' : 'mobile';
 
       if (!baseURL) {
         await say(baseCommand.usage());
@@ -117,7 +120,7 @@ function GetSiteCommand(context) {
       const site = await dataAccess.getSiteByBaseURL(baseURL);
 
       if (!site) {
-        await say(`:warning: No site found with domain: ${baseURL}`);
+        await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 

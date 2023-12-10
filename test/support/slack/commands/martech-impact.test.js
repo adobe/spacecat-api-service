@@ -100,7 +100,7 @@ describe('MartechImpactCommand', () => {
 
       await command.handleExecution(args, say);
 
-      expect(say.calledWith(':warning: No site found with baseURL: nonexistent.com')).to.be.true;
+      expect(say.calledWith(':x: No site found with base URL \'https://nonexistent.com\'.')).to.be.true;
     });
 
     it('notifies when no audit is found', async () => {
@@ -117,7 +117,7 @@ describe('MartechImpactCommand', () => {
 
       await command.handleExecution(args, say);
 
-      expect(say.calledWith(':warning: No audit found for site: example.com')).to.be.true;
+      expect(say.calledWith(':warning: No audit found for site: https://example.com')).to.be.true;
     });
 
     it('notifies when an error occurs', async () => {

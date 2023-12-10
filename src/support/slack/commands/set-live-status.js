@@ -12,7 +12,11 @@
 
 import BaseCommand from './base.js';
 
-import { extractBaseURLFromInput, postErrorMessage } from '../../../utils/slack/base.js';
+import {
+  extractURLFromSlackInput,
+  postErrorMessage,
+  postSiteNotFoundMessage,
+} from '../../../utils/slack/base.js';
 
 const PHRASES = ['toggle live status'];
 
@@ -46,17 +50,17 @@ function SetLiveStatusCommand(context) {
     try {
       const [baseURLInput] = args;
 
-      const baseURL = extractBaseURLFromInput(baseURLInput, false);
+      const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!baseURL) {
-        await say(':warning: Please provide a valid site domain.');
+        await say(':warning: Please provide a valid site base URL.');
         return;
       }
 
       const site = await dataAccess.getSiteByBaseURL(baseURL);
 
       if (!site) {
-        await say(`:x: No site found with the domain '${baseURL}'.`);
+        await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 

@@ -53,7 +53,7 @@ describe('SetLiveStatusCommand', () => {
 
       await command.handleExecution(['validsite.com'], say);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('validsite.com')).to.be.true;
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://validsite.com')).to.be.true;
       expect(mockSite.toggleLive.calledOnce).to.be.true;
       expect(dataAccessStub.updateSite.calledWith(mockSite)).to.be.true;
       expect(say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
@@ -70,7 +70,7 @@ describe('SetLiveStatusCommand', () => {
 
       await command.handleExecution(['validsite.com'], say);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('validsite.com')).to.be.true;
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://validsite.com')).to.be.true;
       expect(mockSite.toggleLive.calledOnce).to.be.true;
       expect(dataAccessStub.updateSite.calledWith(mockSite)).to.be.true;
       expect(say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
@@ -81,7 +81,7 @@ describe('SetLiveStatusCommand', () => {
 
       await command.handleExecution([''], say);
 
-      expect(say.calledWith(':warning: Please provide a valid site domain.')).to.be.true;
+      expect(say.calledWith(':warning: Please provide a valid site base URL.')).to.be.true;
     });
 
     it('informs user if no site found with the given domain', async () => {
@@ -91,7 +91,7 @@ describe('SetLiveStatusCommand', () => {
 
       await command.handleExecution(['unknownsite.com'], say);
 
-      expect(say.calledWith(":x: No site found with the domain 'unknownsite.com'.")).to.be.true;
+      expect(say.calledWith(":x: No site found with base URL 'https://unknownsite.com'.")).to.be.true;
     });
 
     it('handles errors during execution', async () => {
