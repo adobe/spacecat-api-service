@@ -85,7 +85,7 @@ describe('SlackController', () => {
       const response = await controller.handleEvent(context);
 
       expect(response.status).to.equal(500);
-      expect(response.headers.plain()['x-error']).to.equal('Missing SLACK_SIGNING_SECRET');
+      expect(response.headers.plain()['x-error']).to.equal('internal server error: Missing SLACK_SIGNING_SECRET');
     });
 
     it('throws error when slack bot token is missing', async () => {
@@ -95,7 +95,7 @@ describe('SlackController', () => {
       const response = await controller.handleEvent(context);
 
       expect(response.status).to.equal(500);
-      expect(response.headers.plain()['x-error']).to.equal('Missing SLACK_BOT_TOKEN');
+      expect(response.headers.plain()['x-error']).to.equal('internal server error: Missing SLACK_BOT_TOKEN');
     });
 
     it('responds to URL verification', async () => {
@@ -205,7 +205,7 @@ describe('SlackController', () => {
       expect(logStub.error.calledWith(`Error processing event: ${testError.message}`)).to.be.true;
       expect(response).to.be.an.instanceof(Response);
       expect(response.status).to.equal(500);
-      expect(response.headers.get('x-error')).to.equal(testError.message);
+      expect(response.headers.get('x-error')).to.equal(`internal server error: ${testError.message}`);
     });
   });
 });

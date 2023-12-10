@@ -16,6 +16,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import SlackHandler from '../support/slack/slack-handler.js';
 import commands from '../support/slack/commands.js';
+import { createErrorResponse } from '../utils/response-utils.js';
 
 /**
  * Initializes the slack bot.
@@ -122,7 +123,7 @@ function SlackController(dataAccess, SlackApp) {
     } catch (error) {
       const errorMessage = cleanupHeaderValue(error.message);
       log.error(`Error processing event: ${errorMessage}`);
-      return new Response(errorMessage, { status: 500, headers: { 'x-error': errorMessage } });
+      return createErrorResponse(errorMessage);
     }
 
     return new Response('');
