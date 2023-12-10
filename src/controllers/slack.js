@@ -21,7 +21,6 @@ import { createErrorResponse } from '../utils/response-utils.js';
 /**
  * Initializes the slack bot.
  *
- * @param {DataAccess} dataAccess - Data access object.
  * @param {App} App - The bolt app class.
  * @param {object} lambdaContext - The lambda context.
  * @return {App} The bolt app.
@@ -85,11 +84,10 @@ function parsePayload(data) {
 /**
  * Slack Controller for handling incoming Slack events.
  *
- * @param {DataAccess} dataAccess - Data access object.
  * @param {App} SlackApp - Slack bot implementation.
  * @returns {Object} An object containing the handleEvent function.
  */
-function SlackController(dataAccess, SlackApp) {
+function SlackController(SlackApp) {
   // Acknowledge function for Slack events (no operation)
   const ack = () => {};
 
