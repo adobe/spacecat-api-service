@@ -64,3 +64,29 @@ export const sendAuditMessages = async (
   }
   return `Triggered ${type} audit for ${siteIDsToAudit.length > 1 ? `all ${siteIDsToAudit.length} sites` : siteIDsToAudit[0]}`;
 };
+
+/**
+ * Triggers an audit for a site.
+ * @param {Site} site - The site to audit.
+ * @param {string} auditType - The type of audit.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @return {Promise} - A promise representing the audit trigger operation.
+ */
+export const triggerAuditForSite = async (
+  site,
+  auditType,
+  slackContext,
+  lambdaContext,
+) => sendAuditMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+  auditType,
+  {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+  site.getId(),
+);

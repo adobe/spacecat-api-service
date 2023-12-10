@@ -12,7 +12,7 @@
 
 import { isObject } from '@adobe/spacecat-shared-utils';
 
-import { fetch, sendAuditMessage } from '../../utils.js';
+import { fetch, triggerAuditForSite } from '../../utils.js';
 import { printSiteDetails } from '../../../utils/slack/format.js';
 import {
   extractURLFromSlackInput,
@@ -128,18 +128,7 @@ function AddRepoCommand(context) {
 
       await dataAccess.updateSite(site);
 
-      await sendAuditMessage(
-        context.sqs,
-        context.env.AUDIT_JOBS_QUEUE_URL,
-        'lhs-mobile',
-        {
-          slackContext: {
-            channelId: slackContext.channelId,
-            threadTs: slackContext.threadTs,
-          },
-        },
-        site.getId(),
-      );
+      await triggerAuditForSite(site, 'lhs-mobile', slackContext, context);
 
       await say(`
       :white_check_mark: Github repo is successfully added to the site!

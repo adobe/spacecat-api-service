@@ -285,6 +285,7 @@ function GetSitesCommand(context) {
 
       await sendMessageBlocks(say, textSections, additionalBlocks);
     } catch (error) {
+      log.error(error);
       await postErrorMessage(say, error);
     }
   };

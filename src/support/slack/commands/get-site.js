@@ -92,7 +92,7 @@ function GetSiteCommand(context) {
     usageText: `${PHRASES.join(' or ')} {domain} [desktop|mobile];`,
   });
 
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
 
   /**
    * Executes the GetSiteCommand. Retrieves the audit status for a site by
@@ -141,6 +141,7 @@ ${printSiteDetails(site)}
 
       await sendMessageBlocks(say, textSections);
     } catch (error) {
+      log.error(error);
       await postErrorMessage(say, error);
     }
   };

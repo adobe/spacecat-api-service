@@ -115,7 +115,7 @@ function MartechImpactCommand(context) {
     usageText: `${PHRASES.join(' or ')} {baseURL};`,
   });
 
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
 
   /**
    * Executes the MartechImpactCommand. Retrieves the last tbt and third party
@@ -172,6 +172,7 @@ ${printSiteDetails(site)}
 
       await sendMessageBlocks(say, textSections);
     } catch (error) {
+      log.error(error);
       await postErrorMessage(say, error);
     }
   };

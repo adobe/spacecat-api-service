@@ -71,7 +71,7 @@ describe('GetSiteCommand', () => {
       }),
       getAuditsForSite: sinon.stub(),
     };
-    context = { dataAccess: dataAccessStub };
+    context = { dataAccess: dataAccessStub, log: console };
     slackContext = { say: sinon.spy() };
   });
 

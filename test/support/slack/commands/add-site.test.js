@@ -31,7 +31,12 @@ describe('AddSiteCommand', () => {
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
     };
-    context = { dataAccess: dataAccessStub, sqs: sqsStub, env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl' } };
+    context = {
+      dataAccess: dataAccessStub,
+      log: console,
+      sqs: sqsStub,
+      env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl' },
+    };
     slackContext = { say: sinon.spy() };
   });
 

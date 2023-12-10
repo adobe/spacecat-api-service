@@ -15,8 +15,9 @@ import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
 
+import { triggerAuditForSite } from '../../utils.js';
+
 import BaseCommand from './base.js';
-import { sendAuditMessage } from '../../utils.js';
 
 const PHRASES = ['add site'];
 
@@ -36,7 +37,7 @@ function AddSiteCommand(context) {
     usageText: `${PHRASES[0]} {site}`,
   });
 
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
 
   /**
    * Validates input and adds the site to db
@@ -74,18 +75,7 @@ function AddSiteCommand(context) {
         return;
       }
 
-      await sendAuditMessage(
-        context.sqs,
-        context.env.AUDIT_JOBS_QUEUE_URL,
-        'lhs-mobile',
-        {
-          slackContext: {
-            channelId: slackContext.channelId,
-            threadTs: slackContext.threadTs,
-          },
-        },
-        newSite.getId(),
-      );
+      await triggerAuditForSite(newSite, 'lhs-mobile', slackContext, context);
 
       let message = `:white_check_mark: Successfully added new site '${baseURL}'.\n`;
       message += 'First PSI check is triggered! :adobe-run:\'\n';
@@ -93,6 +83,7 @@ function AddSiteCommand(context) {
 
       await say(message);
     } catch (error) {
+      log.error(error);
       await postErrorMessage(say, error);
     }
   };

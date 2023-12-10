@@ -13,7 +13,8 @@
 import BaseCommand from './base.js';
 
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
-import { sendAuditMessage } from '../../utils.js';
+
+import { triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
 
@@ -33,7 +34,7 @@ function RunAuditCommand(context) {
     usageText: `${PHRASES[0]} {site}`,
   });
 
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
 
   /**
    * Validates input, fetches the site
@@ -64,19 +65,14 @@ function RunAuditCommand(context) {
         return;
       }
 
-      await sendAuditMessage(
-        context.sqs,
-        context.env.AUDIT_JOBS_QUEUE_URL,
-        'lhs-mobile',
-        {},
-        site.getId(),
-      );
+      await triggerAuditForSite(site, 'lhs-mobile', slackContext, context);
 
       let message = `:white_check_mark: Audit check is triggered for ${baseURL}\n`;
       message += `:adobe-run: In a minute, you can run@spacecat get site ${baseURL}`;
 
       await say(message);
     } catch (error) {
+      log.error(error);
       await postErrorMessage(say, error);
     }
   };

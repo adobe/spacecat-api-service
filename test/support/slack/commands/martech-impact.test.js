@@ -49,7 +49,7 @@ describe('MartechImpactCommand', () => {
       getSiteByBaseURL: sinon.stub(),
       getLatestAuditForSite: sinon.stub(),
     };
-    context = { dataAccess: dataAccessStub };
+    context = { dataAccess: dataAccessStub, log: console };
     slackContext = { say: sinon.spy() };
   });
 

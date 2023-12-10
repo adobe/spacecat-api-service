@@ -36,7 +36,7 @@ function SetLiveStatusCommand(context) {
     usageText: `${PHRASES[0]} {site}`,
   });
 
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
 
   /**
    * Validates input, fetches the site by domain,
@@ -78,6 +78,7 @@ function SetLiveStatusCommand(context) {
 
       await say(message);
     } catch (error) {
+      log.error(error);
       await postErrorMessage(say, error);
     }
   };

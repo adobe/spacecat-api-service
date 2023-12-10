@@ -27,7 +27,7 @@ describe('SetLiveStatusCommand', () => {
       getSiteByBaseURL: sinon.stub(),
       updateSite: sinon.stub(),
     };
-    context = { dataAccess: dataAccessStub };
+    context = { dataAccess: dataAccessStub, log: console };
     slackContext = { say: sinon.spy() };
   });
 
