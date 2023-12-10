@@ -68,7 +68,7 @@ function RunAuditCommand(context) {
       await triggerAuditForSite(site, 'lhs-mobile', slackContext, context);
 
       let message = `:white_check_mark: Audit check is triggered for ${baseURL}\n`;
-      message += `:adobe-run: In a minute, you can run@spacecat get site ${baseURL}`;
+      message += `:adobe-run: In a minute, you can run @spacecat get site ${baseURL}`;
 
       await say(message);
     } catch (error) {
