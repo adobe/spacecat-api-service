@@ -15,7 +15,7 @@ import { helixStatus } from '@adobe/helix-status';
 import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import dataAccess from '@adobe/spacecat-shared-data-access';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
@@ -110,5 +110,5 @@ export const main = wrap(run)
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
-  .with(secrets)
+  .with(secrets, { name: resolveSecretsName })
   .with(helixStatus);
