@@ -18,11 +18,11 @@ import HelpCommand from '../../../../src/support/slack/commands/help.js';
 
 describe('HelpCommand', () => {
   let context;
-  let say;
+  let slackContext;
 
   beforeEach(() => {
     context = {}; // Mock any required context properties
-    say = sinon.stub();
+    slackContext = { say: sinon.spy() };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -45,10 +45,10 @@ describe('HelpCommand', () => {
       ];
       const command = HelpCommand(context);
 
-      await command.handleExecution([], say, mockCommands);
+      await command.handleExecution([], slackContext, mockCommands);
 
-      expect(say.called).to.be.true;
-      const { blocks } = say.firstCall.args[0];
+      expect(slackContext.say.called).to.be.true;
+      const { blocks } = slackContext.say.firstCall.args[0];
       expect(blocks[0].text.text).to.include('Greetings, I am SpaceCat');
       for (let i = 0; i < mockCommands.length; i += 1) {
         expect(blocks[i + 1].text.text).to.include(mockCommands[i].name);

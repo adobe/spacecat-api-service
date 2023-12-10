@@ -243,10 +243,13 @@ function GetSitesCommand(context) {
    * blocks, and sending the message.
    *
    * @param {Array} args - The arguments provided to the command.
-   * @param {function} say - The function to send a message to Slack.
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
    * @returns {Promise<void>} A Promise that resolves when the command is executed.
    */
-  const handleExecution = async (args, say) => {
+  const handleExecution = async (args, slackContext) => {
+    const { say } = slackContext;
+
     await say(':hourglass: Retrieving all sites, please wait...');
 
     let filterStatus = 'live';

@@ -37,13 +37,12 @@ const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-
  * or null if no valid URL is found.
  */
 function extractURLFromSlackInput(input, domainOnly = false, includeScheme = true) {
-  // Check if the input is a valid string
   if (!isString(input)) {
     return null;
   }
 
-  // Attempt to match the input with the Slack URL format regex
   const match = SLACK_URL_FORMAT_REGEX.exec(input);
+
   if (match) {
     // Construct the URL, adding 'http://' if no scheme is present
     const urlToken = match[0].includes('://') ? match[0] : `http://${match[0]}`;

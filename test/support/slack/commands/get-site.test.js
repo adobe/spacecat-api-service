@@ -58,7 +58,7 @@ function generateMockAudits(count) {
 
 describe('GetSiteCommand', () => {
   let context;
-  let say;
+  let slackContext;
   let dataAccessStub;
 
   beforeEach(() => {
@@ -72,7 +72,7 @@ describe('GetSiteCommand', () => {
       getAuditsForSite: sinon.stub(),
     };
     context = { dataAccess: dataAccessStub };
-    say = sinon.stub();
+    slackContext = { say: sinon.spy() };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -92,11 +92,11 @@ describe('GetSiteCommand', () => {
       const args = ['example.com', 'mobile'];
       const command = GetSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(dataAccessStub.getAuditsForSite.calledWith('123')).to.be.true;
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
     });
 
     it('handles valid input and retrieves site status for desktop strategy', async () => {
@@ -105,20 +105,20 @@ describe('GetSiteCommand', () => {
       const args = ['example.com', 'desktop'];
       const command = GetSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(dataAccessStub.getAuditsForSite.calledWith('123', 'lhs-desktop')).to.be.true;
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
     });
 
     it('responds with usage instructions for invalid input', async () => {
       const args = [''];
       const command = GetSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(sinon.match.string)).to.be.true;
+      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
     it('notifies when no site is found', async () => {
@@ -127,9 +127,9 @@ describe('GetSiteCommand', () => {
       const args = ['nonexistent.com'];
       const command = GetSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':x: No site found with base URL \'https://nonexistent.com\'.')).to.be.true;
+      expect(slackContext.say.calledWith(':x: No site found with base URL \'https://nonexistent.com\'.')).to.be.true;
     });
 
     it('notifies when an error occurs', async () => {
@@ -138,9 +138,9 @@ describe('GetSiteCommand', () => {
       const args = ['nonexistent.com'];
       const command = GetSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':nuclear-warning: Oops! Something went wrong: Test error')).to.be.true;
+      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: Test error')).to.be.true;
     });
   });
 

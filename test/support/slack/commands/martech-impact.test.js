@@ -41,7 +41,7 @@ function generateThirdPartySummaries(count) {
 
 describe('MartechImpactCommand', () => {
   let context;
-  let say;
+  let slackContext;
   let dataAccessStub;
 
   beforeEach(() => {
@@ -50,7 +50,7 @@ describe('MartechImpactCommand', () => {
       getLatestAuditForSite: sinon.stub(),
     };
     context = { dataAccess: dataAccessStub };
-    say = sinon.stub();
+    slackContext = { say: sinon.spy() };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -78,18 +78,18 @@ describe('MartechImpactCommand', () => {
 
       const command = MartechImpactCommand(context);
 
-      await command.handleExecution(['example.com'], say);
+      await command.handleExecution(['example.com'], slackContext);
 
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
     });
 
     it('responds with usage instructions for invalid input', async () => {
       const args = [''];
       const command = MartechImpactCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith('Usage: _get martech impact or get third party impact {baseURL};_')).to.be.true;
+      expect(slackContext.say.calledWith('Usage: _get martech impact or get third party impact {baseURL};_')).to.be.true;
     });
 
     it('notifies when no site is found', async () => {
@@ -98,9 +98,9 @@ describe('MartechImpactCommand', () => {
       const args = ['nonexistent.com'];
       const command = MartechImpactCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':x: No site found with base URL \'https://nonexistent.com\'.')).to.be.true;
+      expect(slackContext.say.calledWith(':x: No site found with base URL \'https://nonexistent.com\'.')).to.be.true;
     });
 
     it('notifies when no audit is found', async () => {
@@ -115,9 +115,9 @@ describe('MartechImpactCommand', () => {
       const args = ['example.com'];
       const command = MartechImpactCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':warning: No audit found for site: https://example.com')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: No audit found for site: https://example.com')).to.be.true;
     });
 
     it('notifies when an error occurs', async () => {
@@ -126,9 +126,9 @@ describe('MartechImpactCommand', () => {
       const args = ['nonexistent.com'];
       const command = MartechImpactCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':nuclear-warning: Oops! Something went wrong: Test error')).to.be.true;
+      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: Test error')).to.be.true;
     });
   });
 

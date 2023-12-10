@@ -60,7 +60,7 @@ function generateSites(count) {
 
 describe('GetSitesCommand', () => {
   let context;
-  let say;
+  let slackContext;
   let dataAccessStub;
   let boltAppStub;
   let logStub;
@@ -79,7 +79,7 @@ describe('GetSitesCommand', () => {
     };
 
     context = { dataAccess: dataAccessStub, boltApp: boltAppStub, log: logStub };
-    say = sinon.stub();
+    slackContext = { say: sinon.spy() };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -103,9 +103,9 @@ describe('GetSitesCommand', () => {
       dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
-      await command.handleExecution([], say);
+      await command.handleExecution([], slackContext);
 
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
       // Additional assertions for message content
     });
 
@@ -113,45 +113,45 @@ describe('GetSitesCommand', () => {
       dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
-      await command.handleExecution(['non-live', 'desktop'], say);
+      await command.handleExecution(['non-live', 'desktop'], slackContext);
 
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
     });
 
     it('handles command execution with live and mobile', async () => {
       dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
-      await command.handleExecution(['live', 'mobile'], say);
+      await command.handleExecution(['live', 'mobile'], slackContext);
 
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
     });
 
     it('handles command execution with all', async () => {
       dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
-      await command.handleExecution(['all', 'mobile'], say);
+      await command.handleExecution(['all', 'mobile'], slackContext);
 
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
     });
 
     it('handles command execution with unknown arg', async () => {
       dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
-      await command.handleExecution(['unknown', 'unknown'], say);
+      await command.handleExecution(['unknown', 'unknown'], slackContext);
 
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
     });
 
     it('handles errors', async () => {
       dataAccessStub.getSitesWithLatestAudit.rejects(new Error('test error'));
       const command = GetSitesCommand(context);
 
-      await command.handleExecution(['all', 'mobile'], say);
+      await command.handleExecution(['all', 'mobile'], slackContext);
 
-      expect(say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
+      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
     });
   });
 
@@ -160,7 +160,7 @@ describe('GetSitesCommand', () => {
       dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(50));
       const command = GetSitesCommand(context);
 
-      await command.handleExecution([], say);
+      await command.handleExecution([], slackContext);
 
       // Assert that the pagination blocks are generated correctly
       // Additional assertions for the 'Previous', 'Next', and numbered page buttons
@@ -171,12 +171,12 @@ describe('GetSitesCommand', () => {
       const command = GetSitesCommand(context);
 
       await command.paginationHandler({
-        say,
+        say: slackContext.say,
         ack: sinon.stub(),
         action: { value: '2:all:mobile' },
       });
 
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
       expect(logStub.info.called).to.be.true;
       expect(dataAccessStub.getSitesWithLatestAudit.called).to.be.true;
     });
@@ -186,12 +186,12 @@ describe('GetSitesCommand', () => {
       const command = GetSitesCommand(context);
 
       await command.paginationHandler({
-        say,
+        say: slackContext.say,
         ack: sinon.stub(),
         action: { value: '2:all:mobile' },
       });
 
-      expect(say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
+      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
     });
   });
 

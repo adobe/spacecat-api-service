@@ -19,7 +19,7 @@ import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
 
 describe('AddSiteCommand', () => {
   let context;
-  let say;
+  let slackContext;
   let dataAccessStub;
   let sqsStub;
 
@@ -32,7 +32,7 @@ describe('AddSiteCommand', () => {
       sendMessage: sinon.stub().resolves(),
     };
     context = { dataAccess: dataAccessStub, sqs: sqsStub, env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl' } };
-    say = sinon.stub();
+    slackContext = { say: sinon.spy() };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -53,20 +53,20 @@ describe('AddSiteCommand', () => {
       const args = ['example.com'];
       const command = AddSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(dataAccessStub.addSite.calledOnce).to.be.true;
-      expect(say.calledWith(sinon.match.string)).to.be.true;
+      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
     it('warns when an invalid site domain is provided', async () => {
       const args = [''];
       const command = AddSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':warning: Please provide a valid site domain.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Please provide a valid site domain.')).to.be.true;
     });
 
     it('informs when the site is already added', async () => {
@@ -75,9 +75,9 @@ describe('AddSiteCommand', () => {
       const args = ['example.com'];
       const command = AddSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(":x: 'https://example.com' was already added before. You can run _@spacecat get site https://example.com_")).to.be.true;
+      expect(slackContext.say.calledWith(":x: 'https://example.com' was already added before. You can run _@spacecat get site https://example.com_")).to.be.true;
     });
 
     it('handles error during site addition', async () => {
@@ -87,9 +87,9 @@ describe('AddSiteCommand', () => {
       const args = ['example.com'];
       const command = AddSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':x: Problem adding the site. Please contact the admins.')).to.be.true;
+      expect(slackContext.say.calledWith(':x: Problem adding the site. Please contact the admins.')).to.be.true;
     });
 
     it('sends an audit message after adding the site', async () => {
@@ -99,7 +99,7 @@ describe('AddSiteCommand', () => {
       const args = ['example.com'];
       const command = AddSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
       expect(sqsStub.sendMessage.called).to.be.true;
     });
@@ -110,9 +110,9 @@ describe('AddSiteCommand', () => {
       const args = ['example.com'];
       const command = AddSiteCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
+      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
     });
   });
 });

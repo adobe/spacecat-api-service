@@ -19,7 +19,7 @@ import RunAuditCommand from '../../../../src/support/slack/commands/run-audit.js
 
 describe('RunAuditCommand', () => {
   let context;
-  let say;
+  let slackContext;
   let dataAccessStub;
   let sqsStub;
 
@@ -31,7 +31,7 @@ describe('RunAuditCommand', () => {
       sendMessage: sinon.stub().resolves(),
     };
     context = { dataAccess: dataAccessStub, sqs: sqsStub, env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl' } };
-    say = sinon.stub();
+    slackContext = { say: sinon.spy() };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -48,37 +48,37 @@ describe('RunAuditCommand', () => {
       dataAccessStub.getSiteByBaseURL.resolves({ getId: () => '123' });
       const command = RunAuditCommand(context);
 
-      await command.handleExecution(['validsite.com'], say);
+      await command.handleExecution(['validsite.com'], slackContext);
 
-      expect(say.called).to.be.true;
-      expect(say.firstCall.args[0]).to.include(':white_check_mark: Audit check is triggered for https://validsite.com');
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Audit check is triggered for https://validsite.com');
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
     it('responds with a warning for an invalid site url', async () => {
       const command = RunAuditCommand(context);
 
-      await command.handleExecution([''], say);
+      await command.handleExecution([''], slackContext);
 
-      expect(say.calledWith(':warning: Please provide a valid site url.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Please provide a valid site url.')).to.be.true;
     });
 
     it('informs user if the site was not added previously', async () => {
       dataAccessStub.getSiteByBaseURL.resolves(null);
       const command = RunAuditCommand(context);
 
-      await command.handleExecution(['unknownsite.com'], say);
+      await command.handleExecution(['unknownsite.com'], slackContext);
 
-      expect(say.calledWith(':x: \'https://unknownsite.com\' was not added previously. You can run \'@spacecat add site https://unknownsite.com')).to.be.true;
+      expect(slackContext.say.calledWith(':x: \'https://unknownsite.com\' was not added previously. You can run \'@spacecat add site https://unknownsite.com')).to.be.true;
     });
 
     it('informs user when error occurs', async () => {
       dataAccessStub.getSiteByBaseURL.rejects(new Error('Test Error'));
       const command = RunAuditCommand(context);
 
-      await command.handleExecution(['some-site.com'], say);
+      await command.handleExecution(['some-site.com'], slackContext);
 
-      expect(say.calledWith(':nuclear-warning: Oops! Something went wrong: Test Error')).to.be.true;
+      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: Test Error')).to.be.true;
     });
   });
 });

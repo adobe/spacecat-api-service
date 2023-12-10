@@ -40,10 +40,13 @@ function RunAuditCommand(context) {
    * and triggers a new audit for the given site
    *
    * @param {string[]} args - The arguments provided to the command ([site]).
-   * @param {Function} say - The function provided by the bot to send messages.
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
-  const handleExecution = async (args, say) => {
+  const handleExecution = async (args, slackContext) => {
+    const { say } = slackContext;
+
     try {
       const [baseURLInput] = args;
 

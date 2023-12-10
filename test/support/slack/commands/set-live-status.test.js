@@ -19,7 +19,7 @@ import SetLiveStatusCommand from '../../../../src/support/slack/commands/set-liv
 
 describe('SetLiveStatusCommand', () => {
   let context;
-  let say;
+  let slackContext;
   let dataAccessStub;
 
   beforeEach(() => {
@@ -28,7 +28,7 @@ describe('SetLiveStatusCommand', () => {
       updateSite: sinon.stub(),
     };
     context = { dataAccess: dataAccessStub };
-    say = sinon.stub();
+    slackContext = { say: sinon.spy() };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -51,12 +51,12 @@ describe('SetLiveStatusCommand', () => {
 
       const command = SetLiveStatusCommand(context);
 
-      await command.handleExecution(['validsite.com'], say);
+      await command.handleExecution(['validsite.com'], slackContext);
 
       expect(dataAccessStub.getSiteByBaseURL.calledWith('https://validsite.com')).to.be.true;
       expect(mockSite.toggleLive.calledOnce).to.be.true;
       expect(dataAccessStub.updateSite.calledWith(mockSite)).to.be.true;
-      expect(say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
     });
 
     it('toggles live status for a non-live site', async () => {
@@ -68,20 +68,20 @@ describe('SetLiveStatusCommand', () => {
 
       const command = SetLiveStatusCommand(context);
 
-      await command.handleExecution(['validsite.com'], say);
+      await command.handleExecution(['validsite.com'], slackContext);
 
       expect(dataAccessStub.getSiteByBaseURL.calledWith('https://validsite.com')).to.be.true;
       expect(mockSite.toggleLive.calledOnce).to.be.true;
       expect(dataAccessStub.updateSite.calledWith(mockSite)).to.be.true;
-      expect(say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
     });
 
     it('informs user if the site domain is invalid', async () => {
       const command = SetLiveStatusCommand(context);
 
-      await command.handleExecution([''], say);
+      await command.handleExecution([''], slackContext);
 
-      expect(say.calledWith(':warning: Please provide a valid site base URL.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Please provide a valid site base URL.')).to.be.true;
     });
 
     it('informs user if no site found with the given domain', async () => {
@@ -89,9 +89,9 @@ describe('SetLiveStatusCommand', () => {
 
       const command = SetLiveStatusCommand(context);
 
-      await command.handleExecution(['unknownsite.com'], say);
+      await command.handleExecution(['unknownsite.com'], slackContext);
 
-      expect(say.calledWith(":x: No site found with base URL 'https://unknownsite.com'.")).to.be.true;
+      expect(slackContext.say.calledWith(":x: No site found with base URL 'https://unknownsite.com'.")).to.be.true;
     });
 
     it('handles errors during execution', async () => {
@@ -99,9 +99,9 @@ describe('SetLiveStatusCommand', () => {
 
       const command = SetLiveStatusCommand(context);
 
-      await command.handleExecution(['validsite.com'], say);
+      await command.handleExecution(['validsite.com'], slackContext);
 
-      expect(say.calledWithMatch(':nuclear-warning: Oops! Something went wrong: Test Error')).to.be.true;
+      expect(slackContext.say.calledWithMatch(':nuclear-warning: Oops! Something went wrong: Test Error')).to.be.true;
     });
   });
 });

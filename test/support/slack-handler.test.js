@@ -24,7 +24,7 @@ describe('Slack Handler', () => {
 
   let slackHandler;
   let logStub;
-  let sayStub;
+  let slackContext;
   let commandsStub;
 
   beforeEach(() => {
@@ -32,7 +32,7 @@ describe('Slack Handler', () => {
       info: sandbox.stub(),
     };
 
-    sayStub = sandbox.stub().resolves();
+    slackContext = { say: sinon.spy() };
 
     commandsStub = [
       { accepts: sandbox.stub().returns(false), execute: sandbox.stub(), phrases: ['not-help'] },
@@ -52,12 +52,12 @@ describe('Slack Handler', () => {
 
     await slackHandler.onAppMention({
       event: { text: 'some-command', ts: '12345' },
-      say: sayStub,
+      say: slackContext.say,
       context: {},
     });
 
     expect(matchingCommand.execute.calledOnce).to.be.true;
-    expect(sayStub.called).to.be.false; // No default message should be sent
+    expect(slackContext.say.called).to.be.false; // No default message should be sent
   });
 
   it('executes the help command if no command matches', async () => {
@@ -65,7 +65,7 @@ describe('Slack Handler', () => {
 
     await slackHandler.onAppMention({
       event: { text: 'help', ts: '12345' },
-      say: sayStub,
+      say: slackContext.say,
       context: {},
     });
 
@@ -75,12 +75,12 @@ describe('Slack Handler', () => {
   it('sends a default message if no command matches and no help command found', async () => {
     await SlackHandler([], logStub).onAppMention({
       event: { text: 'unknown-command', ts: '12345' },
-      say: sayStub,
+      say: slackContext.say,
       context: {},
     });
 
-    expect(sayStub.calledOnce).to.be.true;
-    expect(sayStub.firstCall.args[0]).to.include({
+    expect(slackContext.say.calledOnce).to.be.true;
+    expect(slackContext.say.firstCall.args[0]).to.include({
       text: 'Sorry, I am misconfigured, no commands found.',
     });
   });
@@ -101,8 +101,8 @@ describe('Slack Handler', () => {
     // Mock command that uses the provided say function to send a block message
     const mockCommand = {
       accepts: () => true,
-      execute: async (_, say) => {
-        await say(blockMessage);
+      execute: async (_, ctx) => {
+        await ctx.say(blockMessage);
       },
       phrases: ['mock-command'],
     };
@@ -111,12 +111,12 @@ describe('Slack Handler', () => {
 
     await slackHandler.onAppMention({
       event: { text: 'mock-command', ts: '12345' },
-      say: sayStub,
+      say: slackContext.say,
       context: {},
     });
 
-    expect(sayStub.calledOnce).to.be.true;
-    expect(sayStub.firstCall.args[0]).to.deep.equal({
+    expect(slackContext.say.calledOnce).to.be.true;
+    expect(slackContext.say.firstCall.args[0]).to.deep.equal({
       ...blockMessage,
       thread_ts: '12345',
     });

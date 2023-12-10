@@ -100,10 +100,13 @@ function GetSiteCommand(context) {
    * If an error occurs during execution, an error message is sent back.
    *
    * @param {Array<string>} args - The arguments provided to the command.
-   * @param {Function} say - The function provided by the bot to send messages.
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
-  const handleExecution = async (args, say) => {
+  const handleExecution = async (args, slackContext) => {
+    const { say } = slackContext;
+
     try {
       const [baseURLInput, psiStrategyInput] = args;
 

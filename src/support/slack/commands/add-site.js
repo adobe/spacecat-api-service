@@ -43,10 +43,13 @@ function AddSiteCommand(context) {
    * Runs an initial audit for the added domain
    *
    * @param {string[]} args - The arguments provided to the command ([site]).
-   * @param {Function} say - The function provided by the bot to send messages.
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
-  const handleExecution = async (args, say) => {
+  const handleExecution = async (args, slackContext) => {
+    const { say } = slackContext;
+
     try {
       const [baseURLInput] = args;
 
@@ -75,7 +78,12 @@ function AddSiteCommand(context) {
         context.sqs,
         context.env.AUDIT_JOBS_QUEUE_URL,
         'lhs-mobile',
-        {},
+        {
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
         newSite.getId(),
       );
 

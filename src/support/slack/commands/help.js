@@ -45,11 +45,14 @@ function HelpCommand(context) {
    * Sends a help message to the user.
    *
    * @param {Array} args - The arguments passed to the command.
-   * @param {Function} say - The function to send a message to the user.
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
    * @param {Array} commands - The list of commands the bot can execute.
    * @returns {Promise<void>} A Promise that resolves when the command is executed.
    */
-  const handleExecution = async (args, say, commands) => {
+  const handleExecution = async (args, slackContext, commands) => {
+    const { say } = slackContext;
+
     const blocks = [{
       type: 'section',
       text: {

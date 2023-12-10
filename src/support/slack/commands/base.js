@@ -59,17 +59,31 @@ function BaseCommand({
    * Throws an error by default. This method should be overridden by a specific command.
    *
    * @param {string} message - The incoming message.
-   * @param {Function} say - The function provided by the bot to send messages.
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
+   * @param {string} slackContext.channelId - The Slack channel ID.
+   * @param {string} slackContext.threadTs - The Slack thread timestamp.
    * @param {Array[Object]} commands - List of commands existing.
    * @throws {Error} Always thrown, since this method must be overridden.
    */
-  async function execute(message, say, commands) {
+  async function execute(message, slackContext, commands) {
     const args = extractArguments(message);
 
-    return this.handleExecution(args, say, commands);
+    return this.handleExecution(args, slackContext, commands);
   }
 
-  const handleExecution = async () => {
+  /**
+   * Stub for the command's execution handler function.
+   * @param {Array<string>} args - The arguments provided to the command.
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
+   * @param {string} slackContext.channelId - The Slack channel ID.
+   * @param {string} slackContext.threadTs - The Slack thread timestamp.
+   * @param {Array[Object]} commands - List of commands existing.
+   * @return {Promise<void>} A promise that resolves when the operation is complete.
+   */
+  // eslint-disable-next-line no-unused-vars
+  const handleExecution = async (args, slackContext, commands) => {
     throw new Error('Execute method must be overridden by a specific command.');
   };
 

@@ -20,7 +20,7 @@ import AddRepoCommand from '../../../../src/support/slack/commands/add-repo.js';
 
 describe('AddRepoCommand', () => {
   let context;
-  let say;
+  let slackContext;
   let dataAccessStub;
   let sqsStub;
   let siteStub;
@@ -30,7 +30,7 @@ describe('AddRepoCommand', () => {
       sendMessage: sinon.stub().resolves(),
     };
 
-    say = sinon.stub().resolves();
+    slackContext = { say: sinon.spy() };
 
     siteStub = {
       getId: sinon.stub(),
@@ -74,9 +74,9 @@ describe('AddRepoCommand', () => {
       const args = ['validSite.com', 'https://github.com/valid/repo'];
       const command = AddRepoCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.called).to.be.true;
+      expect(slackContext.say.called).to.be.true;
     });
 
     it('handles archived repository', async () => {
@@ -87,9 +87,9 @@ describe('AddRepoCommand', () => {
       const args = ['validSite.com', 'https://github.com/valid/repo'];
       const command = AddRepoCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':warning: The GitHub repository \'https://github.com/valid/repo\' is archived. Please unarchive it before adding it to a site.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: The GitHub repository \'https://github.com/valid/repo\' is archived. Please unarchive it before adding it to a site.')).to.be.true;
     });
 
     it('handles repo URL without scheme', async () => {
@@ -100,9 +100,9 @@ describe('AddRepoCommand', () => {
       const args = ['validSite.com', 'github.com/valid/repo'];
       const command = AddRepoCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith('\n'
+      expect(slackContext.say.calledWith('\n'
         + '      :white_check_mark: Github repo is successfully added to the site!\n'
         + '      \n'
         + '\n'
@@ -120,27 +120,27 @@ describe('AddRepoCommand', () => {
       const args = [];
       const command = AddRepoCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(command.usage())).to.be.true;
+      expect(slackContext.say.calledWith(command.usage())).to.be.true;
     });
 
     it('handles missing GitHub URL', async () => {
       const args = ['validSite.com'];
       const command = AddRepoCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(command.usage())).to.be.true;
+      expect(slackContext.say.calledWith(command.usage())).to.be.true;
     });
 
     it('handles invalid GitHub repository URL', async () => {
       const args = ['validSite.com', 'invalidRepoURL.com'];
       const command = AddRepoCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':warning: \'https://invalidrepourl.com\' is not a valid GitHub repository URL.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: \'https://invalidrepourl.com\' is not a valid GitHub repository URL.')).to.be.true;
     });
 
     it('handles site not found', async () => {
@@ -149,9 +149,9 @@ describe('AddRepoCommand', () => {
       const args = ['validSite.com', 'https://github.com/valid/repo'];
       const command = AddRepoCommand(context);
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
-      expect(say.calledWith(':x: No site found with base URL \'https://validsite.com\'.')).to.be.true;
+      expect(slackContext.say.calledWith(':x: No site found with base URL \'https://validsite.com\'.')).to.be.true;
     });
   });
 
@@ -169,10 +169,10 @@ describe('AddRepoCommand', () => {
         .get('/repos/valid/repo')
         .reply(200, { name: 'repoName', archived: false });
 
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
       // Assertions to confirm repo info was fetched and handled correctly
-      expect(say.calledWithMatch(/Github repo is successfully added/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Github repo is successfully added/)).to.be.true;
     });
 
     it('handles non-existent repository (404 error)', async () => {
@@ -181,10 +181,10 @@ describe('AddRepoCommand', () => {
         .reply(404);
 
       args[1] = 'https://github.com/invalid/repo';
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
       // Assertions to confirm handling of non-existent repository
-      expect(say.calledWith(':warning: The GitHub repository \'https://github.com/invalid/repo\' could not be found (private repo?).')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: The GitHub repository \'https://github.com/invalid/repo\' could not be found (private repo?).')).to.be.true;
     });
 
     it('handles errors other than 404 from GitHub API', async () => {
@@ -193,10 +193,10 @@ describe('AddRepoCommand', () => {
         .reply(500, { message: 'Internal Server Error' });
 
       args[1] = 'https://github.com/error/repo';
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
       // Assertions to confirm handling of other errors
-      expect(say.calledWithMatch(/Failed to fetch GitHub repository/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Failed to fetch GitHub repository/)).to.be.true;
     });
 
     it('handles network issues or no response scenarios', async () => {
@@ -205,10 +205,10 @@ describe('AddRepoCommand', () => {
         .replyWithError('Network error occurred');
 
       args[1] = 'https://github.com/network-issue/repo';
-      await command.handleExecution(args, say);
+      await command.handleExecution(args, slackContext);
 
       // Assertions to confirm handling of network issues
-      expect(say.calledWithMatch(/Network error occurred/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Network error occurred/)).to.be.true;
     });
   });
 });

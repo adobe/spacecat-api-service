@@ -56,18 +56,23 @@ function SlackHandler(commands, log) {
     const threadTs = getThreadTimestamp(event);
     const threadedSay = wrapSayForThread(say, threadTs);
     const message = getMessageFromEvent(event);
+    const slackContext = {
+      say: threadedSay,
+      channelId: event.channel,
+      threadTs,
+    };
 
     log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);
 
     const command = commands.find((cmd) => cmd.accepts(message));
     if (command) {
-      await command.execute(message, threadedSay, commands);
+      await command.execute(message, slackContext, commands);
       return;
     }
 
     const helpCommand = commands.find((cmd) => cmd.phrases.includes('help'));
     if (helpCommand) {
-      await helpCommand.execute(message, threadedSay, commands);
+      await helpCommand.execute(message, slackContext, commands);
       return;
     }
 
