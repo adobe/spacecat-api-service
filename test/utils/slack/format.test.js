@@ -104,7 +104,7 @@ describe('Utility Functions', () => {
       mockSite.isLive.returns(true);
 
       const expectedOutput = `
-      :mars-team: Domain: https://example.com
+      :mars-team: Base URL: https://example.com
       :github-4173: GitHub: https://github.com/example/repo
       :rocket: Is Live: Yes
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI check>
@@ -119,7 +119,7 @@ describe('Utility Functions', () => {
       mockSite.isLive.returns(false);
 
       const expectedOutput = `
-      :mars-team: Domain: https://example.com
+      :mars-team: Base URL: https://example.com
       :github-4173: GitHub: _not set_
       :submarine: Is Live: No
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI check>

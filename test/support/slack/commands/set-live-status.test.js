@@ -76,7 +76,7 @@ describe('SetLiveStatusCommand', () => {
       expect(slackContext.say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
     });
 
-    it('informs user if the site domain is invalid', async () => {
+    it('informs user if the site base URL is invalid', async () => {
       const command = SetLiveStatusCommand(context);
 
       await command.handleExecution([''], slackContext);
@@ -84,7 +84,7 @@ describe('SetLiveStatusCommand', () => {
       expect(slackContext.say.calledWith(':warning: Please provide a valid site base URL.')).to.be.true;
     });
 
-    it('informs user if no site found with the given domain', async () => {
+    it('informs user if no site found with the given base URL', async () => {
       dataAccessStub.getSiteByBaseURL.resolves(null);
 
       const command = SetLiveStatusCommand(context);

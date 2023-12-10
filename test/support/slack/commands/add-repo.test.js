@@ -106,7 +106,7 @@ describe('AddRepoCommand', () => {
         + '      :white_check_mark: Github repo is successfully added to the site!\n'
         + '      \n'
         + '\n'
-        + '      :mars-team: Domain: undefined\n'
+        + '      :mars-team: Base URL: undefined\n'
         + '      :github-4173: GitHub: _not set_\n'
         + '      :submarine: Is Live: No\n'
         + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI check>\n'

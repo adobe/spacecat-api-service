@@ -39,10 +39,10 @@ function SetLiveStatusCommand(context) {
   const { dataAccess, log } = context;
 
   /**
-   * Validates input, fetches the site by domain,
+   * Validates input, fetches the site by base URL,
    * and updates the "isLive" status.
    *
-   * @param {string[]} args - The arguments provided to the command ([siteDomain, isLive]).
+   * @param {string[]} args - The arguments provided to the command ([siteBaseURL, isLive]).
    * @param {Object} slackContext - The Slack context object.
    * @param {Function} slackContext.say - The Slack say function.
    * @returns {Promise} A promise that resolves when the operation is complete.

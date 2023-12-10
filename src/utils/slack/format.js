@@ -55,7 +55,7 @@ const printSiteDetails = (site) => {
   const psiURL = `https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=mobile`;
 
   return `
-      :mars-team: Domain: ${site.getBaseURL()}
+      :mars-team: Base URL: ${site.getBaseURL()}
       :github-4173: GitHub: ${site.getGitHubURL() || '_not set_'}
       ${site.isLive() ? ':rocket:' : ':submarine:'} Is Live: ${site.isLive() ? 'Yes' : 'No'}
       :lighthouse: <${psiURL}|Run PSI check>

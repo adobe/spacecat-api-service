@@ -26,7 +26,7 @@ import {
   printSiteDetails,
 } from '../../../utils/slack/format.js';
 
-const PHRASES = ['get site', 'get domain'];
+const PHRASES = ['get site', 'get baseURL'];
 
 /**
  * Formats a single row of the table, padding each cell according to the column widths.
@@ -87,16 +87,16 @@ function GetSiteCommand(context) {
   const baseCommand = BaseCommand({
     id: 'get-franklin-site-status',
     name: 'Get Franklin Site Status',
-    description: 'Retrieves audit status for a Franklin site by a given domain',
+    description: 'Retrieves audit status for a Franklin site by a given base URL',
     phrases: PHRASES,
-    usageText: `${PHRASES.join(' or ')} {domain} [desktop|mobile];`,
+    usageText: `${PHRASES.join(' or ')} {baseURL} [desktop|mobile];`,
   });
 
   const { dataAccess, log } = context;
 
   /**
    * Executes the GetSiteCommand. Retrieves the audit status for a site by
-   * a given domain and communicates the status back via the provided say function.
+   * a given base URL and communicates the status back via the provided say function.
    * If an error occurs during execution, an error message is sent back.
    *
    * @param {Array<string>} args - The arguments provided to the command.
@@ -118,7 +118,7 @@ function GetSiteCommand(context) {
         return;
       }
 
-      await say(`:hourglass: Retrieving status for domain: ${baseURL}, please wait...`);
+      await say(`:hourglass: Retrieving status for base URL: ${baseURL}, please wait...`);
 
       const site = await dataAccess.getSiteByBaseURL(baseURL);
 

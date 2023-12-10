@@ -60,10 +60,10 @@ function generateOverflowAccessory() {
 export function formatSites(sites = [], start, end) {
   return sites.slice(start, end).reduce((message, site, index) => {
     const baseURL = site.getBaseURL();
-    const domainText = baseURL.replace(/^main--/, '').replace(/--.*/, '');
+    const baseURLText = baseURL.replace(/^main--/, '').replace(/--.*/, '');
     const rank = start + index + 1;
 
-    let siteMessage = `${rank}. No audits found for ${domainText}`;
+    let siteMessage = `${rank}. No audits found for ${baseURLText}`;
     const audits = site.getAudits();
 
     if (audits.length) {
@@ -78,7 +78,7 @@ export function formatSites(sites = [], start, end) {
         seo = 0,
       } = scores;
 
-      siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${domainText}>`;
+      siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${baseURLText}>`;
       siteMessage += site.getGitHubURL() ? ` (<${site.getGitHubURL()}|GH>)` : '';
     }
 
@@ -179,7 +179,7 @@ function GetSitesCommand(context) {
       text: `
     *Franklin Sites Status:* ${totalSites} total ${filterStatus} sites / PSI: ${psiStrategy}
 
-    Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices >> Domain
+    Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices >> Base URL
 
     _Sites are ordered by performance score, then all other scores, ascending._
     ${formatSites(sites, start, end)}

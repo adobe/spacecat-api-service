@@ -119,7 +119,7 @@ function MartechImpactCommand(context) {
 
   /**
    * Executes the MartechImpactCommand. Retrieves the last tbt and third party
-   * summary audit status for a site by a given domain and communicates the status
+   * summary audit status for a site by a given base URL and communicates the status
    * back via the provided say function. If an error occurs during execution, an
    * error message is sent back.
    *

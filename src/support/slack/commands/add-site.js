@@ -41,7 +41,7 @@ function AddSiteCommand(context) {
 
   /**
    * Validates input and adds the site to db
-   * Runs an initial audit for the added domain
+   * Runs an initial audit for the added base URL
    *
    * @param {string[]} args - The arguments provided to the command ([site]).
    * @param {Object} slackContext - The Slack context object.
@@ -57,7 +57,7 @@ function AddSiteCommand(context) {
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!baseURL) {
-        await say(':warning: Please provide a valid site domain.');
+        await say(':warning: Please provide a valid site base URL.');
         return;
       }
 

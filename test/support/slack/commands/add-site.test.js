@@ -65,13 +65,13 @@ describe('AddSiteCommand', () => {
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
-    it('warns when an invalid site domain is provided', async () => {
+    it('warns when an invalid site base URL is provided', async () => {
       const args = [''];
       const command = AddSiteCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith(':warning: Please provide a valid site domain.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Please provide a valid site base URL.')).to.be.true;
     });
 
     it('informs when the site is already added', async () => {

@@ -80,8 +80,8 @@ describe('GetSiteCommand', () => {
       const command = GetSiteCommand(context);
       expect(command.id).to.equal('get-franklin-site-status');
       expect(command.name).to.equal('Get Franklin Site Status');
-      expect(command.description).to.equal('Retrieves audit status for a Franklin site by a given domain');
-      expect(command.phrases).to.deep.equal(['get site', 'get domain']);
+      expect(command.description).to.equal('Retrieves audit status for a Franklin site by a given base URL');
+      expect(command.phrases).to.deep.equal(['get site', 'get baseURL']);
     });
   });
 
