@@ -25,47 +25,47 @@ export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 
 /**
- * Extracts the domain from the input string. If the input follows a
- * specific Slack URL format, it extracts the domain from the URL. If not,
- * it assumes the input is the domain. If no input is provided, it returns null.
+ * Extracts a URL from a given input string. The input can be in a Slack message
+ * format or a regular URL string. If the input string contains a URL, the function
+ * extracts and processes it based on the provided flags.
  *
- * @param {string} input - The input string.
- * @param domainOnly - If true, only the domain is returned. If false, the entire input is returned.
- * @param includeScheme - If true, the scheme is included in the output.
- * @returns {string|null} The domain extracted from the input message or null.
+ * @param {string} input - The input string to process.
+ * @param {boolean} [domainOnly=false] - Flag to indicate if only the domain should be returned.
+ * @param {boolean} [includeScheme=true] - Flag to determine if the URL scheme
+ * should be included in the output.
+ * @returns {string|null} Extracted URL or domain based on the input and flags,
+ * or null if no valid URL is found.
  */
 function extractURLFromSlackInput(input, domainOnly = false, includeScheme = true) {
+  // Check if the input is a valid string
   if (!isString(input)) {
     return null;
   }
 
-  const tokens = input.split(' ');
+  // Attempt to match the input with the Slack URL format regex
+  const match = SLACK_URL_FORMAT_REGEX.exec(input);
+  if (match) {
+    // Construct the URL, adding 'http://' if no scheme is present
+    const urlToken = match[0].includes('://') ? match[0] : `http://${match[0]}`;
+    const url = new URL(urlToken);
 
-  for (const token of tokens) {
-    const match = SLACK_URL_FORMAT_REGEX.exec(token);
+    // Remove 'www.' prefix from the hostname
+    const finalHostname = url.hostname.replace(/^www\./, '');
 
-    if (match !== null) {
-      // see https://api.slack.com/reference/surfaces/formatting#links-in-retrieved-messages
-      const processedToken = token.charAt(0) === '<' && token.charAt(token.length - 1) === '>'
-        ? token.slice(1, token.length - 1).split('|').at(0)
-        : token;
-      const urlToken = processedToken.includes('://') ? processedToken : `http://${processedToken}`;
-      const url = new URL(urlToken);
-      const { hostname, pathname } = url;
-      // we do not keep the www
-      const finalHostname = hostname.replace(/^www\./, '');
-      // we remove trailing slashes for paths only when an extension is provided
-      const parts = pathname.split('.');
-      const finalPathname = parts.length > 1 && parts[parts.length - 1].endsWith('/')
-        ? pathname.replace(/\/+$/, '')
-        : pathname;
-      const baseURL = !domainOnly && finalPathname && finalPathname !== '/'
-        ? `${finalHostname}${finalPathname}`
-        : finalHostname;
-
-      return includeScheme ? `https://${baseURL}` : baseURL;
+    // If only the domain is required, return it
+    if (domainOnly) {
+      return finalHostname;
     }
+
+    // Remove trailing slashes from the pathname
+    const finalPathname = url.pathname.replace(/\/+$/, '');
+    // Construct the base URL
+    const baseURL = finalPathname && finalPathname !== '/' ? `${finalHostname}${finalPathname}` : finalHostname;
+
+    // Include scheme in the output if required
+    return includeScheme ? `https://${baseURL}` : baseURL;
   }
+
   return null;
 }
 

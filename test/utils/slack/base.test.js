@@ -90,12 +90,12 @@ describe('Base Slack Utils', () => {
     it('extractURLFromSlackInput domain only', async () => {
       const expected = 'business.adobe.com';
 
-      expect(extractURLFromSlackInput('get site http://business.adobe.com/some/path/w1th_numb3rs'), expected);
-      expect(extractURLFromSlackInput('get site <http://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>'), expected);
-      expect(extractURLFromSlackInput('get site https://business.adobe.com/some/path/w1th_numb3rs'), expected);
-      expect(extractURLFromSlackInput('get site <https://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>'), expected);
-      expect(extractURLFromSlackInput('add site https://business.adobe.com/some/path/w1th_numb3rs/'), expected);
-      expect(extractURLFromSlackInput('add site <https://business.adobe.com/some/path/w1th_numb3rs/>'), expected);
+      expect(extractURLFromSlackInput('get site http://business.adobe.com/some/path/w1th_numb3rs', true), expected);
+      expect(extractURLFromSlackInput('get site <http://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>', true), expected);
+      expect(extractURLFromSlackInput('get site https://business.adobe.com/some/path/w1th_numb3rs', true), expected);
+      expect(extractURLFromSlackInput('get site <https://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>', true), expected);
+      expect(extractURLFromSlackInput('add site https://business.adobe.com/some/path/w1th_numb3rs/', true), expected);
+      expect(extractURLFromSlackInput('add site <https://business.adobe.com/some/path/w1th_numb3rs/>', true), expected);
     });
 
     it('extractURLFromSlackInput with trailing tokens', async () => {
