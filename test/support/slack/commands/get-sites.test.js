@@ -201,8 +201,8 @@ describe('GetSitesCommand', () => {
       const formattedSites = formatSites(sites, 0, sites.length);
 
       expect(formattedSites).to.equal('\n'
-        + '1. :rocket: 90% - 80% - 70% - 0%: <https://site-0.com|https://site-0.com> (<https://github.com/site-0|GH>)\n'
-        + '2. :submarine: 90% - 80% - 70% - 0%: <https://site-1.com|https://site-1.com>');
+        + '1. :rocket: 90% - 80% - 70% - 60%: <https://site-0.com|https://site-0.com> (<https://github.com/site-0|GH>)\n'
+        + '2. :submarine: 90% - 80% - 70% - 60%: <https://site-1.com|https://site-1.com>');
     });
   });
 });

@@ -72,7 +72,10 @@ export function formatSites(sites = [], start, end) {
 
       const scores = lastAudit.getScores();
       const {
-        performance = 0, accessibility = 0, bestPractices = 0, seo = 0,
+        performance = 0,
+        accessibility = 0,
+        'best-practices': bestPractices = 0,
+        seo = 0,
       } = scores;
 
       siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${domainText}>`;
@@ -179,7 +182,7 @@ function GetSitesCommand(context) {
     Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices >> Domain
 
     _Sites are ordered by performance score, then all other scores, ascending._
-    ${formatSites(sites, start, end, psiStrategy)}
+    ${formatSites(sites, start, end)}
     `,
       accessory: generateOverflowAccessory(),
     }];
