@@ -127,7 +127,7 @@ function GetSiteCommand(context) {
         return;
       }
 
-      const audits = await dataAccess.getAuditsForSite(site.getId(), `lhs-${psiStrategy}`);
+      const audits = await dataAccess.getAuditsForSite(site.getId(), `lhs-${psiStrategy}`, false);
 
       const textSections = [{
         text: `
