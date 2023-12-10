@@ -33,7 +33,7 @@ import {
 } from './utils/response-utils.js';
 
 // prevents webpack build error
-import { App } from './utils/slack/bolt.cjs';
+import { App as SlackApp } from './utils/slack/bolt.cjs';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
@@ -81,7 +81,7 @@ async function run(request, context) {
     const routeHandlers = getRouteHandlers(
       AuditsController(context.dataAccess),
       SitesController(context.dataAccess),
-      SlackController(context.dataAccess, App),
+      SlackController(SlackApp),
       trigger,
     );
 
