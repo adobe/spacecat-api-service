@@ -187,6 +187,33 @@ const getThreadTimestamp = (event) => event.thread_ts || event.ts;
  */
 const getMessageFromEvent = (event) => event.text?.replace(BOT_MENTION_REGEX, '').trim();
 
+/**
+ * Wraps the Slack say function to respond in a thread. This is necessary because
+ * the Slack say function does not support threads. The wrapped function will
+ * send messages in a thread if the threadTs is set. Otherwise, it will send
+ * messages in the channel. The wrapped function will also set the threadTs
+ * for the next message. The threadTs is set as a property of the function
+ * for convenience.
+ *
+ * @param {Function} say - The original Slack say function.
+ * @param {string} threadTs - The timestamp of the thread to respond in.
+ * @returns {Function} A wrapped say function that sends messages in a thread.
+ */
+const wrapSayForThread = (say, threadTs) => {
+  const wrappedFunction = async (message) => {
+    const messageOptions = typeof message === 'string' ? { text: message } : message;
+    await say({
+      ...messageOptions,
+      thread_ts: threadTs,
+    });
+  };
+
+  // Attach thread_ts as a property of the function
+  wrappedFunction.threadTs = threadTs;
+
+  return wrappedFunction;
+};
+
 export {
   extractURLFromSlackInput,
   getQueryParams,
@@ -196,4 +223,5 @@ export {
   sendMessageBlocks,
   getThreadTimestamp,
   getMessageFromEvent,
+  wrapSayForThread,
 };

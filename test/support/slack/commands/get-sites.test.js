@@ -94,7 +94,6 @@ describe('GetSitesCommand', () => {
       GetSitesCommand(context);
 
       expect(boltAppStub.action.calledWith(/^paginate_sites_(prev|next|page_\d+)$/)).to.be.true;
-      expect(boltAppStub.action.calledWith('reply_in_thread')).to.be.true;
     });
   });
 
@@ -167,7 +166,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles pagination other than start', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(30));
       const command = GetSitesCommand(context);
 
       await command.paginationHandler({
@@ -191,7 +190,10 @@ describe('GetSitesCommand', () => {
         action: { value: '2:all:mobile' },
       });
 
-      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
+      expect(slackContext.say.calledWith({
+        text: ':nuclear-warning: Oops! Something went wrong: test error',
+        thread_ts: undefined,
+      })).to.be.true;
     });
   });
 

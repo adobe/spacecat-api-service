@@ -10,7 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { getMessageFromEvent, getThreadTimestamp } from '../../utils/slack/base.js';
+import {
+  getMessageFromEvent,
+  getThreadTimestamp,
+  wrapSayForThread,
+} from '../../utils/slack/base.js';
 
 /**
  * Creates a slack handler.
@@ -20,21 +24,6 @@ import { getMessageFromEvent, getThreadTimestamp } from '../../utils/slack/base.
  * @constructor
  */
 function SlackHandler(commands, log) {
-  /**
-   * Wraps the Slack say function to respond in a thread.
-   *
-   * @param {Function} say - The original Slack say function.
-   * @param {string} threadTs - The timestamp of the thread to respond in.
-   * @returns {Function} A wrapped say function that sends messages in a thread.
-   */
-  const wrapSayForThread = (say, threadTs) => async (message) => {
-    const messageOptions = typeof message === 'string' ? { text: message } : message;
-    await say({
-      ...messageOptions,
-      thread_ts: threadTs,
-    });
-  };
-
   /**
    * Handles app_mention event.
    *

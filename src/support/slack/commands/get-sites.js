@@ -13,7 +13,7 @@
 import BaseCommand from './base.js';
 
 import { formatScore, formatURL } from '../../../utils/slack/format.js';
-import { sendMessageBlocks, postErrorMessage } from '../../../utils/slack/base.js';
+import { sendMessageBlocks, postErrorMessage, wrapSayForThread } from '../../../utils/slack/base.js';
 
 const PAGE_SIZE = 10;
 const PHRASES = ['get sites', 'get all sites'];
@@ -87,8 +87,13 @@ export function formatSites(sites = [], start, end) {
 }
 
 /**
- * Generate pagination blocks for a Slack message.
+ * Generate pagination blocks for a Slack message. The pagination blocks
+ * include buttons for the previous page, next page, and specific pages.
+ * The pagination blocks also include the thread timestamp to use for the
+ * pagination actions. The pagination actions are handled by the
+ * paginationHandler function.
  *
+ * @param {string} threadTs - The thread timestamp to use for the pagination actions.
  * @param {number} start - The index to start the page.
  * @param {number} end - The index to end the page.
  * @param {number} totalSites - The total number of sites.
@@ -96,7 +101,14 @@ export function formatSites(sites = [], start, end) {
  * @param {string} psiStrategy - The strategy to show scores of.
  * @returns {Object} The pagination blocks object.
  */
-function generatePaginationBlocks(start, end, totalSites, filterStatus, psiStrategy = 'mobile') {
+function generatePaginationBlocks(
+  threadTs,
+  start,
+  end,
+  totalSites,
+  filterStatus,
+  psiStrategy = 'mobile',
+) {
   const blocks = [];
   const numberOfPages = Math.ceil(totalSites / PAGE_SIZE);
 
@@ -140,6 +152,12 @@ function generatePaginationBlocks(start, end, totalSites, filterStatus, psiStrat
     });
   }
 
+  // Modify each block to include thread_ts in the value
+  blocks.forEach((block) => {
+    // eslint-disable-next-line no-param-reassign
+    block.value += `:${threadTs}`;
+  });
+
   return {
     type: 'actions',
     elements: blocks,
@@ -165,7 +183,7 @@ function GetSitesCommand(context) {
 
   const { dataAccess, log } = context;
 
-  async function fetchAndFormatSites(start, filterStatus, psiStrategy) {
+  async function fetchAndFormatSites(threadTs, start, filterStatus, psiStrategy) {
     let sites = await dataAccess.getSitesWithLatestAudit(`lhs-${psiStrategy}`);
 
     if (filterStatus !== 'all') {
@@ -188,7 +206,7 @@ function GetSitesCommand(context) {
     }];
 
     const additionalBlocks = [
-      generatePaginationBlocks(start, end, totalSites, filterStatus, psiStrategy),
+      generatePaginationBlocks(threadTs, start, end, totalSites, filterStatus, psiStrategy),
     ];
 
     return { textSections, additionalBlocks };
@@ -207,17 +225,18 @@ function GetSitesCommand(context) {
 
     await ack();
 
-    const [newStart, filterStatus, psiStrategy] = action.value.split(':');
+    const [newStart, filterStatus, psiStrategy, threadTs] = action.value.split(':');
+    const threadedSay = wrapSayForThread(say, threadTs);
     const start = parseInt(newStart, 10);
 
     try {
       const {
         textSections,
         additionalBlocks,
-      } = await fetchAndFormatSites(start, filterStatus, psiStrategy);
-      await sendMessageBlocks(say, textSections, additionalBlocks);
+      } = await fetchAndFormatSites(threadTs, start, filterStatus, psiStrategy);
+      await sendMessageBlocks(threadedSay, textSections, additionalBlocks);
     } catch (error) {
-      await postErrorMessage(say, error);
+      await postErrorMessage(threadedSay, error);
     }
 
     const endTime = process.hrtime(startTime);
@@ -237,7 +256,6 @@ function GetSitesCommand(context) {
     }
 
     ctx.boltApp.action(/^paginate_sites_(prev|next|page_\d+)$/, paginationHandler);
-    ctx.boltApp.action('reply_in_thread');
   };
 
   /**
@@ -284,7 +302,7 @@ function GetSitesCommand(context) {
       const {
         textSections,
         additionalBlocks,
-      } = await fetchAndFormatSites(0, filterStatus, psiStrategy);
+      } = await fetchAndFormatSites(slackContext.threadTs, 0, filterStatus, psiStrategy);
 
       await sendMessageBlocks(say, textSections, additionalBlocks);
     } catch (error) {
