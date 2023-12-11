@@ -29,8 +29,6 @@ export function initSlackBot(lambdaContext, App) {
   const { boltApp, env, log } = lambdaContext;
   const { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN } = env;
 
-  const slackHandler = SlackHandler(commands(lambdaContext), log);
-
   if (!hasText(SLACK_SIGNING_SECRET)) {
     throw new Error('Missing SLACK_SIGNING_SECRET');
   }
@@ -63,10 +61,12 @@ export function initSlackBot(lambdaContext, App) {
     await next();
   });
 
-  app.event('app_mention', slackHandler.onAppMention);
-
   // eslint-disable-next-line no-param-reassign
   lambdaContext.boltApp = app;
+
+  const slackHandler = SlackHandler(commands(lambdaContext), log);
+
+  app.event('app_mention', slackHandler.onAppMention);
 
   return app;
 }
