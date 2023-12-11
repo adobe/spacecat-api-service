@@ -117,6 +117,13 @@ const sendMessageBlocks = async (say, textSections, additionalBlocks = []) => {
   await say({ blocks });
 };
 
+/**
+ * Gets the query parameters for the Slack API. THe query parameters include the channel ID and
+ * the message blocks.
+ * @param {string} channelId - The channel ID to post the message to.
+ * @param {string} message - The message to post.
+ * @return {{blocks: string, channel}} The query parameters.
+ */
 const getQueryParams = (channelId, message) => ({
   channel: channelId,
   blocks: JSON.stringify([
@@ -130,6 +137,14 @@ const getQueryParams = (channelId, message) => ({
   ]),
 });
 
+/**
+ * Posts a message to a Slack channel.
+ * @param {string} channelId - The channel ID to post the message to.
+ * @param {string} message - The message to post.
+ * @param {string} token - The Slack bot token.
+ * @return {Promise<{channel, ts}>} A promise that resolves to the channel and timestamp
+ * of the message.
+ */
 const postSlackMessage = async (channelId, message, token) => {
   if (!hasText(token)) {
     throw new Error('Missing slack bot token');
@@ -158,6 +173,20 @@ const postSlackMessage = async (channelId, message, token) => {
   };
 };
 
+/**
+ * Determines if the event is part of a thread.
+ * @param {object} event - The Slack event.
+ * @return {string} The thread timestamp (thread_ts).
+ */
+const getThreadTimestamp = (event) => event.thread_ts || event.ts;
+
+/**
+ * Gets the message from the event. Removes the bot mention from the message.
+ * @param {object} event - The Slack event.
+ * @return {string | undefined} - The message without the bot mention.
+ */
+const getMessageFromEvent = (event) => event.text?.replace(BOT_MENTION_REGEX, '').trim();
+
 export {
   extractURLFromSlackInput,
   getQueryParams,
@@ -165,4 +194,6 @@ export {
   postSiteNotFoundMessage,
   postSlackMessage,
   sendMessageBlocks,
+  getThreadTimestamp,
+  getMessageFromEvent,
 };

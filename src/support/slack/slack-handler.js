@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { BOT_MENTION_REGEX } from '../../utils/slack/base.js';
+import { getMessageFromEvent, getThreadTimestamp } from '../../utils/slack/base.js';
 
 /**
  * Creates a slack handler.
@@ -20,15 +20,6 @@ import { BOT_MENTION_REGEX } from '../../utils/slack/base.js';
  * @constructor
  */
 function SlackHandler(commands, log) {
-  /**
-   * Determines if the event is part of a thread.
-   * @param {object} event - The Slack event.
-   * @return {string} The thread timestamp (thread_ts).
-   */
-  const getThreadTimestamp = (event) => event.thread_ts || event.ts;
-
-  const getMessageFromEvent = (event) => event.text?.replace(BOT_MENTION_REGEX, '').trim();
-
   /**
    * Wraps the Slack say function to respond in a thread.
    *

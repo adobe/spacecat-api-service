@@ -201,7 +201,7 @@ function GetSitesCommand(context) {
    * function (ack), say function, and action.
    */
   const paginationHandler = async ({ ack, say, action }) => {
-    log.info(`Pagination request received for get sites. Page: ${action.value}`);
+    log.info(`Pagination request received for get sites. Page: ${JSON.stringify(action, null, 2)}`);
 
     const startTime = process.hrtime();
 
