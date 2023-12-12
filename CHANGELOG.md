@@ -1,3 +1,67 @@
+# [1.5.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.4.0...v1.5.0) (2023-12-12)
+
+
+### Features
+
+* slack event handler ([#39](https://github.com/adobe-rnd/spacecat-api-service/issues/39)) ([2b380dd](https://github.com/adobe-rnd/spacecat-api-service/commit/2b380dd780983fc53c31796753930b0767940f6b))
+
+# [1.4.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.4...v1.4.0) (2023-12-07)
+
+
+### Features
+
+* http api routes ([#37](https://github.com/adobe-rnd/spacecat-api-service/issues/37)) ([a9230db](https://github.com/adobe-rnd/spacecat-api-service/commit/a9230dbe56c216e412f55edbad466348c303e71b))
+
+## [1.3.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.3...v1.3.4) (2023-12-06)
+
+
+### Bug Fixes
+
+* debug log context ([49bd92a](https://github.com/adobe-rnd/spacecat-api-service/commit/49bd92a6390ee712bbe759e14cc5bd769776304c))
+
+## [1.3.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.2...v1.3.3) (2023-12-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-status to v10.0.11 ([#31](https://github.com/adobe-rnd/spacecat-api-service/issues/31)) ([e15e2da](https://github.com/adobe-rnd/spacecat-api-service/commit/e15e2dae9c8f811e63d4052870c487e0dba44e3d))
+
+## [1.3.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.1...v1.3.2) (2023-12-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-universal-logger to v3.0.13 ([#32](https://github.com/adobe-rnd/spacecat-api-service/issues/32)) ([97d68c6](https://github.com/adobe-rnd/spacecat-api-service/commit/97d68c6527f481dd5c001c49977e334e8d8a56d0))
+
+## [1.3.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.0...v1.3.1) (2023-12-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/fetch to v4.1.1 ([#29](https://github.com/adobe-rnd/spacecat-api-service/issues/29)) ([2c51799](https://github.com/adobe-rnd/spacecat-api-service/commit/2c51799428db9a3029ad3db13acddd6d0d28a280))
+* **deps:** update dependency @adobe/helix-shared-secrets to v2.1.3 ([#30](https://github.com/adobe-rnd/spacecat-api-service/issues/30)) ([2ca4c8d](https://github.com/adobe-rnd/spacecat-api-service/commit/2ca4c8dd67230969f033895b83a63eed28fd9fa1))
+
+# [1.3.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.2.1...v1.3.0) (2023-12-05)
+
+
+### Features
+
+* use latest data access and getSiteByID ([#28](https://github.com/adobe-rnd/spacecat-api-service/issues/28)) ([a48ab8e](https://github.com/adobe-rnd/spacecat-api-service/commit/a48ab8e2de89b4f447b1790950789d762fe6e989))
+
+## [1.2.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.2.0...v1.2.1) (2023-12-05)
+
+
+### Bug Fixes
+
+* add lhs audit types ([#18](https://github.com/adobe-rnd/spacecat-api-service/issues/18)) ([a085bc8](https://github.com/adobe-rnd/spacecat-api-service/commit/a085bc81ae5d8acaf3576b67bcea081029bca02f))
+
+# [1.2.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.1.1...v1.2.0) (2023-12-04)
+
+
+### Features
+
+* trigger lhs audit ([#17](https://github.com/adobe-rnd/spacecat-api-service/issues/17)) ([fe4a575](https://github.com/adobe-rnd/spacecat-api-service/commit/fe4a57524e5f60063d105962655457478fabb301))
+
 ## [1.1.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.1.0...v1.1.1) (2023-11-24)
 
 

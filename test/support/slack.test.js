@@ -9,13 +9,13 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
 /* eslint-env mocha */
-/* eslint-disable no-unused-expressions */ // expect statements
 
 import chai from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import nock from 'nock';
-import { getQueryParams, postSlackMessage } from '../../src/support/slack.js';
+import { getQueryParams, postSlackMessage } from '../../src/utils/slack/base.js';
 
 chai.use(chaiAsPromised);
 const { expect } = chai;
@@ -26,9 +26,7 @@ describe('slack', () => {
   beforeEach('setup', () => {
     context = {
       log: console,
-      env: {
-        SLACK_BOT_TOKEN: 'tokentoken',
-      },
+      env: { SLACK_BOT_TOKEN: 'tokentoken' },
     };
   });
 

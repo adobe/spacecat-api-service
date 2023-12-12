@@ -9,20 +9,36 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { Response } from '@adobe/fetch';
 
-export const ADMIN_ENDPOINTS = ['trigger']; // export for testing
+import { Response } from '@adobe/fetch';
+import { hasText } from '@adobe/spacecat-shared-utils';
+
+const ANONYMOUS_ENDPOINTS = [
+  'GET /slack/events',
+  'POST /slack/events',
+];
+
+const ADMIN_ENDPOINTS = [
+  'GET /trigger',
+  'POST /sites',
+];
 
 /*
  * Placeholder authwrapper until a better one replaces
  */
 export default function authWrapper(fn) {
   return async (request, context) => {
-    const { log, pathInfo: { headers, route } } = context;
+    const { log, pathInfo: { method, suffix, headers } } = context;
+
+    const route = `${method.toUpperCase()} ${suffix}`;
+
+    if (ANONYMOUS_ENDPOINTS.includes(route)) {
+      return fn(request, context);
+    }
 
     const apiKeyFromHeader = headers['x-api-key'];
 
-    if (!apiKeyFromHeader) {
+    if (!hasText(apiKeyFromHeader)) {
       return new Response('API key missing in headers', {
         status: 400,
         headers: { 'x-error': 'API key missing' },
@@ -33,7 +49,7 @@ export default function authWrapper(fn) {
       ? context.env.ADMIN_API_KEY
       : context.env.USER_API_KEY;
 
-    if (!expectedApiKey) {
+    if (!hasText(expectedApiKey)) {
       log.error('API key was not configured');
       return new Response('Server configuration error', {
         status: 500,

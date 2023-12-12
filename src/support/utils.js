@@ -15,3 +15,78 @@ import { context as h2, h1 } from '@adobe/fetch';
 export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
   ? h1()
   : h2();
+
+/**
+ * Checks if the url parameter "url" equals "ALL".
+ * @param {string} url - URL parameter.
+ * @returns {boolean} True if url equals "ALL", false otherwise.
+ */
+export const isAuditForAll = (url) => url.toUpperCase() === 'ALL';
+
+/**
+ * Sends an audit message for a single URL.
+ *
+ * @param {Object} sqs - The SQS service object.
+ * @param {string} queueUrl - The SQS queue URL.
+ * @param {string} type - The type of audit.
+ * @param {Object} auditContext - The audit context object.
+ * @param {string} siteId - The site ID to audit.
+ * @returns {Promise} A promise representing the message sending operation.
+ */
+export const sendAuditMessage = async (
+  sqs,
+  queueUrl,
+  type,
+  auditContext,
+  siteId,
+) => sqs.sendMessage(queueUrl, { type, url: siteId, auditContext });
+
+/**
+ * Sends audit messages for each URL.
+ *
+ * @param {Object} sqs - The SQS service object.
+ * @param {string} queueUrl - The SQS queue URL.
+ * @param {string} type - The type of audit.
+ * @param {Object} auditContext - The audit context object.
+ * @param {Array<string>} siteIDsToAudit - An array of site IDs to audit.
+ * @returns {Promise<string>} A promise that resolves to a status message.
+ */
+export const sendAuditMessages = async (
+  sqs,
+  queueUrl,
+  type,
+  auditContext,
+  siteIDsToAudit,
+) => {
+  for (const siteId of siteIDsToAudit) {
+    // eslint-disable-next-line no-await-in-loop
+    await sendAuditMessage(sqs, queueUrl, type, auditContext, siteId);
+  }
+  return `Triggered ${type} audit for ${siteIDsToAudit.length > 1 ? `all ${siteIDsToAudit.length} sites` : siteIDsToAudit[0]}`;
+};
+
+/**
+ * Triggers an audit for a site.
+ * @param {Site} site - The site to audit.
+ * @param {string} auditType - The type of audit.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @return {Promise} - A promise representing the audit trigger operation.
+ */
+export const triggerAuditForSite = async (
+  site,
+  auditType,
+  slackContext,
+  lambdaContext,
+) => sendAuditMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+  auditType,
+  {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+  site.getId(),
+);

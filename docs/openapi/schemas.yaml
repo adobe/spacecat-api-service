@@ -1,102 +1,83 @@
-Organization:
-  type: object
-  properties:
-    id:
-      type: string
-      format: uuid
-    ims_org_id:
-      type: string
-    sales_force_id:
-      type: string
-    github_org_id:
-      type: string
-    name:
-      type: string
-    vertical:
-      type: string
-      enum:
-        - AEM-CS
-    created_at:
-      type: string
-      format: date-time
-
 Site:
   type: object
   properties:
-    organization_id:
-      type: string
-      format: uuid
-    domain:
-      type: string
-    path:
-      type: string
-    type:
-      type: string
-      enum:
-        - edge
-        - cs
-        - other
-    github_repo_id:
-      type: string
-    content_source:
-      type: string
-    slack_channels:
-      type: array
-      items:
-        type: object
-        properties:
-          name:
-            type: string
-          description:
-            type: string
-    status:
-      type: string
-      enum:
-        - new
-        - wip
-        - certification
-        - live
-        - attrition
-    intended_go_live_date:
-      type: string
-      format: date
-    actual_go_live_date:
-      type: string
-      format: date
-    previous_cms:
-      type: string
-    implemented_by:
-      type: string
-    created_at:
-      type: string
-      format: date-time
-
-Audit:
-  type: object
-  properties:
     id:
       type: string
       format: uuid
-    site_id:
+    baseURL:
       type: string
-      format: uuid
-    audited_at:
+    gitHubURL:
+      type: string
+      format: url
+    imsOrgId:
+      type: string
+    isLive:
+      type: boolean
+    createdAt:
       type: string
       format: date-time
-    type:
+    updatedAt:
+      type: string
+      format: date-time
+SiteUpdate:
+  type: object
+  properties:
+    imsOrgId:
+      type: string
+    isLive:
+      type: boolean
+Audit:
+  type: object
+  properties:
+    siteId:
+      type: string
+      format: uuid
+    auditedAt:
+      type: string
+      format: date-time
+    expiresAt:
+      type: string
+      format: date-time
+    auditType:
       type: string
       enum:
-        - psi
-        # Additional audit types...
-    is_error:
+        - lhs-mobile
+        - lhs-desktop
+    isLive:
       type: boolean
-    is_live:
-      type: boolean
-    markdown_content:
+    fullAuditRef:
       type: string
-    markdown_diff:
+    auditResult:
+      $ref: '#/AuditResult'
+AbbreviatedAudit:
+    allOf:
+      - $ref: '#/Audit'
+      - type: object
+        properties:
+          auditResult:
+            $ref: '#/AbbreviatedAuditResult'
+AuditResult:
+  type: object
+  allOf:
+    - $ref: '#/AbbreviatedAuditResult'
+    - type: object
+      additionalProperties: true
+      properties:
+        gitHubDiff:
+          type: string
+        markdownContext:
+          $ref: '#/MarkdownContext'
+AbbreviatedAuditResult:
+  type: object
+  properties:
+    finalUrl:
       type: string
-    github_diff:
-      type: string
-    audit_results:
+    scores:
       type: object
+MarkdownContext:
+  type: object
+  properties:
+    markdownContent:
+      type: string
+    markdownDiff:
+      type: string

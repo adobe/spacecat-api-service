@@ -1,0 +1,24 @@
+trigger:
+  parameters:
+    - $ref: "./parameters.yaml#/triggerUrl"
+    - $ref: "./parameters.yaml#/triggerType"
+  get:
+    operationId: triggerAudit
+    tags:
+      - trigger
+    summary: Trigger an audit
+    security:
+      - admin_key: [ ]
+    responses:
+      '200':
+        description: Audit triggered successfully
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"

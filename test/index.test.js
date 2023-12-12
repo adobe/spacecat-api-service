@@ -12,19 +12,26 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
 import { Request } from '@adobe/fetch';
+import { expect } from 'chai';
+
 import { main } from '../src/index.js';
 
 const baseUrl = 'https://base.spacecat';
 
 describe('Index Tests', () => {
+  const apiKey = 'api-key';
+  const slackBotToken = 'slack-bot-token';
+  const slackSigningSecret = 'slack-signing-secret';
+
   let context;
   let request;
-  const apiKey = 'api-key';
 
   beforeEach('setup', () => {
     context = {
+      boltApp: {
+
+      },
       log: console,
       runtime: {
         region: 'us-east-1',
@@ -35,7 +42,10 @@ describe('Index Tests', () => {
       env: {
         USER_API_KEY: apiKey,
         ADMIN_API_KEY: apiKey,
+        SLACK_BOT_TOKEN: slackBotToken,
+        SLACK_SIGNING_SECRET: slackSigningSecret,
       },
+      dataAccess: { },
     };
     request = new Request(baseUrl, {
       headers: {
@@ -55,12 +65,7 @@ describe('Index Tests', () => {
   it('handles options request', async () => {
     context.pathInfo.suffix = '/test';
 
-    request = new Request(baseUrl, {
-      method: 'OPTIONS',
-      headers: {
-        'x-api-key': apiKey,
-      },
-    });
+    request = new Request(baseUrl, { method: 'OPTIONS', headers: { 'x-api-key': apiKey } });
 
     const resp = await main(request, context);
 
@@ -69,7 +74,7 @@ describe('Index Tests', () => {
       'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS, DELETE',
       'access-control-allow-headers': 'x-api-key',
       'access-control-max-age': '86400',
-      'content-type': 'text/plain; charset=utf-8',
+      'content-type': 'application/json; charset=utf-8',
     });
   });
 
@@ -84,15 +89,22 @@ describe('Index Tests', () => {
   it('handles errors', async () => {
     context.pathInfo.suffix = '/trigger';
 
-    request = new Request(`${baseUrl}/trigger?url=all&type=cwv`, {
-      headers: {
-        'x-api-key': apiKey,
-      },
-    });
+    request = new Request(`${baseUrl}/trigger?url=all&type=cwv`, { headers: { 'x-api-key': apiKey } });
 
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('internal server error');
+    expect(resp.headers.plain()['x-error']).to.equal('internal server error: Failed to trigger cwv audit for all');
+  });
+
+  it('handles dynamic route errors', async () => {
+    context.pathInfo.suffix = '/sites/123';
+
+    request = new Request(`${baseUrl}/sites/123`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(500);
+    expect(resp.headers.plain()['x-error']).to.equal('internal server error: dataAccess.getSiteByID is not a function');
   });
 });

@@ -1,6 +1,4 @@
 sites:
-  parameters:
-    - $ref: "./parameters.yaml#/organizationId"
   post:
     operationId: createSite
     tags:
@@ -31,7 +29,61 @@ sites:
     operationId: getSites
     tags:
       - sites
-    summary: Retrieve all sites for a given organization
+    summary: Retrieve all sites
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: A list of sites
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+export-csv:
+  get:
+    operationId: exportSitesToCSV
+    tags:
+      - sites
+    summary: Exports all sites to a CSV file
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: A list of sites
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+export-xls:
+  get:
+    operationId: exportSitesToXLS
+    tags:
+      - sites
+    summary: Exports all sites to a XLS file
     security:
       - api_key: [ ]
     responses:
