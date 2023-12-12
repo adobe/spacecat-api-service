@@ -10,7 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import {
+  hasText,
+  isBoolean,
+  isObject,
+} from '@adobe/spacecat-shared-utils';
 
 import {
   createBadRequestResponse,
@@ -115,22 +119,60 @@ function SitesController(dataAccess) {
 
   /**
    * Removes a site.
-   * @param {string} siteId - The site ID.
+   * @param {object} context - Context of the request.
    * @return {Promise<Response>} Delete response.
    */
-  const removeSite = async (siteId) => {
+  const removeSite = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!hasText(siteId)) {
+      return createBadRequestResponse('Site ID required');
+    }
+
     await dataAccess.removeSite(siteId);
+
     return createResponse('', 204);
   };
 
   /**
    * Updates a site
-   * @param {object} siteData - Site data.
+   * @param {object} context - Context of the request.
    * @return {Promise<Response>} Site response.
    */
-  const updateSite = async (siteData) => {
-    const site = await dataAccess.updateSite(siteData);
-    return createResponse(SiteDto.toJSON(site));
+  const updateSite = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!hasText(siteId)) {
+      return createBadRequestResponse('Site ID required');
+    }
+
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return createNotFoundResponse('Site not found');
+    }
+
+    const requestBody = context.data;
+    if (!isObject(requestBody)) {
+      return createBadRequestResponse('Request body required');
+    }
+
+    let updates = false;
+    if (isBoolean(requestBody.isLive) && requestBody.isLive !== site.isLive()) {
+      site.toggleLive();
+      updates = true;
+    }
+
+    if (hasText(requestBody.imsOrgId) && requestBody.imsOrgId !== site.getImsOrgId()) {
+      site.updateImsOrgId(requestBody.imsOrgId);
+      updates = true;
+    }
+
+    if (updates) {
+      const updatedSite = await dataAccess.updateSite(requestBody);
+      return createResponse(SiteDto.toJSON(updatedSite));
+    }
+
+    return createBadRequestResponse('No updates provided');
   };
 
   return {

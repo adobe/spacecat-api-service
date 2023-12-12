@@ -16,22 +16,29 @@ import { Response } from '@adobe/fetch';
  * Creates a response with a JSON body. Defaults to 200 status.
  * @param {object} body - JSON body.
  * @param {number} status - Optional status code.
+ * @param {object} headers - Optional headers.
  * @return {Response} Response.
  */
-export function createResponse(body, status = 200) {
+export function createResponse(body, status = 200, headers = {}) {
   return new Response(
     JSON.stringify(body),
     {
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json; charset=utf-8', ...headers },
       status,
     },
   );
 }
 
+export function createErrorResponse(message, status = 500) {
+  return createResponse({ message }, status, {
+    'x-error': `internal server error: ${message}`,
+  });
+}
+
 /**
  * Creates a 400 response with a JSON body.
  * @param {string} message - Error message.
- * @return {Response} Response.
+ * @return {Response} - Response.
  */
 export function createBadRequestResponse(message) {
   return createResponse({ message }, 400);
@@ -40,8 +47,20 @@ export function createBadRequestResponse(message) {
 /**
  * Creates a 404 response with a JSON body.
  * @param {string} message - Error message.
- * @return {Response} Response.
+ * @return {Response} - Response.
  */
-export function createNotFoundResponse(message) {
-  return createResponse({ message }, 404);
+export function createNotFoundResponse(message, headers = {}) {
+  return createResponse({ message }, 404, {
+    'x-error': message,
+    ...headers,
+  });
+}
+
+/**
+ * Creates a 204 response with an empty body.
+ * @param {object} headers - Optional headers.
+ * @return {Response} - Response.
+ */
+export function createNoContentResponse(headers = {}) {
+  return createResponse('', 204, headers);
 }

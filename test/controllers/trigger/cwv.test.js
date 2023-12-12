@@ -17,14 +17,20 @@ import chai from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import nock from 'nock';
+
 import cwv, {
-  getSlackChannelId, DEFAULT_PARAMS, FALLBACK_SLACK_CHANNEL, INITIAL_SLACK_MESSAGE,
+  getSlackChannelId,
+  DEFAULT_PARAMS,
+  FALLBACK_SLACK_CHANNEL,
+  INITIAL_SLACK_MESSAGE,
 } from '../../../src/controllers/trigger/cwv.js';
+import { getQueryParams } from '../../../src/utils/slack/base.js';
+
 import { emptyResponse, fullResponse } from './data.js';
-import { getQueryParams } from '../../../src/support/slack.js';
 
 chai.use(sinonChai);
 chai.use(chaiAsPromised);
+
 const { expect } = chai;
 
 const sandbox = sinon.createSandbox();

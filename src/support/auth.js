@@ -13,6 +13,11 @@
 import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+const ANONYMOUS_ENDPOINTS = [
+  'GET /slack/events',
+  'POST /slack/events',
+];
+
 const ADMIN_ENDPOINTS = [
   'GET /trigger',
   'POST /sites',
@@ -26,6 +31,11 @@ export default function authWrapper(fn) {
     const { log, pathInfo: { method, suffix, headers } } = context;
 
     const route = `${method.toUpperCase()} ${suffix}`;
+
+    if (ANONYMOUS_ENDPOINTS.includes(route)) {
+      return fn(request, context);
+    }
+
     const apiKeyFromHeader = headers['x-api-key'];
 
     if (!hasText(apiKeyFromHeader)) {
