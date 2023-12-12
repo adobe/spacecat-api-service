@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.4.0...v1.5.0) (2023-12-12)
+
+
+### Features
+
+* slack event handler ([#39](https://github.com/adobe-rnd/spacecat-api-service/issues/39)) ([2b380dd](https://github.com/adobe-rnd/spacecat-api-service/commit/2b380dd780983fc53c31796753930b0767940f6b))
+
 # [1.4.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.3.4...v1.4.0) (2023-12-07)
 
 
