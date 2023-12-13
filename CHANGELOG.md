@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.0...v1.6.1) (2023-12-13)
+
+
+### Bug Fixes
+
+* trailing slash handling ([#52](https://github.com/adobe-rnd/spacecat-api-service/issues/52)) ([de541c8](https://github.com/adobe-rnd/spacecat-api-service/commit/de541c8809ba361470021b336bce6e7bfb87fcc1))
+
 # [1.6.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.5.0...v1.6.0) (2023-12-13)
 
 
