@@ -18,7 +18,7 @@ import lhs from './trigger/lhs.js';
 import notfound from './trigger/notfound.js';
 
 const AUDITS = {
-  cwv
+  cwv,
   lhs,
   404: notfound,
 };
