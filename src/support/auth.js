@@ -45,18 +45,22 @@ export default function authWrapper(fn) {
       });
     }
 
-    const expectedApiKey = ADMIN_ENDPOINTS.includes(route)
-      ? context.env.ADMIN_API_KEY
-      : context.env.USER_API_KEY;
+    const isRouteAdminOnly = ADMIN_ENDPOINTS.includes(route);
+    const expectedUserApiKey = context.env.USER_API_KEY;
+    const expectedAdminApiKey = context.env.ADMIN_API_KEY;
 
-    if (!hasText(expectedApiKey)) {
+    if (!hasText(expectedUserApiKey) || !hasText(expectedAdminApiKey)) {
       log.error('API key was not configured');
       return new Response('Server configuration error', {
         status: 500,
       });
     }
 
-    if (apiKeyFromHeader !== expectedApiKey) {
+    const isApiKeyValid = isRouteAdminOnly
+      ? apiKeyFromHeader === expectedAdminApiKey
+      : apiKeyFromHeader === expectedUserApiKey || apiKeyFromHeader === expectedAdminApiKey;
+
+    if (!isApiKeyValid) {
       return new Response('Not authorized', {
         status: 401,
         headers: { 'x-error': 'Incorrect or missing API key' },
