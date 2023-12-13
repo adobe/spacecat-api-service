@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.5.0...v1.6.0) (2023-12-13)
+
+
+### Features
+
+* support audit for both PSI strategies ([#50](https://github.com/adobe-rnd/spacecat-api-service/issues/50)) ([b5b1400](https://github.com/adobe-rnd/spacecat-api-service/commit/b5b1400b58591ee9b4d07f48c8df72ccb8490f63))
+
 # [1.5.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.4.0...v1.5.0) (2023-12-12)
 
 

@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
+
 import { isAuditForAll, sendAuditMessages } from '../../support/utils.js';
 import { createErrorResponse, createNotFoundResponse, createResponse } from '../../utils/response-utils.js';
 
@@ -53,13 +55,22 @@ export default async function trigger(context) {
       return createNotFoundResponse('Site not found');
     }
 
-    const message = await sendAuditMessages(
-      sqs,
-      queueUrl,
-      type,
-      auditContext,
-      siteIDsToAudit,
-    );
+    const types = type === 'lhs' ? [AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE] : [type];
+    const message = [];
+
+    for (const auditType of types) {
+      message.push(
+        // eslint-disable-next-line no-await-in-loop
+        await sendAuditMessages(
+          sqs,
+          queueUrl,
+          auditType,
+          auditContext,
+          siteIDsToAudit,
+        ),
+      );
+    }
+
     return createResponse({ message });
   } catch (e) {
     return createErrorResponse(e);
