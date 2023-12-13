@@ -20,6 +20,7 @@ const AUDITS = {
   cwv,
   'lhs-mobile': lhs,
   'lhs-desktop': lhs,
+  lhs, // for all lhs variants
 };
 
 /**

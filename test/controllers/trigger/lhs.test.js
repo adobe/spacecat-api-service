@@ -55,7 +55,27 @@ describe('LHS Trigger', () => {
 
     expect(dataAccessMock.getSitesToAudit.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
-    expect(result.message).to.equal('Triggered auditType audit for all 2 sites');
+    expect(result.message[0]).to.equal('Triggered auditType audit for all 2 sites');
+  });
+
+  it('triggers audits of both lhs types for all sites', async () => {
+    context = {
+      dataAccess: dataAccessMock,
+      sqs: sqsMock,
+      data: { type: 'lhs', url: 'ALL' },
+      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+    };
+
+    dataAccessMock.getSitesToAudit.resolves(['site1', 'site2']);
+
+    const response = await trigger(context);
+    const result = await response.json();
+
+    expect(dataAccessMock.getSitesToAudit.calledOnce).to.be.true;
+    expect(sqsMock.sendMessage.callCount).to.equal(4);
+    expect(result.message).to.be.an('array').with.lengthOf(2);
+    expect(result.message[0]).to.equal('Triggered lhs-desktop audit for all 2 sites');
+    expect(result.message[1]).to.equal('Triggered lhs-mobile audit for all 2 sites');
   });
 
   it('triggers an audit for a single site when url is specific', async () => {
@@ -76,7 +96,7 @@ describe('LHS Trigger', () => {
 
     expect(dataAccessMock.getSiteByBaseURL.calledOnceWith('http://site1.com')).to.be.true;
     expect(sqsMock.sendMessage.calledOnce).to.be.true;
-    expect(result.message).to.equal('Triggered auditType audit for site1');
+    expect(result.message[0]).to.equal('Triggered auditType audit for site1');
   });
 
   it('returns a 404 response when the site is not found', async () => {
