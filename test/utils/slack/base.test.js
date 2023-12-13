@@ -89,6 +89,7 @@ describe('Base Slack Utils', () => {
     it('extractURLFromSlackInput domain only', async () => {
       const expected = 'business.adobe.com';
 
+      expect(extractURLFromSlackInput('get site business.adobe.com/', true)).to.equal(expected);
       expect(extractURLFromSlackInput('get site http://business.adobe.com/some/path/w1th_numb3rs', true)).to.equal(expected);
       expect(extractURLFromSlackInput('get site <http://business.adobe.com/some/path/w1th_numb3rs|business.adobe.com/some/path/w1th_numb3rs>', true)).to.equal(expected);
       expect(extractURLFromSlackInput('get site https://business.adobe.com/some/path/w1th_numb3rs', true)).to.equal(expected);
