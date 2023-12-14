@@ -1,3 +1,31 @@
+## [1.6.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.3...v1.6.4) (2023-12-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @aws-sdk/client-sqs to v3.473.0 ([#47](https://github.com/adobe-rnd/spacecat-api-service/issues/47)) ([efcf92f](https://github.com/adobe-rnd/spacecat-api-service/commit/efcf92f3a0ffb4fd73c1bee8ed99f500399cf98f))
+
+## [1.6.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.2...v1.6.3) (2023-12-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-utils to v3 ([#51](https://github.com/adobe-rnd/spacecat-api-service/issues/51)) ([dbc7cba](https://github.com/adobe-rnd/spacecat-api-service/commit/dbc7cba61f40c45b26e37daeb7f2ff9129610736))
+
+## [1.6.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.1...v1.6.2) (2023-12-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.4.0 ([#46](https://github.com/adobe-rnd/spacecat-api-service/issues/46)) ([bd4a7c4](https://github.com/adobe-rnd/spacecat-api-service/commit/bd4a7c449e4222da24b1d465971ad406278726fd))
+
+## [1.6.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.0...v1.6.1) (2023-12-13)
+
+
+### Bug Fixes
+
+* trailing slash handling ([#52](https://github.com/adobe-rnd/spacecat-api-service/issues/52)) ([de541c8](https://github.com/adobe-rnd/spacecat-api-service/commit/de541c8809ba361470021b336bce6e7bfb87fcc1))
+
 # [1.6.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.5.0...v1.6.0) (2023-12-13)
 
 
