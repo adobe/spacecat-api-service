@@ -15,7 +15,7 @@ import { hasText, isString } from '@adobe/spacecat-shared-utils';
 
 import { URL } from 'url';
 
-import { fetch } from '../../support/utils.js';
+import { fetch, isAuditForAll } from '../../support/utils.js';
 
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
@@ -186,6 +186,19 @@ const postSlackMessage = async (channelId, message, token) => {
     ts: respJson.ts,
   };
 };
+
+export async function getSlackContext({
+  target, targetChannels, url, message, token,
+}) {
+  let slackContext;
+  const channelId = getSlackChannelId(target, targetChannels);
+  if (isAuditForAll(url)) {
+    slackContext = await postSlackMessage(channelId, message, token);
+  } else {
+    slackContext = { channel: channelId };
+  }
+  return slackContext;
+}
 
 /**
  * Determines if the event is part of a thread.

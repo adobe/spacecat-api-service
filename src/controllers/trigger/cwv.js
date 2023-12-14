@@ -12,10 +12,10 @@
 
 import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { RUMAPIClient } from '@adobe/spacecat-shared-rum-api-client';
 
 import { isAuditForAll } from '../../support/utils.js';
-import { getSlackChannelId, postSlackMessage } from '../../utils/slack/base.js';
-import fetchDomainList from '../../utils/helix.js';
+import { getSlackContext } from '../../utils/slack/base.js';
 
 export const INITIAL_CWV_SLACK_MESSAGE = '*PERFORMANCE DEGRADATION (CWV) REPORT* for the *last week* :thread:';
 
@@ -44,8 +44,10 @@ export default async function triggerAudit(context) {
   if (!hasText(domainkey) || !hasText(queueUrl)) {
     throw Error('Required env variables is missing');
   }
+  const rumApiClient = RUMAPIClient.createFrom(context);
 
-  const filteredUrls = await fetchDomainList(domainkey, url);
+  const urls = await rumApiClient.getDomainList();
+  const filteredUrls = isAuditForAll(url) ? urls : urls.filter((row) => url === row);
 
   if (filteredUrls.length === 0) {
     return new Response('', {
@@ -56,16 +58,9 @@ export default async function triggerAudit(context) {
     });
   }
 
-  let slackContext;
-  // if audit triggered for all urls, then an initial message sent to the channel and the slack
-  // thread id is added to auditContext for downstream components to send messages under same thread
-  // If audit is triggered for a single url, then only channel id is added to uudit context
-  const channelId = getSlackChannelId(target, targetChannels);
-  if (isAuditForAll(url)) {
-    slackContext = await postSlackMessage(channelId, INITIAL_CWV_SLACK_MESSAGE, token);
-  } else {
-    slackContext = { channel: channelId };
-  }
+  const slackContext = getSlackContext({
+    target, targetChannels, url, message: INITIAL_CWV_SLACK_MESSAGE, token,
+  });
 
   for (const filteredUrl of filteredUrls) {
     const auditContext = {
