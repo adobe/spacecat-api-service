@@ -23,7 +23,6 @@ import notfound, {
 import { getQueryParams } from '../../../src/utils/slack/base.js';
 
 import { emptyResponse, fullResponse } from './data.js';
-import { DEFAULT_PARAMS } from '../../../src/utils/helix.js';
 
 chai.use(sinonChai);
 chai.use(chaiAsPromised);
@@ -31,8 +30,13 @@ chai.use(chaiAsPromised);
 const { expect } = chai;
 
 const sandbox = sinon.createSandbox();
+const DEFAULT_PARAMS = {
+  interval: 30,
+  offset: 0,
+  limit: 100000,
+};
 
-describe('audit handler', () => {
+describe('not found handler', () => {
   let context;
 
   beforeEach('setup', () => {
@@ -78,7 +82,7 @@ describe('audit handler', () => {
       })
       .reply(200, '{"key": "value"}');
 
-    await expect(notfound(context)).to.be.rejectedWith('Unexpected response format. $.results.data is not array');
+    await expect(notfound(context)).to.be.rejectedWith('Unexpected response from rum api. $.results.data is not array');
   });
 
   it('return 404 when empty response is received from the rum api', async () => {

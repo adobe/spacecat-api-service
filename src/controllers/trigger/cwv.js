@@ -12,7 +12,7 @@
 
 import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { RUMAPIClient } from '@adobe/spacecat-shared-rum-api-client';
+import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 
 import { isAuditForAll } from '../../support/utils.js';
 import { getSlackContext } from '../../utils/slack/base.js';
@@ -58,7 +58,7 @@ export default async function triggerAudit(context) {
     });
   }
 
-  const slackContext = getSlackContext({
+  const slackContext = await getSlackContext({
     target, targetChannels, url, message: INITIAL_CWV_SLACK_MESSAGE, token,
   });
 
