@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.6.0",
+  "version": "1.6.4",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -58,13 +58,13 @@
     "@adobe/helix-shared-body-data": "2.0.1",
     "@adobe/helix-shared-bounce": "2.0.12",
     "@adobe/helix-shared-secrets": "2.2.1",
-    "@adobe/helix-shared-utils": "2.0.1",
+    "@adobe/helix-shared-utils": "3.0.0",
     "@adobe/helix-shared-wrap": "2.0.0",
     "@adobe/helix-status": "10.0.11",
     "@adobe/helix-universal-logger": "3.0.13",
     "@adobe/spacecat-shared-data-access": "1.2.7",
-    "@adobe/spacecat-shared-utils": "1.3.0",
-    "@aws-sdk/client-sqs": "3.450.0",
+    "@adobe/spacecat-shared-utils": "1.4.0",
+    "@aws-sdk/client-sqs": "3.473.0",
     "@slack/bolt": "3.16.0"
   },
   "devDependencies": {
@@ -85,7 +85,7 @@
     "esmock": "2.6.0",
     "husky": "8.0.3",
     "junit-report-builder": "3.1.0",
-    "lint-staged": "14.0.1",
+    "lint-staged": "15.2.0",
     "mocha": "10.2.0",
     "mocha-multi-reporters": "1.5.1",
     "mocha-suppress-logs": "0.3.1",
