@@ -64,7 +64,7 @@
     "@adobe/helix-universal-logger": "3.0.13",
     "@adobe/spacecat-shared-data-access": "1.2.7",
     "@adobe/spacecat-shared-utils": "1.4.0",
-    "@aws-sdk/client-sqs": "3.450.0",
+    "@aws-sdk/client-sqs": "3.473.0",
     "@slack/bolt": "3.16.0"
   },
   "devDependencies": {
