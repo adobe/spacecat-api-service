@@ -19,7 +19,9 @@ import notfound from './trigger/notfound.js';
 
 const AUDITS = {
   cwv,
-  lhs,
+  'lhs-mobile': lhs,
+  'lhs-desktop': lhs,
+  lhs, // for all lhs variants
   404: notfound,
 };
 
