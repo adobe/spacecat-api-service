@@ -1,3 +1,10 @@
+## [1.6.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.1...v1.6.2) (2023-12-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.4.0 ([#46](https://github.com/adobe-rnd/spacecat-api-service/issues/46)) ([bd4a7c4](https://github.com/adobe-rnd/spacecat-api-service/commit/bd4a7c449e4222da24b1d465971ad406278726fd))
+
 ## [1.6.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.0...v1.6.1) (2023-12-13)
 
 
