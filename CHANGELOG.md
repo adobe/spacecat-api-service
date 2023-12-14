@@ -1,3 +1,10 @@
+## [1.6.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.2...v1.6.3) (2023-12-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-utils to v3 ([#51](https://github.com/adobe-rnd/spacecat-api-service/issues/51)) ([dbc7cba](https://github.com/adobe-rnd/spacecat-api-service/commit/dbc7cba61f40c45b26e37daeb7f2ff9129610736))
+
 ## [1.6.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.1...v1.6.2) (2023-12-14)
 
 
