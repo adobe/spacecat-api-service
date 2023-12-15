@@ -64,12 +64,12 @@ describe('not found handler', () => {
 
   it('rejects when domainkey is not set', async () => {
     delete context.env.RUM_DOMAIN_KEY;
-    await expect(notfound(context)).to.be.rejectedWith('Required env variables is missing');
+    await expect(notfound(context)).to.be.rejectedWith('Required env variables are missing');
   });
 
   it('rejects when queueUrl is not set', async () => {
     delete context.env.AUDIT_JOBS_QUEUE_URL;
-    await expect(notfound(context)).to.be.rejectedWith('Required env variables is missing');
+    await expect(notfound(context)).to.be.rejectedWith('Required env variables are missing');
   });
 
   it('rejects when response is not in expected shape', async () => {

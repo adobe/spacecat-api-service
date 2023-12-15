@@ -65,12 +65,12 @@ describe('cvw handler', () => {
 
   it('rejects when domainkey is not set', async () => {
     delete context.env.RUM_DOMAIN_KEY;
-    await expect(cwv(context)).to.be.rejectedWith('Required env variables is missing');
+    await expect(cwv(context)).to.be.rejectedWith('Required env variables are missing');
   });
 
   it('rejects when queueUrl is not set', async () => {
     delete context.env.AUDIT_JOBS_QUEUE_URL;
-    await expect(cwv(context)).to.be.rejectedWith('Required env variables is missing');
+    await expect(cwv(context)).to.be.rejectedWith('Required env variables are missing');
   });
 
   it('rejects when response is not in expected shape', async () => {

@@ -13,6 +13,7 @@
 import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import { notFound } from '@adobe/spacecat-shared-http-utils';
 
 import { isAuditForAll } from '../../support/utils.js';
 import { getSlackContext } from '../../utils/slack/base.js';
@@ -42,7 +43,7 @@ export default async function triggerAudit(context) {
   } = context.env;
 
   if (!hasText(domainkey) || !hasText(queueUrl)) {
-    throw Error('Required env variables is missing');
+    throw Error('Required env variables are missing');
   }
   const rumApiClient = RUMAPIClient.createFrom(context);
 
@@ -50,12 +51,7 @@ export default async function triggerAudit(context) {
   const filteredUrls = isAuditForAll(url) ? urls : urls.filter((row) => url === row);
 
   if (filteredUrls.length === 0) {
-    return new Response('', {
-      status: 404,
-      headers: {
-        'x-error': 'not matched any url',
-      },
-    });
+    return notFound('', { 'x-error': 'did not match any url' });
   }
 
   const slackContext = await getSlackContext({

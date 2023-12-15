@@ -201,14 +201,13 @@ const postSlackMessage = async (channelId, message, token) => {
 export async function getSlackContext({
   target, targetChannels, url, message, token,
 }) {
-  let slackContext;
   const channelId = getSlackChannelId(target, targetChannels);
-  if (isAuditForAll(url)) {
-    slackContext = await postSlackMessage(channelId, message, token);
-  } else {
-    slackContext = { channel: channelId };
+
+  if (!isAuditForAll(url)) {
+    return { channel: channelId };
   }
-  return slackContext;
+
+  return postSlackMessage(channelId, message, token);
 }
 
 /**
