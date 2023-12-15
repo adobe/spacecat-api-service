@@ -15,12 +15,14 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import cwv from './trigger/cwv.js';
 import lhs from './trigger/lhs.js';
+import notfound from './trigger/notfound.js';
 
 const AUDITS = {
   cwv,
   'lhs-mobile': lhs,
   'lhs-desktop': lhs,
   lhs, // for all lhs variants
+  404: notfound,
 };
 
 /**

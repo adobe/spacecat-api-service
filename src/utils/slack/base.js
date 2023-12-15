@@ -15,12 +15,13 @@ import { hasText, isString } from '@adobe/spacecat-shared-utils';
 
 import { URL } from 'url';
 
-import { fetch } from '../../support/utils.js';
+import { fetch, isAuditForAll } from '../../support/utils.js';
 
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
 export const CHARACTER_LIMIT = 2500;
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
+export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 
@@ -149,6 +150,19 @@ const getQueryParams = (channelId, message) => ({
 });
 
 /**
+ * Gets the slack channelId from the list of targetChannels
+ * @param {string} target - The channel to identify from the list of targetChannels.
+ * @param {string} targetChannels - The list of configured slack channels.
+ * @return {string} slack channelId from targetChannels or a FALLBACK_SLACK_CHANNEL value.
+ */
+export function getSlackChannelId(target, targetChannels = '') {
+  const channel = targetChannels.split(',')
+    .filter((pair) => pair.startsWith(`${target}=`))
+    .find((pair) => pair.trim().length > target.length + 1);
+  return channel ? channel.split('=')[1].trim() : FALLBACK_SLACK_CHANNEL;
+}
+
+/**
  * Posts a message to a Slack channel.
  * @param {string} channelId - The channel ID to post the message to.
  * @param {string} message - The message to post.
@@ -183,6 +197,18 @@ const postSlackMessage = async (channelId, message, token) => {
     ts: respJson.ts,
   };
 };
+
+export async function getSlackContext({
+  target, targetChannels, url, message, token,
+}) {
+  const channelId = getSlackChannelId(target, targetChannels);
+
+  if (!isAuditForAll(url)) {
+    return { channel: channelId };
+  }
+
+  return postSlackMessage(channelId, message, token);
+}
 
 /**
  * Determines if the event is part of a thread.
