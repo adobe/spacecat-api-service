@@ -65,7 +65,7 @@
     "@adobe/spacecat-shared-data-access": "1.2.7",
     "@adobe/spacecat-shared-utils": "1.4.0",
     "@adobe/spacecat-shared-http-utils": "1.0.0",
-    "@adobe/spacecat-shared-rum-api-client": "1.2.0",
+    "@adobe/spacecat-shared-rum-api-client": "1.2.1",
     "@aws-sdk/client-sqs": "3.473.0",
     "@slack/bolt": "3.16.0"
   },
