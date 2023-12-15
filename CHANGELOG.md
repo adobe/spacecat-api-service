@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.4...v1.7.0) (2023-12-15)
+
+
+### Features
+
+* add support for 404 audit type ([be86779](https://github.com/adobe-rnd/spacecat-api-service/commit/be867794d6ef9dd3019b4fdf0863074e2c08bd84))
+
 ## [1.6.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.3...v1.6.4) (2023-12-14)
 
 
