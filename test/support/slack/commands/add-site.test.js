@@ -99,7 +99,15 @@ describe('AddSiteCommand', () => {
 
     it('sends an audit message after adding the site', async () => {
       dataAccessStub.getSiteByBaseURL.resolves(null);
-      dataAccessStub.addSite.resolves({ getId: () => '123' });
+      dataAccessStub.addSite.resolves({
+        getId: () => '123',
+        getAuditConfig: sinon.stub().returns({
+          auditsDisabled: sinon.stub().returns(false),
+          getAuditTypeConfig: sinon.stub().returns({
+            disabled: sinon.stub().returns(false),
+          }),
+        }),
+      });
 
       const args = ['example.com'];
       const command = AddSiteCommand(context);
@@ -107,6 +115,46 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(sqsStub.sendMessage.called).to.be.true;
+    });
+
+    it('does not trigger audit after adding site when audits are disabled', async () => {
+      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.addSite.resolves({
+        getId: () => '123',
+        getAuditConfig: sinon.stub().returns({
+          auditsDisabled: sinon.stub().returns(true),
+          getAuditTypeConfig: sinon.stub().returns({
+            disabled: sinon.stub().returns(false),
+          }),
+        }),
+      });
+
+      const args = ['example.com'];
+      const command = AddSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('does not trigger audit after adding site when audit type is disabled', async () => {
+      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.addSite.resolves({
+        getId: () => '123',
+        getAuditConfig: sinon.stub().returns({
+          auditsDisabled: sinon.stub().returns(false),
+          getAuditTypeConfig: sinon.stub().returns({
+            disabled: sinon.stub().returns(true),
+          }),
+        }),
+      });
+
+      const args = ['example.com'];
+      const command = AddSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage.called).to.be.false;
     });
 
     it('reports when an error occurs', async () => {

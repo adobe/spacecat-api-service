@@ -75,11 +75,19 @@ function AddSiteCommand(context) {
         return;
       }
 
-      await triggerAuditForSite(newSite, 'lhs-mobile', slackContext, context);
+      const auditType = 'lhs-mobile';
+      const auditConfig = newSite.getAuditConfig();
 
       let message = `:white_check_mark: Successfully added new site '${baseURL}'.\n`;
-      message += 'First PSI check is triggered! :adobe-run:\'\n';
-      message += `In a minute, you can run _@spacecat get site ${baseURL}_`;
+
+      // we still check for auditConfig.auditsDisabled() here as the default audit config may change
+      if (!auditConfig.auditsDisabled() && !auditConfig.getAuditTypeConfig(auditType)?.disabled()) {
+        await triggerAuditForSite(newSite, auditType, slackContext, context);
+        message += 'First PSI check is triggered! :adobe-run:\'\n';
+        message += `In a minute, you can run _@spacecat get site ${baseURL}_`;
+      } else {
+        message += 'Audits are disabled for this site.';
+      }
 
       await say(message);
     } catch (error) {

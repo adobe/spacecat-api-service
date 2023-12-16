@@ -65,7 +65,20 @@ function RunAuditCommand(context) {
         return;
       }
 
-      await triggerAuditForSite(site, 'lhs-mobile', slackContext, context);
+      const auditType = 'lhs-mobile';
+      const auditConfig = site.getAuditConfig();
+
+      if (auditConfig.auditsDisabled()) {
+        await say(`:x: Will not audit site '${baseURL}' because audits are disabled for this site.`);
+        return;
+      }
+
+      if (auditConfig.getAuditTypeConfig(auditType)?.disabled()) {
+        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
+        return;
+      }
+
+      await triggerAuditForSite(site, auditType, slackContext, context);
 
       let message = `:white_check_mark: Audit check is triggered for ${baseURL}\n`;
       message += `:adobe-run: In a minute, you can run @spacecat get site ${baseURL}`;

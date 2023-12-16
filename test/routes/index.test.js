@@ -71,7 +71,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/by-base-url/:baseURL',
       'GET /sites/:siteId/audits',
       'GET /sites/:siteId/audits/:auditType',
-      'GET /sites/:siteId/audits/latest/:auditType',
+      'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
     );
 
@@ -85,8 +85,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/audits'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/audits/:auditType'].handler).to.equal(mockAuditsController.getAllForSite);
     expect(dynamicRoutes['GET /sites/:siteId/audits/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
-    expect(dynamicRoutes['GET /sites/:siteId/audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatestForSite);
-    expect(dynamicRoutes['GET /sites/:siteId/audits/latest/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
+    expect(dynamicRoutes['GET /sites/:siteId/audits/latest'].handler).to.equal(mockAuditsController.getAllLatestForSite);
+    expect(dynamicRoutes['GET /sites/:siteId/audits/latest'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].handler).to.equal(mockAuditsController.getLatestForSite);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
   });

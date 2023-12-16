@@ -128,7 +128,12 @@ function AddRepoCommand(context) {
 
       await dataAccess.updateSite(site);
 
-      await triggerAuditForSite(site, 'lhs-mobile', slackContext, context);
+      const auditType = 'lhs-mobile';
+      const auditConfig = site.getAuditConfig();
+
+      if (!auditConfig.auditsDisabled() && !auditConfig.getAuditTypeConfig(auditType)?.disabled()) {
+        await triggerAuditForSite(site, auditType, slackContext, context);
+      }
 
       await say(`
       :white_check_mark: Github repo is successfully added to the site!

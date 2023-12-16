@@ -16,26 +16,28 @@ import { isAuditForAll, sendAuditMessages } from '../../support/utils.js';
 import { createErrorResponse, createNotFoundResponse, createResponse } from '../../utils/response-utils.js';
 
 /**
- * Constant for error message when a site is not found.
- */
-
-/**
- * Retrieves site IDs for auditing based on the input URL. If the input URL has the value
+ * Retrieves sites for auditing based on the input URL. If the input URL has the value
  * 'all', then all sites will be audited. Otherwise, the input URL is assumed to be a base URL.
+ * Sites are filtered to only include sites that have not disabled audits.
  *
  * @param {Object} dataAccess - The data access object for site operations.
  * @param {string} url - The URL to check for auditing.
- * @returns {Promise<Array<string>>} A promise that resolves to an array of base URLs.
+ * @returns {Promise<Array<Site>>} The sites to audit.
  * @throws {Error} Throws an error if the site is not found.
  */
-async function getSiteIDsToAudit(dataAccess, url) {
+async function getSitesToAudit(dataAccess, url) {
+  let sitesToAudit = [];
+
   if (isAuditForAll(url)) {
-    return dataAccess.getSitesToAudit();
+    sitesToAudit = await dataAccess.getSites();
+  } else {
+    const site = await dataAccess.getSiteByBaseURL(url);
+    sitesToAudit = site ? [site] : [];
   }
 
-  const site = await dataAccess.getSiteByBaseURL(url);
+  sitesToAudit = sitesToAudit.filter((site) => site.getAuditConfig().auditsDisabled() !== true);
 
-  return site ? [site.getId()] : [];
+  return sitesToAudit;
 }
 
 /**
@@ -50,8 +52,8 @@ export default async function trigger(context) {
     const { type, url, auditContext } = context.data;
     const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
 
-    const siteIDsToAudit = await getSiteIDsToAudit(dataAccess, url);
-    if (!siteIDsToAudit.length) {
+    const sitesToAudit = await getSitesToAudit(dataAccess, url);
+    if (!sitesToAudit.length) {
       return createNotFoundResponse('Site not found');
     }
 
@@ -59,6 +61,11 @@ export default async function trigger(context) {
     const message = [];
 
     for (const auditType of types) {
+      const sitesToAuditForType = sitesToAudit.filter((site) => {
+        const auditConfig = site.getAuditConfig();
+        return !auditConfig.getAuditTypeConfig(auditType)?.disabled();
+      });
+
       message.push(
         // eslint-disable-next-line no-await-in-loop
         await sendAuditMessages(
@@ -66,7 +73,7 @@ export default async function trigger(context) {
           queueUrl,
           auditType,
           auditContext,
-          siteIDsToAudit,
+          sitesToAuditForType.map((site) => site.getId()),
         ),
       );
     }
