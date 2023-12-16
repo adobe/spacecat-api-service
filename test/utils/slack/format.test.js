@@ -18,6 +18,7 @@ import sinon from 'sinon';
 import {
   addEllipsis,
   formatDate,
+  formatLighthouseError,
   formatScore,
   formatSize,
   formatURL,
@@ -126,6 +127,40 @@ describe('Utility Functions', () => {
     `;
 
       expect(printSiteDetails(mockSite)).to.equal(expectedOutput);
+    });
+  });
+
+  describe('formatLighthouseError()', () => {
+    it('formats ERRORED_DOCUMENT_REQUEST with status code', () => {
+      const runtimeError = {
+        code: 'ERRORED_DOCUMENT_REQUEST',
+        message: 'Lighthouse could not fetch the page. (Status code: 404)',
+      };
+      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Lighthouse could not fetch the page (Status: 404) [ERRORED_DOCUMENT_REQUEST]');
+    });
+
+    it('formats ERRORED_DOCUMENT_REQUEST with missing status code', () => {
+      const runtimeError = {
+        code: 'ERRORED_DOCUMENT_REQUEST',
+        message: 'Lighthouse could not fetch the page. Brrrzzzzt.',
+      };
+      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Lighthouse could not fetch the page (Status: unknown) [ERRORED_DOCUMENT_REQUEST]');
+    });
+
+    it('formats known error without additional data', () => {
+      const runtimeError = {
+        code: 'NO_FCP',
+        message: 'No first contentful paint.',
+      };
+      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: No First Contentful Paint [NO_FCP]');
+    });
+
+    it('handles unknown error codes', () => {
+      const runtimeError = {
+        code: 'UNKNOWN_CODE',
+        message: 'An unknown error occurred.',
+      };
+      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Unknown error [UNKNOWN_CODE]');
     });
   });
 });

@@ -35,6 +35,8 @@ function generateSites(count) {
       isLive: (index % 2 === 0),
     };
 
+    const runtimeError = index % 3 === 0 ? { code: 'NO_FCP', message: 'Test LH Error' } : null;
+
     const auditData = {
       siteId: siteData.id,
       auditType: 'lhs-mobile',
@@ -48,6 +50,7 @@ function generateSites(count) {
           accessibility: 0.7,
           'best-practices': 0.6,
         },
+        runtimeError,
       },
     };
 
@@ -199,12 +202,14 @@ describe('GetSitesCommand', () => {
 
   describe('Site Formatting Logic', () => {
     it('formats a list of sites correctly', () => {
-      const sites = generateSites(2);
+      const sites = generateSites(4);
       const formattedSites = formatSites(sites, 0, sites.length);
 
       expect(formattedSites).to.equal('\n'
-        + '1. :rocket: 90% - 80% - 70% - 60%: <https://site-0.com|https://site-0.com> (<https://github.com/site-0|GH>)\n'
-        + '2. :submarine: 90% - 80% - 70% - 60%: <https://site-1.com|https://site-1.com>');
+        + '1. :rocket: Lighthouse Error: No First Contentful Paint [NO_FCP]: <https://site-0.com|https://site-0.com> (<https://github.com/site-0|GH>)\n'
+        + '2. :submarine: 90% - 80% - 70% - 60%: <https://site-1.com|https://site-1.com>\n'
+        + '3. :rocket: 90% - 80% - 70% - 60%: <https://site-2.com|https://site-2.com> (<https://github.com/site-2|GH>)\n'
+        + '4. :submarine: Lighthouse Error: No First Contentful Paint [NO_FCP]: <https://site-3.com|https://site-3.com>');
     });
   });
 });

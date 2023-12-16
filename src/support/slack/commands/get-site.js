@@ -22,6 +22,7 @@ import {
 } from '../../../utils/slack/base.js';
 import {
   formatDate,
+  formatLighthouseError,
   formatScore,
   printSiteDetails,
 } from '../../../utils/slack/format.js';
@@ -59,14 +60,22 @@ export function formatAudits(audits) {
     const {
       performance, seo, accessibility, 'best-practices': bestPractices,
     } = audit.getScores();
-    return [
-      formatDate(audit.getAuditedAt()),
-      formatScore(performance),
-      formatScore(seo),
-      formatScore(accessibility),
-      formatScore(bestPractices),
-      audit.isLive() ? 'Yes' : 'No',
-    ];
+
+    if (!audit.isError()) {
+      return [
+        formatDate(audit.getAuditedAt()),
+        formatScore(performance),
+        formatScore(seo),
+        formatScore(accessibility),
+        formatScore(bestPractices),
+        audit.isLive() ? 'Yes' : 'No',
+      ];
+    } else {
+      return [
+        formatDate(audit.getAuditedAt()),
+        formatLighthouseError(audit.getAuditResult().runtimeError),
+      ];
+    }
   });
 
   const table = [headers, ...rows];

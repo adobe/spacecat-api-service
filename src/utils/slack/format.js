@@ -86,9 +86,28 @@ function formatSize(bytes) {
   return `${kilobytes.toFixed(decimals)} ${suffixes[index]}`;
 }
 
+const ERROR_MAP = {
+  ERRORED_DOCUMENT_REQUEST: 'Lighthouse could not fetch the page (Status: {statusCode})',
+  NO_FCP: 'No First Contentful Paint',
+};
+
+function formatLighthouseError(runtimeError) {
+  const { code, message } = runtimeError;
+  let description = ERROR_MAP[code] || 'Unknown error';
+
+  if (code === 'ERRORED_DOCUMENT_REQUEST') {
+    const match = message.match(/\(Status code: (\d+)\)/);
+    const statusCode = match ? match[1] : 'unknown';
+    description = description.replace('{statusCode}', statusCode);
+  }
+
+  return `Lighthouse Error: ${description} [${code}]`;
+}
+
 export {
   addEllipsis,
   formatDate,
+  formatLighthouseError,
   formatScore,
   formatSize,
   formatURL,
