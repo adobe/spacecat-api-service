@@ -134,17 +134,17 @@ describe('Utility Functions', () => {
     it('formats ERRORED_DOCUMENT_REQUEST with status code', () => {
       const runtimeError = {
         code: 'ERRORED_DOCUMENT_REQUEST',
-        message: 'Lighthouse could not fetch the page. (Status code: 404)',
+        message: 'Could not fetch the page. (Status code: 404)',
       };
-      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Lighthouse could not fetch the page (Status: 404) [ERRORED_DOCUMENT_REQUEST]');
+      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Could not fetch the page (Status: 404) [ERRORED_DOCUMENT_REQUEST]');
     });
 
     it('formats ERRORED_DOCUMENT_REQUEST with missing status code', () => {
       const runtimeError = {
         code: 'ERRORED_DOCUMENT_REQUEST',
-        message: 'Lighthouse could not fetch the page. Brrrzzzzt.',
+        message: 'Could not fetch the page. Brrrzzzzt.',
       };
-      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Lighthouse could not fetch the page (Status: unknown) [ERRORED_DOCUMENT_REQUEST]');
+      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Could not fetch the page (Status: unknown) [ERRORED_DOCUMENT_REQUEST]');
     });
 
     it('formats known error without additional data', () => {
@@ -161,6 +161,24 @@ describe('Utility Functions', () => {
         message: 'An unknown error occurred.',
       };
       expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Unknown error [UNKNOWN_CODE]');
+    });
+
+    // Additional test for the new FAILED_DOCUMENT_REQUEST case
+    it('formats FAILED_DOCUMENT_REQUEST with details', () => {
+      const runtimeError = {
+        code: 'FAILED_DOCUMENT_REQUEST',
+        message: 'Failed to load the page. (Details: net::ERR_CERT_COMMON_NAME_INVALID)',
+      };
+      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Failed to load the page (Details: net::ERR_CERT_COMMON_NAME_INVALID) [FAILED_DOCUMENT_REQUEST]');
+    });
+
+    // Test for FAILED_DOCUMENT_REQUEST with missing details
+    it('formats FAILED_DOCUMENT_REQUEST with missing details', () => {
+      const runtimeError = {
+        code: 'FAILED_DOCUMENT_REQUEST',
+        message: 'Failed to load the page. No further details.',
+      };
+      expect(formatLighthouseError(runtimeError)).to.equal('Lighthouse Error: Failed to load the page (Details: unknown) [FAILED_DOCUMENT_REQUEST]');
     });
   });
 });

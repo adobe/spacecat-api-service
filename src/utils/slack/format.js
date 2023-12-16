@@ -87,18 +87,35 @@ function formatSize(bytes) {
 }
 
 const ERROR_MAP = {
-  ERRORED_DOCUMENT_REQUEST: 'Lighthouse could not fetch the page (Status: {statusCode})',
-  NO_FCP: 'No First Contentful Paint',
+  ERRORED_DOCUMENT_REQUEST: {
+    messageFormat: 'Could not fetch the page (Status: {statusCode})',
+    pattern: /\(Status code: (\d+)\)/,
+  },
+  FAILED_DOCUMENT_REQUEST: {
+    messageFormat: 'Failed to load the page (Details: {details})',
+    pattern: /\(Details: (.+)\)/,
+  },
+  NO_FCP: {
+    messageFormat: 'No First Contentful Paint',
+    pattern: null,
+  },
 };
 
 function formatLighthouseError(runtimeError) {
   const { code, message } = runtimeError;
-  let description = ERROR_MAP[code] || 'Unknown error';
+  const errorConfig = ERROR_MAP[code] || { messageFormat: 'Unknown error', pattern: null };
+  let description = errorConfig.messageFormat;
 
-  if (code === 'ERRORED_DOCUMENT_REQUEST') {
-    const match = message.match(/\(Status code: (\d+)\)/);
-    const statusCode = match ? match[1] : 'unknown';
-    description = description.replace('{statusCode}', statusCode);
+  if (errorConfig.pattern) {
+    const match = message.match(errorConfig.pattern);
+    if (match) {
+      const placeholders = [...match].slice(1);
+      placeholders.forEach((value) => {
+        description = description.replace(/\{[^}]+\}/i, value);
+      });
+    } else {
+      description = description.replace(/\{[^}]+\}/g, 'unknown');
+    }
   }
 
   return `Lighthouse Error: ${description} [${code}]`;
