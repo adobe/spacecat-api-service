@@ -10,10 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
+import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
 import { AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 
 import { isAuditForAll, sendAuditMessages } from '../../support/utils.js';
-import { createErrorResponse, createNotFoundResponse, createResponse } from '../../utils/response-utils.js';
 
 /**
  * Retrieves sites for auditing based on the input URL. If the input URL has the value
@@ -54,7 +54,7 @@ export default async function trigger(context) {
 
     const sitesToAudit = await getSitesToAudit(dataAccess, url);
     if (!sitesToAudit.length) {
-      return createNotFoundResponse('Site not found');
+      return notFound('Site not found');
     }
 
     const types = type === 'lhs' ? [AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE] : [type];
@@ -78,8 +78,8 @@ export default async function trigger(context) {
       );
     }
 
-    return createResponse({ message });
+    return ok({ message });
   } catch (e) {
-    return createErrorResponse(e);
+    return internalServerError(e);
   }
 }

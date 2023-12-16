@@ -201,6 +201,6 @@ describe('LHS Trigger', () => {
     const response = await trigger(context);
 
     expect(response.status).to.equal(500);
-    expect(response.headers.get('x-error')).to.equal('internal server error: Error: Unexpected error');
+    expect(response.headers.get('x-error')).to.equal('Error: Unexpected error');
   });
 });

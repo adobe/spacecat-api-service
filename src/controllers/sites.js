@@ -11,16 +11,17 @@
  */
 
 import {
+  createResponse,
+  badRequest,
+  noContent,
+  notFound,
+  ok,
+} from '@adobe/spacecat-shared-http-utils';
+import {
   hasText,
   isBoolean,
   isObject,
 } from '@adobe/spacecat-shared-utils';
-
-import {
-  createBadRequestResponse,
-  createNotFoundResponse,
-  createResponse,
-} from '../utils/response-utils.js';
 
 import { SiteDto } from '../dto/site.js';
 
@@ -51,7 +52,7 @@ function SitesController(dataAccess) {
    */
   const getAll = async () => {
     const sites = (await dataAccess.getSites()).map((site) => SiteDto.toJSON(site));
-    return createResponse(sites);
+    return ok(sites);
   };
 
   /**
@@ -60,7 +61,7 @@ function SitesController(dataAccess) {
    */
   const getAllAsXLS = async () => {
     const sites = await dataAccess.getSites();
-    return createResponse(SiteDto.toXLS(sites));
+    return ok(SiteDto.toXLS(sites));
   };
 
   /**
@@ -69,7 +70,7 @@ function SitesController(dataAccess) {
    */
   const getAllAsCSV = async () => {
     const sites = await dataAccess.getSites();
-    return createResponse(SiteDto.toCSV(sites));
+    return ok(SiteDto.toCSV(sites));
   };
 
   /**
@@ -82,15 +83,15 @@ function SitesController(dataAccess) {
     const siteId = context.params?.siteId;
 
     if (!hasText(siteId)) {
-      return createBadRequestResponse('Site ID required');
+      return badRequest('Site ID required');
     }
 
     const site = await dataAccess.getSiteByID(siteId);
     if (!site) {
-      return createNotFoundResponse('Site not found');
+      return notFound('Site not found');
     }
 
-    return createResponse(SiteDto.toJSON(site));
+    return ok(SiteDto.toJSON(site));
   };
 
   /**
@@ -104,17 +105,17 @@ function SitesController(dataAccess) {
     const encodedBaseURL = context.params?.baseURL;
 
     if (!hasText(encodedBaseURL)) {
-      return createBadRequestResponse('Base URL required');
+      return badRequest('Base URL required');
     }
 
     const decodedBaseURL = Buffer.from(encodedBaseURL, 'base64').toString('utf-8').trim();
 
     const site = await dataAccess.getSiteByBaseURL(decodedBaseURL);
     if (!site) {
-      return createNotFoundResponse('Site not found');
+      return notFound('Site not found');
     }
 
-    return createResponse(SiteDto.toJSON(site));
+    return ok(SiteDto.toJSON(site));
   };
 
   /**
@@ -126,12 +127,12 @@ function SitesController(dataAccess) {
     const siteId = context.params?.siteId;
 
     if (!hasText(siteId)) {
-      return createBadRequestResponse('Site ID required');
+      return badRequest('Site ID required');
     }
 
     await dataAccess.removeSite(siteId);
 
-    return createResponse('', 204);
+    return noContent();
   };
 
   /**
@@ -143,17 +144,17 @@ function SitesController(dataAccess) {
     const siteId = context.params?.siteId;
 
     if (!hasText(siteId)) {
-      return createBadRequestResponse('Site ID required');
+      return badRequest('Site ID required');
     }
 
     const site = await dataAccess.getSiteByID(siteId);
     if (!site) {
-      return createNotFoundResponse('Site not found');
+      return notFound('Site not found');
     }
 
     const requestBody = context.data;
     if (!isObject(requestBody)) {
-      return createBadRequestResponse('Request body required');
+      return badRequest('Request body required');
     }
 
     let updates = false;
@@ -167,12 +168,26 @@ function SitesController(dataAccess) {
       updates = true;
     }
 
-    if (updates) {
-      const updatedSite = await dataAccess.updateSite(requestBody);
-      return createResponse(SiteDto.toJSON(updatedSite));
+    if (requestBody.auditConfig) {
+      if (isBoolean(requestBody.auditConfig.auditsDisabled)) {
+        site.setAllAuditsDisabled(requestBody.auditConfig.auditsDisabled);
+        updates = true;
+      }
+
+      if (isObject(requestBody.auditConfig.auditTypeConfigs)) {
+        Object.entries(requestBody.auditConfig.auditTypeConfigs).forEach(([type, config]) => {
+          site.updateAuditTypeConfig(type, config);
+          updates = true;
+        });
+      }
     }
 
-    return createBadRequestResponse('No updates provided');
+    if (updates) {
+      const updatedSite = await dataAccess.updateSite(requestBody);
+      return ok(SiteDto.toJSON(updatedSite));
+    }
+
+    return badRequest('No updates provided');
   };
 
   return {

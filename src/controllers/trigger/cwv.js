@@ -10,10 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
-import { notFound } from '@adobe/spacecat-shared-http-utils';
+import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
 import { isAuditForAll } from '../../support/utils.js';
 import { getSlackContext } from '../../utils/slack/base.js';
@@ -69,5 +68,5 @@ export default async function triggerAudit(context) {
   const message = `Successfully queued ${type} audit jobs for ${filteredUrls.length} url/s`;
   log.info(message);
 
-  return new Response(JSON.stringify({ message }));
+  return ok(JSON.stringify({ message }));
 }
