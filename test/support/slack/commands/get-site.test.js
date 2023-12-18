@@ -34,13 +34,16 @@ function generateMockAudits(count) {
   const audits = [];
 
   for (let i = 0; i < count; i += 1) {
+    const runtimeError = i % 3 === 0 ? { code: 'NO_FCP', message: 'Test LH Error' } : null;
+
     const mockAuditData = {
       siteId: '123',
       auditType: 'lhs-mobile',
-      auditedAt: new Date().toISOString(),
+      auditedAt: '2023-12-16T09:21:09.000Z',
       isLive: (i % 2 === 0),
       fullAuditRef: 'https://example.com',
       auditResult: {
+        runtimeError,
         scores: {
           performance: 0.9,
           seo: 0.8,
@@ -150,6 +153,20 @@ describe('GetSiteCommand', () => {
       const formatted = formatAudits(audits);
 
       expect(formatted).to.be.a('string');
+    });
+
+    it('formats audits with audit errors correctly', () => {
+      const audits = generateMockAudits(4);
+      const formatted = formatAudits(audits);
+
+      expect(formatted).to.be.a('string');
+      expect(formatted).to.equal('```\n'
+        + 'Audited At (UTC)  Perf  SEO   A11y  Best Pr.  Live\n'
+        + '2023-12-16 09:21:09  Lighthouse Error: No First Contentful Paint [NO_FCP]\n'
+        + '2023-12-16 09:21:09  90%   80%   70%   60%   No  \n'
+        + '2023-12-16 09:21:09  90%   80%   70%   60%   Yes \n'
+        + '2023-12-16 09:21:09  Lighthouse Error: No First Contentful Paint [NO_FCP]\n'
+        + '```');
     });
 
     it('returns a message for empty audits', () => {

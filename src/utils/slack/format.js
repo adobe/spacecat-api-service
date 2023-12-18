@@ -12,6 +12,25 @@
 
 const PERCENT_MULTIPLIER = 100;
 
+const PSI_ERROR_MAP = {
+  ERRORED_DOCUMENT_REQUEST: {
+    messageFormat: 'Could not fetch the page (Status: {statusCode})',
+    pattern: /\(Status code: (\d+)\)/,
+  },
+  FAILED_DOCUMENT_REQUEST: {
+    messageFormat: 'Failed to load the page (Details: {details})',
+    pattern: /\(Details: (.+)\)/,
+  },
+  DNS_FAILURE: {
+    messageFormat: 'DNS lookup failed',
+    pattern: null,
+  },
+  NO_FCP: {
+    messageFormat: 'No First Contentful Paint',
+    pattern: null,
+  },
+};
+
 function addEllipsis(string, limit = 24) {
   if (string.length > limit - 2) {
     return `${string.substring(0, 18)}..`;
@@ -86,9 +105,30 @@ function formatSize(bytes) {
   return `${kilobytes.toFixed(decimals)} ${suffixes[index]}`;
 }
 
+function formatLighthouseError(runtimeError) {
+  const { code, message } = runtimeError;
+  const errorConfig = PSI_ERROR_MAP[code] || { messageFormat: 'Unknown error', pattern: null };
+  let description = errorConfig.messageFormat;
+
+  if (errorConfig.pattern) {
+    const match = message.match(errorConfig.pattern);
+    if (match) {
+      const placeholders = [...match].slice(1);
+      placeholders.forEach((value) => {
+        description = description.replace(/\{[^}]+\}/i, value);
+      });
+    } else {
+      description = description.replace(/\{[^}]+\}/g, 'unknown');
+    }
+  }
+
+  return `Lighthouse Error: ${description} [${code}]`;
+}
+
 export {
   addEllipsis,
   formatDate,
+  formatLighthouseError,
   formatScore,
   formatSize,
   formatURL,

@@ -12,7 +12,7 @@
 
 import BaseCommand from './base.js';
 
-import { formatScore, formatURL } from '../../../utils/slack/format.js';
+import { formatLighthouseError, formatScore, formatURL } from '../../../utils/slack/format.js';
 import { sendMessageBlocks, postErrorMessage, wrapSayForThread } from '../../../utils/slack/base.js';
 
 const PAGE_SIZE = 10;
@@ -78,7 +78,11 @@ export function formatSites(sites = [], start, end) {
         seo = 0,
       } = scores;
 
-      siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${baseURLText}>`;
+      if (lastAudit.isError()) {
+        siteMessage = `${rank}. ${icon} ${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}: <${formatURL(baseURL)}|${baseURLText}>`;
+      } else {
+        siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${baseURLText}>`;
+      }
       siteMessage += site.getGitHubURL() ? ` (<${site.getGitHubURL()}|GH>)` : '';
     }
 

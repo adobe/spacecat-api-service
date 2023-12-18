@@ -56,6 +56,7 @@ export const AuditDto = {
     expiresAt: audit.getExpiresAt().toISOString(),
     fullAuditRef: audit.getFullAuditRef(),
     isLive: audit.isLive(),
+    isError: audit.isError(),
     siteId: audit.getSiteId(),
   }),
 
@@ -76,12 +77,14 @@ export const AuditDto = {
     auditResult: {
       finalUrl: audit.getAuditResult()?.finalUrl,
       scores: audit.getAuditResult()?.scores,
+      runtimeError: audit.getAuditResult()?.runtimeError,
     },
     auditType: audit.getAuditType(),
     auditedAt: audit.getAuditedAt(),
     expiresAt: audit.getExpiresAt().toISOString(),
     fullAuditRef: audit.getFullAuditRef(),
     isLive: audit.isLive(),
+    isError: audit.isError(),
     siteId: audit.getSiteId(),
   }),
 };

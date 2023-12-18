@@ -10,13 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
-
 import {
-  createBadRequestResponse,
-  createNotFoundResponse,
-  createResponse,
-} from '../utils/response-utils.js';
+  badRequest,
+  notFound,
+  ok,
+} from '@adobe/spacecat-shared-http-utils';
+import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import { AuditDto } from '../dto/audit.js';
 
@@ -42,13 +41,13 @@ function AuditsController(dataAccess) {
     const auditType = context.params?.auditType || undefined;
 
     if (!hasText(siteId)) {
-      return createBadRequestResponse('Site ID required');
+      return badRequest('Site ID required');
     }
 
     const audits = (await dataAccess.getAuditsForSite(siteId, auditType))
       .map((audit) => AuditDto.toAbbreviatedJSON(audit));
 
-    return createResponse(audits);
+    return ok(audits);
   };
 
   /**
@@ -62,13 +61,13 @@ function AuditsController(dataAccess) {
     const ascending = context.data?.ascending || false;
 
     if (!hasText(auditType)) {
-      return createBadRequestResponse('Audit type required');
+      return badRequest('Audit type required');
     }
 
     const audits = (await dataAccess.getLatestAudits(auditType, ascending))
       .map((audit) => AuditDto.toAbbreviatedJSON(audit));
 
-    return createResponse(audits);
+    return ok(audits);
   };
 
   /**
@@ -79,13 +78,13 @@ function AuditsController(dataAccess) {
     const siteId = context.params?.siteId;
 
     if (!hasText(siteId)) {
-      return createBadRequestResponse('Site ID required');
+      return badRequest('Site ID required');
     }
 
     const audits = (await dataAccess.getLatestAuditsForSite(siteId))
       .map((audit) => AuditDto.toJSON(audit));
 
-    return createResponse(audits);
+    return ok(audits);
   };
 
   /**
@@ -97,19 +96,19 @@ function AuditsController(dataAccess) {
     const auditType = context.params?.auditType;
 
     if (!hasText(siteId)) {
-      return createBadRequestResponse('Site ID required');
+      return badRequest('Site ID required');
     }
 
     if (!hasText(auditType)) {
-      return createBadRequestResponse('Audit type required');
+      return badRequest('Audit type required');
     }
 
     const audit = await dataAccess.getLatestAuditForSite(siteId, auditType);
     if (!audit) {
-      return createNotFoundResponse('Audit not found');
+      return notFound('Audit not found');
     }
 
-    return createResponse(AuditDto.toJSON(audit));
+    return ok(AuditDto.toJSON(audit));
   };
 
   return {

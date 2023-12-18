@@ -94,7 +94,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('internal server error: Failed to trigger cwv audit for all');
+    expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger cwv audit for all');
   });
 
   it('handles dynamic route errors', async () => {
@@ -105,6 +105,6 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('internal server error: dataAccess.getSiteByID is not a function');
+    expect(resp.headers.plain()['x-error']).to.equal('dataAccess.getSiteByID is not a function');
   });
 });

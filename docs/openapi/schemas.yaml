@@ -13,6 +13,8 @@ Site:
       type: string
     isLive:
       type: boolean
+    auditConfig:
+      $ref: '#/AuditConfig'
     createdAt:
       type: string
       format: date-time
@@ -26,6 +28,20 @@ SiteUpdate:
       type: string
     isLive:
       type: boolean
+AuditConfigType:
+  type: object
+  properties:
+    disabled:
+      type: boolean
+AuditConfig:
+  type: object
+  properties:
+    auditsDisabled:
+      type: boolean
+    auditTypeConfigs:
+      type: object
+      additionalProperties:
+        $ref: '#/AuditConfigType'
 Audit:
   type: object
   properties:
@@ -43,6 +59,8 @@ Audit:
       enum:
         - lhs-mobile
         - lhs-desktop
+    isError:
+      type: boolean
     isLive:
       type: boolean
     fullAuditRef:
@@ -65,19 +83,20 @@ AuditResult:
       properties:
         gitHubDiff:
           type: string
-        markdownContext:
-          $ref: '#/MarkdownContext'
+        contentLastModified:
+          type: string
+          format: date-time
 AbbreviatedAuditResult:
   type: object
   properties:
+    runtimeError:
+      type: object
+      properties:
+        message:
+          type: string
+        code:
+          type: string
     finalUrl:
       type: string
     scores:
       type: object
-MarkdownContext:
-  type: object
-  properties:
-    markdownContent:
-      type: string
-    markdownDiff:
-      type: string

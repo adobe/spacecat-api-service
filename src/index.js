@@ -15,6 +15,11 @@ import { helixStatus } from '@adobe/helix-status';
 import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import dataAccess from '@adobe/spacecat-shared-data-access';
+import {
+  internalServerError,
+  noContent,
+  notFound,
+} from '@adobe/spacecat-shared-http-utils';
 import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
 import auth from './support/auth.js';
@@ -26,11 +31,6 @@ import AuditsController from './controllers/audits.js';
 import SitesController from './controllers/sites.js';
 import SlackController from './controllers/slack.js';
 import trigger from './controllers/trigger.js';
-import {
-  createErrorResponse,
-  createNoContentResponse,
-  createNotFoundResponse,
-} from './utils/response-utils.js';
 
 // prevents webpack build error
 import { App as SlackApp } from './utils/slack/bolt.cjs';
@@ -62,13 +62,11 @@ async function run(request, context) {
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
-    return createNotFoundResponse('wrong path format', {
-      'x-error': 'wrong path format',
-    });
+    return notFound('wrong path format');
   }
 
   if (method === 'OPTIONS') {
-    return createNoContentResponse({
+    return noContent({
       'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS, DELETE',
       'access-control-allow-headers': 'x-api-key',
       'access-control-max-age': '86400',
@@ -95,12 +93,12 @@ async function run(request, context) {
     } else {
       const notFoundMessage = `no such route /${route}`;
       log.info(notFoundMessage);
-      return createNotFoundResponse(notFoundMessage);
+      return notFound(notFoundMessage);
     }
   } catch (e) {
     const t1 = Date.now();
     log.error(`Handler exception after ${t1 - t0} ms`, e);
-    return createErrorResponse(e.message);
+    return internalServerError(e.message);
   }
 }
 
