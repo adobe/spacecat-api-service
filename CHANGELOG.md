@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.7.0...v1.8.0) (2023-12-18)
+
+
+### Features
+
+* respect audit config ([#58](https://github.com/adobe-rnd/spacecat-api-service/issues/58)) ([3743b21](https://github.com/adobe-rnd/spacecat-api-service/commit/3743b2100d2e53c5f3aa855187a8834a90b1c231))
+
 # [1.7.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.6.4...v1.7.0) (2023-12-15)
 
 
