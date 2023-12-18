@@ -110,5 +110,5 @@ export const main = wrap(run)
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
-  .with(secrets, { name: resolveSecretsName })
-  .with(helixStatus);
+  .with(helixStatus)
+  .with(secrets, { name: resolveSecretsName });
