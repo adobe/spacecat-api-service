@@ -126,4 +126,38 @@ describe('auth', () => {
 
     expect(resp).to.equal(42);
   });
+
+  it('admin key accepted for user endpoint', async () => {
+    const resp = await action(new Request('https://space.cat/', {
+      headers: {
+        'x-api-key': context.env.ADMIN_API_KEY,
+      },
+    }), context);
+
+    expect(resp).to.equal(42);
+  });
+
+  it('no user key provided in env variables results in internal server error', async () => {
+    context.env.USER_API_KEY = undefined;
+    const resp = await action(new Request('https://space.cat/', {
+      headers: {
+        'x-api-key': 'some-key',
+      },
+    }), context);
+
+    expect(await resp.text()).to.equal('Server configuration error');
+    expect(resp.status).to.equal(500);
+  });
+
+  it('no admin key provided in env variables results in internal server error', async () => {
+    context.env.ADMIN_API_KEY = undefined;
+    const resp = await action(new Request('https://space.cat/', {
+      headers: {
+        'x-api-key': 'some-key',
+      },
+    }), context);
+
+    expect(await resp.text()).to.equal('Server configuration error');
+    expect(resp.status).to.equal(500);
+  });
 });

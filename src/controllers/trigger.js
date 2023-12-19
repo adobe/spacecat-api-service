@@ -10,16 +10,19 @@
  * governing permissions and limitations under the License.
  */
 
-import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+import { badRequest } from '@adobe/spacecat-shared-http-utils';
 import cwv from './trigger/cwv.js';
 import lhs from './trigger/lhs.js';
+import notfound from './trigger/notfound.js';
 
 const AUDITS = {
   cwv,
   'lhs-mobile': lhs,
   'lhs-desktop': lhs,
+  lhs, // for all lhs variants
+  404: notfound,
 };
 
 /**
@@ -32,23 +35,13 @@ export default async function triggerHandler(context) {
   const { type, url } = data;
 
   if (!hasText(type) || !hasText(url)) {
-    return new Response('', {
-      status: 400,
-      headers: {
-        'x-error': 'required query params missing',
-      },
-    });
+    return badRequest('required query params missing');
   }
 
   const audit = AUDITS[type];
 
   if (!audit) {
-    return new Response('', {
-      status: 400,
-      headers: {
-        'x-error': 'unknown audit type',
-      },
-    });
+    return badRequest('unknown audit type');
   }
 
   try {

@@ -12,8 +12,11 @@
 
 /* eslint-env mocha */
 
+import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+
 import { expect } from 'chai';
 import sinon from 'sinon';
+
 import trigger from '../../../src/controllers/trigger/lhs.js';
 
 describe('LHS Trigger', () => {
@@ -21,12 +24,26 @@ describe('LHS Trigger', () => {
   let dataAccessMock;
   let sqsMock;
   let sandbox;
+  let sites;
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
 
+    sites = [
+      createSite({
+        id: 'site1',
+        baseURL: 'http://site1.com',
+        imsOrgId: 'org123',
+      }),
+      createSite({
+        id: 'site2',
+        baseURL: 'http://site2.com',
+        imsOrgId: 'org123',
+      }),
+    ];
+
     dataAccessMock = {
-      getSitesToAudit: sandbox.stub(),
+      getSites: sandbox.stub(),
       getSiteByBaseURL: sandbox.stub(),
       getSiteByID: sandbox.stub(),
     };
@@ -48,14 +65,34 @@ describe('LHS Trigger', () => {
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
-    dataAccessMock.getSitesToAudit.resolves(['site1', 'site2']);
+    dataAccessMock.getSites.resolves(sites);
 
     const response = await trigger(context);
     const result = await response.json();
 
-    expect(dataAccessMock.getSitesToAudit.calledOnce).to.be.true;
+    expect(dataAccessMock.getSites.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
-    expect(result.message).to.equal('Triggered auditType audit for all 2 sites');
+    expect(result.message[0]).to.equal('Triggered auditType audit for all 2 sites');
+  });
+
+  it('triggers audits of both lhs types for all sites', async () => {
+    context = {
+      dataAccess: dataAccessMock,
+      sqs: sqsMock,
+      data: { type: 'lhs', url: 'ALL' },
+      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+    };
+
+    dataAccessMock.getSites.resolves(sites);
+
+    const response = await trigger(context);
+    const result = await response.json();
+
+    expect(dataAccessMock.getSites.calledOnce).to.be.true;
+    expect(sqsMock.sendMessage.callCount).to.equal(4);
+    expect(result.message).to.be.an('array').with.lengthOf(2);
+    expect(result.message[0]).to.equal('Triggered lhs-desktop audit for all 2 sites');
+    expect(result.message[1]).to.equal('Triggered lhs-mobile audit for all 2 sites');
   });
 
   it('triggers an audit for a single site when url is specific', async () => {
@@ -66,17 +103,14 @@ describe('LHS Trigger', () => {
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
-    dataAccessMock.getSiteByBaseURL.resolves({
-      getBaseURL: () => 'http://site1.com',
-      getId: () => 'site1',
-    });
+    dataAccessMock.getSiteByBaseURL.resolves(sites[0]);
 
     const response = await trigger(context);
     const result = await response.json();
 
     expect(dataAccessMock.getSiteByBaseURL.calledOnceWith('http://site1.com')).to.be.true;
     expect(sqsMock.sendMessage.calledOnce).to.be.true;
-    expect(result.message).to.equal('Triggered auditType audit for site1');
+    expect(result.message[0]).to.equal('Triggered auditType audit for site1');
   });
 
   it('returns a 404 response when the site is not found', async () => {
@@ -96,6 +130,64 @@ describe('LHS Trigger', () => {
     expect(result.message).to.equal('Site not found');
   });
 
+  it('does not trigger audit when audits are disabled for sites', async () => {
+    context = {
+      dataAccess: dataAccessMock,
+      sqs: sqsMock,
+      data: { type: 'auditType', url: 'all' },
+      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+    };
+
+    dataAccessMock.getSites.resolves([
+      createSite({
+        id: 'site1',
+        baseURL: 'http://site1.com',
+        imsOrgId: 'org123',
+        auditConfig: { auditsDisabled: true },
+      }),
+      createSite({
+        id: 'site2',
+        baseURL: 'http://site2.com',
+        imsOrgId: 'org123',
+        auditConfig: { auditsDisabled: false },
+      }),
+    ]);
+
+    const response = await trigger(context);
+
+    expect(response.status).to.equal(200);
+    expect(sqsMock.sendMessage.callCount).to.equal(1);
+  });
+
+  it('does not trigger audit for site where audit type is disabled', async () => {
+    context = {
+      dataAccess: dataAccessMock,
+      sqs: sqsMock,
+      data: { type: 'auditType', url: 'all' },
+      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+    };
+
+    dataAccessMock.getSites.resolves([
+      createSite({
+        id: 'site1',
+        baseURL: 'http://site1.com',
+        imsOrgId: 'org123',
+        auditConfig: { auditsDisabled: false, auditTypeConfigs: { auditType: { disabled: true } } },
+      }),
+      createSite({
+        id: 'site2',
+        baseURL: 'http://site2.com',
+        imsOrgId: 'org123',
+        auditConfig: { auditsDisabled: false },
+      }),
+    ]);
+
+    const response = await trigger(context);
+
+    expect(response.status).to.equal(200);
+    expect(sqsMock.sendMessage.callCount).to.equal(1);
+  });
+
   it('should handle unexpected errors gracefully', async () => {
     context = {
       dataAccess: dataAccessMock,
@@ -109,6 +201,6 @@ describe('LHS Trigger', () => {
     const response = await trigger(context);
 
     expect(response.status).to.equal(500);
-    expect(response.headers.get('x-error')).to.equal('internal server error: Error: Unexpected error');
+    expect(response.headers.get('x-error')).to.equal('Error: Unexpected error');
   });
 });

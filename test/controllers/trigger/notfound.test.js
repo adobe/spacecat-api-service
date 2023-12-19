@@ -17,9 +17,9 @@ import chai from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import nock from 'nock';
-import cwv, {
-  INITIAL_CWV_SLACK_MESSAGE,
-} from '../../../src/controllers/trigger/cwv.js';
+import notfound, {
+  INITIAL_404_SLACK_MESSAGE,
+} from '../../../src/controllers/trigger/notfound.js';
 import { getQueryParams } from '../../../src/utils/slack/base.js';
 
 import { emptyResponse, fullResponse } from './data.js';
@@ -30,14 +30,13 @@ chai.use(chaiAsPromised);
 const { expect } = chai;
 
 const sandbox = sinon.createSandbox();
-
 const DEFAULT_PARAMS = {
   interval: 30,
   offset: 0,
   limit: 100000,
 };
 
-describe('cvw handler', () => {
+describe('not found handler', () => {
   let context;
 
   beforeEach('setup', () => {
@@ -65,12 +64,12 @@ describe('cvw handler', () => {
 
   it('rejects when domainkey is not set', async () => {
     delete context.env.RUM_DOMAIN_KEY;
-    await expect(cwv(context)).to.be.rejectedWith('Required env variables are missing');
+    await expect(notfound(context)).to.be.rejectedWith('Required env variables are missing');
   });
 
   it('rejects when queueUrl is not set', async () => {
     delete context.env.AUDIT_JOBS_QUEUE_URL;
-    await expect(cwv(context)).to.be.rejectedWith('Required env variables are missing');
+    await expect(notfound(context)).to.be.rejectedWith('Required env variables are missing');
   });
 
   it('rejects when response is not in expected shape', async () => {
@@ -83,7 +82,7 @@ describe('cvw handler', () => {
       })
       .reply(200, '{"key": "value"}');
 
-    await expect(cwv(context)).to.be.rejectedWith('Unexpected response from rum api. $.results.data is not array');
+    await expect(notfound(context)).to.be.rejectedWith('Unexpected response from rum api. $.results.data is not array');
   });
 
   it('return 404 when empty response is received from the rum api', async () => {
@@ -96,7 +95,7 @@ describe('cvw handler', () => {
       })
       .reply(200, emptyResponse);
 
-    const resp = await cwv(context);
+    const resp = await notfound(context);
 
     expect(resp.status).to.equal(404);
   });
@@ -112,7 +111,7 @@ describe('cvw handler', () => {
       })
       .reply(200, fullResponse);
 
-    const resp = await cwv(context);
+    const resp = await notfound(context);
 
     expect(resp.status).to.equal(404);
   });
@@ -130,7 +129,7 @@ describe('cvw handler', () => {
       })
       .reply(200, fullResponse);
 
-    const resp = await cwv(context);
+    const resp = await notfound(context);
 
     const message = {
       type: context.data.type,
@@ -159,14 +158,14 @@ describe('cvw handler', () => {
 
     nock('https://slack.com')
       .get('/api/chat.postMessage')
-      .query(getQueryParams('DSA', INITIAL_CWV_SLACK_MESSAGE))
+      .query(getQueryParams('DSA', INITIAL_404_SLACK_MESSAGE))
       .reply(200, {
         ok: true,
         channel: 'DSA',
         ts: 'ts1',
       });
 
-    const resp = await cwv(context);
+    const resp = await notfound(context);
 
     expect(context.sqs.sendMessage).to.have.been.calledThrice;
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {

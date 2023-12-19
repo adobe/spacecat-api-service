@@ -38,6 +38,12 @@ describe('AddRepoCommand', () => {
       getGitHubURL: sinon.stub(),
       isLive: sinon.stub(),
       updateGitHubURL: sinon.stub(),
+      getAuditConfig: sinon.stub().returns({
+        auditsDisabled: sinon.stub().returns(false),
+        getAuditTypeConfig: sinon.stub().returns({
+          disabled: sinon.stub().returns(false),
+        }),
+      }),
     };
 
     dataAccessStub = {

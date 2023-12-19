@@ -10,30 +10,34 @@
  * governing permissions and limitations under the License.
  */
 
+import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import { AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
+
 import { isAuditForAll, sendAuditMessages } from '../../support/utils.js';
-import { createErrorResponse, createNotFoundResponse, createResponse } from '../../utils/response-utils.js';
 
 /**
- * Constant for error message when a site is not found.
- */
-
-/**
- * Retrieves site IDs for auditing based on the input URL. If the input URL has the value
+ * Retrieves sites for auditing based on the input URL. If the input URL has the value
  * 'all', then all sites will be audited. Otherwise, the input URL is assumed to be a base URL.
+ * Sites are filtered to only include sites that have not disabled audits.
  *
  * @param {Object} dataAccess - The data access object for site operations.
  * @param {string} url - The URL to check for auditing.
- * @returns {Promise<Array<string>>} A promise that resolves to an array of base URLs.
+ * @returns {Promise<Array<Site>>} The sites to audit.
  * @throws {Error} Throws an error if the site is not found.
  */
-async function getSiteIDsToAudit(dataAccess, url) {
+async function getSitesToAudit(dataAccess, url) {
+  let sitesToAudit = [];
+
   if (isAuditForAll(url)) {
-    return dataAccess.getSitesToAudit();
+    sitesToAudit = await dataAccess.getSites();
+  } else {
+    const site = await dataAccess.getSiteByBaseURL(url);
+    sitesToAudit = site ? [site] : [];
   }
 
-  const site = await dataAccess.getSiteByBaseURL(url);
+  sitesToAudit = sitesToAudit.filter((site) => site.getAuditConfig().auditsDisabled() !== true);
 
-  return site ? [site.getId()] : [];
+  return sitesToAudit;
 }
 
 /**
@@ -48,20 +52,34 @@ export default async function trigger(context) {
     const { type, url, auditContext } = context.data;
     const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
 
-    const siteIDsToAudit = await getSiteIDsToAudit(dataAccess, url);
-    if (!siteIDsToAudit.length) {
-      return createNotFoundResponse('Site not found');
+    const sitesToAudit = await getSitesToAudit(dataAccess, url);
+    if (!sitesToAudit.length) {
+      return notFound('Site not found');
     }
 
-    const message = await sendAuditMessages(
-      sqs,
-      queueUrl,
-      type,
-      auditContext,
-      siteIDsToAudit,
-    );
-    return createResponse({ message });
+    const types = type === 'lhs' ? [AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE] : [type];
+    const message = [];
+
+    for (const auditType of types) {
+      const sitesToAuditForType = sitesToAudit.filter((site) => {
+        const auditConfig = site.getAuditConfig();
+        return !auditConfig.getAuditTypeConfig(auditType)?.disabled();
+      });
+
+      message.push(
+        // eslint-disable-next-line no-await-in-loop
+        await sendAuditMessages(
+          sqs,
+          queueUrl,
+          auditType,
+          auditContext,
+          sitesToAuditForType.map((site) => site.getId()),
+        ),
+      );
+    }
+
+    return ok({ message });
   } catch (e) {
-    return createErrorResponse(e);
+    return internalServerError(e);
   }
 }

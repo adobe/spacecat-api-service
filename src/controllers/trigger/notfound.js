@@ -10,17 +10,15 @@
  * governing permissions and limitations under the License.
  */
 
+import { Response } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
-import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import { notFound } from '@adobe/spacecat-shared-http-utils';
 
 import { isAuditForAll } from '../../support/utils.js';
 import { getSlackContext } from '../../utils/slack/base.js';
 
-export const INITIAL_CWV_SLACK_MESSAGE = '*PERFORMANCE DEGRADATION (CWV) REPORT* for the *last week* :thread:';
-
-// fallback slack channel (franklin-spacecat-internal-test) hardcoded to use when no appropriate
-// slack channel was provided as parameter
+export const INITIAL_404_SLACK_MESSAGE = '*404 REPORT* for the *last week* :thread:';
 
 /**
  * Destructs the env variable in name1=lid1,name2=id2 comma separated pairs and matches the
@@ -44,8 +42,8 @@ export default async function triggerAudit(context) {
   if (!hasText(domainkey) || !hasText(queueUrl)) {
     throw Error('Required env variables are missing');
   }
-  const rumApiClient = RUMAPIClient.createFrom(context);
 
+  const rumApiClient = RUMAPIClient.createFrom(context);
   const urls = await rumApiClient.getDomainList();
   const filteredUrls = isAuditForAll(url) ? urls : urls.filter((row) => url === row);
 
@@ -54,7 +52,7 @@ export default async function triggerAudit(context) {
   }
 
   const slackContext = await getSlackContext({
-    target, targetChannels, url, message: INITIAL_CWV_SLACK_MESSAGE, token,
+    target, targetChannels, url, message: INITIAL_404_SLACK_MESSAGE, token,
   });
 
   for (const filteredUrl of filteredUrls) {
@@ -68,5 +66,5 @@ export default async function triggerAudit(context) {
   const message = `Successfully queued ${type} audit jobs for ${filteredUrls.length} url/s`;
   log.info(message);
 
-  return ok(JSON.stringify({ message }));
+  return new Response(JSON.stringify({ message }));
 }

@@ -12,11 +12,11 @@
 
 import { Response } from '@adobe/fetch';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
+import { internalServerError } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import SlackHandler from '../support/slack/slack-handler.js';
 import commands from '../support/slack/commands.js';
-import { createErrorResponse } from '../utils/response-utils.js';
 
 /**
  * Initializes the slack bot.
@@ -121,7 +121,7 @@ function SlackController(SlackApp) {
     } catch (error) {
       const errorMessage = cleanupHeaderValue(error.message);
       log.error(`Error processing event: ${errorMessage}`);
-      return createErrorResponse(errorMessage);
+      return internalServerError(errorMessage);
     }
 
     return new Response('');
