@@ -29,7 +29,7 @@
     "memory": 4096,
     "awsRole!important": "arn:aws:iam::282898975672:role/spacecat-role-services",
     "testUrl": "/_status_check/healthcheck.json",
-    "awsAttachAuthorizer": "helix-token-authorizer_v2",
+    "awsAttachAuthorizer": "spacecat-token-authorizer",
     "dev": {
       "params-file": "secrets/dev-secrets.json"
     },
