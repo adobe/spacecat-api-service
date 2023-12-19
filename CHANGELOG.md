@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.8.1...v1.9.0) (2023-12-19)
+
+
+### Features
+
+* enable helix authorizer ([#40](https://github.com/adobe-rnd/spacecat-api-service/issues/40)) ([15d611a](https://github.com/adobe-rnd/spacecat-api-service/commit/15d611a3456f2b262be35997b245eb18ce7f2739))
+
 ## [1.8.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.8.0...v1.8.1) (2023-12-19)
 
 
