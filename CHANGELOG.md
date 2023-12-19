@@ -1,3 +1,10 @@
+## [1.8.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.8.0...v1.8.1) (2023-12-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @aws-sdk/client-sqs to v3.476.0 ([#54](https://github.com/adobe-rnd/spacecat-api-service/issues/54)) ([e1ed380](https://github.com/adobe-rnd/spacecat-api-service/commit/e1ed380ec2b850a83275735810ac198f12eb7d25))
+
 # [1.8.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.7.0...v1.8.0) (2023-12-18)
 
 
