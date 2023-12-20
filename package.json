@@ -67,7 +67,7 @@
     "@adobe/spacecat-shared-http-utils": "1.0.0",
     "@adobe/spacecat-shared-rum-api-client": "1.2.1",
     "@aws-sdk/client-sqs": "3.477.0",
-    "@slack/bolt": "3.16.0"
+    "@slack/bolt": "3.17.0"
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.5",
