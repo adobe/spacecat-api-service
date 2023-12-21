@@ -108,9 +108,9 @@ export function formatThirdPartySummary(summary = []) {
  */
 function MartechImpactCommand(context) {
   const baseCommand = BaseCommand({
-    id: 'get-franklin-site-martech-impact',
-    name: 'Get Franklin Site Martech Impact',
-    description: 'Retrieves tbt and third party summary for a Franklin site by a given site',
+    id: 'get-site-martech-impact',
+    name: 'Get Martech Impact for a site',
+    description: 'Retrieves tbt and third party summary for a site by a given site',
     phrases: PHRASES,
     usageText: `${PHRASES.join(' or ')} {baseURL};`,
   });

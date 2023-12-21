@@ -94,9 +94,9 @@ export function formatAudits(audits) {
  */
 function GetSiteCommand(context) {
   const baseCommand = BaseCommand({
-    id: 'get-franklin-site-status',
-    name: 'Get Franklin Site Status',
-    description: 'Retrieves audit status for a Franklin site by a given base URL',
+    id: 'get-site-status',
+    name: 'Get Site Status',
+    description: 'Retrieves audit status for a site by a given base URL',
     phrases: PHRASES,
     usageText: `${PHRASES.join(' or ')} {baseURL} [desktop|mobile];`,
   });

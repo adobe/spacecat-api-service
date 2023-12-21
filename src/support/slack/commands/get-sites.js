@@ -170,7 +170,7 @@ function generatePaginationBlocks(
 
 /**
  * GetSitesCommand constructor function. Creates an instance of the command for
- * retrieving all Franklin sites.
+ * retrieving all sites.
  *
  * @param {Object} context - The context object.
  * @returns {Object} The command object.
@@ -178,9 +178,9 @@ function generatePaginationBlocks(
  */
 function GetSitesCommand(context) {
   const baseCommand = BaseCommand({
-    id: 'get-all-franklin-sites',
-    name: 'Get All Franklin Sites',
-    description: 'Retrieves all known franklin sites and includes the latest audit scores',
+    id: 'get-all-sites',
+    name: 'Get All Sites',
+    description: 'Retrieves all known sites and includes the latest audit scores',
     phrases: PHRASES,
     usageText: `${PHRASES.join(' or ')} [desktop|mobile|all|live|non-live];`,
   });
@@ -199,11 +199,12 @@ function GetSitesCommand(context) {
 
     const textSections = [{
       text: `
-    *Franklin Sites Status:* ${totalSites} total ${filterStatus} sites / PSI: ${psiStrategy}
+*All Sites:* ${totalSites} total ${filterStatus} sites
 
-    Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices >> Base URL
+Selected PSI Strategy: *${psiStrategy}*
 
-    _Sites are ordered by performance score, then all other scores, ascending._
+_Sites are ordered by performance score, then all other scores, ascending._
+_Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices >> Base URL_
     ${formatSites(sites, start, end)}
     `,
       accessory: generateOverflowAccessory(),
@@ -263,7 +264,7 @@ function GetSitesCommand(context) {
   };
 
   /**
-   * Execute the command to get all Franklin sites. This includes retrieving
+   * Execute the command to get all sites. This includes retrieving
    * the sites, formatting the sites, generating the necessary Slack message
    * blocks, and sending the message.
    *
