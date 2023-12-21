@@ -129,7 +129,7 @@ describe('Utility Functions', () => {
       :mars-team: Base URL: https://example.com (some-id)
       :github-4173: GitHub: https://github.com/example/repo
       :rocket: Is Live: Yes
-      :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
+      :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
       expect(printSiteDetails(mockSite, mockAudit)).to.equal(expectedOutput);
@@ -149,7 +149,7 @@ describe('Utility Functions', () => {
       :mars-team: Base URL: https://example.com (some-id)
       :github-4173: GitHub: https://github.com/example/repo
       :rocket: Is Live: Yes
-      :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
+      :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
       expect(printSiteDetails(mockSite, mockAudit)).to.equal(expectedOutput);

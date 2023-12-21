@@ -72,7 +72,7 @@ function formatScore(score) {
 
 const printSiteDetails = (site, latestAudit) => {
   const viewPSILink = latestAudit
-    ? `${latestAudit.isError() ? ':warning: ' : ''}<https://googlechrome.github.io/lighthouse/viewer/?jsonurl=${latestAudit.getFullAuditRef()}|View Latest Audit> `
+    ? `${latestAudit.isError() ? ':warning: ' : ''}<https://googlechrome.github.io/lighthouse/viewer/?jsonurl=${latestAudit.getFullAuditRef()}|View Latest Audit> or `
     : '';
   const runPSILink = `<https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=mobile|Run PSI Check>`;
 
