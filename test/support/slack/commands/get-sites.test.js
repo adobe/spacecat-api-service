@@ -89,8 +89,8 @@ describe('GetSitesCommand', () => {
     it('initializes correctly with base command properties', () => {
       const command = GetSitesCommand(context);
 
-      expect(command.id).to.equal('get-all-franklin-sites');
-      expect(command.name).to.equal('Get All Franklin Sites');
+      expect(command.id).to.equal('get-all-sites');
+      expect(command.name).to.equal('Get All Sites');
     });
 
     it('registers action handlers correctly', () => {

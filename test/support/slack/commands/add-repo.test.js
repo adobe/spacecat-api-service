@@ -33,7 +33,7 @@ describe('AddRepoCommand', () => {
     slackContext = { say: sinon.spy() };
 
     siteStub = {
-      getId: sinon.stub(),
+      getId: sinon.stub().returns('some-id'),
       getBaseURL: sinon.stub(),
       getGitHubURL: sinon.stub(),
       isLive: sinon.stub(),
@@ -109,13 +109,13 @@ describe('AddRepoCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith('\n'
-        + '      :white_check_mark: Github repo is successfully added to the site!\n'
+        + '      :white_check_mark: *GitHub repo added for undefined!*\n'
         + '      \n'
         + '\n'
-        + '      :mars-team: Base URL: undefined\n'
-        + '      :github-4173: GitHub: _not set_\n'
-        + '      :submarine: Is Live: No\n'
-        + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI check>\n'
+        + '      :identification_card: some-id\n'
+        + '      :github-4173: _not set_\n'
+        + '      :submarine: Is not live\n'
+        + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI Check>\n'
         + '    \n'
         + '      \n'
         + '      First PSI check with new repo is triggered! :adobe-run:\n'
@@ -178,7 +178,7 @@ describe('AddRepoCommand', () => {
       await command.handleExecution(args, slackContext);
 
       // Assertions to confirm repo info was fetched and handled correctly
-      expect(slackContext.say.calledWithMatch(/Github repo is successfully added/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/GitHub repo added/)).to.be.true;
     });
 
     it('handles non-existent repository (404 error)', async () => {

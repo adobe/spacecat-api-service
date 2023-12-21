@@ -78,7 +78,7 @@ function AddSiteCommand(context) {
       const auditType = 'lhs-mobile';
       const auditConfig = newSite.getAuditConfig();
 
-      let message = `:white_check_mark: Successfully added new site '${baseURL}'.\n`;
+      let message = `:white_check_mark: *Successfully added new site '${baseURL}*'.\n`;
 
       // we still check for auditConfig.auditsDisabled() here as the default audit config may change
       if (!auditConfig.auditsDisabled() && !auditConfig.getAuditTypeConfig(auditType)?.disabled()) {

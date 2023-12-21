@@ -81,9 +81,9 @@ describe('GetSiteCommand', () => {
   describe('Initialization and BaseCommand Integration', () => {
     it('initializes correctly with base command properties', () => {
       const command = GetSiteCommand(context);
-      expect(command.id).to.equal('get-franklin-site-status');
-      expect(command.name).to.equal('Get Franklin Site Status');
-      expect(command.description).to.equal('Retrieves audit status for a Franklin site by a given base URL');
+      expect(command.id).to.equal('get-site-status');
+      expect(command.name).to.equal('Get Site Status');
+      expect(command.description).to.equal('Retrieves audit status for a site by a given base URL');
       expect(command.phrases).to.deep.equal(['get site', 'get baseURL']);
     });
   });
@@ -104,6 +104,19 @@ describe('GetSiteCommand', () => {
 
     it('handles valid input and retrieves site status for desktop strategy', async () => {
       dataAccessStub.getAuditsForSite.resolves(generateMockAudits(10));
+
+      const args = ['example.com', 'desktop'];
+      const command = GetSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(dataAccessStub.getAuditsForSite.calledWith('123', 'lhs-desktop')).to.be.true;
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('handles valid input and retrieves site status without latest audit', async () => {
+      dataAccessStub.getAuditsForSite.resolves([]);
 
       const args = ['example.com', 'desktop'];
       const command = GetSiteCommand(context);
