@@ -108,9 +108,9 @@ export function formatThirdPartySummary(summary = []) {
  */
 function MartechImpactCommand(context) {
   const baseCommand = BaseCommand({
-    id: 'get-franklin-site-martech-impact',
-    name: 'Get Franklin Site Martech Impact',
-    description: 'Retrieves tbt and third party summary for a Franklin site by a given site',
+    id: 'get-site-martech-impact',
+    name: 'Get Martech Impact for a site',
+    description: 'Retrieves tbt and third party summary for a site by a given site',
     phrases: PHRASES,
     usageText: `${PHRASES.join(' or ')} {baseURL};`,
   });
@@ -140,8 +140,6 @@ function MartechImpactCommand(context) {
         return;
       }
 
-      await say(`:hourglass: Retrieving status for site: ${baseURL}, please wait...`);
-
       const site = await dataAccess.getSiteByBaseURL(baseURL);
 
       if (!site) {
@@ -160,13 +158,13 @@ function MartechImpactCommand(context) {
 
       const textSections = [{
         text: `
-    *Franklin Site Status*:
+*Martech Impact for ${site.getBaseURL()}*
 
 ${printSiteDetails(site)}
 
-    *Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
-    
-    *Third Party Summary:*\n${formatThirdPartySummary(thirdPartySummary)}
+*Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
+
+*Third Party Summary:*\n${formatThirdPartySummary(thirdPartySummary)}
   `,
       }];
 

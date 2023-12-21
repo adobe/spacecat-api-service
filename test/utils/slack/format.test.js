@@ -89,6 +89,7 @@ describe('Utility Functions', () => {
 
     beforeEach(() => {
       mockSite = {
+        getId: sinon.stub().returns('some-id'),
         getBaseURL: sinon.stub(),
         getGitHubURL: sinon.stub(),
         isLive: sinon.stub(),
@@ -105,13 +106,53 @@ describe('Utility Functions', () => {
       mockSite.isLive.returns(true);
 
       const expectedOutput = `
-      :mars-team: Base URL: https://example.com
-      :github-4173: GitHub: https://github.com/example/repo
-      :rocket: Is Live: Yes
-      :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI check>
+      :identification_card: some-id
+      :github-4173: https://github.com/example/repo
+      :rocket: Is live
+      :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
       expect(printSiteDetails(mockSite)).to.equal(expectedOutput);
+    });
+
+    it('prints details for a site with latest audit error', () => {
+      mockSite.getBaseURL.returns('https://example.com');
+      mockSite.getGitHubURL.returns('https://github.com/example/repo');
+      mockSite.isLive.returns(true);
+
+      const mockAudit = {
+        getFullAuditRef: sinon.stub().returns('https://psi-result/1'),
+        isError: sinon.stub().returns(true),
+      };
+
+      const expectedOutput = `
+      :identification_card: some-id
+      :github-4173: https://github.com/example/repo
+      :rocket: Is live
+      :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
+    `;
+
+      expect(printSiteDetails(mockSite, mockAudit)).to.equal(expectedOutput);
+    });
+
+    it('prints details for a site with latest audit', () => {
+      mockSite.getBaseURL.returns('https://example.com');
+      mockSite.getGitHubURL.returns('https://github.com/example/repo');
+      mockSite.isLive.returns(true);
+
+      const mockAudit = {
+        getFullAuditRef: sinon.stub().returns('https://psi-result/1'),
+        isError: sinon.stub().returns(false),
+      };
+
+      const expectedOutput = `
+      :identification_card: some-id
+      :github-4173: https://github.com/example/repo
+      :rocket: Is live
+      :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
+    `;
+
+      expect(printSiteDetails(mockSite, mockAudit)).to.equal(expectedOutput);
     });
 
     it('prints details for a non-live site without GitHub URL', () => {
@@ -120,10 +161,10 @@ describe('Utility Functions', () => {
       mockSite.isLive.returns(false);
 
       const expectedOutput = `
-      :mars-team: Base URL: https://example.com
-      :github-4173: GitHub: _not set_
-      :submarine: Is Live: No
-      :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI check>
+      :identification_card: some-id
+      :github-4173: _not set_
+      :submarine: Is not live
+      :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
       expect(printSiteDetails(mockSite)).to.equal(expectedOutput);

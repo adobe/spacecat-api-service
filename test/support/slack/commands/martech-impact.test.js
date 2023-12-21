@@ -56,8 +56,8 @@ describe('MartechImpactCommand', () => {
   describe('Initialization and BaseCommand Integration', () => {
     it('initializes correctly with base command properties', () => {
       const command = MartechImpactCommand(context);
-      expect(command.id).to.equal('get-franklin-site-martech-impact');
-      expect(command.name).to.equal('Get Franklin Site Martech Impact');
+      expect(command.id).to.equal('get-site-martech-impact');
+      expect(command.name).to.equal('Get Martech Impact for a site');
       // Additional assertions for other properties
     });
   });
