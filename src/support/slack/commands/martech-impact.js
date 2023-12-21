@@ -140,8 +140,6 @@ function MartechImpactCommand(context) {
         return;
       }
 
-      await say(`:hourglass: Retrieving status for site: ${baseURL}, please wait...`);
-
       const site = await dataAccess.getSiteByBaseURL(baseURL);
 
       if (!site) {
@@ -160,13 +158,13 @@ function MartechImpactCommand(context) {
 
       const textSections = [{
         text: `
-    *Franklin Site Status*:
+*Martech Impact for ${site.getBaseURL()}*
 
 ${printSiteDetails(site)}
 
-    *Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
-    
-    *Third Party Summary:*\n${formatThirdPartySummary(thirdPartySummary)}
+*Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
+
+*Third Party Summary:*\n${formatThirdPartySummary(thirdPartySummary)}
   `,
       }];
 

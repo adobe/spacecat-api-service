@@ -136,7 +136,7 @@ function AddRepoCommand(context) {
       }
 
       await say(`
-      :white_check_mark: Github repo is successfully added to the site!
+      :white_check_mark: *GitHub repo added for ${site.getBaseURL()}!*
       
 ${printSiteDetails(site)}
       

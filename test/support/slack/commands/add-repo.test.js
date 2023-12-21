@@ -109,7 +109,7 @@ describe('AddRepoCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith('\n'
-        + '      :white_check_mark: Github repo is successfully added to the site!\n'
+        + '      :white_check_mark: *GitHub repo added for undefined!*\n'
         + '      \n'
         + '\n'
         + '      :identification_card: some-id\n'
@@ -178,7 +178,7 @@ describe('AddRepoCommand', () => {
       await command.handleExecution(args, slackContext);
 
       // Assertions to confirm repo info was fetched and handled correctly
-      expect(slackContext.say.calledWithMatch(/Github repo is successfully added/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/GitHub repo added/)).to.be.true;
     });
 
     it('handles non-existent repository (404 error)', async () => {

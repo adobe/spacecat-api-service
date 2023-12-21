@@ -275,8 +275,6 @@ function GetSitesCommand(context) {
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
 
-    await say(':hourglass: Retrieving all sites, please wait...');
-
     let filterStatus = 'live';
     let psiStrategy = 'mobile';
 
