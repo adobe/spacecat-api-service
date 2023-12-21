@@ -183,7 +183,7 @@ function SitesController(dataAccess) {
     }
 
     if (updates) {
-      const updatedSite = await dataAccess.updateSite(requestBody);
+      const updatedSite = await dataAccess.updateSite(site);
       return ok(SiteDto.toJSON(updatedSite));
     }
 
