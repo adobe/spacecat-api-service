@@ -137,12 +137,13 @@ function GetSiteCommand(context) {
       }
 
       const audits = await dataAccess.getAuditsForSite(site.getId(), `lhs-${psiStrategy}`, false);
+      const latestAudit = audits.length > 0 ? audits[0] : null;
 
       const textSections = [{
         text: `
-    *Franklin Site Status* / PSI: ${psiStrategy}:
+    *Site Status* / PSI: ${psiStrategy}:
 
-${printSiteDetails(site)}
+${printSiteDetails(site, latestAudit)}
 
     _Audits are sorted by date descending._\n${formatAudits(audits)}
   `,

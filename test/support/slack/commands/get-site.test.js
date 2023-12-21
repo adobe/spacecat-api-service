@@ -115,6 +115,19 @@ describe('GetSiteCommand', () => {
       expect(slackContext.say.called).to.be.true;
     });
 
+    it('handles valid input and retrieves site status without latest audit', async () => {
+      dataAccessStub.getAuditsForSite.resolves([]);
+
+      const args = ['example.com', 'desktop'];
+      const command = GetSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(dataAccessStub.getAuditsForSite.calledWith('123', 'lhs-desktop')).to.be.true;
+      expect(slackContext.say.called).to.be.true;
+    });
+
     it('responds with usage instructions for invalid input', async () => {
       const args = [''];
       const command = GetSiteCommand(context);

@@ -33,7 +33,7 @@ describe('AddRepoCommand', () => {
     slackContext = { say: sinon.spy() };
 
     siteStub = {
-      getId: sinon.stub(),
+      getId: sinon.stub().returns('some-id'),
       getBaseURL: sinon.stub(),
       getGitHubURL: sinon.stub(),
       isLive: sinon.stub(),
@@ -112,10 +112,10 @@ describe('AddRepoCommand', () => {
         + '      :white_check_mark: Github repo is successfully added to the site!\n'
         + '      \n'
         + '\n'
-        + '      :mars-team: Base URL: undefined\n'
+        + '      :mars-team: Base URL: undefined (some-id)\n'
         + '      :github-4173: GitHub: _not set_\n'
         + '      :submarine: Is Live: No\n'
-        + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI check>\n'
+        + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI Check>\n'
         + '    \n'
         + '      \n'
         + '      First PSI check with new repo is triggered! :adobe-run:\n'

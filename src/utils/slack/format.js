@@ -70,14 +70,17 @@ function formatScore(score) {
   return `${Math.round(score * PERCENT_MULTIPLIER)}%`;
 }
 
-const printSiteDetails = (site) => {
-  const psiURL = `https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=mobile`;
+const printSiteDetails = (site, latestAudit) => {
+  const viewPSILink = latestAudit
+    ? `${latestAudit.isError() ? ':warning: ' : ''}<https://googlechrome.github.io/lighthouse/viewer/?jsonurl=${latestAudit.getFullAuditRef()}|View Latest Audit> `
+    : '';
+  const runPSILink = `<https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=mobile|Run PSI Check>`;
 
   return `
-      :mars-team: Base URL: ${site.getBaseURL()}
+      :mars-team: Base URL: ${site.getBaseURL()} (${site.getId()})
       :github-4173: GitHub: ${site.getGitHubURL() || '_not set_'}
       ${site.isLive() ? ':rocket:' : ':submarine:'} Is Live: ${site.isLive() ? 'Yes' : 'No'}
-      :lighthouse: <${psiURL}|Run PSI check>
+      :lighthouse: ${viewPSILink}${runPSILink}
     `;
 };
 
