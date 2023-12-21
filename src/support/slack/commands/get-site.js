@@ -127,8 +127,6 @@ function GetSiteCommand(context) {
         return;
       }
 
-      await say(`:hourglass: Retrieving status for base URL: ${baseURL}, please wait...`);
-
       const site = await dataAccess.getSiteByBaseURL(baseURL);
 
       if (!site) {
@@ -141,11 +139,11 @@ function GetSiteCommand(context) {
 
       const textSections = [{
         text: `
-    *Site Status* / PSI: ${psiStrategy}:
-
+*Site Status for ${site.getBaseURL()}*
 ${printSiteDetails(site, latestAudit)}
 
-    _Audits are sorted by date descending._\n${formatAudits(audits)}
+_Audits of *${psiStrategy}* strategy, sorted by date descending:_
+${formatAudits(audits)}
   `,
       }];
 

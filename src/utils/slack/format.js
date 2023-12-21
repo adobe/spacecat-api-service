@@ -77,9 +77,9 @@ const printSiteDetails = (site, latestAudit) => {
   const runPSILink = `<https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=mobile|Run PSI Check>`;
 
   return `
-      :mars-team: Base URL: ${site.getBaseURL()} (${site.getId()})
-      :github-4173: GitHub: ${site.getGitHubURL() || '_not set_'}
-      ${site.isLive() ? ':rocket:' : ':submarine:'} Is Live: ${site.isLive() ? 'Yes' : 'No'}
+      :identification_card: ${site.getId()}
+      :github-4173: ${site.getGitHubURL() || '_not set_'}
+      ${site.isLive() ? ':rocket:' : ':submarine:'} ${site.isLive() ? 'Is live' : 'Is not live'}
       :lighthouse: ${viewPSILink}${runPSILink}
     `;
 };
