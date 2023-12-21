@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.9.2...v1.10.0) (2023-12-21)
+
+
+### Features
+
+* add psi result viewer and error warning ([#64](https://github.com/adobe-rnd/spacecat-api-service/issues/64)) ([20f17f6](https://github.com/adobe-rnd/spacecat-api-service/commit/20f17f67d22685b2a5f9c69b2d323466c9053c6f))
+
 ## [1.9.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.9.1...v1.9.2) (2023-12-20)
 
 
