@@ -1,3 +1,10 @@
+## [1.10.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.3...v1.10.4) (2023-12-22)
+
+
+### Bug Fixes
+
+* allow access control origin & patch ([#68](https://github.com/adobe-rnd/spacecat-api-service/issues/68)) ([7153f34](https://github.com/adobe-rnd/spacecat-api-service/commit/7153f34750341fb9f893217c9739fa53cdd2806b))
+
 ## [1.10.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.2...v1.10.3) (2023-12-22)
 
 
