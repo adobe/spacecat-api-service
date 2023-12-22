@@ -1,3 +1,10 @@
+## [1.10.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.2...v1.10.3) (2023-12-22)
+
+
+### Bug Fixes
+
+* indicate audit disabled  ([#66](https://github.com/adobe-rnd/spacecat-api-service/issues/66)) ([97ce8c8](https://github.com/adobe-rnd/spacecat-api-service/commit/97ce8c810587e08c5d378dba901c8e213a228d49))
+
 ## [1.10.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.1...v1.10.2) (2023-12-21)
 
 
