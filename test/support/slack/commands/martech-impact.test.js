@@ -69,6 +69,10 @@ describe('MartechImpactCommand', () => {
         getBaseURL: () => 'example.com',
         getGitHubURL: () => '',
         isLive: () => true,
+        getAuditConfig: () => ({
+          auditsDisabled: () => false,
+          getAuditTypeConfig: () => ({ disabled: () => false }),
+        }),
       });
       dataAccessStub.getLatestAuditForSite.resolves({
         getAuditResult: () => (
