@@ -87,6 +87,15 @@ describe('auth', () => {
     expect(resp).to.equal(42);
   });
 
+  it('passes options method', async () => {
+    context.pathInfo.method = 'OPTIONS';
+    context.pathInfo.suffix = '/sites';
+
+    const resp = await action(new Request('https://space.cat/sites', { method: 'OPTIONS' }), context);
+
+    expect(resp).to.deep.equal(42);
+  });
+
   it('correct user key invokes the user scoped handler', async () => {
     const resp = await action(new Request('https://space.cat/', {
       headers: {

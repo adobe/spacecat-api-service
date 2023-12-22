@@ -32,7 +32,7 @@ export default function authWrapper(fn) {
 
     const route = `${method.toUpperCase()} ${suffix}`;
 
-    if (ANONYMOUS_ENDPOINTS.includes(route)) {
+    if (ANONYMOUS_ENDPOINTS.includes(route) || method.toUpperCase() === 'OPTIONS') {
       return fn(request, context);
     }
 
