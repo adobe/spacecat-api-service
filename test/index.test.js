@@ -74,6 +74,7 @@ describe('Index Tests', () => {
       'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS, DELETE',
       'access-control-allow-headers': 'x-api-key',
       'access-control-max-age': '86400',
+      'access-control-allow-origin': '*',
       'content-type': 'application/json; charset=utf-8',
     });
   });
