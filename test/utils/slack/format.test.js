@@ -12,6 +12,8 @@
 
 /* eslint-env mocha */
 
+import AuditConfig from '@adobe/spacecat-shared-data-access/src/models/site/audit-config.js';
+
 import { expect } from 'chai';
 import sinon from 'sinon';
 
@@ -93,6 +95,10 @@ describe('Utility Functions', () => {
         getBaseURL: sinon.stub(),
         getGitHubURL: sinon.stub(),
         isLive: sinon.stub(),
+        getAuditConfig: sinon.stub().returns(AuditConfig.fromDynamoItem({
+          auditsDisabled: false,
+          auditTypeConfigs: {},
+        })),
       };
     });
 
@@ -112,7 +118,25 @@ describe('Utility Functions', () => {
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite)).to.equal(expectedOutput);
+      expect(printSiteDetails(mockSite, 'mobile')).to.equal(expectedOutput);
+    });
+
+    it('prints details for a site with audits disabled', () => {
+      mockSite.getBaseURL.returns('https://example.com');
+      mockSite.getAuditConfig = sinon.stub().returns(AuditConfig.fromDynamoItem({
+        auditsDisabled: true,
+        auditTypeConfigs: {},
+      }));
+
+      const expectedOutput = `:warning: Audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).
+
+      :identification_card: some-id
+      :github-4173: _not set_
+      :submarine: Is not live
+      :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
+    `;
+
+      expect(printSiteDetails(mockSite, 'mobile')).to.equal(expectedOutput);
     });
 
     it('prints details for a site with latest audit error', () => {
@@ -132,7 +156,7 @@ describe('Utility Functions', () => {
       :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, mockAudit)).to.equal(expectedOutput);
+      expect(printSiteDetails(mockSite, 'mobile', mockAudit)).to.equal(expectedOutput);
     });
 
     it('prints details for a site with latest audit', () => {
@@ -152,7 +176,7 @@ describe('Utility Functions', () => {
       :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, mockAudit)).to.equal(expectedOutput);
+      expect(printSiteDetails(mockSite, 'mobile', mockAudit)).to.equal(expectedOutput);
     });
 
     it('prints details for a non-live site without GitHub URL', () => {
@@ -167,7 +191,7 @@ describe('Utility Functions', () => {
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite)).to.equal(expectedOutput);
+      expect(printSiteDetails(mockSite, 'mobile')).to.equal(expectedOutput);
     });
   });
 

@@ -69,6 +69,10 @@ describe('MartechImpactCommand', () => {
         getBaseURL: () => 'example.com',
         getGitHubURL: () => '',
         isLive: () => true,
+        getAuditConfig: () => ({
+          auditsDisabled: () => false,
+          getAuditTypeConfig: () => ({ disabled: () => false }),
+        }),
       });
       dataAccessStub.getLatestAuditForSite.resolves({
         getAuditResult: () => (
@@ -162,6 +166,13 @@ describe('MartechImpactCommand', () => {
       const formattedSummary = formatThirdPartySummary(summary);
 
       expect(formattedSummary).to.be.a('string');
+    });
+
+    it('formats empty summary correctly', () => {
+      const formattedSummary = formatThirdPartySummary();
+
+      expect(formattedSummary).to.be.a('string');
+      expect(formattedSummary).to.equal('    _No third party impact detected_');
     });
 
     it('adds ellipsis when the summary exceeds the character limit', () => {
