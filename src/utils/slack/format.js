@@ -70,13 +70,19 @@ function formatScore(score) {
   return `${Math.round(score * PERCENT_MULTIPLIER)}%`;
 }
 
-const printSiteDetails = (site, latestAudit) => {
+const printSiteDetails = (site, psiStrategy = 'mobile', latestAudit = null) => {
   const viewPSILink = latestAudit
     ? `${latestAudit.isError() ? ':warning: ' : ''}<https://googlechrome.github.io/lighthouse/viewer/?jsonurl=${latestAudit.getFullAuditRef()}|View Latest Audit> or `
     : '';
-  const runPSILink = `<https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=mobile|Run PSI Check>`;
+  const runPSILink = `<https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=${psiStrategy}|Run PSI Check>`;
 
-  return `
+  const auditConfig = site.getAuditConfig();
+  const auditTypeConfig = auditConfig.getAuditTypeConfig(`lhs-${psiStrategy}`);
+  const isAuditDisabled = auditConfig.auditsDisabled()
+    || (auditTypeConfig && auditTypeConfig.disabled());
+  const auditDisabledText = isAuditDisabled ? ':warning: Audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).\n' : '';
+
+  return `${auditDisabledText}
       :identification_card: ${site.getId()}
       :github-4173: ${site.getGitHubURL() || '_not set_'}
       ${site.isLive() ? ':rocket:' : ':submarine:'} ${site.isLive() ? 'Is live' : 'Is not live'}
