@@ -1,3 +1,17 @@
+## [1.10.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.1...v1.10.2) (2023-12-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @aws-sdk/client-sqs to v3.478.0 ([#62](https://github.com/adobe-rnd/spacecat-api-service/issues/62)) ([87bf12c](https://github.com/adobe-rnd/spacecat-api-service/commit/87bf12c5a62a8a7844f33c9820a27e46f2149707))
+
+## [1.10.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.0...v1.10.1) (2023-12-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @slack/bolt to v3.17.0 ([#63](https://github.com/adobe-rnd/spacecat-api-service/issues/63)) ([e0b9236](https://github.com/adobe-rnd/spacecat-api-service/commit/e0b9236ebe07e4bac6e32dc7e51349d8e33860c9))
+
 # [1.10.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.9.2...v1.10.0) (2023-12-21)
 
 
