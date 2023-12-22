@@ -28,6 +28,8 @@ SiteUpdate:
       type: string
     isLive:
       type: boolean
+    auditConfig:
+      $ref: '#/AuditConfig'
 AuditConfigType:
   type: object
   properties:
