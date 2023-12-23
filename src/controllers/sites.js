@@ -31,7 +31,7 @@ import { SiteDto } from '../dto/site.js';
  * @returns {object} Sites controller.
  * @constructor
  */
-function SitesController(dataAccess, log) {
+function SitesController(dataAccess) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -42,7 +42,6 @@ function SitesController(dataAccess, log) {
    * @return {Promise<Response>} Site response.
    */
   const createSite = async (context) => {
-    log.info(JSON.stringify(context.data));
     const site = await dataAccess.addSite(context.data);
     return createResponse(SiteDto.toJSON(site), 201);
   };
