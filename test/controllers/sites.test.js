@@ -243,6 +243,14 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[1]).to.equal(false);
   });
 
+  it('returns bad request if audit type is not provided', async () => {
+    const result = await sitesController.getAllWithLatestAudit({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Audit type required');
+  });
+
   it('gets all sites as CSV', async () => {
     const result = await sitesController.getAllAsCSV();
 

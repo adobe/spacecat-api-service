@@ -55,8 +55,22 @@ function SitesController(dataAccess) {
     return ok(sites);
   };
 
+  /**
+   * Gets all sites with their latest audit. Sites without a latest audit will be included
+   * in the result, but will have an empty audits array. The sites are sorted by their latest
+   * audit scores in ascending order by default. The sortAuditsAscending parameter can be used
+   * to change the sort order. If a site has no latest audit, it will be sorted at the end of
+   * the list.
+   * @param {object} context - Context of the request.
+   * @return {Promise<Response>} Array of sites response.
+   */
   const getAllWithLatestAudit = async (context) => {
     const auditType = context.params?.auditType;
+
+    if (!hasText(auditType)) {
+      return badRequest('Audit type required');
+    }
+
     let ascending = true;
     if (hasText(context.params?.ascending)) {
       ascending = context.params.ascending === 'true';
