@@ -1,3 +1,10 @@
+## [1.10.6](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.5...v1.10.6) (2023-12-23)
+
+
+### Bug Fixes
+
+* create site route, api doc ([#70](https://github.com/adobe-rnd/spacecat-api-service/issues/70)) ([12c2ed5](https://github.com/adobe-rnd/spacecat-api-service/commit/12c2ed511ecda891b4d93b567eb9609d29a01e85))
+
 ## [1.10.5](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.4...v1.10.5) (2023-12-22)
 
 
