@@ -69,6 +69,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId',
       'DELETE /sites/:siteId',
       'GET /sites/by-base-url/:baseURL',
+      'GET /sites/with-latest-audit/:auditType',
       'GET /sites/:siteId/audits',
       'GET /sites/:siteId/audits/:auditType',
       'GET /sites/:siteId/audits/latest',

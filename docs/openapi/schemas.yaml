@@ -21,6 +21,15 @@ Site:
     updatedAt:
       type: string
       format: date-time
+SiteWithLatestAudit:
+  allOf:
+    - $ref: '#/Site'
+    - type: object
+      properties:
+        audits:
+          type: array
+          items:
+            $ref: '#/Audit'
 SiteCreate:
   type: object
   properties:

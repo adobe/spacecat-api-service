@@ -30,9 +30,50 @@ describe('Sites Controller', () => {
     { id: 'site2', baseURL: 'https://site2.com' },
   ].map((site) => SiteDto.fromJson(site));
 
+  const sitesWithLatestAudits = [
+    {
+      id: 'site1',
+      baseURL: 'https://site1.com',
+      audits: [{
+        siteId: 'site1',
+        auditType: 'lhs-mobile',
+        auditedAt: '2021-01-01T00:00:00.000Z',
+        fullAuditRef: 'https://site1.com/lighthouse/20210101T000000.000Z/lhs-mobile.json',
+        auditResult: {
+          scores: {
+            performance: 0.5,
+            accessibility: 0.5,
+            'best-practices': 0.5,
+            seo: 0.5,
+          },
+        },
+      }],
+    },
+    {
+      id: 'site2',
+      baseURL: 'https://site2.com',
+      audits: [{
+        siteId: 'site2',
+        auditType: 'lhs-mobile',
+        auditedAt: '2021-01-01T00:00:00.000Z',
+        fullAuditRef: 'https://site2.com/lighthouse/20210101T000000.000Z/lhs-mobile.json',
+        auditResult: {
+          scores: {
+            performance: 0.4,
+            accessibility: 0.4,
+            'best-practices': 0.4,
+            seo: 0.4,
+          },
+        },
+      }],
+    },
+    { id: 'site3', baseURL: 'https://site3.com', audits: [] },
+  ].map((site) => SiteDto.fromJson(site));
+
   const siteFunctions = [
     'createSite',
     'getAll',
+    'getAllWithLatestAudit',
     'getAllAsCSV',
     'getAllAsXLS',
     'getByBaseURL',
@@ -42,7 +83,6 @@ describe('Sites Controller', () => {
   ];
 
   let mockDataAccess;
-  let mockLog;
   let sitesController;
 
   beforeEach(() => {
@@ -51,15 +91,12 @@ describe('Sites Controller', () => {
       updateSite: sandbox.stub().resolves(sites[0]),
       removeSite: sandbox.stub().resolves(),
       getSites: sandbox.stub().resolves(sites),
+      getSitesWithLatestAudit: sandbox.stub().resolves(sitesWithLatestAudits),
       getSiteByBaseURL: sandbox.stub().resolves(sites[0]),
       getSiteByID: sandbox.stub().resolves(sites[0]),
     };
 
-    mockLog = {
-      info: sandbox.stub(),
-    };
-
-    sitesController = SitesController(mockDataAccess, mockLog);
+    sitesController = SitesController(mockDataAccess);
   });
 
   afterEach(() => {
@@ -173,6 +210,37 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
     expect(resultSites[1]).to.have.property('id', 'site2');
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
+  });
+
+  it('gets all sites with latest audit', async () => {
+    const result = await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile' } });
+    const resultSites = await result.json();
+
+    expect(mockDataAccess.getSitesWithLatestAudit.calledOnce).to.be.true;
+    expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[0]).to.equal('lhs-mobile');
+    expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[1]).to.equal(true);
+    expect(resultSites).to.be.an('array').with.lengthOf(3);
+    expect(resultSites[0]).to.have.property('id', 'site1');
+    expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
+    expect(resultSites[0]).to.have.property('audits').with.lengthOf(1);
+    expect(resultSites[1]).to.have.property('id', 'site2');
+    expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
+  });
+
+  it('gets all sites with latest audit with ascending true', async () => {
+    await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile', ascending: 'true' } });
+
+    expect(mockDataAccess.getSitesWithLatestAudit.calledOnce).to.be.true;
+    expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[0]).to.equal('lhs-mobile');
+    expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[1]).to.equal(true);
+  });
+
+  it('gets all sites with latest audit with ascending false', async () => {
+    await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile', ascending: 'false' } });
+
+    expect(mockDataAccess.getSitesWithLatestAudit.calledOnce).to.be.true;
+    expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[0]).to.equal('lhs-mobile');
+    expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[1]).to.equal(false);
   });
 
   it('gets all sites as CSV', async () => {

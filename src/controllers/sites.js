@@ -55,6 +55,17 @@ function SitesController(dataAccess) {
     return ok(sites);
   };
 
+  const getAllWithLatestAudit = async (context) => {
+    const auditType = context.params?.auditType;
+    let ascending = true;
+    if (hasText(context.params?.ascending)) {
+      ascending = context.params.ascending === 'true';
+    }
+    const sites = (await dataAccess.getSitesWithLatestAudit(auditType, ascending))
+      .map((site) => SiteDto.toJSON(site));
+    return ok(sites);
+  };
+
   /**
    * Gets all sites as an XLS file.
    * @returns {Promise<Response>} XLS file.
@@ -195,6 +206,7 @@ function SitesController(dataAccess) {
     getAll,
     getAllAsXLS,
     getAllAsCSV,
+    getAllWithLatestAudit,
     getByBaseURL,
     getByID,
     removeSite,
