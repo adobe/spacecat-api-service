@@ -42,6 +42,7 @@ describe('Sites Controller', () => {
   ];
 
   let mockDataAccess;
+  let mockLog;
   let sitesController;
 
   beforeEach(() => {
@@ -54,7 +55,11 @@ describe('Sites Controller', () => {
       getSiteByID: sandbox.stub().resolves(sites[0]),
     };
 
-    sitesController = SitesController(mockDataAccess);
+    mockLog = {
+      info: sandbox.stub(),
+    };
+
+    sitesController = SitesController(mockDataAccess, mockLog);
   });
 
   afterEach(() => {
@@ -78,7 +83,7 @@ describe('Sites Controller', () => {
   });
 
   it('creates a site', async () => {
-    const response = await sitesController.createSite({ baseURL: 'https://site1.com' });
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
 
     expect(mockDataAccess.addSite.calledOnce).to.be.true;
     expect(response.status).to.equal(201);

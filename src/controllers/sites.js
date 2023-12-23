@@ -31,18 +31,19 @@ import { SiteDto } from '../dto/site.js';
  * @returns {object} Sites controller.
  * @constructor
  */
-function SitesController(dataAccess) {
+function SitesController(dataAccess, log) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
   /**
    * Creates a site. The site ID is generated automatically.
-   * @param {object} siteData - Site data.
+   * @param {object} context - Context of the request.
    * @return {Promise<Response>} Site response.
    */
-  const createSite = async (siteData) => {
-    const site = await dataAccess.addSite(siteData);
+  const createSite = async (context) => {
+    log.info(JSON.stringify(context.data));
+    const site = await dataAccess.addSite(context.data);
     return createResponse(SiteDto.toJSON(site), 201);
   };
 
