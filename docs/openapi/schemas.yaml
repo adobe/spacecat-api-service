@@ -29,7 +29,7 @@ SiteWithLatestAudit:
         audits:
           type: array
           items:
-            $ref: '#/AbbreviatedAudit'
+            $ref: '#/Audit'
 SiteCreate:
   type: object
   properties:
@@ -89,26 +89,7 @@ Audit:
       type: string
     auditResult:
       $ref: '#/AuditResult'
-AbbreviatedAudit:
-    allOf:
-      - $ref: '#/Audit'
-      - type: object
-        properties:
-          auditResult:
-            $ref: '#/AbbreviatedAuditResult'
 AuditResult:
-  type: object
-  allOf:
-    - $ref: '#/AbbreviatedAuditResult'
-    - type: object
-      additionalProperties: true
-      properties:
-        gitHubDiff:
-          type: string
-        contentLastModified:
-          type: string
-          format: date-time
-AbbreviatedAuditResult:
   type: object
   properties:
     runtimeError:
@@ -122,3 +103,5 @@ AbbreviatedAuditResult:
       type: string
     scores:
       type: object
+    totalBlockingTime:
+      type: number
