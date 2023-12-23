@@ -76,8 +76,9 @@ export const AuditDto = {
   toAbbreviatedJSON: (audit) => ({
     auditResult: {
       finalUrl: audit.getAuditResult()?.finalUrl,
-      scores: audit.getAuditResult()?.scores,
       runtimeError: audit.getAuditResult()?.runtimeError,
+      scores: audit.getAuditResult()?.scores,
+      totalBlockingTime: audit.getAuditResult()?.totalBlockingTime,
     },
     auditType: audit.getAuditType(),
     auditedAt: audit.getAuditedAt(),

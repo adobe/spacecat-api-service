@@ -29,6 +29,7 @@ describe('getRouteHandlers', () => {
     getAll: sinon.stub(),
     getAllAsCsv: sinon.stub(),
     getAllAsExcel: sinon.stub(),
+    getAllWithLatestAudit: sinon.stub(),
     getByID: sinon.stub(),
     getByBaseURL: sinon.stub(),
   };
@@ -69,6 +70,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId',
       'DELETE /sites/:siteId',
       'GET /sites/by-base-url/:baseURL',
+      'GET /sites/with-latest-audit/:auditType',
       'GET /sites/:siteId/audits',
       'GET /sites/:siteId/audits/:auditType',
       'GET /sites/:siteId/audits/latest',
@@ -81,6 +83,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].handler).to.equal(mockSitesController.getByBaseURL);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].paramNames).to.deep.equal(['baseURL']);
+    expect(dynamicRoutes['GET /sites/with-latest-audit/:auditType'].handler).to.equal(mockSitesController.getAllWithLatestAudit);
+    expect(dynamicRoutes['GET /sites/with-latest-audit/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /sites/:siteId/audits'].handler).to.equal(mockAuditsController.getAllForSite);
     expect(dynamicRoutes['GET /sites/:siteId/audits'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/audits/:auditType'].handler).to.equal(mockAuditsController.getAllForSite);

@@ -12,6 +12,7 @@
 
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import AuditConfig from '@adobe/spacecat-shared-data-access/src/models/site/audit-config.js';
+import { AuditDto } from './audit.js';
 
 /**
  * Data transfer object for Site.
@@ -33,6 +34,7 @@ export const SiteDto = {
       createdAt: jsonObject.createdAt,
       updatedAt: jsonObject.updatedAt,
       auditConfig: AuditConfig.fromDynamoItem(jsonObject.auditConfig),
+      audits: jsonObject.audits ? jsonObject.audits.map((audit) => AuditDto.fromJson(audit)) : [],
     };
 
     return createSite(siteData);
@@ -60,6 +62,8 @@ export const SiteDto = {
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
     auditConfig: AuditConfig.toDynamoItem(site.getAuditConfig()),
+    ...(site.getAudits().length > 0
+      && { audits: [AuditDto.toAbbreviatedJSON(site.getAudits()[0])] }),
   }),
 
   // TODO: implement toCSV

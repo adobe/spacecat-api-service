@@ -16,7 +16,7 @@ audits:
             schema:
               type: array
               items:
-                $ref: './schemas.yaml#/AbbreviatedAudit'
+                $ref: './schemas.yaml#/Audit'
       '400':
         $ref: "./responses.yaml#/400"
       '401':
@@ -45,7 +45,7 @@ audits-for-site:
             schema:
               type: array
               items:
-                $ref: './schemas.yaml#/AbbreviatedAudit'
+                $ref: './schemas.yaml#/Audit'
       '400':
         $ref: "./responses.yaml#/400"
       '401':
@@ -75,7 +75,7 @@ audits-for-site-and-type:
             schema:
               type: array
               items:
-                $ref: './schemas.yaml#/AbbreviatedAudit'
+                $ref: './schemas.yaml#/Audit'
       '400':
         $ref: "./responses.yaml#/400"
       '401':

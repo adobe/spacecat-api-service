@@ -14,6 +14,7 @@
 
 import { Request } from '@adobe/fetch';
 import { expect } from 'chai';
+import sinon from 'sinon';
 
 import { main } from '../src/index.js';
 
@@ -45,7 +46,9 @@ describe('Index Tests', () => {
         SLACK_BOT_TOKEN: slackBotToken,
         SLACK_SIGNING_SECRET: slackSigningSecret,
       },
-      dataAccess: { },
+      dataAccess: {
+        getSitesWithLatestAudit: sinon.stub().resolves([]),
+      },
     };
     request = new Request(baseUrl, {
       headers: {
@@ -107,5 +110,16 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(500);
     expect(resp.headers.plain()['x-error']).to.equal('dataAccess.getSiteByID is not a function');
+  });
+
+  it('handles dynamic route', async () => {
+    context.pathInfo.suffix = '/sites/with-latest-audit/lhs-mobile';
+
+    request = new Request(`${baseUrl}/sites/with-latest-audit/lhs-mobile`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(200);
+    expect(context.dataAccess.getSitesWithLatestAudit.calledOnce).to.be.true;
   });
 });
