@@ -1,3 +1,10 @@
+## [1.10.8](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.7...v1.10.8) (2023-12-23)
+
+
+### Bug Fixes
+
+* add missing endpoint ([#72](https://github.com/adobe-rnd/spacecat-api-service/issues/72)) ([7ac4087](https://github.com/adobe-rnd/spacecat-api-service/commit/7ac40879e8bc2ebb577d397714d959c6e7759053))
+
 ## [1.10.7](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.6...v1.10.7) (2023-12-23)
 
 
