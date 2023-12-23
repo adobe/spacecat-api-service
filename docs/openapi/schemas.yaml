@@ -21,6 +21,17 @@ Site:
     updatedAt:
       type: string
       format: date-time
+SiteCreate:
+  type: object
+  properties:
+    baseURL:
+      type: string
+    imsOrgId:
+      type: string
+    isLive:
+      type: boolean
+    auditConfig:
+      $ref: '#/AuditConfig'
 SiteUpdate:
   type: object
   properties:

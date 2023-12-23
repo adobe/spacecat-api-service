@@ -11,7 +11,7 @@ sites:
       content:
         application/json:
           schema:
-            $ref: './schemas.yaml#/Site'
+            $ref: './schemas.yaml#/SiteCreate'
     responses:
       '201':
         description: Site created successfully

@@ -79,7 +79,7 @@ async function run(request, context) {
   try {
     const routeHandlers = getRouteHandlers(
       AuditsController(context.dataAccess),
-      SitesController(context.dataAccess),
+      SitesController(context.dataAccess, log),
       SlackController(SlackApp),
       trigger,
     );

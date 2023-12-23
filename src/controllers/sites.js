@@ -38,11 +38,11 @@ function SitesController(dataAccess) {
 
   /**
    * Creates a site. The site ID is generated automatically.
-   * @param {object} siteData - Site data.
+   * @param {object} context - Context of the request.
    * @return {Promise<Response>} Site response.
    */
-  const createSite = async (siteData) => {
-    const site = await dataAccess.addSite(siteData);
+  const createSite = async (context) => {
+    const site = await dataAccess.addSite(context.data);
     return createResponse(SiteDto.toJSON(site), 201);
   };
 
