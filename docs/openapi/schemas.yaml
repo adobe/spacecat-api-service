@@ -29,7 +29,7 @@ SiteWithLatestAudit:
         audits:
           type: array
           items:
-            $ref: '#/Audit'
+            $ref: '#/AbbreviatedAudit'
 SiteCreate:
   type: object
   properties:
