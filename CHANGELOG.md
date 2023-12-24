@@ -1,3 +1,10 @@
+## [1.10.9](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.8...v1.10.9) (2023-12-24)
+
+
+### Bug Fixes
+
+* pass ascending param ([#75](https://github.com/adobe-rnd/spacecat-api-service/issues/75)) ([63344fc](https://github.com/adobe-rnd/spacecat-api-service/commit/63344fc382e55180d5e5cd9236310480f00ec430))
+
 ## [1.10.8](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.7...v1.10.8) (2023-12-23)
 
 
