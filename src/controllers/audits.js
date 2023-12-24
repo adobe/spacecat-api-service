@@ -39,12 +39,13 @@ function AuditsController(dataAccess) {
   const getAllForSite = async (context) => {
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType || undefined;
+    const ascending = context.data?.ascending === 'true' || false;
 
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const audits = (await dataAccess.getAuditsForSite(siteId, auditType))
+    const audits = (await dataAccess.getAuditsForSite(siteId, auditType, ascending))
       .map((audit) => AuditDto.toAbbreviatedJSON(audit));
 
     return ok(audits);
@@ -58,7 +59,7 @@ function AuditsController(dataAccess) {
    */
   const getAllLatest = async (context) => {
     const auditType = context.params?.auditType;
-    const ascending = context.data?.ascending || false;
+    const ascending = context.data?.ascending === 'true' || false;
 
     if (!hasText(auditType)) {
       return badRequest('Audit type required');

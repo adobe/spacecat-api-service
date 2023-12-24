@@ -123,7 +123,22 @@ describe('Audits Controller', () => {
       const result = await auditsController.getAllForSite({ params: { siteId } });
       const audits = await result.json();
 
-      expect(mockDataAccess.getAuditsForSite.calledWith(siteId, undefined)).to.be.true;
+      expect(mockDataAccess.getAuditsForSite.calledWith(siteId, undefined, false)).to.be.true;
+      expect(audits).to.deep.equal(expectedAudits);
+    });
+
+    it('retrieves all audits descending for a site', async () => {
+      const siteId = 'site1';
+      const expectedAudits = mockAudits.map(AuditDto.toJSON);
+
+      mockDataAccess.getAuditsForSite.resolves(mockAudits);
+
+      const result = await auditsController.getAllForSite(
+        { params: { siteId }, data: { ascending: 'true' } },
+      );
+      const audits = await result.json();
+
+      expect(mockDataAccess.getAuditsForSite.calledWith(siteId, undefined, true)).to.be.true;
       expect(audits).to.deep.equal(expectedAudits);
     });
 
@@ -155,7 +170,7 @@ describe('Audits Controller', () => {
       mockDataAccess.getLatestAudits.resolves(mockAudits);
 
       const result = await auditsController.getAllLatest(
-        { params: { auditType }, data: { ascending: true } },
+        { params: { auditType }, data: { ascending: 'true' } },
       );
       const audits = await result.json();
 
