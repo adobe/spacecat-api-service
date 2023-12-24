@@ -134,7 +134,7 @@ describe('Audits Controller', () => {
       mockDataAccess.getAuditsForSite.resolves(mockAudits);
 
       const result = await auditsController.getAllForSite(
-        { params: { siteId }, data: { ascending: true } },
+        { params: { siteId }, data: { ascending: 'true' } },
       );
       const audits = await result.json();
 
@@ -170,7 +170,7 @@ describe('Audits Controller', () => {
       mockDataAccess.getLatestAudits.resolves(mockAudits);
 
       const result = await auditsController.getAllLatest(
-        { params: { auditType }, data: { ascending: true } },
+        { params: { auditType }, data: { ascending: 'true' } },
       );
       const audits = await result.json();
 
