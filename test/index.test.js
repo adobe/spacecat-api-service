@@ -13,6 +13,7 @@
 /* eslint-env mocha */
 
 import { Request } from '@adobe/fetch';
+import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 import { expect } from 'chai';
 import sinon from 'sinon';
 
@@ -27,6 +28,23 @@ describe('Index Tests', () => {
 
   let context;
   let request;
+
+  const mockAuditData = {
+    siteId: '123',
+    auditType: 'lhs-mobile',
+    auditedAt: '2023-12-16T09:21:09.000Z',
+    isLive: true,
+    fullAuditRef: 'https://example.com',
+    auditResult: {
+      runtimeError: {},
+      scores: {
+        performance: 0.9,
+        seo: 0.8,
+        accessibility: 0.7,
+        'best-practices': 0.6,
+      },
+    },
+  };
 
   beforeEach('setup', () => {
     context = {
@@ -48,6 +66,7 @@ describe('Index Tests', () => {
       },
       dataAccess: {
         getSitesWithLatestAudit: sinon.stub().resolves([]),
+        getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),
       },
     };
     request = new Request(baseUrl, {
@@ -121,5 +140,16 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(200);
     expect(context.dataAccess.getSitesWithLatestAudit.calledOnce).to.be.true;
+  });
+
+  it('handles dynamic route with three params', async () => {
+    context.pathInfo.suffix = '/sites/1-2-3-4/audits/lhs-mobile/2023-12-17T00:50:39.470Z';
+
+    request = new Request(`${baseUrl}/sites/1-2-3-4/audits/lhs-mobile/2023-12-17T00:50:39.470Z`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(200);
+    expect(context.dataAccess.getAuditForSite.calledOnce).to.be.true;
   });
 });
