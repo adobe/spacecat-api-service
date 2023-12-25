@@ -76,6 +76,7 @@ describe('Sites Controller', () => {
     'getAllWithLatestAudit',
     'getAllAsCSV',
     'getAllAsXLS',
+    'getAuditForSite',
     'getByBaseURL',
     'getByID',
     'removeSite',
@@ -94,6 +95,7 @@ describe('Sites Controller', () => {
       getSitesWithLatestAudit: sandbox.stub().resolves(sitesWithLatestAudits),
       getSiteByBaseURL: sandbox.stub().resolves(sites[0]),
       getSiteByID: sandbox.stub().resolves(sites[0]),
+      getAuditForSite: sandbox.stub().resolves(sitesWithLatestAudits[0].getAudits()[0]),
     };
 
     sitesController = SitesController(mockDataAccess);
@@ -285,6 +287,81 @@ describe('Sites Controller', () => {
     expect(site).to.be.an('object');
     expect(site).to.have.property('id', 'site1');
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('gets specific audit for a site', async () => {
+    const result = await sitesController.getAuditForSite({
+      params: {
+        siteId: 'site1',
+        auditType: 'lhs-mobile',
+        auditedAt: '2021-01-01T00:00:00.000Z',
+      },
+    });
+    const audit = await result.json();
+
+    expect(mockDataAccess.getAuditForSite.calledOnce).to.be.true;
+
+    expect(audit).to.be.an('object');
+    expect(audit).to.have.property('siteId', 'site1');
+    expect(audit).to.have.property('auditType', 'lhs-mobile');
+    expect(audit).to.have.property('auditedAt', '2021-01-01T00:00:00.000Z');
+    expect(audit).to.have.property('fullAuditRef', 'https://site1.com/lighthouse/20210101T000000.000Z/lhs-mobile.json');
+    expect(audit).to.have.property('auditResult');
+  });
+
+  it('returns bad request if site ID is not provided when getting audit for site', async () => {
+    const result = await sitesController.getAuditForSite({
+      params: {
+        auditType: 'lhs-mobile',
+        auditedAt: '2021-01-01T00:00:00.000Z',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('returns bad request if audit type is not provided when getting audit for site', async () => {
+    const result = await sitesController.getAuditForSite({
+      params: {
+        siteId: 'site1',
+        auditedAt: '2021-01-01T00:00:00.000Z',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Audit type required');
+  });
+
+  it('returns bad request if audit date is not provided when getting audit for site', async () => {
+    const result = await sitesController.getAuditForSite({
+      params: {
+        siteId: 'site1',
+        auditType: 'lhs-mobile',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Audited at required');
+  });
+
+  it('returns not found if audit for site is not found', async () => {
+    mockDataAccess.getAuditForSite.resolves(null);
+
+    const result = await sitesController.getAuditForSite({
+      params: {
+        siteId: 'site1',
+        auditType: 'lhs-mobile',
+        auditedAt: '2021-01-01T00:00:00.000Z',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Audit not found');
   });
 
   it('returns not found when site is not found by id', async () => {

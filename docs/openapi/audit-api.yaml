@@ -2,11 +2,40 @@ audit-for-site:
   parameters:
     - $ref: "./parameters.yaml#/siteId"
     - $ref: "./parameters.yaml#/auditType"
+    - $ref: "./parameters.yaml#/auditedAt"
   get:
     operationId: getAuditForSite
     tags:
       - audits
     summary: Retrieve a single audit for a site
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: An audit object
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Audit'
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
+latest-audit-for-site:
+  parameters:
+    - $ref: "./parameters.yaml#/siteId"
+    - $ref: "./parameters.yaml#/auditType"
+  get:
+    operationId: getAuditForSite
+    tags:
+      - audits
+    summary: Retrieve the latest audit for a site
     security:
       - api_key: [ ]
     responses:
