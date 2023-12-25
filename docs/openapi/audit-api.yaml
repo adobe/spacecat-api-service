@@ -32,7 +32,7 @@ latest-audit-for-site:
     - $ref: "./parameters.yaml#/siteId"
     - $ref: "./parameters.yaml#/auditType"
   get:
-    operationId: getAuditForSite
+    operationId: getLatestAuditForSite
     tags:
       - audits
     summary: Retrieve the latest audit for a site

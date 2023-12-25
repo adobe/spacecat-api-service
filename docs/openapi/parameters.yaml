@@ -4,6 +4,12 @@ siteId:
   required: true
   schema:
     type: string
+auditedAt:
+  name: auditedAt
+  in: path
+  required: true
+  schema:
+    type: string
 auditType:
   name: auditType
   in: path
