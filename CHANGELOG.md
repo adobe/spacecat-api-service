@@ -1,6 +1,18 @@
 # [1.11.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.9...v1.11.0) (2023-12-25)
 
 
+### Bug Fixes
+
+* api doc ([e5e008d](https://github.com/adobe-rnd/spacecat-api-service/commit/e5e008dd15b49cd3984f01c02343ffad252823e4))
+
+
+### Features
+
+* get audit for site endpoint ([#76](https://github.com/adobe-rnd/spacecat-api-service/issues/76)) ([0691bb6](https://github.com/adobe-rnd/spacecat-api-service/commit/0691bb646b31a6649c53f7b1c7aaa7ba50c6f217))
+
+# [1.11.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.10.9...v1.11.0) (2023-12-25)
+
+
 ### Features
 
 * get audit for site endpoint ([#76](https://github.com/adobe-rnd/spacecat-api-service/issues/76)) ([0691bb6](https://github.com/adobe-rnd/spacecat-api-service/commit/0691bb646b31a6649c53f7b1c7aaa7ba50c6f217))
