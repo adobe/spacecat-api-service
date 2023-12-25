@@ -68,6 +68,7 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
+    'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,

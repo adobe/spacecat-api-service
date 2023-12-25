@@ -24,6 +24,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import { SiteDto } from '../dto/site.js';
+import { AuditDto } from '../dto/audit.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -96,6 +97,31 @@ function SitesController(dataAccess) {
   const getAllAsCSV = async () => {
     const sites = await dataAccess.getSites();
     return ok(SiteDto.toCSV(sites));
+  };
+
+  const getAuditForSite = async (context) => {
+    const siteId = context.params?.siteId;
+    const auditType = context.params?.auditType;
+    const auditedAt = context.params?.auditedAt;
+
+    if (!hasText(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(auditType)) {
+      return badRequest('Audit type required');
+    }
+
+    if (!hasText(auditedAt)) {
+      return badRequest('Audited at required');
+    }
+
+    const audit = await dataAccess.getAuditForSite(siteId, auditType, auditedAt);
+    if (!audit) {
+      return notFound('Audit not found');
+    }
+
+    return ok(AuditDto.toJSON(audit));
   };
 
   /**
@@ -221,6 +247,7 @@ function SitesController(dataAccess) {
     getAllAsXLS,
     getAllAsCSV,
     getAllWithLatestAudit,
+    getAuditForSite,
     getByBaseURL,
     getByID,
     removeSite,
