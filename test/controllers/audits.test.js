@@ -12,6 +12,7 @@
 
 /* eslint-env mocha */
 
+import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 import chai from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -47,6 +48,14 @@ describe('Audits Controller', () => {
           seo: 0.5,
         },
       },
+      previousAuditResult: {
+        scores: {
+          performance: 0.5,
+          accessibility: 0.5,
+          'best-practices': 0.5,
+          seo: 0.5,
+        },
+      },
     },
     {
       siteId: 'site1',
@@ -55,6 +64,14 @@ describe('Audits Controller', () => {
       isLive: true,
       fullAuditRef: 'https://lh-metrics.com/audit/234',
       auditResult: {
+        scores: {
+          performance: 0.5,
+          accessibility: 0.5,
+          'best-practices': 0.5,
+          seo: 0.5,
+        },
+      },
+      previousAuditResult: {
         scores: {
           performance: 0.5,
           accessibility: 0.5,
@@ -77,8 +94,9 @@ describe('Audits Controller', () => {
           'total-blocking-time': 0.5,
         },
       },
+      previousAuditResult: { scores: {} },
     },
-  ].map((audit) => AuditDto.fromJson(audit));
+  ].map((audit) => createAudit(audit));
 
   const mockDataAccess = {
     getAuditsForSite: sandbox.stub(),
