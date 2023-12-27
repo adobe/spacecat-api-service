@@ -51,6 +51,7 @@ export const AuditDto = {
    */
   toJSON: (audit) => ({
     auditResult: audit.getAuditResult(),
+    previousAuditResult: audit.getPreviousAuditResult() || {},
     auditType: audit.getAuditType(),
     auditedAt: audit.getAuditedAt(),
     expiresAt: audit.getExpiresAt().toISOString(),
@@ -79,6 +80,14 @@ export const AuditDto = {
       runtimeError: audit.getAuditResult()?.runtimeError,
       scores: audit.getAuditResult()?.scores,
       totalBlockingTime: audit.getAuditResult()?.totalBlockingTime,
+    },
+    previousAuditResult: {
+      finalUrl: audit.getPreviousAuditResult()?.finalUrl,
+      runtimeError: audit.getPreviousAuditResult()?.runtimeError,
+      scores: audit.getPreviousAuditResult()?.scores,
+      totalBlockingTime: audit.getPreviousAuditResult()?.totalBlockingTime,
+      fullAuditRef: audit.getPreviousAuditResult()?.fullAuditRef,
+      auditedAt: audit.getPreviousAuditResult()?.auditedAt,
     },
     auditType: audit.getAuditType(),
     auditedAt: audit.getAuditedAt(),

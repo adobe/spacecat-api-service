@@ -89,6 +89,8 @@ Audit:
       type: string
     auditResult:
       $ref: '#/AuditResult'
+    previousAuditResult:
+      $ref: '#/AuditResult'
 AuditResult:
   type: object
   properties:
