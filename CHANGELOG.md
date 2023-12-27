@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.11.2...v1.12.0) (2023-12-27)
+
+
+### Features
+
+* expose previous audit result ([#78](https://github.com/adobe-rnd/spacecat-api-service/issues/78)) ([87f7387](https://github.com/adobe-rnd/spacecat-api-service/commit/87f7387f1e4728e9a81fee9e9c9b4c56b08f370a))
+
 ## [1.11.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.11.1...v1.11.2) (2023-12-27)
 
 
