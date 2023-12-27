@@ -86,6 +86,8 @@ export const AuditDto = {
       runtimeError: audit.getPreviousAuditResult()?.runtimeError,
       scores: audit.getPreviousAuditResult()?.scores,
       totalBlockingTime: audit.getPreviousAuditResult()?.totalBlockingTime,
+      fullAuditRef: audit.getPreviousAuditResult()?.fullAuditRef,
+      auditedAt: audit.getPreviousAuditResult()?.auditedAt,
     },
     auditType: audit.getAuditType(),
     auditedAt: audit.getAuditedAt(),
