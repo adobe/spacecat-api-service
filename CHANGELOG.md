@@ -1,3 +1,10 @@
+## [1.11.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.11.1...v1.11.2) (2023-12-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.5.1 ([#79](https://github.com/adobe-rnd/spacecat-api-service/issues/79)) ([9b88987](https://github.com/adobe-rnd/spacecat-api-service/commit/9b88987a4433eb385c50f3eb4c251fbc0bd62eaf))
+
 ## [1.11.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.11.0...v1.11.1) (2023-12-26)
 
 
