@@ -20,22 +20,13 @@ import { getSlackContext } from '../../utils/slack/base.js';
 
 export const INITIAL_404_SLACK_MESSAGE = '*404 REPORT* for the *last week* :thread:';
 
-/**
- * Destructs the env variable in name1=lid1,name2=id2 comma separated pairs and matches the
- * channel name which is provided by the target variable. Then returns the matched channel id
- * If no channel is matched to the given target param, then id of the fallback channel is returned
- * @param target name of the channel to match
- * @param targetChannels env variable in name=id,name=id form
- * @returns {*|string}
- */
-
 export default async function triggerAudit(context) {
   const { log, sqs } = context;
-  const { type, url, target } = context.data;
+  const { type, url } = context.data;
   const {
     RUM_DOMAIN_KEY: domainkey,
     AUDIT_JOBS_QUEUE_URL: queueUrl,
-    TARGET_SLACK_CHANNELS: targetChannels,
+    AUDIT_REPORT_SLACK_CHANNEL_ID: slackChannelId,
     SLACK_BOT_TOKEN: token,
   } = context.env;
 
@@ -52,7 +43,7 @@ export default async function triggerAudit(context) {
   }
 
   const slackContext = await getSlackContext({
-    target, targetChannels, url, message: INITIAL_404_SLACK_MESSAGE, token,
+    slackChannelId, url, message: INITIAL_404_SLACK_MESSAGE, token,
   });
 
   for (const filteredUrl of filteredUrls) {

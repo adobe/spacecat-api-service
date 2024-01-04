@@ -82,7 +82,7 @@ Currently, audit worker requires two env variables:
 
 ```plaintext
 AUDIT_JOBS_QUEUE_URL=url of the queue to send audit jobs to
+AUDIT_REPORT_SLACK_CHANNEL_ID=slack channel id to send the audit reports to
 RUM_DOMAIN_KEY=global domain key for the rum api
-TARGET_SLACK_CHANNELS=comma separated key values containing slack channel names and ids,
 SLACK_BOT_TOKEN=slack bot's token,
 ```

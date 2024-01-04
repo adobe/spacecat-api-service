@@ -17,7 +17,8 @@ import sinon from 'sinon';
 
 import {
   extractURLFromSlackInput,
-  FALLBACK_SLACK_CHANNEL, getSlackChannelId,
+  FALLBACK_SLACK_CHANNEL,
+  getSlackContext,
   postErrorMessage,
   sendMessageBlocks,
 } from '../../../src/utils/slack/base.js';
@@ -167,26 +168,10 @@ describe('Base Slack Utils', () => {
         expect(say.firstCall.args[0]).to.deep.equal({ blocks: expectedBlocks });
       });
     });
-    describe('getSlackChannelId()', () => {
+    describe('getSlackContext()', async () => {
       it('fallbacks to default slack channel when no configured', async () => {
-        expect(getSlackChannelId(undefined, undefined)).to.equal(FALLBACK_SLACK_CHANNEL);
-        expect(getSlackChannelId(null, '')).to.equal(FALLBACK_SLACK_CHANNEL);
-        expect(getSlackChannelId(undefined, '')).to.equal(FALLBACK_SLACK_CHANNEL);
-        expect(getSlackChannelId(undefined, ',')).to.equal(FALLBACK_SLACK_CHANNEL);
-        expect(getSlackChannelId(undefined, '=,')).to.equal(FALLBACK_SLACK_CHANNEL);
-        expect(getSlackChannelId(undefined, 'ch= ,')).to.equal(FALLBACK_SLACK_CHANNEL);
-        expect(getSlackChannelId('channel', 'channel1=,channel2= ')).to.equal(FALLBACK_SLACK_CHANNEL);
-        expect(getSlackChannelId(null, 'asd')).to.equal(FALLBACK_SLACK_CHANNEL);
-      });
-
-      it('fallbacks to default slack channel when no found in env', async () => {
-        const channelId = getSlackChannelId('ch4', 'ch1=ASD,ch2=DSA,ch3=TRE');
-        expect(channelId).to.equal(FALLBACK_SLACK_CHANNEL);
-      });
-
-      it('returs to desired slack channel', async () => {
-        const channelId = getSlackChannelId('ch3', 'ch1=ASD,ch2=DSA,ch3=TRE');
-        expect(channelId).to.equal('TRE');
+        const slackContext = await getSlackContext({ url: 'some-url' });
+        expect(slackContext).to.eql({ channel: FALLBACK_SLACK_CHANNEL });
       });
     });
   });

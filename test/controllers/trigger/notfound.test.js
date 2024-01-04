@@ -50,7 +50,7 @@ describe('not found handler', () => {
         AUDIT_JOBS_QUEUE_URL: 'queueUrl',
         RUM_DOMAIN_KEY: 'domainkey',
         SLACK_BOT_TOKEN: 'token',
-        TARGET_SLACK_CHANNELS: 'ch1=ASD,ch2=DSA,ch3=TRE',
+        AUDIT_REPORT_SLACK_CHANNEL_ID: 'DSAN',
       },
       sqs: {
         sendMessage: sandbox.stub().resolves(),
@@ -119,7 +119,6 @@ describe('not found handler', () => {
   it('queue the audit task when requested url in rum api', async () => {
     context.data.type = 'cwv';
     context.data.url = 'adobe.com';
-    context.data.target = 'ch3';
 
     nock('https://helix-pages.anywhere.run')
       .get('/helix-services/run-query@v3/dash/domain-list')
@@ -134,7 +133,7 @@ describe('not found handler', () => {
     const message = {
       type: context.data.type,
       url: context.data.url,
-      auditContext: { slackContext: { channel: 'TRE' } },
+      auditContext: { slackContext: { channel: 'DSAN' } },
     };
 
     expect(context.sqs.sendMessage).to.have.been.calledOnce;
@@ -146,7 +145,6 @@ describe('not found handler', () => {
   it('queue multiple audit tasks when all urls requested', async () => {
     context.data.type = 'cwv';
     context.data.url = 'all';
-    context.data.target = 'ch2';
 
     nock('https://helix-pages.anywhere.run')
       .get('/helix-services/run-query@v3/dash/domain-list')
@@ -158,10 +156,10 @@ describe('not found handler', () => {
 
     nock('https://slack.com')
       .get('/api/chat.postMessage')
-      .query(getQueryParams('DSA', INITIAL_404_SLACK_MESSAGE))
+      .query(getQueryParams('DSAN', INITIAL_404_SLACK_MESSAGE))
       .reply(200, {
         ok: true,
-        channel: 'DSA',
+        channel: 'DSAN',
         ts: 'ts1',
       });
 
@@ -171,17 +169,17 @@ describe('not found handler', () => {
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
       url: 'adobe.com',
-      auditContext: { slackContext: { channel: 'DSA', ts: 'ts1' } },
+      auditContext: { slackContext: { channel: 'DSAN', ts: 'ts1' } },
     });
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
       url: 'bamboohr.com',
-      auditContext: { slackContext: { channel: 'DSA', ts: 'ts1' } },
+      auditContext: { slackContext: { channel: 'DSAN', ts: 'ts1' } },
     });
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
       url: 'nurtec.com',
-      auditContext: { slackContext: { channel: 'DSA', ts: 'ts1' } },
+      auditContext: { slackContext: { channel: 'DSAN', ts: 'ts1' } },
     });
     expect(resp.status).to.equal(200);
   });

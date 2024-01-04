@@ -51,7 +51,7 @@ describe('cvw handler', () => {
         AUDIT_JOBS_QUEUE_URL: 'queueUrl',
         RUM_DOMAIN_KEY: 'domainkey',
         SLACK_BOT_TOKEN: 'token',
-        TARGET_SLACK_CHANNELS: 'ch1=ASD,ch2=DSA,ch3=TRE',
+        AUDIT_REPORT_SLACK_CHANNEL_ID: 'DSA',
       },
       sqs: {
         sendMessage: sandbox.stub().resolves(),
@@ -120,7 +120,6 @@ describe('cvw handler', () => {
   it('queue the audit task when requested url in rum api', async () => {
     context.data.type = 'cwv';
     context.data.url = 'adobe.com';
-    context.data.target = 'ch3';
 
     nock('https://helix-pages.anywhere.run')
       .get('/helix-services/run-query@v3/dash/domain-list')
@@ -135,7 +134,7 @@ describe('cvw handler', () => {
     const message = {
       type: context.data.type,
       url: context.data.url,
-      auditContext: { slackContext: { channel: 'TRE' } },
+      auditContext: { slackContext: { channel: 'DSA' } },
     };
 
     expect(context.sqs.sendMessage).to.have.been.calledOnce;
@@ -147,7 +146,6 @@ describe('cvw handler', () => {
   it('queue multiple audit tasks when all urls requested', async () => {
     context.data.type = 'cwv';
     context.data.url = 'all';
-    context.data.target = 'ch2';
 
     nock('https://helix-pages.anywhere.run')
       .get('/helix-services/run-query@v3/dash/domain-list')
