@@ -186,9 +186,13 @@ const postSlackMessage = async (channelId, message, token) => {
 };
 
 export async function getSlackContext({
-  slackChannelId, url, message, token,
+  slackChannelId, url, message, token, log,
 }) {
-  const channelId = hasText(slackChannelId) ? slackChannelId : FALLBACK_SLACK_CHANNEL;
+  let channelId = slackChannelId;
+  if (!hasText(slackChannelId)) {
+    log.info('Provided channelId is invalid. Using fallback channel instead');
+    channelId = FALLBACK_SLACK_CHANNEL;
+  }
 
   if (!isAuditForAll(url)) {
     return { channel: channelId };

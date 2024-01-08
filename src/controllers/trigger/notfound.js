@@ -43,7 +43,7 @@ export default async function triggerAudit(context) {
   }
 
   const slackContext = await getSlackContext({
-    slackChannelId, url, message: INITIAL_404_SLACK_MESSAGE, token,
+    slackChannelId, url, message: INITIAL_404_SLACK_MESSAGE, token, log,
   });
 
   for (const filteredUrl of filteredUrls) {
