@@ -170,7 +170,7 @@ describe('Base Slack Utils', () => {
     });
     describe('getSlackContext()', async () => {
       it('fallbacks to default slack channel when no configured', async () => {
-        const slackContext = await getSlackContext({ url: 'some-url' });
+        const slackContext = await getSlackContext({ url: 'some-url', log: console });
         expect(slackContext).to.eql({ channel: FALLBACK_SLACK_CHANNEL });
       });
     });
