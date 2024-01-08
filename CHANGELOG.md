@@ -1,3 +1,10 @@
+## [1.12.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.12.1...v1.12.2) (2024-01-08)
+
+
+### Bug Fixes
+
+* improved logs for fallback channel mechanism ([#84](https://github.com/adobe-rnd/spacecat-api-service/issues/84)) ([455512f](https://github.com/adobe-rnd/spacecat-api-service/commit/455512f087c37b4c0ff00f700b88b03d0b84bc7d))
+
 ## [1.12.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.12.0...v1.12.1) (2023-12-30)
 
 
