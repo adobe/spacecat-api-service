@@ -1,3 +1,10 @@
+## [1.12.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.12.2...v1.12.3) (2024-01-09)
+
+
+### Bug Fixes
+
+* npm token renovate ([0e274cd](https://github.com/adobe-rnd/spacecat-api-service/commit/0e274cdbb78396899799cef61b2318f0508021ee))
+
 ## [1.12.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.12.1...v1.12.2) (2024-01-08)
 
 
