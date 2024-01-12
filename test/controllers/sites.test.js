@@ -26,14 +26,15 @@ const { expect } = chai;
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
   const sites = [
-    { id: 'site1', baseURL: 'https://site1.com' },
-    { id: 'site2', baseURL: 'https://site2.com' },
+    { id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' },
+    { id: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge' },
   ].map((site) => SiteDto.fromJson(site));
 
   const sitesWithLatestAudits = [
     {
       id: 'site1',
       baseURL: 'https://site1.com',
+      deliveryType: 'aem_edge',
       audits: [{
         siteId: 'site1',
         auditType: 'lhs-mobile',
@@ -52,6 +53,7 @@ describe('Sites Controller', () => {
     {
       id: 'site2',
       baseURL: 'https://site2.com',
+      deliveryType: 'aem_edge',
       audits: [{
         siteId: 'site2',
         auditType: 'lhs-mobile',
@@ -73,6 +75,7 @@ describe('Sites Controller', () => {
   const siteFunctions = [
     'createSite',
     'getAll',
+    'getAllByDeliveryType',
     'getAllWithLatestAudit',
     'getAllAsCSV',
     'getAllAsXLS',
@@ -92,6 +95,7 @@ describe('Sites Controller', () => {
       updateSite: sandbox.stub().resolves(sites[0]),
       removeSite: sandbox.stub().resolves(),
       getSites: sandbox.stub().resolves(sites),
+      getSitesByDeliveryType: sandbox.stub().resolves(sites),
       getSitesWithLatestAudit: sandbox.stub().resolves(sitesWithLatestAudits),
       getSiteByBaseURL: sandbox.stub().resolves(sites[0]),
       getSiteByID: sandbox.stub().resolves(sites[0]),
@@ -214,6 +218,20 @@ describe('Sites Controller', () => {
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
   });
 
+  it('gets all sites by delivery type', async () => {
+    mockDataAccess.getSites.resolves(sites);
+
+    const result = await sitesController.getAllByDeliveryType({ params: { deliveryType: 'aem_edge' } });
+    const resultSites = await result.json();
+
+    expect(mockDataAccess.getSitesByDeliveryType.calledOnce).to.be.true;
+    expect(resultSites).to.be.an('array').with.lengthOf(2);
+    expect(resultSites[0]).to.have.property('id', 'site1');
+    expect(resultSites[0]).to.have.property('deliveryType', 'aem_edge');
+    expect(resultSites[1]).to.have.property('id', 'site2');
+    expect(resultSites[1]).to.have.property('deliveryType', 'aem_edge');
+  });
+
   it('gets all sites with latest audit', async () => {
     const result = await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile' } });
     const resultSites = await result.json();
@@ -243,6 +261,14 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.getSitesWithLatestAudit.calledOnce).to.be.true;
     expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[0]).to.equal('lhs-mobile');
     expect(mockDataAccess.getSitesWithLatestAudit.firstCall.args[1]).to.equal(false);
+  });
+
+  it('returns bad request if delivery type is not provided', async () => {
+    const result = await sitesController.getAllByDeliveryType({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Delivery type required');
   });
 
   it('returns bad request if audit type is not provided', async () => {

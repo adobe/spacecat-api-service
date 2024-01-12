@@ -57,6 +57,23 @@ function SitesController(dataAccess) {
   };
 
   /**
+   * Gets all sites by delivery type.
+    * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of sites response.
+   */
+  const getAllByDeliveryType = async (context) => {
+    const deliveryType = context.params?.deliveryType;
+
+    if (!hasText(deliveryType)) {
+      return badRequest('Delivery type required');
+    }
+
+    const sites = (await dataAccess.getSitesByDeliveryType(deliveryType))
+      .map((site) => SiteDto.toJSON(site));
+    return ok(sites);
+  };
+
+  /**
    * Gets all sites with their latest audit. Sites without a latest audit will be included
    * in the result, but will have an empty audits array. The sites are sorted by their latest
    * audit scores in ascending order by default. The sortAuditsAscending parameter can be used
@@ -249,6 +266,7 @@ function SitesController(dataAccess) {
     getAllWithLatestAudit,
     getAuditForSite,
     getByBaseURL,
+    getAllByDeliveryType,
     getByID,
     removeSite,
     updateSite,

@@ -28,6 +28,7 @@ export const SiteDto = {
     const siteData = {
       id: jsonObject.id,
       baseURL: jsonObject.baseURL,
+      deliveryType: jsonObject.deliveryType,
       gitHubURL: jsonObject.gitHubURL,
       imsOrgId: jsonObject.imsOrgId,
       isLive: jsonObject.isLive,
@@ -56,6 +57,7 @@ export const SiteDto = {
   toJSON: (site) => ({
     id: site.getId(),
     baseURL: site.getBaseURL(),
+    deliveryType: site.getDeliveryType(),
     gitHubURL: site.getGitHubURL(),
     imsOrgId: site.getImsOrgId(),
     isLive: site.isLive(),
