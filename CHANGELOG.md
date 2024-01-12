@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.12.3...v1.13.0) (2024-01-12)
+
+
+### Features
+
+* site delivery type ([#88](https://github.com/adobe-rnd/spacecat-api-service/issues/88)) ([99a8a08](https://github.com/adobe-rnd/spacecat-api-service/commit/99a8a08f220d19b396cb7f6a5f1cd2899152803c))
+
 ## [1.12.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.12.2...v1.12.3) (2024-01-09)
 
 
