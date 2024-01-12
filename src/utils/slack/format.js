@@ -84,6 +84,7 @@ const printSiteDetails = (site, psiStrategy = 'mobile', latestAudit = null) => {
 
   return `${auditDisabledText}
       :identification_card: ${site.getId()}
+      :cat-category-white: ${site.getDeliveryType()}
       :github-4173: ${site.getGitHubURL() || '_not set_'}
       ${site.isLive() ? ':rocket:' : ':submarine:'} ${site.isLive() ? 'Is live' : 'Is not live'}
       :lighthouse: ${viewPSILink}${runPSILink}

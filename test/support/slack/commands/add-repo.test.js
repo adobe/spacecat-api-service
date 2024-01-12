@@ -34,6 +34,7 @@ describe('AddRepoCommand', () => {
 
     siteStub = {
       getId: sinon.stub().returns('some-id'),
+      getDeliveryType: sinon.stub().returns('aem_edge'),
       getBaseURL: sinon.stub(),
       getGitHubURL: sinon.stub(),
       isLive: sinon.stub(),
@@ -113,6 +114,7 @@ describe('AddRepoCommand', () => {
         + '      \n'
         + '\n'
         + '      :identification_card: some-id\n'
+        + '      :cat-category-white: aem_edge\n'
         + '      :github-4173: _not set_\n'
         + '      :submarine: Is not live\n'
         + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI Check>\n'
