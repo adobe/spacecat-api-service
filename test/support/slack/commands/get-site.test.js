@@ -68,6 +68,7 @@ describe('GetSiteCommand', () => {
     dataAccessStub = {
       getSiteByBaseURL: sinon.stub().resolves({
         getId: () => '123',
+        getDeliveryType: () => 'aem_edge',
         getBaseURL: () => 'example.com',
         getGitHubURL: () => '',
         isLive: () => true,
