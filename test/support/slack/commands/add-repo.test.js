@@ -114,7 +114,7 @@ describe('AddRepoCommand', () => {
         + '      \n'
         + '\n'
         + '      :identification_card: some-id\n'
-        + '      :cat-category-white: aem_edge\n'
+        + '      :cat-egory-white: aem_edge\n'
         + '      :github-4173: _not set_\n'
         + '      :submarine: Is not live\n'
         + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI Check>\n'

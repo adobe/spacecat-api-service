@@ -114,7 +114,7 @@ describe('Utility Functions', () => {
 
       const expectedOutput = `
       :identification_card: some-id
-      :cat-category-white: aem_edge
+      :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
       :rocket: Is live
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
@@ -133,7 +133,7 @@ describe('Utility Functions', () => {
       const expectedOutput = `:warning: Audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).
 
       :identification_card: some-id
-      :cat-category-white: aem_edge
+      :cat-egory-white: aem_edge
       :github-4173: _not set_
       :submarine: Is not live
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
@@ -154,7 +154,7 @@ describe('Utility Functions', () => {
 
       const expectedOutput = `
       :identification_card: some-id
-      :cat-category-white: aem_edge
+      :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
       :rocket: Is live
       :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
@@ -175,7 +175,7 @@ describe('Utility Functions', () => {
 
       const expectedOutput = `
       :identification_card: some-id
-      :cat-category-white: aem_edge
+      :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
       :rocket: Is live
       :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
@@ -191,7 +191,7 @@ describe('Utility Functions', () => {
 
       const expectedOutput = `
       :identification_card: some-id
-      :cat-category-white: aem_edge
+      :cat-egory-white: aem_edge
       :github-4173: _not set_
       :submarine: Is not live
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
