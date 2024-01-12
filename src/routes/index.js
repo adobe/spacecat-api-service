@@ -72,6 +72,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
+    'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,

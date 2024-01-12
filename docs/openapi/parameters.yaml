@@ -16,6 +16,12 @@ auditType:
   required: true
   schema:
     type: string
+deliveryType:
+  name: deliveryType
+  in: path
+  required: true
+  schema:
+    type: string
 base64BaseUrl:
   name: base64BaseUrl
   in: path

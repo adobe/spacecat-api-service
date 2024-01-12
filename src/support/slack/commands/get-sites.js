@@ -58,36 +58,38 @@ function generateOverflowAccessory() {
  */
 // eslint-disable-next-line default-param-last
 export function formatSites(sites = [], start, end) {
-  return sites.slice(start, end).reduce((message, site, index) => {
-    const baseURL = site.getBaseURL();
-    const baseURLText = baseURL.replace(/^main--/, '').replace(/--.*/, '');
-    const rank = start + index + 1;
+  return sites.slice(start, end)
+    .reduce((message, site, index) => {
+      const baseURL = site.getBaseURL();
+      const baseURLText = baseURL.replace(/^main--/, '')
+        .replace(/--.*/, '');
+      const rank = start + index + 1;
 
-    let siteMessage = `${rank}. No audits found for ${baseURLText}`;
-    const audits = site.getAudits();
+      let siteMessage = `${rank}. No audits found for ${baseURLText}`;
+      const audits = site.getAudits();
 
-    if (audits.length) {
-      const lastAudit = audits[0];
-      const icon = site.isLive() ? ':rocket:' : ':submarine:';
+      if (audits.length) {
+        const lastAudit = audits[0];
+        const icon = site.isLive() ? ':rocket:' : ':submarine:';
 
-      const scores = lastAudit.getScores();
-      const {
-        performance = 0,
-        accessibility = 0,
-        'best-practices': bestPractices = 0,
-        seo = 0,
-      } = scores;
+        const scores = lastAudit.getScores();
+        const {
+          performance = 0,
+          accessibility = 0,
+          'best-practices': bestPractices = 0,
+          seo = 0,
+        } = scores;
 
-      if (lastAudit.isError()) {
-        siteMessage = `${rank}. ${icon} ${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}: <${formatURL(baseURL)}|${baseURLText}>`;
-      } else {
-        siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${baseURLText}>`;
+        if (lastAudit.isError()) {
+          siteMessage = `${rank}. ${icon} ${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}: <${formatURL(baseURL)}|${baseURLText}>`;
+        } else {
+          siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${baseURLText}>`;
+        }
+        siteMessage += site.getGitHubURL() ? ` (<${site.getGitHubURL()}|GH>)` : '';
       }
-      siteMessage += site.getGitHubURL() ? ` (<${site.getGitHubURL()}|GH>)` : '';
-    }
 
-    return `${message}\n${siteMessage.trim()}`;
-  }, '');
+      return `${message}\n${siteMessage.trim()}`;
+    }, '');
 }
 
 /**
@@ -103,6 +105,7 @@ export function formatSites(sites = [], start, end) {
  * @param {number} totalSites - The total number of sites.
  * @param {string} filterStatus - The status to filter sites by.
  * @param {string} psiStrategy - The strategy to show scores of.
+ * @param {string} deliveryType - The delivery type to filter sites by.
  * @returns {Object} The pagination blocks object.
  */
 function generatePaginationBlocks(
@@ -112,6 +115,7 @@ function generatePaginationBlocks(
   totalSites,
   filterStatus,
   psiStrategy = 'mobile',
+  deliveryType = 'all',
 ) {
   const blocks = [];
   const numberOfPages = Math.ceil(totalSites / PAGE_SIZE);
@@ -124,7 +128,7 @@ function generatePaginationBlocks(
         type: 'plain_text',
         text: 'Previous',
       },
-      value: `${String(start - PAGE_SIZE)}:${filterStatus}:${psiStrategy}`,
+      value: `${String(start - PAGE_SIZE)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
       action_id: 'paginate_sites_prev',
     });
   }
@@ -138,7 +142,7 @@ function generatePaginationBlocks(
         type: 'plain_text',
         text: `${i + 1}`,
       },
-      value: `${String(pageStart)}:${filterStatus}:${psiStrategy}`,
+      value: `${String(pageStart)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
       action_id: `paginate_sites_page_${i + 1}`,
     });
   }
@@ -151,7 +155,7 @@ function generatePaginationBlocks(
         type: 'plain_text',
         text: 'Next',
       },
-      value: `${String(start + PAGE_SIZE)}:${filterStatus}:${psiStrategy}`,
+      value: `${String(start + PAGE_SIZE)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
       action_id: 'paginate_sites_next',
     });
   }
@@ -182,13 +186,13 @@ function GetSitesCommand(context) {
     name: 'Get All Sites',
     description: 'Retrieves all known sites and includes the latest audit scores',
     phrases: PHRASES,
-    usageText: `${PHRASES.join(' or ')} [desktop|mobile|all|live|non-live];`,
+    usageText: `${PHRASES.join(' or ')} [desktop|mobile|all] [live|non-live] [aem_edge|aem_cs|other];`,
   });
 
   const { dataAccess, log } = context;
 
-  async function fetchAndFormatSites(threadTs, start, filterStatus, psiStrategy) {
-    let sites = await dataAccess.getSitesWithLatestAudit(`lhs-${psiStrategy}`);
+  async function fetchAndFormatSites(threadTs, start, filterStatus, psiStrategy, deliveryType) {
+    let sites = await dataAccess.getSitesWithLatestAudit(`lhs-${psiStrategy}`, true, deliveryType);
 
     if (filterStatus !== 'all') {
       sites = sites.filter((site) => (filterStatus === 'live' ? site.isLive() : !site.isLive()));
@@ -199,9 +203,10 @@ function GetSitesCommand(context) {
 
     const textSections = [{
       text: `
-*All Sites:* ${totalSites} total ${filterStatus} sites
+*Sites:* ${totalSites} total ${filterStatus} sites
 
-Selected PSI Strategy: *${psiStrategy}*
+PSI Strategy: *${psiStrategy}*
+Delivery Type: *${deliveryType}*
 
 _Sites are ordered by performance score, then all other scores, ascending._
 _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices >> Base URL_
@@ -211,10 +216,21 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
     }];
 
     const additionalBlocks = [
-      generatePaginationBlocks(threadTs, start, end, totalSites, filterStatus, psiStrategy),
+      generatePaginationBlocks(
+        threadTs,
+        start,
+        end,
+        totalSites,
+        filterStatus,
+        psiStrategy,
+        deliveryType,
+      ),
     ];
 
-    return { textSections, additionalBlocks };
+    return {
+      textSections,
+      additionalBlocks,
+    };
   }
 
   /**
@@ -230,7 +246,7 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
 
     await ack();
 
-    const [newStart, filterStatus, psiStrategy, threadTs] = action.value.split(':');
+    const [newStart, filterStatus, psiStrategy, deliveryType, threadTs] = action.value.split(':');
     const threadedSay = wrapSayForThread(say, threadTs);
     const start = parseInt(newStart, 10);
 
@@ -238,7 +254,7 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
       const {
         textSections,
         additionalBlocks,
-      } = await fetchAndFormatSites(threadTs, start, filterStatus, psiStrategy);
+      } = await fetchAndFormatSites(threadTs, start, filterStatus, psiStrategy, deliveryType);
       await sendMessageBlocks(threadedSay, textSections, additionalBlocks);
     } catch (error) {
       await postErrorMessage(threadedSay, error);
@@ -278,6 +294,7 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
 
     let filterStatus = 'live';
     let psiStrategy = 'mobile';
+    let deliveryType = 'all';
 
     args.forEach((arg) => {
       switch (arg) {
@@ -296,6 +313,15 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
         case 'mobile':
           psiStrategy = 'mobile';
           break;
+        case 'aem_edge':
+          deliveryType = 'aem_edge';
+          break;
+        case 'aem_cs':
+          deliveryType = 'aem_cs';
+          break;
+        case 'other':
+          deliveryType = 'other';
+          break;
         default:
           break;
       }
@@ -305,7 +331,13 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
       const {
         textSections,
         additionalBlocks,
-      } = await fetchAndFormatSites(slackContext.threadTs, 0, filterStatus, psiStrategy);
+      } = await fetchAndFormatSites(
+        slackContext.threadTs,
+        0,
+        filterStatus,
+        psiStrategy,
+        deliveryType,
+      );
 
       await sendMessageBlocks(say, textSections, additionalBlocks);
     } catch (error) {

@@ -138,6 +138,33 @@ describe('GetSitesCommand', () => {
       expect(slackContext.say.called).to.be.true;
     });
 
+    it('handles command execution with delivery type aem_edge', async () => {
+      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      const command = GetSitesCommand(context);
+
+      await command.handleExecution(['aem_edge'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('handles command execution with delivery type aem_cs', async () => {
+      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      const command = GetSitesCommand(context);
+
+      await command.handleExecution(['aem_cs'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('handles command execution with delivery type other', async () => {
+      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      const command = GetSitesCommand(context);
+
+      await command.handleExecution(['other'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+    });
+
     it('handles command execution with unknown arg', async () => {
       dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);

@@ -6,6 +6,8 @@ Site:
       format: uuid
     baseURL:
       type: string
+    deliveryType:
+      type: string
     gitHubURL:
       type: string
       format: url
