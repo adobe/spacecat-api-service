@@ -51,6 +51,35 @@ sites:
         $ref: "./responses.yaml#/404"
       '500':
         $ref: "./responses.yaml#/500"
+sites-by-delivery-type:
+  parameters:
+    - $ref: "./parameters.yaml#/deliveryType"
+  get:
+    operationId: getSitesByDeliveryType
+    tags:
+      - sites
+    summary: Retrieve all sites by delivery type
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: A list of sites
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '403':
+        $ref: "./responses.yaml#/403"
+      '404':
+        $ref: "./responses.yaml#/404"
+      '500':
+        $ref: "./responses.yaml#/500"
 sites-with-latest-audit:
   parameters:
     - $ref: "./parameters.yaml#/auditType"
