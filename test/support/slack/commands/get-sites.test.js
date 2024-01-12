@@ -138,6 +138,15 @@ describe('GetSitesCommand', () => {
       expect(slackContext.say.called).to.be.true;
     });
 
+    it('handles command execution with no results', async () => {
+      dataAccessStub.getSitesWithLatestAudit.resolves([]);
+      const command = GetSitesCommand(context);
+
+      await command.handleExecution(['all', 'mobile'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+    });
+
     it('handles command execution with delivery type aem_edge', async () => {
       dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);

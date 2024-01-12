@@ -74,6 +74,15 @@ describe('AddSiteCommand', () => {
       expect(slackContext.say.calledWith(':warning: Please provide a valid site base URL.')).to.be.true;
     });
 
+    it('warns when an invalid site delivery type is provided', async () => {
+      const args = ['example.com', 'invalid-delivery-type'];
+      const command = AddSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Please provide a valid delivery type.')).to.be.true;
+    });
+
     it('informs when the site is already added', async () => {
       dataAccessStub.getSiteByBaseURL.resolves({});
 

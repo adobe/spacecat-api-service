@@ -67,6 +67,7 @@ describe('MartechImpactCommand', () => {
       dataAccessStub.getSiteByBaseURL.resolves({
         getId: () => '123',
         getBaseURL: () => 'example.com',
+        getDeliveryType: () => 'aem_edge',
         getGitHubURL: () => '',
         isLive: () => true,
         getAuditConfig: () => ({
