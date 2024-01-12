@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.13.0...v1.13.1) (2024-01-12)
+
+
+### Bug Fixes
+
+* add site with delivery type ([#90](https://github.com/adobe-rnd/spacecat-api-service/issues/90)) ([41652d7](https://github.com/adobe-rnd/spacecat-api-service/commit/41652d75722f668a417daa2039b3a0f4ba3d14f9))
+
 # [1.13.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.12.3...v1.13.0) (2024-01-12)
 
 
