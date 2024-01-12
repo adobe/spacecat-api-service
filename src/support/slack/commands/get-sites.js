@@ -201,6 +201,20 @@ function GetSitesCommand(context) {
     const end = start + PAGE_SIZE;
     const totalSites = sites.length;
 
+    if (totalSites === 0) {
+      return {
+        textSections: [{
+          text: `
+*No sites found*:
+  
+PSI Strategy: *${psiStrategy}*
+Delivery Type: *${deliveryType}*
+`,
+        }],
+        additionalBlocks: [],
+      };
+    }
+
     const textSections = [{
       text: `
 *Sites:* ${totalSites} total ${filterStatus} sites
