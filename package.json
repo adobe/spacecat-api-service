@@ -56,8 +56,8 @@
   "dependencies": {
     "@adobe/fetch": "4.1.1",
     "@adobe/helix-shared-body-data": "2.0.1",
-    "@adobe/helix-shared-bounce": "2.0.13",
-    "@adobe/helix-shared-secrets": "2.2.1",
+    "@adobe/helix-shared-bounce": "2.0.14",
+    "@adobe/helix-shared-secrets": "2.2.2",
     "@adobe/helix-shared-utils": "3.0.0",
     "@adobe/helix-shared-wrap": "2.0.0",
     "@adobe/helix-status": "10.0.11",
