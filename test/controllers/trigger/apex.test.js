@@ -17,7 +17,9 @@ import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.j
 import { expect } from 'chai';
 import sinon from 'sinon';
 
-import trigger from '../../../src/controllers/trigger/apex.js';
+import nock from 'nock';
+import trigger, { INITIAL_APEX_SLACK_MESSAGE } from '../../../src/controllers/trigger/apex.js';
+import { getQueryParams } from '../../../src/utils/slack/base.js';
 
 describe('Apex trigger', () => {
   let context;
@@ -59,13 +61,27 @@ describe('Apex trigger', () => {
 
   it('triggers a single apex audit', async () => {
     context = {
+      log: console,
       dataAccess: dataAccessMock,
       sqs: sqsMock,
       data: { type: 'apex', url: 'ALL' },
-      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      env: {
+        AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com',
+        SLACK_BOT_TOKEN: 'token',
+        AUDIT_REPORT_SLACK_CHANNEL_ID: 'DSA',
+      },
     };
 
     dataAccessMock.getSites.resolves(sites);
+
+    nock('https://slack.com')
+      .get('/api/chat.postMessage')
+      .query(getQueryParams('DSA', INITIAL_APEX_SLACK_MESSAGE))
+      .reply(200, {
+        ok: true,
+        channel: 'DSA',
+        ts: 'ts1',
+      });
 
     const response = await trigger(context, [context.data.type]);
     const result = await response.json();

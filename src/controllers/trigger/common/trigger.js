@@ -55,12 +55,13 @@ async function getSitesToAudit(dataAccess, url) {
  *
  * @param {Object} context - The context object containing dataAccess, sqs, data, and env.
  * @param {string[]} types - The context object containing dataAccess, sqs, data, and env.
+ * @param {Object} auditContext - The audit context for downstream components.
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
-export async function triggerFromData(context, types) {
+export async function triggerFromData(context, types, auditContext = {}) {
   try {
     const { dataAccess, sqs } = context;
-    const { url, auditContext } = context.data;
+    const { url } = context.data;
     const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
 
     const sitesToAudit = await getSitesToAudit(dataAccess, url);

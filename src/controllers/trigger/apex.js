@@ -11,6 +11,9 @@
  */
 
 import { triggerFromData } from './common/trigger.js';
+import { getSlackContext } from '../../utils/slack/base.js';
+
+export const INITIAL_APEX_SLACK_MESSAGE = '*NETWORK REPORT for the domains :thread:';
 
 /**
  * Triggers apex audit for websites based on the provided URL.
@@ -19,6 +22,20 @@ import { triggerFromData } from './common/trigger.js';
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
 export default async function trigger(context) {
-  const { type } = context.data;
-  return triggerFromData(context, [type]);
+  const { log } = context;
+  const { type, url } = context.data;
+  const {
+    AUDIT_REPORT_SLACK_CHANNEL_ID: slackChannelId,
+    SLACK_BOT_TOKEN: token,
+  } = context.env;
+
+  const slackContext = await getSlackContext({
+    slackChannelId, url, message: INITIAL_APEX_SLACK_MESSAGE, token, log,
+  });
+
+  const auditContext = {
+    slackContext,
+  };
+
+  return triggerFromData(context, [type], auditContext);
 }
