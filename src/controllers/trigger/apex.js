@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Adobe. All rights reserved.
+ * Copyright 2024 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -10,19 +10,15 @@
  * governing permissions and limitations under the License.
  */
 
-import { AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 import { triggerFromData } from './common/trigger.js';
 
 /**
- * Triggers audit processes for websites based on the provided URL.
+ * Triggers apex audit for websites based on the provided URL.
  *
- * @param {Object} context - The context object containing dataAccess, sqs, data, and env.
+ * @param {UniversalContext} context the context of the universal serverless function
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
 export default async function trigger(context) {
   const { type } = context.data;
-
-  const types = type === 'lhs' ? [AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE] : [type];
-
-  return triggerFromData(context, types);
+  return triggerFromData(context, [type]);
 }
