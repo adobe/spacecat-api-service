@@ -67,7 +67,7 @@ describe('LHS Trigger', () => {
 
     dataAccessMock.getSites.resolves(sites);
 
-    const response = await trigger(context, [context.data.type]);
+    const response = await trigger(context);
     const result = await response.json();
 
     expect(dataAccessMock.getSites.calledOnce).to.be.true;

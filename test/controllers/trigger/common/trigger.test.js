@@ -44,6 +44,7 @@ describe('Trigger from data access', () => {
 
     dataAccessMock = {
       getSites: sandbox.stub(),
+      getSitesByDeliveryType: sandbox.stub(),
       getSiteByBaseURL: sandbox.stub(),
       getSiteByID: sandbox.stub(),
     };
@@ -65,12 +66,42 @@ describe('Trigger from data access', () => {
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
+    const config = {
+      url: context.data.url,
+      auditTypes: [context.data.type],
+      deliveryType: 'all',
+    };
+
     dataAccessMock.getSites.resolves(sites);
 
-    const response = await triggerFromData(context, [context.data.type]);
+    const response = await triggerFromData(context, config);
     const result = await response.json();
 
     expect(dataAccessMock.getSites.calledOnce).to.be.true;
+    expect(sqsMock.sendMessage.callCount).to.equal(2);
+    expect(result.message[0]).to.equal('Triggered auditType audit for all 2 sites');
+  });
+
+  it('triggers an audit for all sites when url is "ALL" and deliveryType is aem_edge', async () => {
+    context = {
+      dataAccess: dataAccessMock,
+      sqs: sqsMock,
+      data: { type: 'auditType', url: 'ALL' },
+      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+    };
+
+    const config = {
+      url: context.data.url,
+      auditTypes: [context.data.type],
+      deliveryType: 'aem_edge',
+    };
+
+    dataAccessMock.getSitesByDeliveryType.resolves(sites);
+
+    const response = await triggerFromData(context, config);
+    const result = await response.json();
+
+    expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
     expect(result.message[0]).to.equal('Triggered auditType audit for all 2 sites');
   });
@@ -83,9 +114,15 @@ describe('Trigger from data access', () => {
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
+    const config = {
+      url: context.data.url,
+      auditTypes: ['type1', 'type2'],
+      deliveryType: 'all',
+    };
+
     dataAccessMock.getSites.resolves(sites);
 
-    const response = await triggerFromData(context, ['type1', 'type2']);
+    const response = await triggerFromData(context, config);
     const result = await response.json();
 
     expect(dataAccessMock.getSites.calledOnce).to.be.true;
@@ -103,9 +140,15 @@ describe('Trigger from data access', () => {
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
+    const config = {
+      url: context.data.url,
+      auditTypes: [context.data.type],
+      deliveryType: 'all',
+    };
+
     dataAccessMock.getSiteByBaseURL.resolves(sites[0]);
 
-    const response = await triggerFromData(context, [context.data.type]);
+    const response = await triggerFromData(context, config);
     const result = await response.json();
 
     expect(dataAccessMock.getSiteByBaseURL.calledOnceWith('http://site1.com')).to.be.true;
@@ -121,9 +164,15 @@ describe('Trigger from data access', () => {
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
+    const config = {
+      url: context.data.url,
+      auditTypes: [context.data.type],
+      deliveryType: 'all',
+    };
+
     dataAccessMock.getSiteByBaseURL.resolves(null);
 
-    const response = await triggerFromData(context, [context.data.type]);
+    const response = await triggerFromData(context, config);
     const result = await response.json();
 
     expect(response.status).to.equal(404);
@@ -136,6 +185,12 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'all' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+    };
+
+    const config = {
+      url: context.data.url,
+      auditTypes: [context.data.type],
+      deliveryType: 'all',
     };
 
     dataAccessMock.getSites.resolves([
@@ -153,7 +208,7 @@ describe('Trigger from data access', () => {
       }),
     ]);
 
-    const response = await triggerFromData(context, [context.data.type]);
+    const response = await triggerFromData(context, config);
 
     expect(response.status).to.equal(200);
     expect(sqsMock.sendMessage.callCount).to.equal(1);
@@ -165,6 +220,12 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'all' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+    };
+
+    const config = {
+      url: context.data.url,
+      auditTypes: [context.data.type],
+      deliveryType: 'all',
     };
 
     dataAccessMock.getSites.resolves([
@@ -182,7 +243,7 @@ describe('Trigger from data access', () => {
       }),
     ]);
 
-    const response = await triggerFromData(context, [context.data.type]);
+    const response = await triggerFromData(context, config);
 
     expect(response.status).to.equal(200);
     expect(sqsMock.sendMessage.callCount).to.equal(1);
@@ -196,9 +257,15 @@ describe('Trigger from data access', () => {
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
     };
 
+    const config = {
+      url: context.data.url,
+      auditTypes: [context.data.type],
+      deliveryType: 'all',
+    };
+
     dataAccessMock.getSiteByBaseURL.rejects(new Error('Unexpected error'));
 
-    const response = await triggerFromData(context, [context.data.type]);
+    const response = await triggerFromData(context, config);
 
     expect(response.status).to.equal(500);
     expect(response.headers.get('x-error')).to.equal('Error: Unexpected error');

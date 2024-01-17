@@ -23,7 +23,7 @@
  */
 import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
-import { isAuditForAll, sendAuditMessages } from '../../../support/utils.js';
+import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from '../../../support/utils.js';
 
 /**
  * Retrieves sites for auditing based on the input URL. If the input URL has the value
@@ -35,11 +35,13 @@ import { isAuditForAll, sendAuditMessages } from '../../../support/utils.js';
  * @returns {Promise<Array<Site>>} The sites to audit.
  * @throws {Error} Throws an error if the site is not found.
  */
-async function getSitesToAudit(dataAccess, url) {
+async function getSitesToAudit(dataAccess, url, deliveryType) {
   let sitesToAudit = [];
 
-  if (isAuditForAll(url)) {
+  if (isAuditForAllUrls(url) && isAuditForAllDeliveryTypes(deliveryType)) {
     sitesToAudit = await dataAccess.getSites();
+  } else if (isAuditForAllUrls(url)) {
+    sitesToAudit = await dataAccess.getSitesByDeliveryType(deliveryType);
   } else {
     const site = await dataAccess.getSiteByBaseURL(url);
     sitesToAudit = site ? [site] : [];
@@ -54,24 +56,25 @@ async function getSitesToAudit(dataAccess, url) {
  * Triggers audit processes for websites based on the provided URL.
  *
  * @param {Object} context - The context object containing dataAccess, sqs, data, and env.
- * @param {string[]} types - The context object containing dataAccess, sqs, data, and env.
+ * @param {Object} config - The config object for trigger logic
  * @param {Object} auditContext - The audit context for downstream components.
+
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
-export async function triggerFromData(context, types, auditContext = {}) {
+export async function triggerFromData(context, config, auditContext = {}) {
   try {
     const { dataAccess, sqs } = context;
-    const { url } = context.data;
     const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
+    const { url, auditTypes, deliveryType } = config;
 
-    const sitesToAudit = await getSitesToAudit(dataAccess, url);
+    const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType);
     if (!sitesToAudit.length) {
       return notFound('Site not found');
     }
 
     const message = [];
 
-    for (const auditType of types) {
+    for (const auditType of auditTypes) {
       const sitesToAuditForType = sitesToAudit.filter((site) => {
         const auditConfig = site.getAuditConfig();
         return !auditConfig.getAuditTypeConfig(auditType)?.disabled();

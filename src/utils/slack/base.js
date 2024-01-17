@@ -15,7 +15,7 @@ import { hasText, isString } from '@adobe/spacecat-shared-utils';
 
 import { URL } from 'url';
 
-import { fetch, isAuditForAll } from '../../support/utils.js';
+import { fetch, isAuditForAllUrls } from '../../support/utils.js';
 
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
@@ -194,7 +194,7 @@ export async function getSlackContext({
     channelId = FALLBACK_SLACK_CHANNEL;
   }
 
-  if (!isAuditForAll(url)) {
+  if (!isAuditForAllUrls(url)) {
     return { channel: channelId };
   }
 

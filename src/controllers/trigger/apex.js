@@ -37,5 +37,11 @@ export default async function trigger(context) {
     slackContext,
   };
 
-  return triggerFromData(context, [type], auditContext);
+  const config = {
+    url,
+    auditTypes: [type],
+    deliveryType: 'aem_edge',
+  };
+
+  return triggerFromData(context, config, auditContext);
 }

@@ -21,7 +21,14 @@ export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
  * @param {string} url - URL parameter.
  * @returns {boolean} True if url equals "ALL", false otherwise.
  */
-export const isAuditForAll = (url) => url.toUpperCase() === 'ALL';
+export const isAuditForAllUrls = (url) => url.toUpperCase() === 'ALL';
+
+/**
+ * Checks if the deliveryType parameter "deliveryType" equals "ALL".
+ * @param {string} deliveryType - deliveryType parameter.
+ * @returns {boolean} True if deliveryType equals "ALL", false otherwise.
+ */
+export const isAuditForAllDeliveryTypes = (deliveryType) => deliveryType.toUpperCase() === 'ALL';
 
 /**
  * Sends an audit message for a single URL.

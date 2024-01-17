@@ -45,9 +45,7 @@ describe('Apex trigger', () => {
     ];
 
     dataAccessMock = {
-      getSites: sandbox.stub(),
-      getSiteByBaseURL: sandbox.stub(),
-      getSiteByID: sandbox.stub(),
+      getSitesByDeliveryType: sandbox.stub(),
     };
 
     sqsMock = {
@@ -72,7 +70,7 @@ describe('Apex trigger', () => {
       },
     };
 
-    dataAccessMock.getSites.resolves(sites);
+    dataAccessMock.getSitesByDeliveryType.resolves(sites);
 
     nock('https://slack.com')
       .get('/api/chat.postMessage')
@@ -86,7 +84,7 @@ describe('Apex trigger', () => {
     const response = await trigger(context, [context.data.type]);
     const result = await response.json();
 
-    expect(dataAccessMock.getSites.calledOnce).to.be.true;
+    expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
     expect(result.message[0]).to.equal('Triggered apex audit for all 2 sites');
   });

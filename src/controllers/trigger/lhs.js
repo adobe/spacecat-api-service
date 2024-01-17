@@ -20,9 +20,15 @@ import { triggerFromData } from './common/trigger.js';
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
 export default async function trigger(context) {
-  const { type } = context.data;
+  const { type, url } = context.data;
 
   const types = type === 'lhs' ? [AUDIT_TYPE_LHS_DESKTOP, AUDIT_TYPE_LHS_MOBILE] : [type];
 
-  return triggerFromData(context, types);
+  const config = {
+    url,
+    auditTypes: types,
+    deliveryType: 'all',
+  };
+
+  return triggerFromData(context, config);
 }
