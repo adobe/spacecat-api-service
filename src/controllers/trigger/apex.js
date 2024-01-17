@@ -13,7 +13,7 @@
 import { triggerFromData } from './common/trigger.js';
 import { getSlackContext } from '../../utils/slack/base.js';
 
-export const INITIAL_APEX_SLACK_MESSAGE = '*NETWORK REPORT* for the domains :thread:';
+export const INITIAL_APEX_SLACK_MESSAGE = '*APEX CONFIGURATION ALERT* for customer domains on Edge Delivery :thread:';
 
 /**
  * Triggers apex audit for websites based on the provided URL.
