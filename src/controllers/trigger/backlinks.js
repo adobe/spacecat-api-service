@@ -46,6 +46,7 @@ async function getSitesToAudit(dataAccess, url) {
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
 export default async function trigger(context) {
+  // TODO: extract common logic in utils
   try {
     const { dataAccess, sqs } = context;
     const { type, url, auditContext } = context.data;
