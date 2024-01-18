@@ -231,8 +231,9 @@ function SitesController(dataAccess) {
       updates = true;
     }
 
-    if (hasText(requestBody.imsOrgId) && requestBody.imsOrgId !== site.getImsOrgId()) {
-      site.updateImsOrgId(requestBody.imsOrgId);
+    if (hasText(requestBody.organizationId)
+        && requestBody.organizationId !== site.getOrganizationId()) {
+      site.updateOrganizationId(requestBody.organizationId);
       updates = true;
     }
 
