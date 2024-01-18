@@ -13,12 +13,14 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { badRequest } from '@adobe/spacecat-shared-http-utils';
+import apex from './trigger/apex.js';
 import cwv from './trigger/cwv.js';
 import lhs from './trigger/lhs.js';
 import notfound from './trigger/notfound.js';
 import backlinks from './trigger/backlinks.js';
 
 const AUDITS = {
+  apex,
   cwv,
   'lhs-mobile': lhs,
   'lhs-desktop': lhs,

@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.13.3...v1.14.0) (2024-01-18)
+
+
+### Features
+
+* apex audit trigger ([#95](https://github.com/adobe-rnd/spacecat-api-service/issues/95)) ([0b11d62](https://github.com/adobe-rnd/spacecat-api-service/commit/0b11d627284228d88cfed13849e372dd57c75616))
+
 ## [1.13.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.13.2...v1.13.3) (2024-01-15)
 
 

@@ -15,7 +15,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import { notFound } from '@adobe/spacecat-shared-http-utils';
 
-import { isAuditForAll } from '../../support/utils.js';
+import { isAuditForAllUrls } from '../../support/utils.js';
 import { getSlackContext } from '../../utils/slack/base.js';
 
 export const INITIAL_404_SLACK_MESSAGE = '*404 REPORT* for the *last week* :thread:';
@@ -36,7 +36,7 @@ export default async function triggerAudit(context) {
 
   const rumApiClient = RUMAPIClient.createFrom(context);
   const urls = await rumApiClient.getDomainList();
-  const filteredUrls = isAuditForAll(url) ? urls : urls.filter((row) => url === row);
+  const filteredUrls = isAuditForAllUrls(url) ? urls : urls.filter((row) => url === row);
 
   if (filteredUrls.length === 0) {
     return notFound('', { 'x-error': 'did not match any url' });
