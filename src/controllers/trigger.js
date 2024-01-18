@@ -16,6 +16,7 @@ import { badRequest } from '@adobe/spacecat-shared-http-utils';
 import cwv from './trigger/cwv.js';
 import lhs from './trigger/lhs.js';
 import notfound from './trigger/notfound.js';
+import backlinks from './trigger/backlinks.js';
 
 const AUDITS = {
   cwv,
@@ -23,6 +24,7 @@ const AUDITS = {
   'lhs-desktop': lhs,
   lhs, // for all lhs variants
   404: notfound,
+  'broken-backlinks': backlinks,
 };
 
 /**
