@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.14.0...v1.15.0) (2024-01-18)
+
+
+### Features
+
+* isLiveToggledAt ([#98](https://github.com/adobe-rnd/spacecat-api-service/issues/98)) ([d4ce993](https://github.com/adobe-rnd/spacecat-api-service/commit/d4ce993ae5c8b22a843dc66d0ecc0c25dbdbc1bb))
+
 # [1.14.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.13.3...v1.14.0) (2024-01-18)
 
 

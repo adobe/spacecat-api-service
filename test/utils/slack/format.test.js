@@ -96,6 +96,7 @@ describe('Utility Functions', () => {
         getBaseURL: sinon.stub(),
         getGitHubURL: sinon.stub(),
         isLive: sinon.stub(),
+        getIsLiveToggledAt: sinon.stub().returns('2011-10-05T14:48:00.000Z'),
         getAuditConfig: sinon.stub().returns(AuditConfig.fromDynamoItem({
           auditsDisabled: false,
           auditTypeConfigs: {},
@@ -116,7 +117,7 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
-      :rocket: Is live
+      :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
@@ -156,7 +157,7 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
-      :rocket: Is live
+      :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
@@ -177,7 +178,7 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
-      :rocket: Is live
+      :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
