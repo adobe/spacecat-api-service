@@ -29,7 +29,7 @@ base64BaseUrl:
   schema:
     type: string
     format: base64url
-triggerUrl:
+targetUrl:
   name: url
   in: query
   required: true

@@ -87,7 +87,7 @@ run-audit:
     operationId: runAudit
     tags:
       - sites
-    summary: Trigger an audit of given type for a site
+    summary: Trigger an audit of given type for a site (not yet implemented)
     security:
       - admin_key: [ ]
     parameters:

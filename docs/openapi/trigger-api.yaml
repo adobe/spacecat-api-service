@@ -1,7 +1,7 @@
 trigger:
   parameters:
-    - $ref: "./parameters.yaml#/triggerUrl"
-    - $ref: "./parameters.yaml#/triggerType"
+    - $ref: "./parameters.yaml#/targetUrl"
+    - $ref: "./parameters.yaml#/auditType"
   get:
     operationId: triggerAudit
     tags:
