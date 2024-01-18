@@ -10,34 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { triggerFromData } from './common/trigger.js';
+import { getSlackContext } from '../../utils/slack/base.js';
 
-import { isAuditForAll, sendAuditMessages } from '../../support/utils.js';
-
-/**
- * Retrieves sites for auditing based on the input URL. If the input URL has the value
- * 'all', then all sites will be audited. Otherwise, the input URL is assumed to be a base URL.
- * Sites are filtered to only include sites that have not disabled audits.
- *
- * @param {Object} dataAccess - The data access object for site operations.
- * @param {string} url - The URL to check for auditing.
- * @returns {Promise<Array<Site>>} The sites to audit.
- * @throws {Error} Throws an error if the site is not found.
- */
-async function getSitesToAudit(dataAccess, url) {
-  let sitesToAudit = [];
-
-  if (isAuditForAll(url)) {
-    sitesToAudit = await dataAccess.getSites();
-  } else {
-    const site = await dataAccess.getSiteByBaseURL(url);
-    sitesToAudit = site ? [site] : [];
-  }
-
-  sitesToAudit = sitesToAudit.filter((site) => site.getAuditConfig().auditsDisabled() !== true);
-
-  return sitesToAudit;
-}
+export const INITIAL_BACKLINKS_SLACK_MESSAGE = '*BROKEN BACKLINKS REPORT* for the *last week* :thread:';
 
 /**
  * Triggers audit processes for websites based on the provided URL.
@@ -46,37 +23,27 @@ async function getSitesToAudit(dataAccess, url) {
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
 export default async function trigger(context) {
-  // TODO: extract common logic in utils
-  try {
-    const { dataAccess, sqs } = context;
-    const { type, url, auditContext } = context.data;
-    const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
+  const { log } = context;
 
-    const sitesToAudit = await getSitesToAudit(dataAccess, url);
-    if (!sitesToAudit.length) {
-      return notFound('Site not found');
-    }
+  const { type, url } = context.data;
+  const {
+    AUDIT_REPORT_SLACK_CHANNEL_ID: slackChannelId,
+    SLACK_BOT_TOKEN: token,
+  } = context.env;
 
-    const message = [];
+  const slackContext = await getSlackContext({
+    slackChannelId, url, message: INITIAL_BACKLINKS_SLACK_MESSAGE, token, log,
+  });
 
-    const sitesToAuditForType = sitesToAudit.filter((site) => {
-      const auditConfig = site.getAuditConfig();
-      return !auditConfig.getAuditTypeConfig(type)?.disabled();
-    });
+  const auditContext = {
+    slackContext,
+  };
 
-    message.push(
-      // eslint-disable-next-line no-await-in-loop
-      await sendAuditMessages(
-        sqs,
-        queueUrl,
-        type,
-        auditContext,
-        sitesToAuditForType.map((site) => site.getId()),
-      ),
-    );
+  const config = {
+    url,
+    auditTypes: [type],
+    deliveryType: DELIVERY_TYPES.AEM_EDGE,
+  };
 
-    return ok({ message });
-  } catch (e) {
-    return internalServerError(e);
-  }
+  return triggerFromData(context, config, auditContext);
 }
