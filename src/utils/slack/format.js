@@ -86,7 +86,7 @@ const printSiteDetails = (site, psiStrategy = 'mobile', latestAudit = null) => {
       :identification_card: ${site.getId()}
       :cat-egory-white: ${site.getDeliveryType()}
       :github-4173: ${site.getGitHubURL() || '_not set_'}
-      ${site.isLive() ? ':rocket:' : ':submarine:'} ${site.isLive() ? 'Is live' : 'Is not live'}
+      ${site.isLive() ? `:rocket: Is live (${formatDate(site.getIsLiveToggledAt())})` : ':submarine: Is not live'}
       :lighthouse: ${viewPSILink}${runPSILink}
     `;
 };

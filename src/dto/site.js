@@ -61,6 +61,7 @@ export const SiteDto = {
     gitHubURL: site.getGitHubURL(),
     imsOrgId: site.getImsOrgId(),
     isLive: site.isLive(),
+    isLiveToggledAt: site.getIsLiveToggledAt(),
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
     auditConfig: AuditConfig.toDynamoItem(site.getAuditConfig()),

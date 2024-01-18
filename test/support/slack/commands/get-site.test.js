@@ -41,6 +41,7 @@ function generateMockAudits(count) {
       auditType: 'lhs-mobile',
       auditedAt: '2023-12-16T09:21:09.000Z',
       isLive: (i % 2 === 0),
+      isLiveToggledAt: (i % 2 === 0 ? '2011-10-05T14:48:00.000Z' : null),
       fullAuditRef: 'https://example.com',
       auditResult: {
         runtimeError,
@@ -72,6 +73,7 @@ describe('GetSiteCommand', () => {
         getBaseURL: () => 'example.com',
         getGitHubURL: () => '',
         isLive: () => true,
+        getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
         getAuditConfig: () => ({
           auditsDisabled: () => false,
           getAuditTypeConfig: () => ({ disabled: () => false }),
