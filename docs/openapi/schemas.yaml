@@ -15,6 +15,9 @@ Site:
       type: string
     isLive:
       type: boolean
+    isLiveToggledAt:
+      type: string
+      format: date-time
     auditConfig:
       $ref: '#/AuditConfig'
     createdAt:

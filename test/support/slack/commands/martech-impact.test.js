@@ -70,6 +70,7 @@ describe('MartechImpactCommand', () => {
         getDeliveryType: () => 'aem_edge',
         getGitHubURL: () => '',
         isLive: () => true,
+        getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
         getAuditConfig: () => ({
           auditsDisabled: () => false,
           getAuditTypeConfig: () => ({ disabled: () => false }),
