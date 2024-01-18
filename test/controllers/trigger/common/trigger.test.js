@@ -33,12 +33,12 @@ describe('Trigger from data access', () => {
       createSite({
         id: 'site1',
         baseURL: 'http://site1.com',
-        imsOrgId: 'org123',
+        organizationId: 'org123',
       }),
       createSite({
         id: 'site2',
         baseURL: 'http://site2.com',
-        imsOrgId: 'org123',
+        organizationId: 'org123',
       }),
     ];
 
@@ -197,13 +197,13 @@ describe('Trigger from data access', () => {
       createSite({
         id: 'site1',
         baseURL: 'http://site1.com',
-        imsOrgId: 'org123',
+        organizationId: 'org123',
         auditConfig: { auditsDisabled: true },
       }),
       createSite({
         id: 'site2',
         baseURL: 'http://site2.com',
-        imsOrgId: 'org123',
+        organizationId: 'org123',
         auditConfig: { auditsDisabled: false },
       }),
     ]);
@@ -232,13 +232,13 @@ describe('Trigger from data access', () => {
       createSite({
         id: 'site1',
         baseURL: 'http://site1.com',
-        imsOrgId: 'org123',
+        organizationId: 'org123',
         auditConfig: { auditsDisabled: false, auditTypeConfigs: { auditType: { disabled: true } } },
       }),
       createSite({
         id: 'site2',
         baseURL: 'http://site2.com',
-        imsOrgId: 'org123',
+        organizationId: 'org123',
         auditConfig: { auditsDisabled: false },
       }),
     ]);
