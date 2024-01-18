@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Adobe. All rights reserved.
+ * Copyright 2024 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -17,9 +17,11 @@ import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.j
 import { expect } from 'chai';
 import sinon from 'sinon';
 
-import trigger from '../../../src/controllers/trigger/lhs.js';
+import nock from 'nock';
+import trigger, { INITIAL_APEX_SLACK_MESSAGE } from '../../../src/controllers/trigger/apex.js';
+import { getQueryParams } from '../../../src/utils/slack/base.js';
 
-describe('LHS Trigger', () => {
+describe('Apex trigger', () => {
   let context;
   let dataAccessMock;
   let sqsMock;
@@ -43,9 +45,7 @@ describe('LHS Trigger', () => {
     ];
 
     dataAccessMock = {
-      getSites: sandbox.stub(),
-      getSiteByBaseURL: sandbox.stub(),
-      getSiteByID: sandbox.stub(),
+      getSitesByDeliveryType: sandbox.stub(),
     };
 
     sqsMock = {
@@ -57,41 +57,35 @@ describe('LHS Trigger', () => {
     sandbox.restore();
   });
 
-  it('triggers a single audit for all sites when url is "ALL"', async () => {
+  it('triggers a single apex audit', async () => {
     context = {
+      log: console,
       dataAccess: dataAccessMock,
       sqs: sqsMock,
-      data: { type: 'lhs-mobile', url: 'ALL' },
-      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      data: { type: 'apex', url: 'ALL' },
+      env: {
+        AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com',
+        SLACK_BOT_TOKEN: 'token',
+        AUDIT_REPORT_SLACK_CHANNEL_ID: 'DSA',
+      },
     };
 
-    dataAccessMock.getSites.resolves(sites);
+    dataAccessMock.getSitesByDeliveryType.resolves(sites);
 
-    const response = await trigger(context);
+    nock('https://slack.com')
+      .get('/api/chat.postMessage')
+      .query(getQueryParams('DSA', INITIAL_APEX_SLACK_MESSAGE))
+      .reply(200, {
+        ok: true,
+        channel: 'DSA',
+        ts: 'ts1',
+      });
+
+    const response = await trigger(context, [context.data.type]);
     const result = await response.json();
 
-    expect(dataAccessMock.getSites.calledOnce).to.be.true;
+    expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
-    expect(result.message[0]).to.equal('Triggered lhs-mobile audit for all 2 sites');
-  });
-
-  it('triggers audits of both lhs types for all sites', async () => {
-    context = {
-      dataAccess: dataAccessMock,
-      sqs: sqsMock,
-      data: { type: 'lhs', url: 'ALL' },
-      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
-    };
-
-    dataAccessMock.getSites.resolves(sites);
-
-    const response = await trigger(context);
-    const result = await response.json();
-
-    expect(dataAccessMock.getSites.calledOnce).to.be.true;
-    expect(sqsMock.sendMessage.callCount).to.equal(4);
-    expect(result.message).to.be.an('array').with.lengthOf(2);
-    expect(result.message[0]).to.equal('Triggered lhs-desktop audit for all 2 sites');
-    expect(result.message[1]).to.equal('Triggered lhs-mobile audit for all 2 sites');
+    expect(result.message[0]).to.equal('Triggered apex audit for all 2 sites');
   });
 });
