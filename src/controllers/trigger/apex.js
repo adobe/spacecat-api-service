@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { triggerFromData } from './common/trigger.js';
 import { getSlackContext } from '../../utils/slack/base.js';
 
@@ -40,7 +41,7 @@ export default async function trigger(context) {
   const config = {
     url,
     auditTypes: [type],
-    deliveryType: 'aem_edge',
+    deliveryType: DELIVERY_TYPES.AEM_EDGE,
   };
 
   return triggerFromData(context, config, auditContext);

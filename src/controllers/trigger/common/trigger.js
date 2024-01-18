@@ -10,17 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/*
- * Copyright 2023 Adobe. All rights reserved.
- * This file is licensed to you under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License. You may obtain a copy
- * of the License at http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under
- * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
- * OF ANY KIND, either express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
- */
 import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
 import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from '../../../support/utils.js';
@@ -32,26 +21,22 @@ import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from
  *
  * @param {Object} dataAccess - The data access object for site operations.
  * @param {string} url - The URL to check for auditing.
+ * @param {string} deliveryType - The delivery type (ie aem_edge) to check for auditing.
  * @returns {Promise<Array<Site>>} The sites to audit.
  * @throws {Error} Throws an error if the site is not found.
  */
 async function getSitesToAudit(dataAccess, url, deliveryType) {
-  let sitesToAudit = [];
-
-  if (isAuditForAllUrls(url) && isAuditForAllDeliveryTypes(deliveryType)) {
-    sitesToAudit = await dataAccess.getSites();
-  } else if (isAuditForAllUrls(url)) {
-    sitesToAudit = await dataAccess.getSitesByDeliveryType(deliveryType);
+  let sitesToAudit;
+  if (isAuditForAllUrls(url)) {
+    sitesToAudit = isAuditForAllDeliveryTypes(deliveryType)
+      ? await dataAccess.getSites()
+      : await dataAccess.getSitesByDeliveryType(deliveryType);
   } else {
     const site = await dataAccess.getSiteByBaseURL(url);
     sitesToAudit = site ? [site] : [];
   }
-
-  sitesToAudit = sitesToAudit.filter((site) => site.getAuditConfig().auditsDisabled() !== true);
-
-  return sitesToAudit;
+  return sitesToAudit.filter((site) => !site.getAuditConfig().auditsDisabled());
 }
-
 /**
  * Triggers audit processes for websites based on the provided URL.
  *
