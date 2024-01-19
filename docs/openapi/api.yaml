@@ -55,8 +55,6 @@ paths:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/latest-audit/{auditType}:
     $ref: './audit-api.yaml#/latest-audit-for-site'
-  /sites/{siteId}/run-audit/{auditType}:
-    $ref: './site-api.yaml#/run-audit'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'
 

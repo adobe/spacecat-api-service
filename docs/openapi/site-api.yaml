@@ -105,36 +105,3 @@ site:
         $ref: './responses.yaml#/404-site-not-found-with-id'
       '500':
         $ref: './responses.yaml#/500'
-run-audit:
-  post:
-    tags:
-      - site
-    summary: Trigger an audit of given type for a site
-    description: |
-      *NOT IMPLEMENTED YET*
-      This endpoint is useful for triggering an audit of a given type for a site.
-      The audit will be run asynchronously and the response will be returned immediately.
-    operationId: runAudit
-    parameters:
-      - $ref: './parameters.yaml#/siteId'
-      - $ref: './parameters.yaml#/auditType'
-    responses:
-      202:
-        description: Audit initiated successfully
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                message:
-                  type: string
-      '400':
-        $ref: './responses.yaml#/400-no-site-id'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404-site-not-found-with-id'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - admin_key: [ ]
