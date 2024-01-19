@@ -14,6 +14,7 @@ import { isObject } from '@adobe/spacecat-shared-utils';
 
 import { fetch, triggerAuditForSite } from '../../utils.js';
 import { printSiteDetails } from '../../../utils/slack/format.js';
+import { validateRepoUrl } from '../../../utils/validations.js';
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -41,16 +42,6 @@ function AddRepoCommand(context) {
   });
 
   const { dataAccess, log } = context;
-
-  /**
-   * Validates if the URL is a valid GitHub repository URL.
-   *
-   * @param {string} repoUrl - The GitHub repository URL.
-   * @returns {boolean} true if the URL is valid, false otherwise.
-   */
-  function validateRepoUrl(repoUrl) {
-    return /^https:\/\/github\.com\/[\w-]+\/[\w-]+(\.git)?$/.test(repoUrl);
-  }
 
   /**
    * Fetches repository information from the GitHub API.
