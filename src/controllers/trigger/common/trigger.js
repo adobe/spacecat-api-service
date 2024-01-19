@@ -65,6 +65,10 @@ export async function triggerFromData(context, config, auditContext = {}) {
         return !auditConfig.getAuditTypeConfig(auditType)?.disabled();
       });
 
+      if (!sitesToAuditForType.length) {
+        message.push(`No site with ${url} is enabled for ${auditType} audit type`);
+      }
+
       message.push(
         // eslint-disable-next-line no-await-in-loop
         await sendAuditMessages(
