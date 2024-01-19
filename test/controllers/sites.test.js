@@ -139,7 +139,7 @@ describe('Sites Controller', () => {
   it('updates a site', async () => {
     const response = await sitesController.updateSite({
       params: { siteId: 'site1' },
-      data: { imsOrgId: 'abcd124', isLive: false },
+      data: { organizationId: 'abcd124', isLive: false },
     });
 
     expect(mockDataAccess.updateSite.calledOnce).to.be.true;

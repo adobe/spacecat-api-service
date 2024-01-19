@@ -9,7 +9,10 @@ info:
     url: http://www.apache.org/licenses/LICENSE-2.0.html
 
 servers:
-  - url: 'https://spacecat.hlx.page'
+  - url: "https://spacecat.experiencecloud.live/api/ci"
+    description: "Development server"
+  - url: "https://spacecat.experiencecloud.live/api/v1"
+    description: "Production server"
 
 tags:
   - name: sites
@@ -54,10 +57,10 @@ components:
     api_key:
       type: apiKey
       in: header
-      name: X-API-Key
+      name: x-api-key
     admin_key:
       type: apiKey
       in: header
-      name: X-Admin-Key
+      name: x-api-key
   schemas:
     $ref: "./schemas.yaml"

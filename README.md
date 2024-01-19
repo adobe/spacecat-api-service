@@ -2,9 +2,9 @@
 
 > Provides an HTTP API to interact with SpaceCat data
 
-## API Doc
+## HTTP API Doc
 
-https://scaling-robot-wovlqzk.pages.github.io
+https://opensource.adobe.com/spacecat-api-service/
 
 ## Installation
 

@@ -42,6 +42,9 @@ triggerType:
   schema:
     type: string
     enum:
-      - manual
-      - scheduled
-      - webhook
+      - "404"
+      - "apex"
+      - "cwv"
+      - "lhs"
+      - "lhs-desktop"
+      - "lhs-mobile"
