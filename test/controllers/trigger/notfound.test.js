@@ -18,9 +18,7 @@ import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import nock from 'nock';
 import notfound, {
-  INITIAL_404_SLACK_MESSAGE,
 } from '../../../src/controllers/trigger/notfound.js';
-import { getQueryParams } from '../../../src/utils/slack/base.js';
 
 import { emptyResponse, fullResponse } from './data.js';
 
@@ -49,8 +47,6 @@ describe('not found handler', () => {
       env: {
         AUDIT_JOBS_QUEUE_URL: 'queueUrl',
         RUM_DOMAIN_KEY: 'domainkey',
-        SLACK_BOT_TOKEN: 'token',
-        AUDIT_REPORT_SLACK_CHANNEL_ID: 'DSAN',
       },
       sqs: {
         sendMessage: sandbox.stub().resolves(),
@@ -133,7 +129,6 @@ describe('not found handler', () => {
     const message = {
       type: context.data.type,
       url: context.data.url,
-      auditContext: { slackContext: { channel: 'DSAN' } },
     };
 
     expect(context.sqs.sendMessage).to.have.been.calledOnce;
@@ -154,32 +149,20 @@ describe('not found handler', () => {
       })
       .reply(200, fullResponse);
 
-    nock('https://slack.com')
-      .get('/api/chat.postMessage')
-      .query(getQueryParams('DSAN', INITIAL_404_SLACK_MESSAGE))
-      .reply(200, {
-        ok: true,
-        channel: 'DSAN',
-        ts: 'ts1',
-      });
-
     const resp = await notfound(context);
 
     expect(context.sqs.sendMessage).to.have.been.calledThrice;
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
       url: 'adobe.com',
-      auditContext: { slackContext: { channel: 'DSAN', ts: 'ts1' } },
     });
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
       url: 'bamboohr.com',
-      auditContext: { slackContext: { channel: 'DSAN', ts: 'ts1' } },
     });
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
       url: 'nurtec.com',
-      auditContext: { slackContext: { channel: 'DSAN', ts: 'ts1' } },
     });
     expect(resp.status).to.equal(200);
   });
