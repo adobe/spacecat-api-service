@@ -2,15 +2,18 @@ Id:
   type: string
   format: uuid
   readOnly: true
+  example: '123e4567-e89b-12d3-a456-426614174000'
 DateTime:
   type: string
   format: date-time
+  example: '2024-01-19T14:20:30Z'
 DeliveryType:
   type: string
   enum:
     - 'aem_edge'
     - 'aem_cs'
     - 'other'
+  example: 'aem_edge'
 AuditType:
   type: string
   enum:
@@ -20,9 +23,11 @@ AuditType:
     - 'lhs'
     - 'lhs-desktop'
     - 'lhs-mobile'
+  example: 'cwv'
 URL:
   type: string
   format: url
+  example: 'https://www.example.com'
 Site:
   type: object
   properties:
@@ -56,6 +61,23 @@ Site:
     updatedAt:
       description: The date and time when the site was last updated
       $ref: '#/DateTime'
+  example:
+    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
+    baseURL: 'https://example-site.com'
+    deliveryType: 'aem_edge'
+    gitHubURL: 'https://github.com/example/repo'
+    isLive: true
+    isLiveToggledAt: '2024-01-20T10:00:00Z'
+    auditConfig:
+      auditsDisabled: false
+      auditTypeConfigs:
+        '404':
+          disabled: true
+        'cwv':
+          disabled: false
+    createdAt: '2023-12-15T09:30:00Z'
+    updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'
@@ -66,6 +88,43 @@ SiteWithLatestAudit:
           type: array
           items:
             $ref: '#/Audit'
+  example:
+    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
+    baseURL: 'https://example-site.com'
+    deliveryType: 'aem_edge'
+    gitHubURL: 'https://github.com/example/repo'
+    isLive: true
+    isLiveToggledAt: '2024-01-20T10:00:00Z'
+    auditConfig:
+      auditsDisabled: false
+      auditTypeConfigs:
+        '404':
+          disabled: true
+        'cwv':
+          disabled: false
+    createdAt: '2023-12-15T09:30:00Z'
+    updatedAt: '2024-01-19T11:20:00Z'
+    audits:
+      - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+        auditedAt: '2024-01-20T12:00:00Z'
+        expiresAt: '2024-07-20T12:00:00Z'
+        auditType: 'cwv'
+        isError: false
+        isLive: true
+        fullAuditRef: 'https://some-audit-system/full-report/1234'
+        auditResult:
+            lcp: 1234
+            cls: 0.1234
+            fcp: 1234
+            tbt: 1234
+            tti: 1234
+        previousAuditResult:
+            lcp: 1234
+            cls: 0.1234
+            fcp: 1234
+            tbt: 1234
+            tti: 1234
 SiteList:
   type: array
   items:
@@ -96,6 +155,10 @@ SiteCreate:
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
+  example:
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
+    baseURL: 'https://www.newsite.com'
+    deliveryType: 'aem_cs'
 SiteUpdate:
   type: object
   properties:
@@ -111,12 +174,18 @@ SiteUpdate:
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
+  example:
+    organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
+    deliveryType: 'other'
+    isLive: true
 AuditConfigType:
   type: object
   properties:
     disabled:
       description: Whether audits are disabled for the given audit type
       type: boolean
+  example:
+    disabled: true
 AuditConfig:
   type: object
   properties:
@@ -127,6 +196,13 @@ AuditConfig:
       type: object
       additionalProperties:
         $ref: '#/AuditConfigType'
+  example:
+    auditsDisabled: false
+    auditTypeConfigs:
+      '404':
+        disabled: true
+      'cwv':
+        disabled: false
 Audit:
   type: object
   readOnly: true
@@ -155,6 +231,26 @@ Audit:
       $ref: '#/AuditResult'
     previousAuditResult:
       $ref: '#/AuditResult'
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    auditedAt: '2024-01-20T12:00:00Z'
+    expiresAt: '2024-07-20T12:00:00Z'
+    auditType: 'cwv'
+    isError: false
+    isLive: true
+    fullAuditRef: 'https://some-audit-system/full-report/1234'
+    auditResult:
+        lcp: 1234
+        cls: 0.1234
+        fcp: 1234
+        tbt: 1234
+        tti: 1234
+    previousAuditResult:
+        lcp: 1234
+        cls: 0.1234
+        fcp: 1234
+        tbt: 1234
+        tti: 1234
 AuditResult:
   type: object
   description: |

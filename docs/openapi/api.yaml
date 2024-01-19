@@ -5,6 +5,10 @@ info:
   title: SpaceCat API
   description: |
     The SpaceCat API is used to manage edge delivery site directory and obtain audit information.
+    
+    ## Authentication
+    <SecurityDefinitions />
+
   termsOfService: 'https://www.adobe.com/go/experiencecloudterms'
   contact:
     name: Spacecat Team
