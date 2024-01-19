@@ -1,24 +1,33 @@
 trigger:
   parameters:
-    - $ref: "./parameters.yaml#/targetUrl"
-    - $ref: "./parameters.yaml#/auditType"
+    - $ref: './parameters.yaml#/triggerUrl'
+    - $ref: './parameters.yaml#/triggerType'
   get:
-    operationId: triggerAudit
     tags:
       - trigger
     summary: Trigger an audit
-    security:
-      - admin_key: [ ]
+    description: |
+      This endpoint is useful for triggering an audit.
+      The audit will be run asynchronously and the response will be returned immediately.
+
+      The audit type is determined by the type parameter and must be one of the following:
+        - 404
+        - apex
+        - cwv
+        - lhs
+        - lhs-desktop
+        - lhs-mobile
+
+      The URL can be either a site ID or a base URL depending on the audit type.
+    operationId: triggerAudit
     responses:
       '200':
         description: Audit triggered successfully
       '400':
-        $ref: "./responses.yaml#/400"
+        $ref: './responses.yaml#/400-missing-params-or-unknown-audit-type'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/401'
       '500':
-        $ref: "./responses.yaml#/500"
+        $ref: './responses.yaml#/500'
+    security:
+      - admin_key: [ ]

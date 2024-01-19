@@ -1,88 +1,82 @@
-audits:
+latest-audits:
   parameters:
-    - $ref: "./parameters.yaml#/auditType"
+    - $ref: './parameters.yaml#/auditType'
+    - $ref: './parameters.yaml#/ascending'
   get:
-    operationId: getAllAudits
     tags:
-      - audits
-    summary: Retrieve all audits of a given type
-    security:
-      - api_key: [ ]
+      - audit
+    summary: Retrieve all latest audits of a given type
+    description: |
+      This endpoint is useful for retrieving all audits of a given type.
+      Optionally, the results can be sorted in ascending order by audited at date.
+    operationId: getAllAudits
     responses:
       '200':
         description: A list of audits
         content:
           application/json:
             schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/Audit'
+              $ref: './schemas.yaml#/AuditList'
       '400':
-        $ref: "./responses.yaml#/400"
+        $ref: './responses.yaml#/400-no-audit-type'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/401'
       '500':
-        $ref: "./responses.yaml#/500"
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 audits-for-site:
   parameters:
-    - $ref: "./parameters.yaml#/siteId"
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/ascending'
   get:
-    operationId: getAllAuditsForSite
     tags:
-      - audits
+      - audit
     summary: Retrieve all audits for a site
-    security:
-      - api_key: [ ]
+    description: |
+      This endpoint is useful for retrieving all audits for a site.
+      Optionally, the results can be sorted in ascending order by audited at date.
+    operationId: getAllAuditsForSite
     responses:
       '200':
         description: A list of audits
         content:
           application/json:
             schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/Audit'
+              $ref: './schemas.yaml#/AuditList'
       '400':
-        $ref: "./responses.yaml#/400"
+        $ref: './responses.yaml#/400-no-site-id'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/401'
       '500':
-        $ref: "./responses.yaml#/500"
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 audits-for-site-and-type:
   parameters:
-    - $ref: "./parameters.yaml#/siteId"
-    - $ref: "./parameters.yaml#/auditType"
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/auditType'
+    - $ref: './parameters.yaml#/ascending'
   get:
-    operationId: getAllAuditsOfTypeForSite
     tags:
-      - audits
+      - audit
     summary: Retrieve all audits of a given type for a site
-    security:
-      - api_key: [ ]
+    description: |
+      This endpoint is useful for retrieving all audits of a given type for a site.
+      Optionally, the results can be sorted in ascending order by audited at date.
+    operationId: getAllAuditsOfTypeForSite
     responses:
       '200':
         description: A list of audits
         content:
           application/json:
             schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/Audit'
+              $ref: './schemas.yaml#/AuditList'
       '400':
-        $ref: "./responses.yaml#/400"
+        $ref: './responses.yaml#/400-no-site-id'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/401'
       '500':
-        $ref: "./responses.yaml#/500"
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

@@ -1,50 +1,58 @@
 siteId:
   name: siteId
+  description: The site ID in uuid format
   in: path
   required: true
   schema:
-    type: string
+    $ref: './schemas.yaml#/Id'
 auditedAt:
   name: auditedAt
+  description: The date and time of the audit in ISO 8601 format
   in: path
   required: true
   schema:
-    type: string
+    $ref: './schemas.yaml#/DateTime'
 auditType:
   name: auditType
+  description: The type of the audit
   in: path
   required: true
   schema:
-    type: string
+    $ref: './schemas.yaml#/AuditType'
 deliveryType:
   name: deliveryType
+  description: The type of the delivery this site is using
   in: path
   required: true
   schema:
-    type: string
+    $ref: './schemas.yaml#/DeliveryType'
 base64BaseUrl:
   name: base64BaseUrl
+  description: Base64-encoded base URL
   in: path
   required: true
   schema:
     type: string
     format: base64url
-targetUrl:
+ascending:
+  name: ascending
+  description: Whether to sort ascending or descending
+  in: query
+  required: false
+  schema:
+    type: boolean
+    default: false
+triggerUrl:
   name: url
+  description: The URL or Site ID to trigger the audit for
   in: query
   required: true
   schema:
     type: string
 triggerType:
   name: type
+  description: The type of the audit to trigger
   in: query
   required: true
   schema:
-    type: string
-    enum:
-      - "404"
-      - "apex"
-      - "cwv"
-      - "lhs"
-      - "lhs-desktop"
-      - "lhs-mobile"
+    $ref: './schemas.yaml#/AuditType'
