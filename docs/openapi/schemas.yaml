@@ -1,69 +1,127 @@
+Id:
+  type: string
+  format: uuid
+  readOnly: true
+DateTime:
+  type: string
+  format: date-time
+DeliveryType:
+  type: string
+  enum:
+    - 'aem_edge'
+    - 'aem_cs'
+    - 'other'
+AuditType:
+  type: string
+  enum:
+    - '404'
+    - 'apex'
+    - 'cwv'
+    - 'lhs'
+    - 'lhs-desktop'
+    - 'lhs-mobile'
+URL:
+  type: string
+  format: url
 Site:
   type: object
   properties:
     id:
-      type: string
-      format: uuid
-    baseURL:
-      type: string
-    deliveryType:
-      type: string
-    gitHubURL:
-      type: string
-      format: url
+      description: The site ID in uuid format
+      $ref: '#/Id'
     organizationId:
-      type: string
+      description: The optional ID of the organization this site belongs to
+      $ref: '#/Id'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
+    gitHubURL:
+      description: The optional GitHub URL of the site
+      $ref: '#/URL'
     isLive:
+      description: Whether the site is live or not
       type: boolean
     isLiveToggledAt:
-      type: string
-      format: date-time
+      description: The date and time when the site was last toggled to live or non-live
+      $ref: '#/DateTime'
     auditConfig:
+      description: The audit configuration for this site
       $ref: '#/AuditConfig'
     createdAt:
-      type: string
-      format: date-time
+      description: The date and time when the site was created
+      $ref: '#/DateTime'
     updatedAt:
-      type: string
-      format: date-time
+      description: The date and time when the site was last updated
+      $ref: '#/DateTime'
 SiteWithLatestAudit:
   allOf:
     - $ref: '#/Site'
     - type: object
       properties:
         audits:
+          description: An array with the latest audit for the given audit type
           type: array
           items:
             $ref: '#/Audit'
+SiteList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/Site'
 SiteCreate:
   type: object
+  required:
+    - baseURL
+    - deliveryType
   properties:
-    baseURL:
-      type: string
     organizationId:
-      type: string
+      description: The optional ID of the organization this site belongs to
+      default: null
+      $ref: '#/Id'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
+    gitHubURL:
+      description: The optional GitHub URL of the site
+      $ref: '#/URL'
     isLive:
+      description: Whether the site is live or not.
+      default: false
       type: boolean
     auditConfig:
+      description: The audit configuration for this site
       $ref: '#/AuditConfig'
 SiteUpdate:
   type: object
   properties:
     organizationId:
-      type: string
+      description: The optional ID of the organization this site belongs to
+      $ref: '#/Id'
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
     isLive:
+      description: Whether the site is live or not.
       type: boolean
     auditConfig:
+      description: The audit configuration for this site
       $ref: '#/AuditConfig'
 AuditConfigType:
   type: object
   properties:
     disabled:
+      description: Whether audits are disabled for the given audit type
       type: boolean
 AuditConfig:
   type: object
   properties:
     auditsDisabled:
+      description: Whether audits are disabled for this site
       type: boolean
     auditTypeConfigs:
       type: object
@@ -71,26 +129,27 @@ AuditConfig:
         $ref: '#/AuditConfigType'
 Audit:
   type: object
+  readOnly: true
   properties:
     siteId:
-      type: string
-      format: uuid
+      description: The ID of the site this audit belongs to
+      $ref: '#/Id'
     auditedAt:
-      type: string
-      format: date-time
+      description: The date and time of the audit in ISO 8601 format
+      $ref: '#/DateTime'
     expiresAt:
-      type: string
-      format: date-time
+      description: The date and time when the audit expires in ISO 8601 format
+      $ref: '#/DateTime'
     auditType:
-      type: string
-      enum:
-        - lhs-mobile
-        - lhs-desktop
+      description: The type of the audit
+      $ref: '#/AuditType'
     isError:
       type: boolean
     isLive:
       type: boolean
     fullAuditRef:
+      description: |
+        A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
       type: string
     auditResult:
       $ref: '#/AuditResult'
@@ -98,17 +157,10 @@ Audit:
       $ref: '#/AuditResult'
 AuditResult:
   type: object
-  properties:
-    runtimeError:
-      type: object
-      properties:
-        message:
-          type: string
-        code:
-          type: string
-    finalUrl:
-      type: string
-    scores:
-      type: object
-    totalBlockingTime:
-      type: number
+  description: |
+    The result of an audit, which is dependent on the audit type.
+  additionalProperties: true
+AuditList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/Audit'

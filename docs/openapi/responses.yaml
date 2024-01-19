@@ -1,29 +1,74 @@
 '400':
-  description: Invalid request url.
+  description: Invalid request.
   headers:
     X-Error:
-      $ref: "./headers.yaml#/xError"
+      $ref: './headers.yaml#/xError'
+'400-no-audit-type':
+  description: Bad request. Audit Type is required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-no-base-url':
+  description: Bad request. Base URL is required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-no-delivery-type':
+  description: Bad request. Delivery Type is required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-no-site-id':
+  description: Bad request. Site ID is required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-no-site-id-request-body-no-updates':
+  description: |
+    Bad request. No or empty Site ID is provided, or request body is empty, or no updates have been provided.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-missing-params-or-unknown-audit-type':
+  description: |
+    Bad request. URL parameters _url_ or _type_ are missing, or audit type is unknown.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-audit-for-site':
+  description: Bad request. Site ID, Audit Type and Audited At are required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-latest-audit-for-site':
+  description: Bad request. Site ID and Audit Type are required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '401':
-  description: Not authenticated
-'403':
-  description: Access role does not have the required permission
+  description: Not authenticated.
 '404':
-  description: Resource not found.
+  description: Not found.
   headers:
     X-Error:
-      $ref: "./headers.yaml#/xError"
-'405':
-  description: Method not allowed.
+      $ref: './headers.yaml#/xError'
+'404-site-not-found-with-base-url':
+  description: Site not found with given Base URL.
   headers:
     X-Error:
-      $ref: "./headers.yaml#/xError"
-'409':
-  description: Conflict. The requested operation is not allowed by the current state of tte resource.
+      $ref: './headers.yaml#/xError'
+'404-site-not-found-with-id':
+  description: Site not found with given ID.
   headers:
     X-Error:
-      $ref: "./headers.yaml#/xError"
+      $ref: './headers.yaml#/xError'
+'404-audit-not-found':
+  description: Audit not found.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '500':
-  description: Operation failed due to an internal error.
+  description: Internal server error.
   headers:
     X-Error:
-      $ref: "./headers.yaml#/xError"
+      $ref: './headers.yaml#/xError'

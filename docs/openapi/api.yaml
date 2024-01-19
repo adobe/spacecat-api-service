@@ -1,56 +1,64 @@
 openapi: 3.0.0
 info:
   version:
-    $ref: "../../package.json#/version"
+    $ref: '../../package.json#/version'
   title: SpaceCat API
-  description: The SpaceCat API is used to manage edge delivery site directory and obtain audit information.
+  description: |
+    The SpaceCat API is used to manage edge delivery site directory and obtain audit information.
+  termsOfService: 'https://www.adobe.com/go/experiencecloudterms'
+  contact:
+    name: Spacecat Team
+    url: 'https://github.com/adobe/spacecat-api-service'
+  x-logo:
+    url: 'https://solaris007.github.io/spacecat-ui/spacecat_logo_192.webp'
+    altText: SpaceCat logo
   license:
     name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
+    url: 'http://www.apache.org/licenses/LICENSE-2.0.html'
 
 servers:
-  - url: "https://spacecat.experiencecloud.live/api/ci"
-    description: "Development server"
-  - url: "https://spacecat.experiencecloud.live/api/v1"
-    description: "Production server"
+  - url: 'https://spacecat.experiencecloud.live/api/ci'
+    description: Development server
+  - url: 'https://spacecat.experiencecloud.live/api/v1'
+    description: Production server
 
 tags:
-  - name: sites
+  - name: site
     description: Site operations
-  - name: audits
+  - name: audit
     description: Audit operations
+  - name: organization
+    description: Organization operations
+  - name: trigger
+    description: Trigger operations
 
 paths:
   /audits/latest/{auditType}:
-    $ref: "./audits-api.yaml#/audits"
+    $ref: './audits-api.yaml#/latest-audits'
   /sites:
-    $ref: "./sites-api.yaml#/sites"
+    $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:
-    $ref: "./sites-api.yaml#/sites-by-delivery-type"
+    $ref: './sites-api.yaml#/sites-by-delivery-type'
   /sites/by-base-url/{base64BaseUrl}:
-    $ref: "./site-api.yaml#/site-by-base-url"
+    $ref: './site-api.yaml#/site-by-base-url'
   /sites/with-latest-audit/{auditType}:
-    $ref: "./sites-api.yaml#/sites-with-latest-audit"
+    $ref: './sites-api.yaml#/sites-with-latest-audit'
   /sites/{siteId}:
-    $ref: "./site-api.yaml#/site"
+    $ref: './site-api.yaml#/site'
   /sites/{siteId}/audits:
-    $ref: "./audits-api.yaml#/audits-for-site"
-  /sites/{siteId}/run-audit/{auditType}:
-    $ref: "./site-api.yaml#/run-audit"
+    $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/audits/{auditType}:
-    $ref: "./audits-api.yaml#/audits-for-site-and-type"
+    $ref: './audits-api.yaml#/audits-for-site-and-type'
   /sites/{siteId}/audits/{auditType}/{auditedAt}:
-    $ref: "./audit-api.yaml#/audit-for-site"
+    $ref: './audit-api.yaml#/audit-for-site'
   /sites/{siteId}/audits/latest/{auditType}:
-    $ref: "./audits-api.yaml#/audits-for-site"
+    $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/latest-audit/{auditType}:
-    $ref: "./audit-api.yaml#/latest-audit-for-site"
-  /sites.xlsx:
-    $ref: "./sites-api.yaml#/export-xls"
-  /sites.csv:
-    $ref: "./sites-api.yaml#/export-csv"
+    $ref: './audit-api.yaml#/latest-audit-for-site'
+  /sites/{siteId}/run-audit/{auditType}:
+    $ref: './site-api.yaml#/run-audit'
   /trigger:
-    $ref: "./trigger-api.yaml#/trigger"
+    $ref: './trigger-api.yaml#/trigger'
 
 components:
   securitySchemes:
@@ -63,4 +71,4 @@ components:
       in: header
       name: x-api-key
   schemas:
-    $ref: "./schemas.yaml"
+    $ref: './schemas.yaml'
