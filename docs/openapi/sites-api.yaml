@@ -1,11 +1,11 @@
 sites:
   post:
-    operationId: createSite
     tags:
-      - sites
+      - site
     summary: Create a new site
-    security:
-      - admin_key: [ ]
+    description: |
+      This endpoint is useful for creating a new site.
+    operationId: createSite
     requestBody:
       required: true
       content:
@@ -15,52 +15,46 @@ sites:
     responses:
       '201':
         description: Site created successfully
-      '400':
-        $ref: "./responses.yaml#/400"
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Site'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/401'
       '500':
-        $ref: "./responses.yaml#/500"
-  get:
-    operationId: getSites
-    tags:
-      - sites
-    summary: Retrieve all sites
+        $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - admin_key: [ ]
+  get:
+    tags:
+      - site
+    summary: Retrieve all sites
+    description: |
+      This endpoint is useful for retrieving all sites.
+    operationId: getSites
     responses:
       '200':
         description: A list of sites
         content:
           application/json:
             schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/Site'
-      '400':
-        $ref: "./responses.yaml#/400"
+              $ref: './schemas.yaml#/SiteList'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/401'
       '500':
-        $ref: "./responses.yaml#/500"
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 sites-by-delivery-type:
   parameters:
-    - $ref: "./parameters.yaml#/deliveryType"
+    - $ref: './parameters.yaml#/deliveryType'
   get:
-    operationId: getSitesByDeliveryType
     tags:
-      - sites
+      - site
     summary: Retrieve all sites by delivery type
-    security:
-      - api_key: [ ]
+    description: |
+      This endpoint is useful for retrieving all sites by delivery type.
+    operationId: getSitesByDeliveryType
     responses:
       '200':
         description: A list of sites
@@ -71,25 +65,25 @@ sites-by-delivery-type:
               items:
                 $ref: './schemas.yaml#/Site'
       '400':
-        $ref: "./responses.yaml#/400"
+        $ref: './responses.yaml#/400-no-delivery-type'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/401'
       '500':
-        $ref: "./responses.yaml#/500"
-sites-with-latest-audit:
-  parameters:
-    - $ref: "./parameters.yaml#/auditType"
-  get:
-    operationId: getSitesWithLatestAudit
-    tags:
-      - sites
-    summary: Retrieve all sites including their latest audit
+        $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+sites-with-latest-audit:
+  parameters:
+    - $ref: './parameters.yaml#/auditType'
+  get:
+    tags:
+      - site
+    summary: Retrieve all sites including their latest audit
+    description: |
+      This endpoint is useful for retrieving all sites including their latest audit.
+      The latest audit is determined by the auditedAt property of the audit and
+      included in the audits array of the site object.
+    operationId: getSitesWithLatestAudit
     responses:
       '200':
         description: A list of sites with their latest audit
@@ -100,66 +94,10 @@ sites-with-latest-audit:
               items:
                 $ref: './schemas.yaml#/Site'
       '400':
-        $ref: "./responses.yaml#/400"
+        $ref: './responses.yaml#/400-no-audit-type'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/401'
       '500':
-        $ref: "./responses.yaml#/500"
-export-csv:
-  get:
-    operationId: exportSitesToCSV
-    tags:
-      - sites
-    summary: Exports all sites to a CSV file
+        $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-    responses:
-      '200':
-        description: A list of sites
-        content:
-          application/json:
-            schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/Site'
-      '400':
-        $ref: "./responses.yaml#/400"
-      '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
-      '500':
-        $ref: "./responses.yaml#/500"
-export-xls:
-  get:
-    operationId: exportSitesToXLS
-    tags:
-      - sites
-    summary: Exports all sites to a XLS file
-    security:
-      - api_key: [ ]
-    responses:
-      '200':
-        description: A list of sites
-        content:
-          application/json:
-            schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/Site'
-      '400':
-        $ref: "./responses.yaml#/400"
-      '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
-      '404':
-        $ref: "./responses.yaml#/404"
-      '500':
-        $ref: "./responses.yaml#/500"

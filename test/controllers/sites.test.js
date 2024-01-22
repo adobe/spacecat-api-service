@@ -139,7 +139,12 @@ describe('Sites Controller', () => {
   it('updates a site', async () => {
     const response = await sitesController.updateSite({
       params: { siteId: 'site1' },
-      data: { organizationId: 'abcd124', isLive: false },
+      data: {
+        organizationId: 'abcd124',
+        isLive: false,
+        deliveryType: 'other',
+        gitHubURL: 'https://github.com/blah/bluh',
+      },
     });
 
     expect(mockDataAccess.updateSite.calledOnce).to.be.true;
@@ -148,6 +153,8 @@ describe('Sites Controller', () => {
     const site = await response.json();
     expect(site).to.have.property('id', 'site1');
     expect(site).to.have.property('baseURL', 'https://site1.com');
+    expect(site).to.have.property('deliveryType', 'other');
+    expect(site).to.have.property('gitHubURL', 'https://github.com/blah/bluh');
   });
 
   it('returns bad request when updating a site if id not provided', async () => {
@@ -227,9 +234,7 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.getSitesByDeliveryType.calledOnce).to.be.true;
     expect(resultSites).to.be.an('array').with.lengthOf(2);
     expect(resultSites[0]).to.have.property('id', 'site1');
-    expect(resultSites[0]).to.have.property('deliveryType', 'aem_edge');
-    expect(resultSites[1]).to.have.property('id', 'site2');
-    expect(resultSites[1]).to.have.property('deliveryType', 'aem_edge');
+    expect(resultSites[0]).to.have.property('deliveryType', 'other');
   });
 
   it('gets all sites with latest audit', async () => {
