@@ -22,9 +22,11 @@ import {
   isBoolean,
   isObject,
 } from '@adobe/spacecat-shared-utils';
+import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
+import { validateRepoUrl } from '../utils/validations.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -234,6 +236,17 @@ function SitesController(dataAccess) {
     if (hasText(requestBody.organizationId)
         && requestBody.organizationId !== site.getOrganizationId()) {
       site.updateOrganizationId(requestBody.organizationId);
+      updates = true;
+    }
+
+    if (requestBody.gitHubURL !== site.getGitHubURL() && validateRepoUrl(requestBody.gitHubURL)) {
+      site.updateGitHubURL(requestBody.gitHubURL);
+      updates = true;
+    }
+
+    if (requestBody.deliveryType !== site.getDeliveryType()
+      && Object.values(DELIVERY_TYPES).includes(requestBody.deliveryType)) {
+      site.updateDeliveryType(requestBody.deliveryType);
       updates = true;
     }
 

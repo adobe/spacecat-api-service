@@ -1,3 +1,38 @@
+## [1.15.5](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.4...v1.15.5) (2024-01-22)
+
+
+### Bug Fixes
+
+* update to node 20, deps ([#107](https://github.com/adobe-rnd/spacecat-api-service/issues/107)) ([a61918f](https://github.com/adobe-rnd/spacecat-api-service/commit/a61918f2f6abc89e578453b41d099ef0ce84815f))
+
+## [1.15.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.3...v1.15.4) (2024-01-21)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#106](https://github.com/adobe-rnd/spacecat-api-service/issues/106)) ([2ca4351](https://github.com/adobe-rnd/spacecat-api-service/commit/2ca4351e518cacba9292c1cba82c6645d3742131))
+
+## [1.15.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.2...v1.15.3) (2024-01-20)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#105](https://github.com/adobe-rnd/spacecat-api-service/issues/105)) ([3f4fb64](https://github.com/adobe-rnd/spacecat-api-service/commit/3f4fb64a050e4a0689fa64ed97cc581772c9ae49))
+
+## [1.15.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.1...v1.15.2) (2024-01-19)
+
+
+### Bug Fixes
+
+* api docs and update properties ([#102](https://github.com/adobe-rnd/spacecat-api-service/issues/102)) ([0803d89](https://github.com/adobe-rnd/spacecat-api-service/commit/0803d89b9663daba70b6a514608c314cb521ef09))
+
+## [1.15.1](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.0...v1.15.1) (2024-01-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.9.3 ([#100](https://github.com/adobe-rnd/spacecat-api-service/issues/100)) ([0140af4](https://github.com/adobe-rnd/spacecat-api-service/commit/0140af463d9cb1929af3f46d0951a3c3e6d466b2))
+
 # [1.15.0](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.14.0...v1.15.0) (2024-01-18)
 
 

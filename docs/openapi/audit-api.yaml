@@ -1,15 +1,17 @@
 audit-for-site:
   parameters:
-    - $ref: "./parameters.yaml#/siteId"
-    - $ref: "./parameters.yaml#/auditType"
-    - $ref: "./parameters.yaml#/auditedAt"
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/auditType'
+    - $ref: './parameters.yaml#/auditedAt'
   get:
-    operationId: getAuditForSite
     tags:
-      - audits
+      - audit
     summary: Retrieve a single audit for a site
-    security:
-      - api_key: [ ]
+    description: |
+      This endpoint is useful for retrieving a single audit for a site.
+      The audit is identified by the auditedAt property of the audit and
+      the audit type.
+    operationId: getAuditForSite
     responses:
       '200':
         description: An audit object
@@ -18,26 +20,28 @@ audit-for-site:
             schema:
               $ref: './schemas.yaml#/Audit'
       '400':
-        $ref: "./responses.yaml#/400"
+        $ref: './responses.yaml#/400-audit-for-site'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
+        $ref: './responses.yaml#/401'
       '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/404-audit-not-found'
       '500':
-        $ref: "./responses.yaml#/500"
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 latest-audit-for-site:
   parameters:
-    - $ref: "./parameters.yaml#/siteId"
-    - $ref: "./parameters.yaml#/auditType"
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/auditType'
   get:
-    operationId: getLatestAuditForSite
     tags:
-      - audits
+      - audit
     summary: Retrieve the latest audit for a site
-    security:
-      - api_key: [ ]
+    description: |
+      This endpoint is useful for retrieving the latest audit for a site.
+      The latest audit is determined by the given audit type and will be 
+      included in the audits array of the site object.
+    operationId: getLatestAuditForSite
     responses:
       '200':
         description: An audit object
@@ -46,12 +50,12 @@ latest-audit-for-site:
             schema:
               $ref: './schemas.yaml#/Audit'
       '400':
-        $ref: "./responses.yaml#/400"
+        $ref: './responses.yaml#/400-latest-audit-for-site'
       '401':
-        $ref: "./responses.yaml#/401"
-      '403':
-        $ref: "./responses.yaml#/403"
+        $ref: './responses.yaml#/401'
       '404':
-        $ref: "./responses.yaml#/404"
+        $ref: './responses.yaml#/404-audit-not-found'
       '500':
-        $ref: "./responses.yaml#/500"
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
