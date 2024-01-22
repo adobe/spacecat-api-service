@@ -1,3 +1,31 @@
+# [1.16.0](https://github.com/adobe/spacecat-api-service/compare/v1.15.5...v1.16.0) (2024-01-22)
+
+
+### Features
+
+* add broken-backlinks trigger (SITES-18417) ([#97](https://github.com/adobe/spacecat-api-service/issues/97)) ([2524d2a](https://github.com/adobe/spacecat-api-service/commit/2524d2a3edc3b1e77a21b23bb6bad3b95bda88d2)), closes [adobe/spacecat-audit-worker#77](https://github.com/adobe/spacecat-audit-worker/issues/77) [adobe/spacecat-audit-post-processor#37](https://github.com/adobe/spacecat-audit-post-processor/issues/37) [adobe/spacecat-audit-scheduler#27](https://github.com/adobe/spacecat-audit-scheduler/issues/27)
+
+## [1.15.5](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.4...v1.15.5) (2024-01-22)
+
+
+### Bug Fixes
+
+* update to node 20, deps ([#107](https://github.com/adobe-rnd/spacecat-api-service/issues/107)) ([a61918f](https://github.com/adobe-rnd/spacecat-api-service/commit/a61918f2f6abc89e578453b41d099ef0ce84815f))
+
+## [1.15.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.3...v1.15.4) (2024-01-21)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#106](https://github.com/adobe-rnd/spacecat-api-service/issues/106)) ([2ca4351](https://github.com/adobe-rnd/spacecat-api-service/commit/2ca4351e518cacba9292c1cba82c6645d3742131))
+
+## [1.15.3](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.2...v1.15.3) (2024-01-20)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#105](https://github.com/adobe-rnd/spacecat-api-service/issues/105)) ([3f4fb64](https://github.com/adobe-rnd/spacecat-api-service/commit/3f4fb64a050e4a0689fa64ed97cc581772c9ae49))
+
 ## [1.15.2](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.1...v1.15.2) (2024-01-19)
 
 
