@@ -242,7 +242,7 @@ describe('Trigger from data access', () => {
 
     expect(response.status).to.equal(200);
     expect(sqsMock.sendMessage.callCount).to.equal(0);
-    expect(result.message[0]).to.equal('No site is not enabled for auditType audit type');
+    expect(result.message[0]).to.equal('No site is enabled for auditType audit type');
   });
 
   it('does not trigger audit for site where audit type is disabled', async () => {

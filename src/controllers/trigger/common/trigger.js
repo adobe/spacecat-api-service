@@ -66,19 +66,19 @@ export async function triggerFromData(context, config, auditContext = {}) {
       });
 
       if (!sitesToAuditForType.length) {
-        message.push(`No site is not enabled for ${auditType} audit type`);
+        message.push(`No site is enabled for ${auditType} audit type`);
+      } else {
+        message.push(
+          // eslint-disable-next-line no-await-in-loop
+          await sendAuditMessages(
+            sqs,
+            queueUrl,
+            auditType,
+            auditContext,
+            sitesToAuditForType.map((site) => site.getId()),
+          ),
+        );
       }
-
-      message.push(
-        // eslint-disable-next-line no-await-in-loop
-        await sendAuditMessages(
-          sqs,
-          queueUrl,
-          auditType,
-          auditContext,
-          sitesToAuditForType.map((site) => site.getId()),
-        ),
-      );
     }
 
     return ok({ message });
