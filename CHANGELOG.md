@@ -1,3 +1,10 @@
+# [1.16.0](https://github.com/adobe/spacecat-api-service/compare/v1.15.5...v1.16.0) (2024-01-22)
+
+
+### Features
+
+* add broken-backlinks trigger (SITES-18417) ([#97](https://github.com/adobe/spacecat-api-service/issues/97)) ([2524d2a](https://github.com/adobe/spacecat-api-service/commit/2524d2a3edc3b1e77a21b23bb6bad3b95bda88d2)), closes [adobe/spacecat-audit-worker#77](https://github.com/adobe/spacecat-audit-worker/issues/77) [adobe/spacecat-audit-post-processor#37](https://github.com/adobe/spacecat-audit-post-processor/issues/37) [adobe/spacecat-audit-scheduler#27](https://github.com/adobe/spacecat-audit-scheduler/issues/27)
+
 ## [1.15.5](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.4...v1.15.5) (2024-01-22)
 
 
