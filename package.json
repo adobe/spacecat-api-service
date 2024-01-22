@@ -39,14 +39,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/adobe-rnd/spacecat-api-service"
+    "url": "https://github.com/adobe/spacecat-api-service"
   },
   "author": "",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/adobe-rnd/spacecat-api-service/issues"
+    "url": "https://github.com/adobe/spacecat-api-service/issues"
   },
-  "homepage": "https://github.com/adobe-rnd/spacecat-api-service#readme",
+  "homepage": "https://github.com/adobe/spacecat-api-service#readme",
   "mocha": {
     "require": "test/setup-env.js",
     "recursive": "true",
