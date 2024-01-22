@@ -1,3 +1,10 @@
+## [1.15.5](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.4...v1.15.5) (2024-01-22)
+
+
+### Bug Fixes
+
+* update to node 20, deps ([#107](https://github.com/adobe-rnd/spacecat-api-service/issues/107)) ([a61918f](https://github.com/adobe-rnd/spacecat-api-service/commit/a61918f2f6abc89e578453b41d099ef0ce84815f))
+
 ## [1.15.4](https://github.com/adobe-rnd/spacecat-api-service/compare/v1.15.3...v1.15.4) (2024-01-21)
 
 
