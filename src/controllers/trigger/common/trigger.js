@@ -66,7 +66,7 @@ export async function triggerFromData(context, config, auditContext = {}) {
       });
 
       if (!sitesToAuditForType.length) {
-        message.push(`No site with ${url} is enabled for ${auditType} audit type`);
+        message.push(`No site is not enabled for ${auditType} audit type`);
       }
 
       message.push(
