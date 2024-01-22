@@ -74,6 +74,7 @@
     "@adobe/helix-deploy": "10.2.1",
     "@adobe/helix-universal": "4.4.1",
     "@adobe/semantic-release-coralogix": "1.1.27",
+    "@semantic-release/npm": "11.0.2",
     "@adobe/semantic-release-skms-cmr": "1.0.14",
     "@redocly/cli": "1.6.0",
     "@semantic-release/changelog": "6.0.3",
