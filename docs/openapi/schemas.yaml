@@ -23,6 +23,7 @@ AuditType:
     - 'lhs'
     - 'lhs-desktop'
     - 'lhs-mobile'
+    - 'broken-backlinks'
   example: 'cwv'
 URL:
   type: string
