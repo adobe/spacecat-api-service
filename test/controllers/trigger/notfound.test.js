@@ -128,7 +128,7 @@ describe('not found handler', () => {
 
     const message = {
       type: context.data.type,
-      url: context.data.url,
+      url: `https://${context.data.url}`,
     };
 
     expect(context.sqs.sendMessage).to.have.been.calledOnce;
@@ -154,15 +154,15 @@ describe('not found handler', () => {
     expect(context.sqs.sendMessage).to.have.been.calledThrice;
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
-      url: 'adobe.com',
+      url: 'https://adobe.com',
     });
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
-      url: 'bamboohr.com',
+      url: 'https://bamboohr.com',
     });
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
       type: 'cwv',
-      url: 'nurtec.com',
+      url: 'https://nurtec.com',
     });
     expect(resp.status).to.equal(200);
   });

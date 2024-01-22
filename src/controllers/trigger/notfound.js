@@ -40,8 +40,9 @@ export default async function triggerAudit(context) {
   }
 
   for (const filteredUrl of filteredUrls) {
+    const siteBaseURL = `https://${filteredUrl}`;
     // eslint-disable-next-line no-await-in-loop
-    await sqs.sendMessage(queueUrl, { type, url: filteredUrl });
+    await sqs.sendMessage(queueUrl, { type, url: siteBaseURL });
   }
 
   const message = `Successfully queued ${type} audit jobs for ${filteredUrls.length} url/s`;
