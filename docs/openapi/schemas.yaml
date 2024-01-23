@@ -261,3 +261,27 @@ AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+FulfillmentCompletedEvent:
+  type: object
+  required:
+    - external_request_id
+    - requestor_id
+    - owner_id
+    - request_type
+    - requestor_system
+    - fulfillment_id
+    - create_date
+    - items
+  properties:
+    external_request_id:
+      description: TODO continue here
+      type: string
+  example:
+    external_request_id: ''
+    requestor_id: ''
+    owner_id: ''
+    request_type: ''
+    requestor_system: ''
+    fulfillment_id: ''
+    create_date: ''
+    items: []

@@ -1,0 +1,33 @@
+fulfillment-hook:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/auditType'
+    - $ref: './parameters.yaml#/auditedAt'
+  post:
+    tags:
+      - hook
+    summary: Receive a contract fulfillment_completed event
+    description: |
+      This endpoint can be used to receive events published to the Hoolihan
+      fulfillment_completed topic. In particular, it is intended to be used
+      to handle contract fulfillment events which involve an Edge Delivery
+      Services fulfillable item "code".
+    operationId: receiveFulfillmentEvent # handle instead?
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/FulfillmentCompletedEvent'
+    responses:
+      '202':
+        description: Accepted for processing
+        $ref: './responses.yaml#/202-accepted-event'
+      '400':
+        $ref: './responses.yaml#/400-audit-for-site'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

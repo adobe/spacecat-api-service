@@ -35,6 +35,8 @@ tags:
     description: Organization operations
   - name: trigger
     description: Trigger operations
+  - name: hook # or event?
+    description: Endpoints for receiving and handling events
 
 paths:
   /audits/latest/{auditType}:
