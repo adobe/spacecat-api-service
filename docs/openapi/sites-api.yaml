@@ -101,3 +101,33 @@ sites-with-latest-audit:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+sites-for-organization:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+  get:
+    tags:
+      - organization
+      - site
+    summary: Retrieve all sites for an organization
+    description: |
+      This endpoint is useful for retrieving all sites for an organization.
+    operationId: getSitesForOrganization
+    responses:
+      '200':
+        description: A list of sites
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/SiteList'
+      '400':
+        $ref: './responses.yaml#/400-no-organization-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
