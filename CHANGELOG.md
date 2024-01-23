@@ -1,3 +1,10 @@
+## [1.16.2](https://github.com/adobe/spacecat-api-service/compare/v1.16.1...v1.16.2) (2024-01-23)
+
+
+### Bug Fixes
+
+* site disabled audit type ([#103](https://github.com/adobe/spacecat-api-service/issues/103)) ([1752cff](https://github.com/adobe/spacecat-api-service/commit/1752cff74c10404adaa3583bdb87b66baf84cd8b))
+
 ## [1.16.1](https://github.com/adobe/spacecat-api-service/compare/v1.16.0...v1.16.1) (2024-01-23)
 
 
