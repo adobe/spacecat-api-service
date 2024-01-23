@@ -30,7 +30,7 @@ organization:
       - organization
     summary: Update an organization
     description: |
-      This endpoint is useful for updating a site.
+      This endpoint is useful for updating an organization.
       Only the fields as per the request body schema will be updated.
       At least one field to update must be provided in the request body.
     operationId: patchOrganization
@@ -48,7 +48,7 @@ organization:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/Site'
+              $ref: './schemas.yaml#/Organization'
       '400':
         $ref: './responses.yaml#/400-no-organization-id-request-body-no-updates'
       '401':

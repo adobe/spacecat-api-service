@@ -115,9 +115,6 @@ Organization:
             - slack:
                 - '@user1'
                 - '@user2'
-            - slack:
-                - '@user3'
-                - '@user4'
         - type: 'cwv'
           byOrg: false
           mentions:
@@ -158,9 +155,6 @@ OrganizationCreate:
           byOrg: true
           mentions:
             - slack:
-                - '@user1'
-                - '@user2'
-            - slack:
                 - '@user3'
                 - '@user4'
         - type: 'cwv'
@@ -197,9 +191,6 @@ OrganizationUpdate:
             - slack:
                 - '@user1'
                 - '@user2'
-            - slack:
-                - '@user3'
-                - '@user4'
         - type: 'cwv'
           byOrg: false
           mentions:
@@ -292,17 +283,9 @@ SiteWithLatestAudit:
         isLive: true
         fullAuditRef: 'https://some-audit-system/full-report/1234'
         auditResult:
-          lcp: 1234
-          cls: 0.1234
-          fcp: 1234
-          tbt: 1234
-          tti: 1234
+          someProperty: 'someValue'
         previousAuditResult:
-          lcp: 1234
-          cls: 0.1234
-          fcp: 1234
-          tbt: 1234
-          tti: 1234
+          someProperty: 'somePreviousValue'
 SiteList:
   type: array
   items:
