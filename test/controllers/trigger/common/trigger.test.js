@@ -214,6 +214,37 @@ describe('Trigger from data access', () => {
     expect(sqsMock.sendMessage.callCount).to.equal(1);
   });
 
+  it('does not trigger audit when audit is disabled for audit type', async () => {
+    context = {
+      dataAccess: dataAccessMock,
+      sqs: sqsMock,
+      data: { type: 'auditType', url: 'all' },
+      env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+    };
+
+    const config = {
+      url: context.data.url,
+      auditTypes: [context.data.type],
+      deliveryType: 'all',
+    };
+
+    dataAccessMock.getSites.resolves([
+      createSite({
+        id: 'site1',
+        baseURL: 'http://site1.com',
+        organizationId: 'org123',
+        auditConfig: { auditsDisabled: false, auditTypeConfigs: { auditType: { disabled: true } } },
+      }),
+    ]);
+
+    const response = await triggerFromData(context, config);
+    const result = await response.json();
+
+    expect(response.status).to.equal(200);
+    expect(sqsMock.sendMessage.callCount).to.equal(0);
+    expect(result.message[0]).to.equal('No site is enabled for auditType audit type');
+  });
+
   it('does not trigger audit for site where audit type is disabled', async () => {
     context = {
       dataAccess: dataAccessMock,
