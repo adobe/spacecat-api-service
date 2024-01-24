@@ -35,7 +35,7 @@ tags:
     description: Organization operations
   - name: trigger
     description: Trigger operations
-  - name: hook # or event?
+  - name: hooks
     description: Endpoints for receiving and handling events
 
 paths:

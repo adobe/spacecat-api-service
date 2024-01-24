@@ -23,6 +23,7 @@ fulfillment-hook:
       '202':
         description: Accepted for processing
         $ref: './responses.yaml#/202-accepted-event'
+        # TODO: return request ID (UUID), use aswRequestId from context
       '400':
         $ref: './responses.yaml#/400-audit-for-site'
       '401':
