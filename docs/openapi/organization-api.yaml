@@ -1,0 +1,79 @@
+organization:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+  get:
+    tags:
+      - organization
+    summary: Retrieve a single organization by its ID
+    description: |
+      This endpoint is useful for retrieving an organization by its ID.
+    operationId: getOrganization
+    responses:
+      '200':
+        description: Successful operation with an organization object returned
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Organization'
+      '400':
+        $ref: './responses.yaml#/400-no-organization-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  patch:
+    tags:
+      - organization
+    summary: Update an organization
+    description: |
+      This endpoint is useful for updating an organization.
+      Only the fields as per the request body schema will be updated.
+      At least one field to update must be provided in the request body.
+    operationId: patchOrganization
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/OrganizationUpdate'
+    responses:
+      '200':
+        description: Organization updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Organization'
+      '400':
+        $ref: './responses.yaml#/400-no-organization-id-request-body-no-updates'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+  delete:
+    tags:
+      - organization
+    summary: Delete an organization
+    description: |
+      This endpoint is useful for deleting an organization.
+    operationId: deleteOrganization
+    security:
+      - admin_key: [ ]
+    responses:
+      '204':
+        description: Organization deleted successfully
+      '400':
+        $ref: './responses.yaml#/400-no-organization-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'

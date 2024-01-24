@@ -18,8 +18,25 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-no-organization-id':
+  description: Bad request. Organization ID is required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '400-no-site-id':
   description: Bad request. Site ID is required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-empty-request-body-validation-failure':
+  description: |
+    Bad request. No or empty request body or required Organization properties missing.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-no-organization-id-request-body-no-updates':
+  description: |
+    Bad request. No or empty Organization ID is provided, or request body is empty, or no updates have been provided.
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
@@ -54,6 +71,11 @@
       $ref: './headers.yaml#/xError'
 '404-site-not-found-with-base-url':
   description: Site not found with given Base URL.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'404-organization-not-found-with-id':
+  description: Organization not found with given ID.
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'

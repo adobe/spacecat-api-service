@@ -29,6 +29,179 @@ URL:
   type: string
   format: url
   example: 'https://www.example.com'
+SlackMentionConfig:
+  type: object
+  additionalProperties: true
+  properties:
+    slack:
+      type: array
+      items:
+        type: string
+AlertConfig:
+  type: object
+  additionalProperties: true
+  properties:
+    type:
+      description: The type of the alert
+      type: string
+    byOrg:
+      description: Whether the alert should be sent by organization
+      type: boolean
+    mentions:
+      description: The Slack mentions to include in the alert
+      type: array
+      items:
+        $ref: '#/SlackMentionConfig'
+AlertsConfig:
+  type: array
+  items:
+    $ref: '#/AlertConfig'
+SlackConfig:
+  type: object
+  additionalProperties: true
+  properties:
+    channel:
+      description: The Slack channel ID to send notifications to
+      type: string
+      example: 'C1234567890'
+    workspace:
+      description: The Slack workspace name to send notifications to
+      type: string
+      example: 'example-workspace'
+Config:
+  type: object
+  additionalProperties: true
+  properties:
+    slack:
+      description: Optional. The Slack configuration
+      $ref: '#/SlackConfig'
+    alerts:
+      description: Optional. The Alert configuration
+      $ref: '#/AlertsConfig'
+OrganizationConfig:
+  allOf:
+    - $ref: '#/Config'
+SiteConfig:
+  allOf:
+    - $ref: '#/Config'
+Organization:
+  type: object
+  properties:
+    id:
+      description: The organization ID in uuid format
+      $ref: '#/Id'
+    name:
+      description: The name of the organization
+      type: string
+    imsOrgId:
+      description: Optional. The ID of the Adobe IMS organization
+      type: string
+    config:
+      description: Optional. The configuration of the organization
+      $ref: '#/OrganizationConfig'
+    createdAt:
+      description: The date and time when the organization was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: The date and time when the organization was last updated
+      $ref: '#/DateTime'
+  example:
+    id: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
+    name: 'Example Organization'
+    imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+    config:
+      slack:
+        channel: '#example-channel'
+        workspace: 'example-workspace'
+      alerts:
+        - type: '404'
+          byOrg: true
+          mentions:
+            - slack:
+                - '@user1'
+                - '@user2'
+        - type: 'cwv'
+          byOrg: false
+          mentions:
+            - slack:
+                - '@user5'
+                - '@user6'
+    createdAt: '2023-12-15T09:30:00Z'
+    updatedAt: '2024-01-19T11:20:00Z'
+OrganizationList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/Organization'
+OrganizationCreate:
+  type: object
+  required:
+    - name
+  properties:
+    name:
+      description: The name of the organization
+      type: string
+    imsOrgId:
+      description: Optional. The ID of the Adobe IMS organization
+      type: string
+      example:
+        - '1234567890ABCDEF12345678@AdobeOrg'
+    config:
+      description: Optional. The configuration of the organization
+      $ref: '#/OrganizationConfig'
+  example:
+    name: 'Example Organization'
+    imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+    config:
+      slack:
+        channel: '#example-channel'
+        workspace: 'example-workspace'
+      alerts:
+        - type: '404'
+          byOrg: true
+          mentions:
+            - slack:
+                - '@user3'
+                - '@user4'
+        - type: 'cwv'
+          byOrg: false
+          mentions:
+            - slack:
+                - '@user5'
+                - '@user6'
+OrganizationUpdate:
+  type: object
+  properties:
+    name:
+      description: The name of the organization
+      type: string
+    imsOrgId:
+      description: Optional. The ID of the Adobe IMS organization
+      type: string
+      example:
+        - '1234567890ABCDEF12345678@AdobeOrg'
+    config:
+      description: Optional. The configuration of the organization
+      $ref: '#/OrganizationConfig'
+  example:
+    name: 'Example Organization'
+    imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+    config:
+      slack:
+        channel: '#example-channel'
+        workspace: 'example-workspace'
+      alerts:
+        - type: '404'
+          byOrg: true
+          mentions:
+            - slack:
+                - '@user1'
+                - '@user2'
+        - type: 'cwv'
+          byOrg: false
+          mentions:
+            - slack:
+                - '@user5'
+                - '@user6'
 Site:
   type: object
   properties:
@@ -56,6 +229,9 @@ Site:
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
+    config:
+      description: Optional. The configuration of the site. May override the organization configuration.
+      $ref: '#/SiteConfig'
     createdAt:
       description: The date and time when the site was created
       $ref: '#/DateTime'
@@ -77,6 +253,23 @@ Site:
           disabled: true
         'cwv':
           disabled: false
+    config:
+        slack:
+          channel: 'C1234567890'
+          workspace: 'example-workspace'
+        alerts:
+          - type: '404'
+            byOrg: true
+            mentions:
+              - slack:
+                  - '@user1'
+                  - '@user2'
+          - type: 'cwv'
+            byOrg: false
+            mentions:
+                - slack:
+                    - '@user5'
+                    - '@user6'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -115,17 +308,9 @@ SiteWithLatestAudit:
         isLive: true
         fullAuditRef: 'https://some-audit-system/full-report/1234'
         auditResult:
-            lcp: 1234
-            cls: 0.1234
-            fcp: 1234
-            tbt: 1234
-            tti: 1234
+          someProperty: 'someValue'
         previousAuditResult:
-            lcp: 1234
-            cls: 0.1234
-            fcp: 1234
-            tbt: 1234
-            tti: 1234
+          someProperty: 'somePreviousValue'
 SiteList:
   type: array
   items:
@@ -241,17 +426,9 @@ Audit:
     isLive: true
     fullAuditRef: 'https://some-audit-system/full-report/1234'
     auditResult:
-        lcp: 1234
-        cls: 0.1234
-        fcp: 1234
-        tbt: 1234
-        tti: 1234
+      someProperty: 'someValue'
     previousAuditResult:
-        lcp: 1234
-        cls: 0.1234
-        fcp: 1234
-        tbt: 1234
-        tti: 1234
+      someProperty: 'somePreviousValue'
 AuditResult:
   type: object
   description: |
