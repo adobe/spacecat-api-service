@@ -19,6 +19,8 @@ organizations:
           application/json:
             schema:
               $ref: './schemas.yaml#/Organization'
+      '400':
+        $ref: './responses.yaml#/400-empty-request-body-validation-failure'
       '401':
         $ref: './responses.yaml#/401'
       '500':

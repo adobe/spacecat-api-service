@@ -28,6 +28,12 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-empty-request-body-validation-failure':
+  description: |
+    Bad request. No or empty request body or required Organization properties missing.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '400-no-organization-id-request-body-no-updates':
   description: |
     Bad request. No or empty Organization ID is provided, or request body is empty, or no updates have been provided.
