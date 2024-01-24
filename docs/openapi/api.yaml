@@ -41,6 +41,12 @@ tags:
 paths:
   /audits/latest/{auditType}:
     $ref: './audits-api.yaml#/latest-audits'
+  /organizations:
+    $ref: './organizations-api.yaml#/organizations'
+  /organizations/{organizationId}:
+    $ref: './organization-api.yaml#/organization'
+  /organizations/{organizationId}/sites:
+    $ref: './sites-api.yaml#/sites-for-organization'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:
