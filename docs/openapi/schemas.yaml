@@ -61,11 +61,13 @@ SlackConfig:
   additionalProperties: true
   properties:
     channel:
-      description: The Slack channel to send notifications to
+      description: The Slack channel ID to send notifications to
       type: string
+      example: 'C1234567890'
     workspace:
-      description: The Slack workspace to send notifications to
+      description: The Slack workspace name to send notifications to
       type: string
+      example: 'example-workspace'
 Config:
   type: object
   additionalProperties: true
@@ -77,6 +79,9 @@ Config:
       description: Optional. The Alert configuration
       $ref: '#/AlertsConfig'
 OrganizationConfig:
+  allOf:
+    - $ref: '#/Config'
+SiteConfig:
   allOf:
     - $ref: '#/Config'
 Organization:
@@ -224,6 +229,9 @@ Site:
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
+    config:
+      description: Optional. The configuration of the site. May override the organization configuration.
+      $ref: '#/SiteConfig'
     createdAt:
       description: The date and time when the site was created
       $ref: '#/DateTime'
@@ -245,6 +253,23 @@ Site:
           disabled: true
         'cwv':
           disabled: false
+    config:
+        slack:
+          channel: 'C1234567890'
+          workspace: 'example-workspace'
+        alerts:
+          - type: '404'
+            byOrg: true
+            mentions:
+              - slack:
+                  - '@user1'
+                  - '@user2'
+          - type: 'cwv'
+            byOrg: false
+            mentions:
+                - slack:
+                    - '@user5'
+                    - '@user6'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
