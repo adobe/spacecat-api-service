@@ -426,17 +426,9 @@ Audit:
     isLive: true
     fullAuditRef: 'https://some-audit-system/full-report/1234'
     auditResult:
-      lcp: 1234
-      cls: 0.1234
-      fcp: 1234
-      tbt: 1234
-      tti: 1234
+      someProperty: 'someValue'
     previousAuditResult:
-      lcp: 1234
-      cls: 0.1234
-      fcp: 1234
-      tbt: 1234
-      tti: 1234
+      someProperty: 'somePreviousValue'
 AuditResult:
   type: object
   description: |
