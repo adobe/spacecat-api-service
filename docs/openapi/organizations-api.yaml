@@ -1,0 +1,49 @@
+organizations:
+  post:
+    tags:
+      - organization
+    summary: Create a new organization
+    description: |
+      This endpoint is useful for creating a new organization.
+    operationId: createOrganization
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/OrganizationCreate'
+    responses:
+      '201':
+        description: Organization created successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Organization'
+      '400':
+        $ref: './responses.yaml#/400-empty-request-body-validation-failure'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - admin_key: [ ]
+  get:
+    tags:
+      - organization
+    summary: Retrieve all organizations
+    description: |
+      This endpoint is useful for retrieving all organizations.
+    operationId: getOrganizations
+    responses:
+      '200':
+        description: A list of organizations
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OrganizationList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

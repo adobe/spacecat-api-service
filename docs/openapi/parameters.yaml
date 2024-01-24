@@ -1,3 +1,10 @@
+organizationId:
+  name: organizationId
+  description: The organization ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
 siteId:
   name: siteId
   description: The site ID in uuid format
