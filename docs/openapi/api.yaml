@@ -37,6 +37,8 @@ tags:
     description: Trigger operations
   - name: hooks
     description: Webhooks for receiving events
+  - name: slack
+    description: Slack operations
 
 paths:
   /audits/latest/{auditType}:
@@ -69,7 +71,7 @@ paths:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/latest-audit/{auditType}:
     $ref: './audit-api.yaml#/latest-audit-for-site'
-  /slack:
+  /slack/{imsOrgId}:
     $ref: './slack-api.yaml#/slack'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'

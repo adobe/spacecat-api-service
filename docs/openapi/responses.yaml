@@ -62,6 +62,16 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-bad-Hoolihan-event':
+  description: Bad request. Did not match expected Hoolihan message format.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'400-bad-ims-org-id':
+  description: Bad request. IMS org ID param was not in the expected format.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '401':
   description: Not authenticated.
 '404':

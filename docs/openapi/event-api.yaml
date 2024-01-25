@@ -15,17 +15,16 @@ process-fulfillment-events:
       content:
         application/json:
           schema:
-            type: array
-            $ref: './schemas.yaml#/HoolihanEvent'
+            $ref: './schemas.yaml#/HoolihanEvents'
     responses:
       '202':
         description: Accepted for processing
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/FulfillmentProcessing'
+              $ref: './schemas.yaml#/FulfillmentProcessingResults'
       '400':
-        $ref: './responses.yaml#/400-audit-for-site'
+        $ref: './responses.yaml#/400-bad-Hoolihan-event'
       '401':
         $ref: './responses.yaml#/401'
       '500':

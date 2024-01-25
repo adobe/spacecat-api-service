@@ -461,10 +461,9 @@ HoolihanHeaders:
       items:
         type: string
     com-adobe-hoolihan-publish-time:
-      description: The time the event was published
+      description: The time the event was published in milliseconds since the Unix Epoch
       type: array
       items:
-        description: Milliseconds since the Unix Epoch
         type: string
         example: "1705914902659"
     x-api-key:
@@ -536,7 +535,7 @@ HoolihanEvent:
     partition: 0
     offset: 1234
     value:
-      content: |
+      content: |-
         ewogICAgImV4dGVybmFsX3JlcXVlc3RfaWQiOiAiMTIzNDUiLAogICAgInJlcXVlc3Rvcl9pZCI6ICIxMjM0NTY3ODkw
         QUJDREVGMTIzNDU2NzhAYWRvYmUuY29tIiwKICAgICJvd25lcl9pZCI6ICIxMjM0NTY3ODkwQUJDREVGMTIzNDU2NzhA
         QWRvYmVPcmciLAogICAgInJlcXVlc3RfdHlwZSI6ICJSRUdVTEFSIiwKICAgICJyZXF1ZXN0b3Jfc3lzdGVtIjogIkFB
@@ -576,17 +575,30 @@ HoolihanEvent:
           - "example_other_client_id"
         Content-Type:
           - "application/json"
+HoolihanEvents:
+  type: array
+  items:
+    $ref: '#/HoolihanEvent'
 ProcessingStatus:
   type: string
   enum:
     - 'accepted'
     - 'rejected'
   example: 'accepted'
-FulfillmentProcessing:
-  type: object
-  required:
-    - status
-  properties:
-    status:
-      $ref: '#/ProcessingStatus'
-    requestId: uuid
+FulfillmentProcessingResults:
+  type: array
+  items:
+    type: object
+    required:
+      - status
+    properties:
+      status:
+        description: The processing status (whether or not the event was accepted for processing)
+        $ref: '#/ProcessingStatus'
+      requestId:
+        description: The request ID
+        $ref: '#/Id'
+  example:
+    - status: 'accepted'
+      requestId: '123e4567-e89b-12d3-a456-426614174000'
+    - status: 'rejected'
