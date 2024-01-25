@@ -45,7 +45,7 @@ export const OrganizationDto = {
   toJSON: (organization) => ({
     id: organization.getId(),
     name: organization.getName(),
-    imsOrgId: organization.imsOrgId(),
+    imsOrgId: organization.getImsOrgId(),
     createdAt: organization.getCreatedAt(),
     updatedAt: organization.getUpdatedAt(),
     config: Config.toDynamoItem(organization.getConfig()),
