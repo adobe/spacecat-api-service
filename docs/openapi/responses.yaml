@@ -62,7 +62,7 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
-'400-bad-Hoolihan-event':
+'400-bad-hoolihan-event':
   description: Bad request. Did not match expected Hoolihan message format.
   headers:
     X-Error:

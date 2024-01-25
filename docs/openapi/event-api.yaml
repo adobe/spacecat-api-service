@@ -24,7 +24,7 @@ process-fulfillment-events:
             schema:
               $ref: './schemas.yaml#/FulfillmentProcessingResults'
       '400':
-        $ref: './responses.yaml#/400-bad-Hoolihan-event'
+        $ref: './responses.yaml#/400-bad-hoolihan-event'
       '401':
         $ref: './responses.yaml#/401'
       '500':

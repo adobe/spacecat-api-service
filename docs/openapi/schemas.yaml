@@ -465,7 +465,7 @@ HoolihanHeaders:
       type: array
       items:
         type: string
-        example: "1705914902659"
+        example: "1705914000000"
     x-api-key:
       description: The API key of the client which published the original event
       type: array
@@ -503,7 +503,6 @@ HoolihanEventValue:
       type: string
     headers:
       description: Metadata headers included by Hoolihan on each event
-      type: object
       $ref: '#/HoolihanHeaders'
 HoolihanEvent:
   type: object
