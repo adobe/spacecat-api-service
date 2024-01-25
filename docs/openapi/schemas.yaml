@@ -29,9 +29,6 @@ URL:
   type: string
   format: url
   example: 'https://www.example.com'
-ImsUserId:
-  type: string
-  example: '1234567890ABCDEF12345678@adobe.com'
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
@@ -440,121 +437,145 @@ AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
-FulfillmentAcceptedTerms:
+HoolihanHeaders:
+  type: object
+  properties:
+    x-request-id:
+      description: The request ID
+      type: array
+      items:
+        $ref: '#/Id'
+    miso-trace-id:
+      description: The Miso trace ID
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-source-partition:
+      description: The source partition
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-source-offset:
+      description: The source offset
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-publish-time:
+      description: The time the event was published
+      type: array
+      items:
+        description: Milliseconds since the Unix Epoch
+        type: string
+        example: "1705914902659"
+    x-api-key:
+      description: The API key of the client which published the original event
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-publisher:
+      description: The publisher of the original event
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-source-topic:
+      description: The topic that the original event was published to
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-on-behalf-of:
+      description: The client ID(s) that the event was forwarded on behalf of
+      type: array
+      items:
+        type: string
+    Content-Type:
+      description: The content type of the event value
+      type: array
+      items:
+        type: string
+        example: "application/json"
+HoolihanEventValue:
   type: object
   required:
-    - contract_id
-    - accepted_agreement
+    - content
+    - headers
   properties:
-    contract_id:
-      description: The ID of the contract
+    content:
+      description: The JSON payload of the event, encoded as a Base64 string
       type: string
-    accepted_agreement:
-      description: Agreement that has been accepted
-      type: string
-      example: 'INITIAL'
-  example:
-    contract_id: '1234567890ABCDEF1234'
-    accepted_agreement: 'INITIAL'
-FulfillmentDetails:
-  type: object
-  properties:
-    fulfillable_entity_resource_locator:
-      description: The resource locator of the fulfillable entity
-      $ref: '#/URL'
-    fulfillable_entity_resource_name:
-      description: Human readable resource name of the fulfillable entity
-      type: string
-  example:
-    fulfillable_entity_resource_locator: 'https://example.com/1234567890ABCDEF12345678@AdobeOrg'
-    fulfillable_entity_resource_name: 'Example Entity Name'
-FulfillmentCompletedItem:
+    headers:
+      description: Metadata headers included by Hoolihan on each event
+      type: object
+      $ref: '#/HoolihanHeaders'
+HoolihanEvent:
   type: object
   required:
     - id
-    - code
+    - topic
+    - value
+    - partition
+    - offset
   properties:
     id:
-      description: The ID of the item in uuid format
-      $ref: '#/Id'
-    code:
-      description: The code of the item
+      description: The Hoolihan ID of the event
       type: string
-      example: 'dx_example_solution_code'
-    fulfillment_details:
-      description: Details of the fulfillment
-      $ref: '#/FulfillmentDetails'
-FulfillmentExternalItem:
-  type: object
-  required:
-    - external_item_id
-    - offer_id
-    - fulfillable_items_completed
-  properties:
-    external_item_id:
-      description: The ID of the external item
+    topic:
+      description: The name of the Hoolihan topic that the event was received on
       type: string
-    quantity:
-      description: The quantity of the item
-      type: string
-      example: 'UNLIMITED'
-    offer_id:
-      description: The ID of the offer
-      type: string
-      example: '1234567890ABCDEF1234567890ABCDEF'
-    accepted_terms:
-      description: Terms that have been accepted
-      ref: '#/FulfillmentAcceptedTerms'
-    fulfillable_items_completed:
-      type: array
-      items:
-        $ref: './schemas.yaml#/FulfillmentCompletedItem'
-FulfillmentCompletedEvent:
-  type: object
-  required:
-    - external_request_id
-    - requestor_id
-    - owner_id
-    - request_type
-    - requestor_system
-    - fulfillment_id
-    - create_date
-    - items
-  properties:
-    external_request_id:
-      description: Request ID from the external system, ie. Adobe Agent User Interface (AAUI)
-      type: string
-    requestor_id:
-      description: Adobe IMS ID of the requestor
-      $ref: '#/ImsUserId'
-    owner_id:
-      description: The ID of the Adobe IMS organization that owns this fulfillment
-      $ref: '#/ImsOrganizationId'
-    request_type:
-      description: The type of the request
-      type: string
-    requestor_system:
-      description: The name of the system that initiated the request
-      type: string
-    fulfillment_id:
-      description: The ID of the fulfillment
-      type: string
-    create_date:
-      description: The date and time when the fulfillment event was created
-      $ref: '#/DateTime'
-    items:
-      type: array
-      items:
-        $ref: '#/FulfillmentExternalItem'
+    value:
+      description: Value of the event, which contains the message payload from the publishing system
+      $ref: '#/HoolihanEventValue'
+    partition:
+      description: The partition index that the event was received on
+      type: integer
+    offset:
+      description: The offset of the event within the partition
+      type: integer
   example:
-    external_request_id: ''
-    requestor_id: ''
-    owner_id: ''
-    request_type: ''
-    requestor_system: ''
-    fulfillment_id: ''
-    create_date: ''
-    items: []
+    id: "b7fyJDj1bu5yrt82RxLX89a98a73KSqR4ptC5MRvlEoLshbgAB3emGKdjQleAMyINZcoAkM6cB7ma2aV"
+    topic: "example_fulfillment_topic"
+    partition: 0
+    offset: 1234
+    value:
+      content: |
+        ewogICAgImV4dGVybmFsX3JlcXVlc3RfaWQiOiAiMTIzNDUiLAogICAgInJlcXVlc3Rvcl9pZCI6ICIxMjM0NTY3ODkw
+        QUJDREVGMTIzNDU2NzhAYWRvYmUuY29tIiwKICAgICJvd25lcl9pZCI6ICIxMjM0NTY3ODkwQUJDREVGMTIzNDU2NzhA
+        QWRvYmVPcmciLAogICAgInJlcXVlc3RfdHlwZSI6ICJSRUdVTEFSIiwKICAgICJyZXF1ZXN0b3Jfc3lzdGVtIjogIkFB
+        VUkiLAogICAgImZ1bGZpbGxtZW50X2lkIjogIjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5
+        MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYiLAogICAgImNyZWF0ZV9kYXRlIjogIjIwMjQtMDEtMjJUMDk6MjA6MDEuMTIz
+        NDVaIiwKICAgICJpdGVtcyI6IFsKICAgICAgICB7CiAgICAgICAgICAgICJleHRlcm5hbF9pdGVtX2lkIjogIjEyMzQ1
+        LWFiY2QtMTIzNC0xMjM0LTEyMzQ0MzIxIiwKICAgICAgICAgICAgInF1YW50aXR5IjogIlVOTElNSVRFRCIsCiAgICAg
+        ICAgICAgICJvZmZlcl9pZCI6ICIxMjM0NTY3ODkwQUJDREVGMTIzNDU2Nzg5MEFCQ0RFRiIsCiAgICAgICAgICAgICJh
+        Y2NlcHRlZF90ZXJtcyI6IHsKICAgICAgICAgICAgICAgICJjb250cmFjdF9pZCI6ICIxMjM0NTY3ODkwQUJDREVGMTIz
+        NCIsCiAgICAgICAgICAgICAgICAiYWNjZXB0ZWRfYWdyZWVtZW50IjogIklOSVRJQUwiCiAgICAgICAgICAgIH0sCiAg
+        ICAgICAgICAgICJmdWxmaWxsYWJsZV9pdGVtc19jb21wbGV0ZWQiOiBbCiAgICAgICAgICAgICAgICB7CiAgICAgICAg
+        ICAgICAgICAgICAgImlkIjogIjEyM2U0NTY3LWU4OWItMTJkMy1hNDU2LTQyNjYxNDE3NDAwMCIsCiAgICAgICAgICAg
+        ICAgICAgICAgImNvZGUiOiAiZHhfZXhhbXBsZV9zb2x1dGlvbiIsCiAgICAgICAgICAgICAgICAgICAgImZ1bGZpbGxt
+        ZW50X2RldGFpbHMiOiB7CiAgICAgICAgICAgICAgICAgICAgICAgICJmdWxmaWxsYWJsZV9lbnRpdHlfcmVzb3VyY2Vf
+        bG9jYXRvciI6ICJodHRwczovL2V4YW1wbGUuY29tLzEyMzQ1Njc4OTBBQkNERUYxMjM0NTY3OEBBZG9iZU9yZyIsCiAg
+        ICAgICAgICAgICAgICAgICAgICAgICJmdWxmaWxsYWJsZV9lbnRpdHlfcmVzb3VyY2VfbmFtZSI6ICJFeGFtcGxlIFNv
+        bHV0aW9uIgogICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgXQogICAgICAg
+        IH0KICAgIF0KfQ==
+      headers:
+        x-request-id:
+          - "123e4567-e89b-12d3-a456-426614174000"
+        miso-trace-id:
+          - "12345678abcdef12:12345678abcdef12:12345678abcdef12:1"
+        com-adobe-hoolihan-source-partition:
+          - "0"
+        com-adobe-hoolihan-source-offset:
+          - "1234"
+        com-adobe-hoolihan-publish-time:
+          - "1705915000000"
+        x-api-key:
+          - "example_publisher_client_id"
+        com-adobe-hoolihan-publisher:
+          - "example_publisher_client_id"
+        com-adobe-hoolihan-source-topic:
+          - "example_source_topic"
+        com-adobe-hoolihan-on-behalf-of:
+          - "example_other_client_id"
+        Content-Type:
+          - "application/json"
 ProcessingStatus:
   type: string
   enum:

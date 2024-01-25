@@ -36,13 +36,13 @@ tags:
   - name: trigger
     description: Trigger operations
   - name: hooks
-    description: Endpoints for receiving events
+    description: Webhooks for receiving events
 
 paths:
   /audits/latest/{auditType}:
     $ref: './audits-api.yaml#/latest-audits'
   /event/fulfillment:
-    $ref: './event-api.yaml#/process-fulfillment-event'
+    $ref: './event-api.yaml#/process-fulfillment-events'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
