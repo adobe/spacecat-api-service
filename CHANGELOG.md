@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/adobe/spacecat-api-service/compare/v1.16.6...v1.17.0) (2024-01-25)
+
+
+### Features
+
+* organizations API ([#119](https://github.com/adobe/spacecat-api-service/issues/119)) ([2159d82](https://github.com/adobe/spacecat-api-service/commit/2159d825a5bbdec5b0d52efb1fa1668d6a6f99b8))
+
 ## [1.16.6](https://github.com/adobe/spacecat-api-service/compare/v1.16.5...v1.16.6) (2024-01-24)
 
 
