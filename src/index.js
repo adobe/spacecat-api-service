@@ -28,6 +28,7 @@ import getRouteHandlers from './routes/index.js';
 import matchPath from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
+import OrganizationsController from './controllers/organizations.js';
 import SitesController from './controllers/sites.js';
 import SlackController from './controllers/slack.js';
 import trigger from './controllers/trigger.js';
@@ -79,6 +80,7 @@ async function run(request, context) {
   try {
     const routeHandlers = getRouteHandlers(
       AuditsController(context.dataAccess),
+      OrganizationsController(context.dataAccess, log),
       SitesController(context.dataAccess, log),
       SlackController(SlackApp),
       trigger,

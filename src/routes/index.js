@@ -43,6 +43,7 @@ function isStaticRoute(routePattern) {
  * - paramNames: an array of parameter names extracted from the route pattern
  *
  * @param auditsController
+ * @param organizationsController
  * @param sitesController
  * @param slackController
  * @param triggerHandler
@@ -50,6 +51,7 @@ function isStaticRoute(routePattern) {
  */
 export default function getRouteHandlers(
   auditsController,
+  organizationsController,
   sitesController,
   slackController,
   triggerHandler,
@@ -59,6 +61,12 @@ export default function getRouteHandlers(
 
   const routeDefinitions = {
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
+    'GET /organizations': organizationsController.getAll,
+    'POST /organizations': organizationsController.createOrganization,
+    'GET /organizations/:organizationId': organizationsController.getByID,
+    'PATCH /organizations/:organizationId': organizationsController.updateOrganization,
+    'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
+    'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
