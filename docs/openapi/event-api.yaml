@@ -1,18 +1,15 @@
-fulfillment-hook:
-  parameters:
-    - $ref: './parameters.yaml#/siteId'
-    - $ref: './parameters.yaml#/auditType'
-    - $ref: './parameters.yaml#/auditedAt'
+process-fulfillment-event:
   post:
     tags:
-      - hook
-    summary: Receive a contract fulfillment_completed event
+      - hooks
+    summary: Process a fulfillment_completed event
     description: |
-      This endpoint can be used to receive events published to the Hoolihan
-      fulfillment_completed topic. In particular, it is intended to be used
+      This endpoint can be used to process a fulfillment_completed event,
+      in the format produced by the Fulfillment Gateway and delivered by
+      the Hoolihan pipeline. In particular, it is intended to be used
       to handle contract fulfillment events which involve an Edge Delivery
       Services fulfillable item "code".
-    operationId: receiveFulfillmentEvent # handle instead?
+    operationId: processFulfillmentEvent
     requestBody:
       required: true
       content:
@@ -22,8 +19,10 @@ fulfillment-hook:
     responses:
       '202':
         description: Accepted for processing
-        $ref: './responses.yaml#/202-accepted-event'
-        # TODO: return request ID (UUID), use aswRequestId from context
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FulfillmentProcessing'
       '400':
         $ref: './responses.yaml#/400-audit-for-site'
       '401':

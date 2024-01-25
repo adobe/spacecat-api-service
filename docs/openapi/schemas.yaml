@@ -29,6 +29,12 @@ URL:
   type: string
   format: url
   example: 'https://www.example.com'
+ImsUserId:
+  type: string
+  example: '1234567890ABCDEF12345678@adobe.com'
+ImsOrganizationId:
+  type: string
+  example: '1234567890ABCDEF12345678@AdobeOrg'
 SlackMentionConfig:
   type: object
   additionalProperties: true
@@ -95,7 +101,7 @@ Organization:
       type: string
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
-      type: string
+      $ref: '#/ImsOrganizationId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -142,9 +148,7 @@ OrganizationCreate:
       type: string
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
-      type: string
-      example:
-        - '1234567890ABCDEF12345678@AdobeOrg'
+      $ref: '#/ImsOrganizationId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -176,9 +180,7 @@ OrganizationUpdate:
       type: string
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
-      type: string
-      example:
-        - '1234567890ABCDEF12345678@AdobeOrg'
+      $ref: '#/ImsOrganizationId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -438,6 +440,75 @@ AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+FulfillmentAcceptedTerms:
+  type: object
+  required:
+    - contract_id
+    - accepted_agreement
+  properties:
+    contract_id:
+      description: The ID of the contract
+      type: string
+    accepted_agreement:
+      description: Agreement that has been accepted
+      type: string
+      example: 'INITIAL'
+  example:
+    contract_id: '1234567890ABCDEF1234'
+    accepted_agreement: 'INITIAL'
+FulfillmentDetails:
+  type: object
+  properties:
+    fulfillable_entity_resource_locator:
+      description: The resource locator of the fulfillable entity
+      $ref: '#/URL'
+    fulfillable_entity_resource_name:
+      description: Human readable resource name of the fulfillable entity
+      type: string
+  example:
+    fulfillable_entity_resource_locator: 'https://example.com/1234567890ABCDEF12345678@AdobeOrg'
+    fulfillable_entity_resource_name: 'Example Entity Name'
+FulfillmentCompletedItem:
+  type: object
+  required:
+    - id
+    - code
+  properties:
+    id:
+      description: The ID of the item in uuid format
+      $ref: '#/Id'
+    code:
+      description: The code of the item
+      type: string
+      example: 'dx_example_solution_code'
+    fulfillment_details:
+      description: Details of the fulfillment
+      $ref: '#/FulfillmentDetails'
+FulfillmentExternalItem:
+  type: object
+  required:
+    - external_item_id
+    - offer_id
+    - fulfillable_items_completed
+  properties:
+    external_item_id:
+      description: The ID of the external item
+      type: string
+    quantity:
+      description: The quantity of the item
+      type: string
+      example: 'UNLIMITED'
+    offer_id:
+      description: The ID of the offer
+      type: string
+      example: '1234567890ABCDEF1234567890ABCDEF'
+    accepted_terms:
+      description: Terms that have been accepted
+      ref: '#/FulfillmentAcceptedTerms'
+    fulfillable_items_completed:
+      type: array
+      items:
+        $ref: './schemas.yaml#/FulfillmentCompletedItem'
 FulfillmentCompletedEvent:
   type: object
   required:
@@ -451,8 +522,30 @@ FulfillmentCompletedEvent:
     - items
   properties:
     external_request_id:
-      description: TODO continue here
+      description: Request ID from the external system, ie. Adobe Agent User Interface (AAUI)
       type: string
+    requestor_id:
+      description: Adobe IMS ID of the requestor
+      $ref: '#/ImsUserId'
+    owner_id:
+      description: The ID of the Adobe IMS organization that owns this fulfillment
+      $ref: '#/ImsOrganizationId'
+    request_type:
+      description: The type of the request
+      type: string
+    requestor_system:
+      description: The name of the system that initiated the request
+      type: string
+    fulfillment_id:
+      description: The ID of the fulfillment
+      type: string
+    create_date:
+      description: The date and time when the fulfillment event was created
+      $ref: '#/DateTime'
+    items:
+      type: array
+      items:
+        $ref: '#/FulfillmentExternalItem'
   example:
     external_request_id: ''
     requestor_id: ''
@@ -462,3 +555,17 @@ FulfillmentCompletedEvent:
     fulfillment_id: ''
     create_date: ''
     items: []
+ProcessingStatus:
+  type: string
+  enum:
+    - 'accepted'
+    - 'rejected'
+  example: 'accepted'
+FulfillmentProcessing:
+  type: object
+  required:
+    - status
+  properties:
+    status:
+      $ref: '#/ProcessingStatus'
+    requestId: uuid
