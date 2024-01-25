@@ -1,0 +1,178 @@
+/*
+ * Copyright 2024 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import {
+  createResponse,
+  badRequest,
+  noContent,
+  notFound,
+  ok,
+} from '@adobe/spacecat-shared-http-utils';
+import {
+  hasText,
+  isObject,
+  isString,
+} from '@adobe/spacecat-shared-utils';
+import { createOrganization as validateOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
+
+import { OrganizationDto } from '../dto/organization.js';
+import { SiteDto } from '../dto/site.js';
+
+/**
+ * Organizations controller. Provides methods to create, read, update and delete organizations.
+ * @param {DataAccess} dataAccess - Data access.
+ * @returns {object} Organizations controller.
+ * @constructor
+ */
+function OrganizationsController(dataAccess) {
+  if (!isObject(dataAccess)) {
+    throw new Error('Data access required');
+  }
+
+  /**
+   * Creates an organization. The organization ID is generated automatically.
+   * @param {object} context - Context of the request.
+   * @return {Promise<Response>} Organization response.
+   */
+  const createOrganization = async (context) => {
+    try {
+      validateOrganization(context.data);
+      const organization = await dataAccess.addOrganization(context.data);
+      return createResponse(OrganizationDto.toJSON(organization), 201);
+    } catch (e) {
+      return badRequest(e.message);
+    }
+  };
+
+  /**
+   * Gets all organizations.
+   * @returns {Promise<Response>} Array of organizations response.
+   */
+  const getAll = async () => {
+    const organizations = (await dataAccess.getOrganizations())
+      .map((organization) => OrganizationDto.toJSON(organization));
+    return ok(organizations);
+  };
+
+  /**
+   * Gets an organization by ID.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<object>} Organization.
+   * @throws {Error} If organization ID is not provided.
+   */
+  const getByID = async (context) => {
+    const organizationId = context.params?.organizationId;
+
+    if (!hasText(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    const organization = await dataAccess.getOrganizationByID(organizationId);
+    if (!organization) {
+      return notFound('Organization not found');
+    }
+
+    return ok(OrganizationDto.toJSON(organization));
+  };
+
+  /**
+   * Gets all sites for an organization.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Sites.
+   */
+  const getSitesForOrganization = async (context) => {
+    const organizationId = context.params?.organizationId;
+
+    if (!hasText(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    const sites = await dataAccess.getSitesByOrganizationID(organizationId);
+
+    return ok(sites.map((site) => SiteDto.toJSON(site)));
+  };
+
+  /**
+   * Removes an organization and all sites/audits associated with it.
+   * @param {object} context - Context of the request.
+   * @return {Promise<Response>} Delete response.
+   */
+  const removeOrganization = async (context) => {
+    const organizationId = context.params?.organizationId;
+
+    if (!hasText(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    await dataAccess.removeOrganization(organizationId);
+
+    return noContent();
+  };
+
+  /**
+   * Updates an organization
+   * @param {object} context - Context of the request.
+   * @return {Promise<Response>} Organization response.
+   */
+  const updateOrganization = async (context) => {
+    const organizationId = context.params?.organizationId;
+
+    if (!hasText(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    const organization = await dataAccess.getOrganizationByID(organizationId);
+    if (!organization) {
+      return notFound('Organization not found');
+    }
+
+    const requestBody = context.data;
+    if (!isObject(requestBody)) {
+      return badRequest('Request body required');
+    }
+
+    let updates = false;
+    if (isString(requestBody.name) && requestBody.name !== organization.getName()) {
+      organization.updateName(requestBody.name);
+      updates = true;
+    }
+
+    if (isString(requestBody.imsOrgId) && requestBody.imsOrgId !== organization.getImsOrgId()) {
+      organization.updateImsOrgId(requestBody.imsOrgId);
+      updates = true;
+    }
+
+    if (isObject(requestBody.config)) {
+      organization.updateConfig(requestBody.config);
+      updates = true;
+    }
+
+    if (updates) {
+      const updatedOrganization = await dataAccess.updateOrganization(organization);
+      return ok(OrganizationDto.toJSON(updatedOrganization));
+    }
+
+    return badRequest('No updates provided');
+  };
+
+  return {
+    createOrganization,
+    getAll,
+    getByID,
+    getSitesForOrganization,
+    removeOrganization,
+    updateOrganization,
+  };
+}
+
+export default OrganizationsController;
