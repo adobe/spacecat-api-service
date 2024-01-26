@@ -71,6 +71,10 @@ SlackConfig:
       description: The Slack workspace name to send notifications to
       type: string
       example: 'example-workspace'
+    channel-url:
+      description: Slack URL of the channel to send notifications to
+      type: string
+      example: 'https://example-workspace.slack.com/archives/C1234567890'
 Config:
   type: object
   additionalProperties: true
@@ -596,7 +600,7 @@ FulfillmentProcessingResults:
       - status
     properties:
       status:
-        description: The processing status (whether or not the event was accepted for processing)
+        description: The acceptance status (whether or not the event was accepted for processing)
         $ref: '#/ProcessingStatus'
       requestId:
         description: The request ID
