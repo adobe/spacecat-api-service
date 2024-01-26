@@ -314,6 +314,10 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SiteWithLatestAuditList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/SiteWithLatestAudit'
 SiteCreate:
   type: object
   required:
