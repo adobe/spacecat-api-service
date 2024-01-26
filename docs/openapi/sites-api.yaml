@@ -61,9 +61,7 @@ sites-by-delivery-type:
         content:
           application/json:
             schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/Site'
+              $ref: './schemas.yaml#/SiteList'
       '400':
         $ref: './responses.yaml#/400-no-delivery-type'
       '401':
@@ -90,9 +88,7 @@ sites-with-latest-audit:
         content:
           application/json:
             schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/Site'
+              $ref: './schemas.yaml#/SiteWithLatestAuditList'
       '400':
         $ref: './responses.yaml#/400-no-audit-type'
       '401':
@@ -118,9 +114,7 @@ sites-for-organization:
         content:
           application/json:
             schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/SiteList'
+              $ref: './schemas.yaml#/SiteList'
       '400':
         $ref: './responses.yaml#/400-no-organization-id'
       '401':
