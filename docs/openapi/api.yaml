@@ -35,16 +35,24 @@ tags:
     description: Organization operations
   - name: trigger
     description: Trigger operations
+  - name: hooks
+    description: Webhooks for receiving events
 
 paths:
   /audits/latest/{auditType}:
     $ref: './audits-api.yaml#/latest-audits'
+  /event/fulfillment:
+    $ref: './event-api.yaml#/process-fulfillment-events'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
+  /organizations/by-ims-org-id/{imsOrgId}:
+    $ref: './organization-api.yaml#/organization-by-ims-org-id'
+  /organizations/by-ims-org-id/{imsOrgId}/slack-config:
+    $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:

@@ -29,6 +29,9 @@ URL:
   type: string
   format: url
   example: 'https://www.example.com'
+ImsOrganizationId:
+  type: string
+  example: '1234567890ABCDEF12345678@AdobeOrg'
 SlackMentionConfig:
   type: object
   additionalProperties: true
@@ -68,6 +71,10 @@ SlackConfig:
       description: The Slack workspace name to send notifications to
       type: string
       example: 'example-workspace'
+    channel-url:
+      description: Slack URL of the channel to send notifications to
+      type: string
+      example: 'https://example-workspace.slack.com/archives/C1234567890'
 Config:
   type: object
   additionalProperties: true
@@ -95,7 +102,7 @@ Organization:
       type: string
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
-      type: string
+      $ref: '#/ImsOrganizationId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -142,9 +149,7 @@ OrganizationCreate:
       type: string
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
-      type: string
-      example:
-        - '1234567890ABCDEF12345678@AdobeOrg'
+      $ref: '#/ImsOrganizationId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -176,9 +181,7 @@ OrganizationUpdate:
       type: string
     imsOrgId:
       description: Optional. The ID of the Adobe IMS organization
-      type: string
-      example:
-        - '1234567890ABCDEF12345678@AdobeOrg'
+      $ref: '#/ImsOrganizationId'
     config:
       description: Optional. The configuration of the organization
       $ref: '#/OrganizationConfig'
@@ -442,3 +445,167 @@ AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+HoolihanHeaders:
+  type: object
+  properties:
+    x-request-id:
+      description: The request ID
+      type: array
+      items:
+        $ref: '#/Id'
+    miso-trace-id:
+      description: The Miso trace ID
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-source-partition:
+      description: The source partition
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-source-offset:
+      description: The source offset
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-publish-time:
+      description: The time the event was published in milliseconds since the Unix Epoch
+      type: array
+      items:
+        type: string
+        example: "1705914000000"
+    x-api-key:
+      description: The API key of the client which published the original event
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-publisher:
+      description: The publisher of the original event
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-source-topic:
+      description: The topic that the original event was published to
+      type: array
+      items:
+        type: string
+    com-adobe-hoolihan-on-behalf-of:
+      description: The client ID(s) that the event was forwarded on behalf of
+      type: array
+      items:
+        type: string
+    Content-Type:
+      description: The content type of the event value
+      type: array
+      items:
+        type: string
+        example: "application/json"
+HoolihanEventValue:
+  type: object
+  required:
+    - content
+    - headers
+  properties:
+    content:
+      description: The JSON payload of the event, encoded as a Base64 string
+      type: string
+    headers:
+      description: Metadata headers included by Hoolihan on each event
+      $ref: '#/HoolihanHeaders'
+HoolihanEvent:
+  type: object
+  required:
+    - id
+    - topic
+    - value
+    - partition
+    - offset
+  properties:
+    id:
+      description: The Hoolihan ID of the event
+      type: string
+    topic:
+      description: The name of the Hoolihan topic that the event was received on
+      type: string
+    value:
+      description: Value of the event, which contains the message payload from the publishing system
+      $ref: '#/HoolihanEventValue'
+    partition:
+      description: The partition index that the event was received on
+      type: integer
+    offset:
+      description: The offset of the event within the partition
+      type: integer
+  example:
+    id: "b7fyJDj1bu5yrt82RxLX89a98a73KSqR4ptC5MRvlEoLshbgAB3emGKdjQleAMyINZcoAkM6cB7ma2aV"
+    topic: "example_fulfillment_topic"
+    partition: 0
+    offset: 1234
+    value:
+      content: |-
+        ewogICAgImV4dGVybmFsX3JlcXVlc3RfaWQiOiAiMTIzNDUiLAogICAgInJlcXVlc3Rvcl9pZCI6ICIxMjM0NTY3ODkw
+        QUJDREVGMTIzNDU2NzhAYWRvYmUuY29tIiwKICAgICJvd25lcl9pZCI6ICIxMjM0NTY3ODkwQUJDREVGMTIzNDU2NzhA
+        QWRvYmVPcmciLAogICAgInJlcXVlc3RfdHlwZSI6ICJSRUdVTEFSIiwKICAgICJyZXF1ZXN0b3Jfc3lzdGVtIjogIkFB
+        VUkiLAogICAgImZ1bGZpbGxtZW50X2lkIjogIjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5
+        MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYiLAogICAgImNyZWF0ZV9kYXRlIjogIjIwMjQtMDEtMjJUMDk6MjA6MDEuMTIz
+        NDVaIiwKICAgICJpdGVtcyI6IFsKICAgICAgICB7CiAgICAgICAgICAgICJleHRlcm5hbF9pdGVtX2lkIjogIjEyMzQ1
+        LWFiY2QtMTIzNC0xMjM0LTEyMzQ0MzIxIiwKICAgICAgICAgICAgInF1YW50aXR5IjogIlVOTElNSVRFRCIsCiAgICAg
+        ICAgICAgICJvZmZlcl9pZCI6ICIxMjM0NTY3ODkwQUJDREVGMTIzNDU2Nzg5MEFCQ0RFRiIsCiAgICAgICAgICAgICJh
+        Y2NlcHRlZF90ZXJtcyI6IHsKICAgICAgICAgICAgICAgICJjb250cmFjdF9pZCI6ICIxMjM0NTY3ODkwQUJDREVGMTIz
+        NCIsCiAgICAgICAgICAgICAgICAiYWNjZXB0ZWRfYWdyZWVtZW50IjogIklOSVRJQUwiCiAgICAgICAgICAgIH0sCiAg
+        ICAgICAgICAgICJmdWxmaWxsYWJsZV9pdGVtc19jb21wbGV0ZWQiOiBbCiAgICAgICAgICAgICAgICB7CiAgICAgICAg
+        ICAgICAgICAgICAgImlkIjogIjEyM2U0NTY3LWU4OWItMTJkMy1hNDU2LTQyNjYxNDE3NDAwMCIsCiAgICAgICAgICAg
+        ICAgICAgICAgImNvZGUiOiAiZHhfZXhhbXBsZV9zb2x1dGlvbiIsCiAgICAgICAgICAgICAgICAgICAgImZ1bGZpbGxt
+        ZW50X2RldGFpbHMiOiB7CiAgICAgICAgICAgICAgICAgICAgICAgICJmdWxmaWxsYWJsZV9lbnRpdHlfcmVzb3VyY2Vf
+        bG9jYXRvciI6ICJodHRwczovL2V4YW1wbGUuY29tLzEyMzQ1Njc4OTBBQkNERUYxMjM0NTY3OEBBZG9iZU9yZyIsCiAg
+        ICAgICAgICAgICAgICAgICAgICAgICJmdWxmaWxsYWJsZV9lbnRpdHlfcmVzb3VyY2VfbmFtZSI6ICJFeGFtcGxlIFNv
+        bHV0aW9uIgogICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgXQogICAgICAg
+        IH0KICAgIF0KfQ==
+      headers:
+        x-request-id:
+          - "123e4567-e89b-12d3-a456-426614174000"
+        miso-trace-id:
+          - "12345678abcdef12:12345678abcdef12:12345678abcdef12:1"
+        com-adobe-hoolihan-source-partition:
+          - "0"
+        com-adobe-hoolihan-source-offset:
+          - "1234"
+        com-adobe-hoolihan-publish-time:
+          - "1705915000000"
+        x-api-key:
+          - "example_publisher_client_id"
+        com-adobe-hoolihan-publisher:
+          - "example_publisher_client_id"
+        com-adobe-hoolihan-source-topic:
+          - "example_source_topic"
+        com-adobe-hoolihan-on-behalf-of:
+          - "example_other_client_id"
+        Content-Type:
+          - "application/json"
+HoolihanEvents:
+  type: array
+  items:
+    $ref: '#/HoolihanEvent'
+ProcessingStatus:
+  type: string
+  enum:
+    - 'accepted'
+    - 'rejected'
+  example: 'accepted'
+FulfillmentProcessingResults:
+  type: array
+  items:
+    type: object
+    required:
+      - status
+    properties:
+      status:
+        description: The acceptance status (whether or not the event was accepted for processing)
+        $ref: '#/ProcessingStatus'
+      requestId:
+        description: The request ID
+        $ref: '#/Id'
+  example:
+    - status: 'accepted'
+      requestId: '123e4567-e89b-12d3-a456-426614174000'
+    - status: 'rejected'

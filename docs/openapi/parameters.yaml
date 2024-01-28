@@ -63,3 +63,10 @@ triggerType:
   required: true
   schema:
     $ref: './schemas.yaml#/AuditType'
+imsOrgId:
+  name: imsOrgId
+  description: An IMS organization ID
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/ImsOrganizationId'
