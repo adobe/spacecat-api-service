@@ -35,6 +35,13 @@ describe('Backlinks trigger', () => {
       createSite({
         id: 'site1',
         baseURL: 'http://site1.com',
+        auditConfig: {
+          auditTypeConfigs: {
+            'broken-backlinks': {
+              disabled: false,
+            },
+          },
+        },
       }),
       createSite({
         id: 'site2',
@@ -83,7 +90,7 @@ describe('Backlinks trigger', () => {
     const result = await response.json();
 
     expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
-    expect(sqsMock.sendMessage.callCount).to.equal(2);
-    expect(result.message[0]).to.equal('Triggered broken-backlinks audit for all 2 sites');
+    expect(sqsMock.sendMessage.callCount).to.equal(1);
+    expect(result.message[0]).to.equal('Triggered broken-backlinks audit for site1');
   });
 });
