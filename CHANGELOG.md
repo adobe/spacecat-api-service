@@ -1,3 +1,10 @@
+## [1.17.3](https://github.com/adobe/spacecat-api-service/compare/v1.17.2...v1.17.3) (2024-01-29)
+
+
+### Bug Fixes
+
+* **deps:** update and adjust test for default value for disabled property of audit config ([#128](https://github.com/adobe/spacecat-api-service/issues/128)) ([06c8784](https://github.com/adobe/spacecat-api-service/commit/06c878467340aa1cc2078290c5e6c48a0a1d0da7))
+
 ## [1.17.2](https://github.com/adobe/spacecat-api-service/compare/v1.17.1...v1.17.2) (2024-01-27)
 
 
