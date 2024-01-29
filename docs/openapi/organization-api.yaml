@@ -77,3 +77,60 @@ organization:
         $ref: './responses.yaml#/404-organization-not-found-with-id'
       '500':
         $ref: './responses.yaml#/500'
+organization-by-ims-org-id:
+  parameters:
+    - $ref: './parameters.yaml#/imsOrgId'
+  get:
+    tags:
+      - organization
+    summary: Retrieve an organization by IMS Org ID
+    description: |
+      This endpoint is useful for retrieving an organization by IMS Org ID.
+    operationId: getOrganizationByImsOrgId
+    responses:
+      '200':
+        description: Successful operation with an organization object returned
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Organization'
+      '400':
+        $ref: './responses.yaml#/400-bad-ims-org-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+organization-slack-config-by-ims-org-id:
+  parameters:
+    - $ref: './parameters.yaml#/imsOrgId'
+  get:
+    tags:
+      - organization
+    summary: Retrieve Slack config for an organization by IMS Org ID
+    description: |
+      This endpoint is useful for retrieving the Slack config of an 
+      organization by IMS Org ID.
+    operationId: getSlackConfigByImsOrgId
+    responses:
+      '200':
+        description: Successful operation with a Slack config object returned
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SlackConfig'
+      '204':
+        description: No Slack config found for this IMS Org ID
+      '400':
+        $ref: './responses.yaml#/400-bad-ims-org-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

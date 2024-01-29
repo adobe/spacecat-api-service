@@ -1,0 +1,33 @@
+process-fulfillment-events:
+  post:
+    tags:
+      - hooks
+    summary: Process fulfillment_completed events
+    description: |
+      This endpoint can be used to process an array of fulfillment_completed
+      events, in the format produced by the Fulfillment Gateway and 
+      delivered by the Hoolihan pipeline. In particular, it is intended to 
+      be used to handle contract fulfillment events which involve an Edge 
+      Delivery Services fulfillable item "code".
+    operationId: processFulfillmentEvents
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/HoolihanEvents'
+    responses:
+      '202':
+        description: Accepted for processing
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FulfillmentProcessingResults'
+      '400':
+        $ref: './responses.yaml#/400-bad-hoolihan-event'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
