@@ -93,4 +93,15 @@ describe('Keywords trigger', () => {
     expect(sqsMock.sendMessage.callCount).to.equal(1);
     expect(result.message[0]).to.equal('Triggered organic-keywords audit for id1');
   });
+
+  it('throws an error if slack post message fails', async () => {
+    nock('https://slack.com')
+      .get('/api/chat.postMessage')
+      .query(getQueryParams('channelId', INITIAL_KEYWORDS_SLACK_MESSAGE))
+      .replyWithError('Slack post message API request failed');
+
+    const response = await trigger(context);
+
+    expect(response.status).to.equal(500);
+  });
 });

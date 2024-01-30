@@ -11,6 +11,7 @@
  */
 
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { internalServerError } from '@adobe/spacecat-shared-http-utils';
 import { triggerFromData } from './common/trigger.js';
 import { getSlackContext } from '../../utils/slack/base.js';
 
@@ -31,20 +32,25 @@ export default async function trigger(context) {
     SLACK_BOT_TOKEN: token,
   } = context.env;
 
-  const slackContext = await getSlackContext({
-    slackChannelId, url, message: INITIAL_KEYWORDS_SLACK_MESSAGE, token, log,
-  });
+  try {
+    const slackContext = await getSlackContext({
+      slackChannelId, url, message: INITIAL_KEYWORDS_SLACK_MESSAGE, token, log,
+    });
 
-  const auditContext = {
-    slackContext,
-  };
+    const auditContext = {
+      slackContext,
+    };
 
-  const config = {
-    url,
-    log,
-    auditTypes: [type],
-    deliveryType: DELIVERY_TYPES.AEM_EDGE,
-  };
+    const config = {
+      url,
+      log,
+      auditTypes: [type],
+      deliveryType: DELIVERY_TYPES.AEM_EDGE,
+    };
 
-  return triggerFromData(context, config, auditContext);
+    return triggerFromData(context, config, auditContext);
+  } catch (e) {
+    log.error(`Failed to trigger ${type} audit for ${url}`, e);
+    return internalServerError();
+  }
 }
