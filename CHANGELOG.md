@@ -1,3 +1,31 @@
+## [1.17.6](https://github.com/adobe/spacecat-api-service/compare/v1.17.5...v1.17.6) (2024-01-30)
+
+
+### Bug Fixes
+
+* add update site config to api ([df7b706](https://github.com/adobe/spacecat-api-service/commit/df7b7060ae5f6de1a4f90980c0a37b540e98ed15))
+
+## [1.17.5](https://github.com/adobe/spacecat-api-service/compare/v1.17.4...v1.17.5) (2024-01-30)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#133](https://github.com/adobe/spacecat-api-service/issues/133)) ([f49bc40](https://github.com/adobe/spacecat-api-service/commit/f49bc40bb01d731badf5913fee777113867aa840))
+
+## [1.17.4](https://github.com/adobe/spacecat-api-service/compare/v1.17.3...v1.17.4) (2024-01-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.13.0 ([#131](https://github.com/adobe/spacecat-api-service/issues/131)) ([f3aa7ef](https://github.com/adobe/spacecat-api-service/commit/f3aa7efecc5361bf5fa0d56275b95a96a26fd833))
+
+## [1.17.3](https://github.com/adobe/spacecat-api-service/compare/v1.17.2...v1.17.3) (2024-01-29)
+
+
+### Bug Fixes
+
+* **deps:** update and adjust test for default value for disabled property of audit config ([#128](https://github.com/adobe/spacecat-api-service/issues/128)) ([06c8784](https://github.com/adobe/spacecat-api-service/commit/06c878467340aa1cc2078290c5e6c48a0a1d0da7))
+
 ## [1.17.2](https://github.com/adobe/spacecat-api-service/compare/v1.17.1...v1.17.2) (2024-01-27)
 
 
