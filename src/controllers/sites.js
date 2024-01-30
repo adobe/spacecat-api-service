@@ -250,6 +250,11 @@ function SitesController(dataAccess) {
       updates = true;
     }
 
+    if (isObject(requestBody.config)) {
+      site.updateConfig(requestBody.config);
+      updates = true;
+    }
+
     if (requestBody.auditConfig) {
       if (isBoolean(requestBody.auditConfig.auditsDisabled)) {
         site.setAllAuditsDisabled(requestBody.auditConfig.auditsDisabled);
