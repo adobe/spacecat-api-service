@@ -1,3 +1,10 @@
+## [1.17.6](https://github.com/adobe/spacecat-api-service/compare/v1.17.5...v1.17.6) (2024-01-30)
+
+
+### Bug Fixes
+
+* add update site config to api ([df7b706](https://github.com/adobe/spacecat-api-service/commit/df7b7060ae5f6de1a4f90980c0a37b540e98ed15))
+
 ## [1.17.5](https://github.com/adobe/spacecat-api-service/compare/v1.17.4...v1.17.5) (2024-01-30)
 
 
