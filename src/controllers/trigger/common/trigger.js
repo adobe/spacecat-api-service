@@ -48,12 +48,12 @@ async function getSitesToAudit(dataAccess, url, deliveryType) {
  */
 export async function triggerFromData(context, config, auditContext = {}) {
   try {
-    const { dataAccess, sqs } = context;
+    const { dataAccess, sqs, log } = context;
     const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
     const { url, auditTypes, deliveryType } = config;
 
     const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType);
-    config.log?.info(`AUDIT is ${!sitesToAudit.length} for ${url}`);
+    log.info(`AUDIT is ${!sitesToAudit.length} for ${url}`);
     if (!sitesToAudit.length) {
       return notFound('Site not found');
     }
@@ -61,14 +61,14 @@ export async function triggerFromData(context, config, auditContext = {}) {
     const message = [];
 
     for (const auditType of auditTypes) {
-      config.log?.info(`AUDIT is ${!auditType} for ${url}`);
+      log.info(`AUDIT is ${!auditType} for ${url}`);
       const sitesToAuditForType = sitesToAudit.filter((site) => {
         const auditConfig = site.getAuditConfig();
-        config.log?.info(`AUDIT is ${!auditConfig.getAuditTypeConfig(auditType)?.disabled()} for ${site.getId()}`);
+        log.info(`AUDIT is ${!auditConfig.getAuditTypeConfig(auditType)?.disabled()} for ${site.getId()}`);
         return !auditConfig.getAuditTypeConfig(auditType)?.disabled();
       });
 
-      config.log?.info(`AUDIT is ${!sitesToAuditForType.length} for ${auditType}`);
+      log.info(`AUDIT is ${!sitesToAuditForType.length} for ${auditType}`);
 
       if (!sitesToAuditForType.length) {
         message.push(`No site is enabled for ${auditType} audit type`);

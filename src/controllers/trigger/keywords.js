@@ -43,7 +43,6 @@ export default async function trigger(context) {
 
     const config = {
       url,
-      log,
       auditTypes: [type],
       deliveryType: DELIVERY_TYPES.AEM_EDGE,
     };
