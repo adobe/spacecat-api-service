@@ -47,6 +47,10 @@ describe('getRouteHandlers', () => {
 
   const mockTrigger = sinon.stub();
 
+  const mockFulfillmentController = {
+    processFulfillmentEvents: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -54,6 +58,7 @@ describe('getRouteHandlers', () => {
       mockSitesController,
       mockSlackController,
       mockTrigger,
+      mockFulfillmentController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -66,6 +71,7 @@ describe('getRouteHandlers', () => {
       'GET /slack/events',
       'POST /slack/events',
       'GET /trigger',
+      'POST /event/fulfillment',
     );
 
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);

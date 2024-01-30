@@ -55,12 +55,14 @@ export default function getRouteHandlers(
   sitesController,
   slackController,
   triggerHandler,
+  fulfillmentController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
+    'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'GET /organizations': organizationsController.getAll,
     'POST /organizations': organizationsController.createOrganization,
     'GET /organizations/:organizationId': organizationsController.getByID,
