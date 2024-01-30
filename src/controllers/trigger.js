@@ -40,6 +40,8 @@ export default async function triggerHandler(context) {
   const { log, data } = context;
   const { type, url } = data;
 
+  log.info(`AUDIT TRIGGERED ${type} ${url}}`);
+
   if (!hasText(type) || !hasText(url)) {
     return badRequest('required query params missing');
   }
