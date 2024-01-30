@@ -64,8 +64,10 @@ export const sendAuditMessages = async (
   type,
   auditContext,
   siteIDsToAudit,
+  log,
 ) => {
   for (const siteId of siteIDsToAudit) {
+    log?.info(`Triggered ${type} audit for ${siteIDsToAudit.length > 1 ? `all ${siteIDsToAudit.length} sites` : siteIDsToAudit[0]}`);
     // eslint-disable-next-line no-await-in-loop
     await sendAuditMessage(sqs, queueUrl, type, auditContext, siteId);
   }

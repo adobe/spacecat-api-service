@@ -62,9 +62,11 @@ export async function triggerFromData(context, config, auditContext = {}) {
     for (const auditType of auditTypes) {
       const sitesToAuditForType = sitesToAudit.filter((site) => {
         const auditConfig = site.getAuditConfig();
-        config.log?.info(`AUTID is ${!auditConfig.getAuditTypeConfig(auditType)?.disabled()} for ${site.getId()}`);
+        config.log?.info(`AUDIT is ${!auditConfig.getAuditTypeConfig(auditType)?.disabled()} for ${site.getId()}`);
         return !auditConfig.getAuditTypeConfig(auditType)?.disabled();
       });
+
+      config.log?.info(`AUDIT is ${!sitesToAuditForType.length} for ${auditType}`);
 
       if (!sitesToAuditForType.length) {
         message.push(`No site is enabled for ${auditType} audit type`);
@@ -77,6 +79,7 @@ export async function triggerFromData(context, config, auditContext = {}) {
             auditType,
             auditContext,
             sitesToAuditForType.map((site) => site.getId()),
+            config.log,
           ),
         );
       }
