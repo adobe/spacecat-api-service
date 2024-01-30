@@ -59,7 +59,9 @@ export async function triggerFromData(context, config, auditContext = {}) {
 
     const message = [];
 
+    config.log?.info(`AUDIT is ${!auditTypes.length} for ${url}`);
     for (const auditType of auditTypes) {
+      config.log?.info(`AUDIT is ${!auditType} for ${url}`);
       const sitesToAuditForType = sitesToAudit.filter((site) => {
         const auditConfig = site.getAuditConfig();
         config.log?.info(`AUDIT is ${!auditConfig.getAuditTypeConfig(auditType)?.disabled()} for ${site.getId()}`);
