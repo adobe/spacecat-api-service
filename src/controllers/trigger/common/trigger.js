@@ -53,13 +53,13 @@ export async function triggerFromData(context, config, auditContext = {}) {
     const { url, auditTypes, deliveryType } = config;
 
     const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType);
+    config.log?.info(`AUDIT is ${!sitesToAudit.length} for ${url}`);
     if (!sitesToAudit.length) {
       return notFound('Site not found');
     }
 
     const message = [];
 
-    config.log?.info(`AUDIT is ${!auditTypes.length} for ${url}`);
     for (const auditType of auditTypes) {
       config.log?.info(`AUDIT is ${!auditType} for ${url}`);
       const sitesToAuditForType = sitesToAudit.filter((site) => {
