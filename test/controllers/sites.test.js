@@ -144,6 +144,7 @@ describe('Sites Controller', () => {
         isLive: false,
         deliveryType: 'other',
         gitHubURL: 'https://github.com/blah/bluh',
+        config: {},
       },
     });
 
