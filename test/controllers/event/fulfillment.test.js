@@ -15,8 +15,11 @@
 import chai from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
-import FulfillmentsController
-  from '../../../src/controllers/event/fulfillments.js';
+import fs from 'fs';
+import path, { dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+import FulfillmentController from '../../../src/controllers/event/fulfillments.js';
 
 chai.use(chaiAsPromised);
 
@@ -29,6 +32,8 @@ describe('Fulfillment Controller', () => {
     'processFulfillmentEvents',
   ];
 
+  const thisDirectory = dirname(fileURLToPath(import.meta.url));
+
   let mockDataAccess;
   let fulfillmentController;
 
@@ -37,7 +42,7 @@ describe('Fulfillment Controller', () => {
       // addOrganization: sandbox.stub().resolves(organizations[0]),
     };
 
-    fulfillmentController = FulfillmentsController(mockDataAccess);
+    fulfillmentController = FulfillmentController(mockDataAccess);
   });
 
   afterEach(() => {
@@ -54,5 +59,20 @@ describe('Fulfillment Controller', () => {
     Object.keys(fulfillmentController).forEach((funcName) => {
       expect(fulfillmentFunctions).to.include(funcName);
     });
+  });
+
+  it('can handle poorly crafted/malicious Hoolihan events', async () => {
+    const context = {};
+    const response = await fulfillmentController.processFulfillmentEvents(context);
+    expect(response.status).to.equal(400);
+  });
+
+  it('can process a valid Hoolihan event with a single fulfillment', async () => {
+    const data = JSON.parse(fs.readFileSync(path.join(thisDirectory, 'sample-hoolihan-event.json')));
+    const context = { data };
+    const response = await fulfillmentController.processFulfillmentEvents(context);
+
+    expect(response.status).to.equal(202);
+    // TODO: add assertions for the body
   });
 });
