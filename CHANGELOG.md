@@ -1,3 +1,10 @@
+# [1.18.0](https://github.com/adobe/spacecat-api-service/compare/v1.17.6...v1.18.0) (2024-01-31)
+
+
+### Features
+
+* 404 report for customers ([891253f](https://github.com/adobe/spacecat-api-service/commit/891253f4690ecdbe7338d1c125080c9bd2ed3eda))
+
 ## [1.17.6](https://github.com/adobe/spacecat-api-service/compare/v1.17.5...v1.17.6) (2024-01-30)
 
 
