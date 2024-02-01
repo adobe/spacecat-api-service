@@ -1,3 +1,10 @@
+## [1.18.1](https://github.com/adobe/spacecat-api-service/compare/v1.18.0...v1.18.1) (2024-02-01)
+
+
+### Bug Fixes
+
+* API should return audit result for broken backlinks also in abbreviated JSON ([#134](https://github.com/adobe/spacecat-api-service/issues/134)) ([37b0b47](https://github.com/adobe/spacecat-api-service/commit/37b0b47d52c7b2aaba559d276eff56c7cb46ba49))
+
 # [1.18.0](https://github.com/adobe/spacecat-api-service/compare/v1.17.6...v1.18.0) (2024-01-31)
 
 
