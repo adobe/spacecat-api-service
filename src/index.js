@@ -85,7 +85,7 @@ async function run(request, context) {
       SitesController(context.dataAccess, log),
       SlackController(SlackApp),
       trigger,
-      FulfillmentController(context.dataAccess),
+      FulfillmentController(context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

@@ -36,13 +36,23 @@ describe('Fulfillment Controller', () => {
 
   let mockDataAccess;
   let fulfillmentController;
+  let baseContext;
 
   beforeEach(() => {
     mockDataAccess = {
       // addOrganization: sandbox.stub().resolves(organizations[0]),
     };
 
-    fulfillmentController = FulfillmentController(mockDataAccess);
+    baseContext = {
+      dataAccess: mockDataAccess,
+      log: console,
+      sqs: {
+        sendMessage: sandbox.stub().resolves(),
+      },
+      env: {},
+    };
+
+    fulfillmentController = FulfillmentController(baseContext);
   });
 
   afterEach(() => {
@@ -68,11 +78,30 @@ describe('Fulfillment Controller', () => {
   });
 
   it('can process a valid Hoolihan event with a single fulfillment', async () => {
-    const data = JSON.parse(fs.readFileSync(path.join(thisDirectory, 'sample-hoolihan-event.json')));
-    const context = { data };
-    const response = await fulfillmentController.processFulfillmentEvents(context);
+    const eventArray = JSON.parse(fs.readFileSync(path.join(thisDirectory, 'sample-hoolihan-event.json')));
+
+    const response = await fulfillmentController.processFulfillmentEvents({ data: eventArray });
 
     expect(response.status).to.equal(202);
     // TODO: add assertions for the body
+  });
+
+  it('can process multiple valid Hoolihan events, with a single invalid one mixed in', async () => {
+    const validEvent = JSON.parse(fs.readFileSync(path.join(thisDirectory, 'sample-hoolihan-event.json')))[0];
+    const multipleEvents = [
+      { ...validEvent },
+      { id: 'not a valid event' },
+      { ...validEvent },
+      { ...validEvent },
+    ];
+    const response = await fulfillmentController.processFulfillmentEvents({ data: multipleEvents });
+
+    expect(response.status).to.equal(202);
+    const results = await response.json();
+    expect(results).to.have.length(4);
+    expect(results[0].status).to.equal('accepted');
+    expect(results[1].status).to.equal('rejected'); // Rejected because it's not a valid event
+    expect(results[2].status).to.equal('accepted');
+    expect(results[3].status).to.equal('accepted');
   });
 });
