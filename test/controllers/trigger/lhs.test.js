@@ -63,6 +63,11 @@ describe('LHS Trigger', () => {
       sqs: sqsMock,
       data: { type: 'lhs-mobile', url: 'ALL' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     dataAccessMock.getSites.resolves(sites);
@@ -81,6 +86,11 @@ describe('LHS Trigger', () => {
       sqs: sqsMock,
       data: { type: 'lhs', url: 'ALL' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     dataAccessMock.getSites.resolves(sites);

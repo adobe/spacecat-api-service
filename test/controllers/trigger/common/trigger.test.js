@@ -64,6 +64,11 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'ALL' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     const config = {
@@ -88,6 +93,11 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'ALL' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     const config = {
@@ -112,6 +122,11 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'lhs', url: 'ALL' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     const config = {
@@ -138,6 +153,11 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'http://site1.com' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     const config = {
@@ -162,6 +182,11 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'https://example.com' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     const config = {
@@ -185,6 +210,11 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'all' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     const config = {
@@ -220,6 +250,11 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'all' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     const config = {
@@ -251,6 +286,11 @@ describe('Trigger from data access', () => {
       sqs: sqsMock,
       data: { type: 'auditType', url: 'all' },
       env: { AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com' },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
     };
 
     const config = {
