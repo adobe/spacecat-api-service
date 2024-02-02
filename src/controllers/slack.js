@@ -73,7 +73,13 @@ export function initSlackBot(lambdaContext, App) {
 
     await ack();
 
-    const { text } = body;
+    const {
+      message: {
+        blocks,
+      },
+    } = body;
+
+    const { text: { text } } = blocks[0];
 
     const newBlocks = [];
 
@@ -87,7 +93,7 @@ export function initSlackBot(lambdaContext, App) {
 
     await respond({
       replace_original: true,
-      text: text.replace('Yes button Ignore button', ''),
+      text,
       blocks: newBlocks,
     });
   });
@@ -95,21 +101,19 @@ export function initSlackBot(lambdaContext, App) {
   app.action('ignoreSiteCandidate', async ({ ack, body, respond }) => {
     await ack();
 
-    const { text } = body;
+    const {
+      message: {
+        blocks,
+      },
+    } = body;
+
+    const { text: { text } } = blocks[0];
 
     const newBlocks = [];
 
-    newBlocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: 'Ignored :cross-x:',
-      },
-    });
-
     await respond({
       replace_original: true,
-      text: text.replace('Yes button Ignore button', ''),
+      text,
       blocks: newBlocks,
     });
   });
