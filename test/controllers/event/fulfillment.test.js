@@ -32,8 +32,6 @@ describe('Fulfillment Controller', () => {
     'processFulfillmentEvents',
   ];
 
-  const thisDirectory = dirname(fileURLToPath(import.meta.url));
-
   let fulfillmentController;
   let baseContext;
 
@@ -53,6 +51,11 @@ describe('Fulfillment Controller', () => {
     sandbox.restore();
   });
 
+  const thisDirectory = dirname(fileURLToPath(import.meta.url));
+  function localFileToObject(fileName) {
+    return JSON.parse(fs.readFileSync(path.join(thisDirectory, fileName), 'utf8'));
+  }
+
   it('contains all controller functions', () => {
     fulfillmentFunctions.forEach((funcName) => {
       expect(fulfillmentController).to.have.property(funcName);
@@ -67,13 +70,34 @@ describe('Fulfillment Controller', () => {
 
   it('can handle poorly crafted/malicious Hoolihan events', async () => {
     const emptyObj = {};
-    const response = await fulfillmentController.processFulfillmentEvents(emptyObj);
+    let response = await fulfillmentController.processFulfillmentEvents(emptyObj);
     expect(response.status).to.equal(400);
     expect(response.headers.get('x-error')).to.equal('Bad Request');
+
+    // Missing payload
+    let eventArray = localFileToObject('sample-hoolihan-event-missing-props.json');
+    response = await fulfillmentController.processFulfillmentEvents({ data: eventArray });
+    expect(response.status).to.equal(202);
+    let results = await response.json();
+    expect(results[0].status).to.equal('rejected');
+
+    // Bad payload
+    eventArray = localFileToObject('sample-hoolihan-event-bad-payload.json');
+    response = await fulfillmentController.processFulfillmentEvents({ data: eventArray });
+    expect(response.status).to.equal(202);
+    results = await response.json();
+    expect(results[0].status).to.equal('rejected');
+
+    // No external-request-id
+    eventArray = localFileToObject('sample-hoolihan-event-no-external-id.json');
+    response = await fulfillmentController.processFulfillmentEvents({ data: eventArray });
+    expect(response.status).to.equal(202);
+    results = await response.json();
+    expect(results[0].status).to.equal('accepted');
   });
 
   it('can process a valid Hoolihan event with a single fulfillment', async () => {
-    const eventArray = JSON.parse(fs.readFileSync(path.join(thisDirectory, 'sample-hoolihan-event.json')));
+    const eventArray = localFileToObject('sample-hoolihan-event.json');
 
     const response = await fulfillmentController.processFulfillmentEvents({ data: eventArray });
 
@@ -85,7 +109,7 @@ describe('Fulfillment Controller', () => {
   });
 
   it('can process multiple valid Hoolihan events, with a single invalid one mixed in', async () => {
-    const validEvent = JSON.parse(fs.readFileSync(path.join(thisDirectory, 'sample-hoolihan-event.json')))[0];
+    const validEvent = localFileToObject('sample-hoolihan-event.json')[0];
     const multipleEvents = [
       { ...validEvent },
       { id: 'not-a-valid-event' },
@@ -104,7 +128,7 @@ describe('Fulfillment Controller', () => {
     expect(results[3].requestId).to.equal('12345');
   });
 
-  it('should reject when SQS fails', async () => {
+  it('rejects when SQS fails', async () => {
     const failingSqs = {
       sendMessage: sandbox.stub().rejects(new Error('Error queueing message')),
     };
@@ -112,7 +136,7 @@ describe('Fulfillment Controller', () => {
       ...baseContext,
       sqs: failingSqs,
     };
-    const eventArray = JSON.parse(fs.readFileSync(path.join(thisDirectory, 'sample-hoolihan-event.json')));
+    const eventArray = localFileToObject('sample-hoolihan-event.json');
 
     const controllerBadSqs = FulfillmentController(contextWithBadSqs);
     await expect(controllerBadSqs.processFulfillmentEvents({ data: eventArray })).to.be.rejectedWith('Error queueing message');

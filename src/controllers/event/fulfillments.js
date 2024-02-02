@@ -59,8 +59,7 @@ function FulfillmentController(context) {
 
         validationStatus.push({
           status: ACCEPTED,
-          requestId: fulfillmentEvent.external_request_id
-            || 'no-external-request-id',
+          requestId: fulfillmentEvent.external_request_id || 'no-external-request-id',
         });
 
         return fulfillmentEvent;
@@ -90,12 +89,22 @@ function FulfillmentController(context) {
     return results.filter((result) => status === result.status).length;
   }
 
+  /**
+   * Process an array of fulfillment_completed events, in the format produced by the Fulfillment
+   * Gateway and delivered by the Hoolihan pipeline.
+   *
+   * @param {Object} requestContext - Context of the request.
+   * @param {Array<HoolihanEvent>} requestContext.data - Array of Hoolihan events for processing.
+   * @returns {Promise<Response|*>} ProcessingStatus[] response, with an entry for each event in
+   * the request.
+   * @throws {Error} If there is a problem with the SQS queue.
+   */
   async function processFulfillmentEvents(requestContext) {
     try {
       const results = await queueEventsForProcessing(requestContext.data);
 
-      log.info(`Fulfillment events processed. Total=${results.length} `
-        + `accepted=${countByStatus(results, 'accepted')}, rejected=${countByStatus(results, 'rejected')})}`);
+      log.info(`Fulfillment events processed. Total: ${results.length} `
+        + `(Accepted: ${countByStatus(results, 'accepted')}, Rejected: ${countByStatus(results, 'rejected')})`);
 
       return createResponse(results, 202);
     } catch (error) {

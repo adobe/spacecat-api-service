@@ -1,0 +1,14 @@
+[
+    {
+        "topic": "example_fulfillment_topic",
+        "partition": 0,
+        "offset": 1236,
+        "value": {
+            "headers": {
+                "Content-Type": [
+                    "application/json"
+                ]
+            }
+        }
+    }
+]

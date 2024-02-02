@@ -1,0 +1,15 @@
+[
+    {
+        "topic": "example_fulfillment_topic",
+        "partition": 0,
+        "offset": 1235,
+        "value": {
+            "content": "<invalid JSON value to cause an error>",
+            "headers": {
+                "Content-Type": [
+                    "application/json"
+                ]
+            }
+        }
+    }
+]
