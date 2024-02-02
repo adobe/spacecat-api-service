@@ -68,6 +68,24 @@ export function initSlackBot(lambdaContext, App) {
 
   app.event('app_mention', slackHandler.onAppMention);
 
+  app.action('approveSiteCandidate', async ({ ack, body, say }) => {
+    await ack();
+
+    await say({
+      text: 'Site included in the Star Catalogue!',
+      thread_ts: body.message.ts,
+    });
+  });
+
+  app.action('ignoreSiteCandidate', async ({ ack, body, say }) => {
+    await ack();
+
+    await say({
+      text: 'Alright, ignored!',
+      thread_ts: body.message.ts,
+    });
+  });
+
   return app;
 }
 
