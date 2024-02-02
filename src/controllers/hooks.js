@@ -35,7 +35,7 @@ function verifySecret(fn, opts) {
 }
 
 function getBaseURLFromXForwardedHostHeader(forwardedHost) {
-  const domain = forwardedHost.split(',')?.trim();
+  const domain = forwardedHost.split(',')[0]?.trim();
   domain.replace(/:(\d{1,5})$/, ''); // replace the port at the end
   const baseURL = domain.startsWith('https://') ? domain : `https://${domain}`;
   const url = new URL(baseURL);
