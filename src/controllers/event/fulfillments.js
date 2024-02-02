@@ -14,72 +14,93 @@ import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
 
 /**
- * Fulfillment controller. Provides methods to handle fulfillment_completed
- * events from the Fulfillment Gateway.
- * @param {DataAccess} dataAccess - Data access.
+ * Fulfillment controller. Provides a method to handle fulfillment_completed
+ * events from the Fulfillment Gateway. Events are queued for processing onto
+ * the provided SQS queue URL.
+ *
+ * @param {UniversalContext} context - The context object.
+ * @param {object} context.env - The environment object.
+ * @param {object} context.env.FULFILLMENT_EVENTS_QUEUE_URL - URL of the SQS queue to use.
+ * @param {object} context.log - The logger.
+ * @param {object} context.sqs - The SQS client.
  * @returns {object} Fulfillment controller.
  * @constructor
  */
 function FulfillmentController(context) {
-  const { dataAccess, log, sqs } = context;
+  const { log, sqs } = context;
   const {
     FULFILLMENT_EVENTS_QUEUE_URL: queueUrl,
   } = context.env;
 
-  if (!isObject(dataAccess)) {
-    throw new Error('Data access required');
-  }
+  const INVALID_EVENT_ERROR_CODE = 'INVALID_HOOLIHAN_EVENT';
+  const ACCEPTED = 'accepted';
+  const REJECTED = 'rejected';
 
   async function queueEventsForProcessing(hoolihanEventArray) {
     if (!Array.isArray(hoolihanEventArray)) {
       const error = new Error('Invalid event envelope, must be an array');
-      error.code = 'INVALID_HOOLIHAN_EVENT';
+      error.code = INVALID_EVENT_ERROR_CODE;
       throw error;
     }
 
     // Note the processing status of each fulfillment event included in the Hoolihan event
-    const processingStatus = [];
+    const validationStatus = [];
 
-    for (const hoolihanEvent of hoolihanEventArray) {
+    // Pull all fulfillment events from the envelope and prepare to be sent to SQS
+    const fulfillmentEvents = hoolihanEventArray.map((hoolihanEvent) => {
       try {
         if (!isObject(hoolihanEvent) || !hasText(hoolihanEvent.value?.content)) {
           throw new Error('Invalid event envelope, must have a "value" property with a "content" property');
         }
 
-        // Parse event.value.content from Base64 to JSON
+        // Parse the event payload from Base64 to JSON
         const eventContent = Buffer.from(hoolihanEvent.value.content, 'base64').toString('utf-8');
         const fulfillmentEvent = JSON.parse(eventContent);
 
-        // eslint-disable-next-line no-await-in-loop
-        await sqs.sendMessage(queueUrl, fulfillmentEvent);
-
-        processingStatus.push({
-          status: 'accepted',
+        validationStatus.push({
+          status: ACCEPTED,
           requestId: fulfillmentEvent.external_request_id
             || 'no-external-request-id',
         });
+
+        return fulfillmentEvent;
       } catch (error) {
-        // Include a "rejected" entry for invalid events
-        processingStatus.push({
-          status: 'rejected',
+        log.error(`Failed to process hoolihanEventId: ${hoolihanEvent.id || 'no-hoolihan-id'}, Message: ${error.message}`);
+
+        validationStatus.push({
+          status: REJECTED,
         });
       }
+      return null;
+    }).filter((event) => event !== null);
+
+    for (const fulfillmentEvent of fulfillmentEvents) {
+      // Failure to send a message to the queue will result in an Error response, meaning the
+      // event push will be retried by the publisher (Hoolihan). If we were to return a 2xx
+      // response instead and fail to queue the event, then it would be lost.
+
+      // eslint-disable-next-line no-await-in-loop
+      await sqs.sendMessage(queueUrl, fulfillmentEvent);
     }
 
-    return processingStatus;
+    return validationStatus;
+  }
+
+  function countByStatus(results, status) {
+    return results.filter((result) => status === result.status).length;
   }
 
   async function processFulfillmentEvents(requestContext) {
     try {
-      const processingResults = await queueEventsForProcessing(requestContext.data);
+      const results = await queueEventsForProcessing(requestContext.data);
 
-      // TODO: anything else that we would like to see in the logs here? processingResults?
-      // Is logging in controllers an anti-pattern?
-      log.info(`Fulfillment events processed: ${processingResults.length}`);
-      return createResponse(processingResults, 202);
+      log.info(`Fulfillment events processed. Total=${results.length} `
+        + `accepted=${countByStatus(results, 'accepted')}, rejected=${countByStatus(results, 'rejected')})}`);
+
+      return createResponse(results, 202);
     } catch (error) {
-      if (error.code === 'INVALID_HOOLIHAN_EVENT') {
-        log.error(`Bad request, unable to process event: ${error.message}`);
+      if (error.code === INVALID_EVENT_ERROR_CODE) {
+        log.error(`Bad request, unable to process event. Message: ${error.message}`);
         return new Response('', {
           status: 400,
           headers: {
@@ -87,6 +108,7 @@ function FulfillmentController(context) {
           },
         });
       }
+      // Unknown error code; re-throw
       throw error;
     }
   }
