@@ -33,7 +33,7 @@ export default function authWrapper(fn) {
     const route = `${method.toUpperCase()} ${suffix}`;
 
     if (ANONYMOUS_ENDPOINTS.includes(route)
-      || route.startsWith('POST /hooks/site-detection/cdn/:hookSecret')
+      || route.startsWith('POST /hooks/site-detection/cdn/')
       || method.toUpperCase() === 'OPTIONS') {
       return fn(request, context);
     }
