@@ -68,7 +68,11 @@ export function initSlackBot(lambdaContext, App) {
 
   app.event('app_mention', slackHandler.onAppMention);
 
-  app.action('approveSiteCandidate', async ({ ack, body, say }) => {
+  app.action('approveSiteCandidate', async ({
+    payload, ack, body, say,
+  }) => {
+    lambdaContext.log.info(JSON.stringify(payload));
+
     await ack();
 
     await say({

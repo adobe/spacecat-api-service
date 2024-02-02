@@ -81,7 +81,7 @@ function HooksController() {
     const discoveryMessage = Message()
       .channel(channel)
       .blocks(
-        Blocks.Section().text(`I discovered a new site: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue?`),
+        Blocks.Section().text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue?`),
         Blocks.Actions()
           .elements(
             Elements.Button()
