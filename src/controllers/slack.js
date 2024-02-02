@@ -68,25 +68,49 @@ export function initSlackBot(lambdaContext, App) {
 
   app.event('app_mention', slackHandler.onAppMention);
 
-  app.action('approveSiteCandidate', async ({
-    ack, body, say,
-  }) => {
+  app.action('approveSiteCandidate', async ({ ack, body, respond }) => {
     lambdaContext.log.info(JSON.stringify(body));
 
     await ack();
 
-    await say({
-      text: 'Site included in the Star Catalogue!',
-      thread_ts: body.message.ts,
+    const { blocks } = body;
+
+    const newBlocks = [];
+    newBlocks.push(blocks[0]);
+
+    newBlocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: 'Added :checked:',
+      },
+    });
+
+    await respond({
+      replace_original: true,
+      blocks: newBlocks,
     });
   });
 
-  app.action('ignoreSiteCandidate', async ({ ack, body, say }) => {
+  app.action('ignoreSiteCandidate', async ({ ack, body, respond }) => {
     await ack();
 
-    await say({
-      text: 'Alright, ignored!',
-      thread_ts: body.message.ts,
+    const { blocks } = body;
+
+    const newBlocks = [];
+    newBlocks.push(blocks[0]);
+
+    newBlocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: 'Ignored :cross-x:',
+      },
+    });
+
+    await respond({
+      replace_original: true,
+      blocks: newBlocks,
     });
   });
 
