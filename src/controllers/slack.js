@@ -79,9 +79,7 @@ export function initSlackBot(lambdaContext, App) {
       },
     } = body;
 
-    const { text: { text } } = blocks[0];
-
-    const newBlocks = [];
+    const newBlocks = [blocks[0]];
 
     newBlocks.push({
       type: 'section',
@@ -93,7 +91,7 @@ export function initSlackBot(lambdaContext, App) {
 
     await respond({
       replace_original: true,
-      text,
+      text: newBlocks[0].text.text,
       blocks: newBlocks,
     });
   });
@@ -107,13 +105,11 @@ export function initSlackBot(lambdaContext, App) {
       },
     } = body;
 
-    const { text: { text } } = blocks[0];
-
-    const newBlocks = [];
+    const newBlocks = [blocks[0]];
 
     await respond({
       replace_original: true,
-      text,
+      text: newBlocks[0].text.text,
       blocks: newBlocks,
     });
   });
