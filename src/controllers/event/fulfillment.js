@@ -43,14 +43,12 @@ function FulfillmentController(context) {
       throw error;
     }
 
-    // Note the processing status of each fulfillment event included in the Hoolihan event
-    const validationStatus = [];
-
     // Pull all fulfillment events from the envelope and prepare to be sent to SQS
+    const validationStatus = [];
     const fulfillmentEvents = hoolihanEventArray.map((hoolihanEvent) => {
       try {
         if (!isObject(hoolihanEvent) || !hasText(hoolihanEvent.value?.content)) {
-          throw new Error('Invalid event envelope, must have a "value" property with a "content" property');
+          throw new Error('Invalid event, must have a "value" property with a "content" property');
         }
 
         // Parse the event payload from Base64 to JSON
@@ -104,7 +102,7 @@ function FulfillmentController(context) {
       const results = await queueEventsForProcessing(requestContext.data);
 
       log.info(`Fulfillment events processed. Total: ${results.length} `
-        + `(Accepted: ${countByStatus(results, 'accepted')}, Rejected: ${countByStatus(results, 'rejected')})`);
+        + `(Accepted: ${countByStatus(results, ACCEPTED)}, Rejected: ${countByStatus(results, REJECTED)})`);
 
       return createResponse(results, 202);
     } catch (error) {

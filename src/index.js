@@ -35,7 +35,7 @@ import trigger from './controllers/trigger.js';
 
 // prevents webpack build error
 import { App as SlackApp } from './utils/slack/bolt.cjs';
-import FulfillmentController from './controllers/event/fulfillments.js';
+import FulfillmentController from './controllers/event/fulfillment.js';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {

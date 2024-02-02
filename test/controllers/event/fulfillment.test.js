@@ -19,7 +19,7 @@ import fs from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import FulfillmentController from '../../../src/controllers/event/fulfillments.js';
+import FulfillmentController from '../../../src/controllers/event/fulfillment.js';
 
 chai.use(chaiAsPromised);
 
@@ -98,7 +98,6 @@ describe('Fulfillment Controller', () => {
 
   it('can process a valid Hoolihan event with a single fulfillment', async () => {
     const eventArray = localFileToObject('sample-hoolihan-event.json');
-
     const response = await fulfillmentController.processFulfillmentEvents({ data: eventArray });
 
     expect(response.status).to.equal(202);
