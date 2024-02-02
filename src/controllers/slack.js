@@ -107,6 +107,14 @@ export function initSlackBot(lambdaContext, App) {
 
     const newBlocks = [blocks[0]];
 
+    newBlocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: 'Ignored :cross-x:',
+      },
+    });
+
     await respond({
       replace_original: true,
       text: newBlocks[0].text.text,
