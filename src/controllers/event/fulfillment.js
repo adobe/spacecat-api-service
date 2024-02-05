@@ -84,7 +84,7 @@ function FulfillmentController(context) {
   }
 
   function countByStatus(results, status) {
-    return results.filter((result) => status === result.status).length;
+    return results.reduce((count, result) => count + (status === result.status ? 1 : 0), 0);
   }
 
   /**
