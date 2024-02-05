@@ -100,10 +100,10 @@ function FulfillmentController(context) {
   async function processFulfillmentEvents(requestContext) {
     try {
       const results = await queueEventsForProcessing(requestContext.data);
+      const acceptedCount = countByStatus(results, ACCEPTED);
+      const rejectedCount = results.length - acceptedCount;
 
-      log.info(`Fulfillment events processed. Total: ${results.length} `
-        + `(Accepted: ${countByStatus(results, ACCEPTED)}, Rejected: ${countByStatus(results, REJECTED)})`);
-
+      log.info(`Fulfillment events processed. Total: ${results.length} (Accepted: ${acceptedCount}, Rejected: ${rejectedCount})`);
       return createResponse(results, 202);
     } catch (error) {
       if (error.code === INVALID_EVENT_ERROR_CODE) {
