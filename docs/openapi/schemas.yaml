@@ -367,6 +367,9 @@ SiteUpdate:
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
+    config:
+      description: Optional. The configuration of the site
+      $ref: '#/SiteConfig'
   example:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
