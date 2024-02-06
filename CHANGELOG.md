@@ -1,3 +1,10 @@
+## [1.19.1](https://github.com/adobe/spacecat-api-service/compare/v1.19.0...v1.19.1) (2024-02-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.9.0 ([#151](https://github.com/adobe/spacecat-api-service/issues/151)) ([a6367e7](https://github.com/adobe/spacecat-api-service/commit/a6367e71602be58ac7a07e0af8a268b3adc245b6))
+
 # [1.19.0](https://github.com/adobe/spacecat-api-service/compare/v1.18.6...v1.19.0) (2024-02-06)
 
 
