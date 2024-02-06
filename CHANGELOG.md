@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/adobe/spacecat-api-service/compare/v1.18.6...v1.19.0) (2024-02-06)
+
+
+### Features
+
+* add organic traffic audit type (SITES-18661) ([#150](https://github.com/adobe/spacecat-api-service/issues/150)) ([9feafcf](https://github.com/adobe/spacecat-api-service/commit/9feafcf1f2e8beae64c7b69bf39c5cd96314ea9d))
+
 ## [1.18.6](https://github.com/adobe/spacecat-api-service/compare/v1.18.5...v1.18.6) (2024-02-05)
 
 
