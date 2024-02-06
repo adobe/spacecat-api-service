@@ -18,6 +18,7 @@ import cwv from './trigger/cwv.js';
 import lhs from './trigger/lhs.js';
 import notfound from './trigger/notfound.js';
 import backlinks from './trigger/backlinks.js';
+import experiment from './trigger/experiment.js';
 
 const AUDITS = {
   apex,
@@ -27,6 +28,7 @@ const AUDITS = {
   lhs, // for all lhs variants
   404: notfound,
   'broken-backlinks': backlinks,
+  experiment,
 };
 
 /**
