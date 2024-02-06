@@ -132,6 +132,8 @@ class HooksController {
   }
 
   async #processSiteCandidate(domain, source) {
+    const { dataAccess } = this.context;
+
     const url = composeSanitizedURL(domain);
     verifyURLCandidate(url);
     await verifyHelixSite(url.href);
@@ -144,13 +146,13 @@ class HooksController {
       status: SITE_CANDIDATE_STATUS.PENDING,
     };
 
-    if (await this.dataAccess.siteCandidateExists(siteCandidate.baseURL)) {
+    if (await dataAccess.siteCandidateExists(siteCandidate.baseURL)) {
       throw Error('Site candidate previously evaluated');
     }
 
-    await this.dataAccess.upsertSiteCandidate(siteCandidate);
+    await dataAccess.upsertSiteCandidate(siteCandidate);
 
-    if (await this.dataAccess.getSiteByBaseURL(siteCandidate.baseURL)) {
+    if (await dataAccess.getSiteByBaseURL(siteCandidate.baseURL)) {
       throw Error('Site candidate already exists in sites db');
     }
 
