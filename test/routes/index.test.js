@@ -83,6 +83,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
       'POST /hooks/site-detection/cdn/:hookSecret',
+      'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/sites',
       'PATCH /organizations/:organizationId',

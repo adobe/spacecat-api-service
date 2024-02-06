@@ -17,6 +17,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import SlackHandler from '../support/slack/slack-handler.js';
 import commands from '../support/slack/commands.js';
+import actions from '../support/slack/actions/index.js';
 
 /**
  * Initializes the slack bot.
@@ -68,59 +69,8 @@ export function initSlackBot(lambdaContext, App) {
 
   app.event('app_mention', slackHandler.onAppMention);
 
-  app.action('approveSiteCandidate', async ({ ack, body, respond }) => {
-    lambdaContext.log.info(JSON.stringify(body));
-
-    await ack();
-
-    const {
-      message: {
-        blocks,
-      },
-    } = body;
-
-    const newBlocks = [blocks[0]];
-
-    newBlocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: 'Added :checked:',
-      },
-    });
-
-    await respond({
-      replace_original: true,
-      text: newBlocks[0].text.text,
-      blocks: newBlocks,
-    });
-  });
-
-  app.action('ignoreSiteCandidate', async ({ ack, body, respond }) => {
-    await ack();
-
-    const {
-      message: {
-        blocks,
-      },
-    } = body;
-
-    const newBlocks = [blocks[0]];
-
-    newBlocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: 'Ignored :cross-x:',
-      },
-    });
-
-    await respond({
-      replace_original: true,
-      text: newBlocks[0].text.text,
-      blocks: newBlocks,
-    });
-  });
+  Object.entries(actions)
+    .forEach(([action, fn]) => app.action(action, fn(lambdaContext)));
 
   return app;
 }

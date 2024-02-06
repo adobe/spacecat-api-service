@@ -11,35 +11,34 @@
  */
 
 import { Message, Blocks, Elements } from 'slack-block-builder';
-import wrap from '@adobe/helix-shared-wrap';
 import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import { fetch } from '../support/utils.js';
 
-const CDN_HOOK_SECRET = 'INCOMING_WEBHOOK_SECRET_CDN';
-// const RUM_HOOK_SECRET = 'INCOMING_WEBHOOK_SECRET_RUM';
+const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
+const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
 
 const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--'];
 
-function isValidSubdomain(hostname) {
+function verifyHookSecret(context, secretName) {
+  const expectedSecret = context.env[secretName];
+  const secretFromPath = context.params?.hookSecret;
+  return expectedSecret !== secretFromPath;
+}
+
+function isInvalidSubdomain(hostname) {
   const subdomain = hostname.split('.').slice(0, -2).join('.');
-  return !IGNORED_SUBDOMAIN_TOKENS.some((ignored) => subdomain.includes(ignored));
+  return IGNORED_SUBDOMAIN_TOKENS.some((ignored) => subdomain.includes(ignored));
 }
 
 function isIPAddress(hostname) {
   return /^\d{1,3}(\.\d{1,3}){3}$|^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(hostname);
 }
 
-function verifySecret(fn, opts) {
-  return (context) => {
-    const expectedSecret = context.env[opts.secret];
-    const secretFromPath = context.params?.hookSecret;
-    return expectedSecret === secretFromPath
-      ? fn(context)
-      : notFound();
-  };
+function containsPathOrSearchParams(url) {
+  return url.pathname !== '/' || url.search !== '';
 }
 
 async function verifyHelixSite(url) {
@@ -48,7 +47,7 @@ async function verifyHelixSite(url) {
     const resp = await fetch(url);
     finalUrl = resp.url;
   } catch (e) {
-    throw Error(`url is unreachable: ${url}`, { cause: e });
+    throw Error(`URL is unreachable: ${url}`, { cause: e });
   }
 
   finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
@@ -66,27 +65,60 @@ async function verifyHelixSite(url) {
   return true;
 }
 
-async function getBaseURLFromXForwardedHostHeader(forwardedHost) {
-  let domain = forwardedHost.split(',')[0]?.trim();
-  domain = domain.replace(/:(\d{1,5})$/, ''); // omit the port at the end
-  const baseURL = domain.startsWith('https://') ? domain : `https://${domain}`;
-  const url = new URL(baseURL); // sneakily check if a valid URL
+async function extractDomainFromXForwardedHostHeader(forwardedHost) {
+  return forwardedHost.split(',')[0]?.trim(); // get the domain from x-fw-host header
+}
 
-  if (url.pathname !== '/' || url.search !== '') {
-    throw Error(`unrecognized pathname/search: ${url.href}/${url.search}`);
+function composeSanitizedURL(domain) {
+  let sanitized = domain.startsWith('www.') ? domain.slice(4) : domain; // ignore the www
+  sanitized = sanitized.replace(/:(\d{1,5})$/, ''); // omit the port at the end
+  sanitized = sanitized.endsWith('.') ? sanitized.slice(0, -1) : sanitized; // omit the dot(.) at the end
+  const baseURL = sanitized.startsWith('https://') ? sanitized : `https://${sanitized}`; // prepend schema if needed
+  return new URL(baseURL); // create a URL object
+}
+
+function verifyURLCandidate(url) {
+  // x-fw-host header should contain hostname only. If it contains path and/or search
+  // params, then it's most likely a h4ck attempt
+  if (containsPathOrSearchParams(url)) {
+    throw Error(`Path/search params are not accepted: ${url.href}/${url.search}`);
   }
 
+  // disregard the IP addresses
   if (isIPAddress(url.hostname)) {
-    throw Error('we dont accept ip addresses');
+    throw Error('Hostname is an IP address');
   }
 
-  if (!isValidSubdomain(url.hostname)) {
-    throw Error(`subdomain contains an ignored string: ${url.href}`);
+  // disregard the non-prod hostnames
+  if (isInvalidSubdomain(url.hostname)) {
+    throw Error(`URL most likely contains a non-prod domain: ${url.href}`);
   }
+}
 
-  await verifyHelixSite(url.href);
+function buildSlackMessage(baseURL, source, channel) {
+  const discoveryMessage = Message()
+    .channel(channel)
+    .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (Source: *${source}*`)
+    .blocks(
+      Blocks.Actions()
+        .elements(
+          Elements.Button()
+            .text('Yes')
+            .actionId('approveSiteCandidate')
+            .primary(),
+          Elements.Button()
+            .text('Ignore')
+            .actionId('ignoreSiteCandidate')
+            .danger(),
+        ),
+    )
+    .buildToObject();
 
-  return url.href;
+  return {
+    ...discoveryMessage,
+    unfurl_links: true, // TODO: change once this PR is merged: https://github.com/raycharius/slack-block-builder/pull/130
+    unfurl_media: true,
+  };
 }
 
 /**
@@ -94,63 +126,84 @@ async function getBaseURLFromXForwardedHostHeader(forwardedHost) {
  * @returns {object} Hooks controller.
  * @constructor
  */
-function HooksController() {
-  async function processCDNHook(context) {
-    const { dataAccess, log } = context;
-    const { forwardedHost } = context.data;
-    const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
-
-    let baseURL;
-    try {
-      baseURL = await getBaseURLFromXForwardedHostHeader(forwardedHost);
-    } catch (e) {
-      log.warn('Forwarded host does not contain a valid', e);
-      return ok('you sure this is valid?');
-    }
-
-    if (await dataAccess.siteCandidateExists(baseURL)) {
-      return ok('already exists');
-    }
-
-    await dataAccess.upsertSiteCandidate({
-      baseURL,
-      source: SITE_CANDIDATE_SOURCES.CDN,
-      status: SITE_CANDIDATE_STATUS.PENDING,
-    });
-
-    const slackClient = BaseSlackClient.createFrom(context, SLACK_TARGETS.WORKSPACE_INTERNAL);
-
-    const discoveryMessage = Message()
-      .channel(channel)
-      .blocks(
-        Blocks.Section().text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue?`),
-        Blocks.Actions()
-          .elements(
-            Elements.Button()
-              .text('Yes')
-              .actionId('approveSiteCandidate')
-              .primary(),
-            Elements.Button()
-              .text('Ignore')
-              .actionId('ignoreSiteCandidate')
-              .danger(),
-          ),
-      )
-      .buildToObject();
-
-    await slackClient.postMessage({
-      ...discoveryMessage,
-      unfurl_links: true,
-    });
-
-    log.info(`Processed site candidate ${baseURL} successfully.`);
-    return ok('processed yo!');
+class HooksController {
+  constructor(context) {
+    this.context = context;
   }
 
-  return {
-    processCDNHook: wrap(processCDNHook)
-      .with(verifySecret, { secret: CDN_HOOK_SECRET }),
-  };
+  async #processSiteCandidate(domain, source) {
+    const url = composeSanitizedURL(domain);
+    verifyURLCandidate(url);
+    await verifyHelixSite(url.href);
+
+    const baseURL = url.href;
+
+    const siteCandidate = {
+      baseURL,
+      source,
+      status: SITE_CANDIDATE_STATUS.PENDING,
+    };
+
+    if (await this.dataAccess.siteCandidateExists(siteCandidate.baseURL)) {
+      throw Error('Site candidate previously evaluated');
+    }
+
+    await this.dataAccess.upsertSiteCandidate(siteCandidate);
+
+    if (await this.dataAccess.getSiteByBaseURL(siteCandidate.baseURL)) {
+      throw Error('Site candidate already exists in sites db');
+    }
+
+    return url;
+  }
+
+  async #sendDiscoveryMessage(url, source) {
+    const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = this.context.env;
+    const slackClient = BaseSlackClient.createFrom(this.context, SLACK_TARGETS.WORKSPACE_INTERNAL);
+    await slackClient.postMessage(buildSlackMessage(url, source, channel));
+  }
+
+  async processCDNHook(context) {
+    if (verifyHookSecret(context, CDN_HOOK_SECRET_NAME)) notFound();
+
+    const { log } = context;
+    const { forwardedHost } = context.data;
+
+    try {
+      // extract the url from the x-forwarded-host header
+      const domain = await extractDomainFromXForwardedHostHeader(forwardedHost);
+      const source = SITE_CANDIDATE_SOURCES.CDN;
+
+      const url = await this.#processSiteCandidate(domain, source);
+
+      await this.#sendDiscoveryMessage(url.href, source);
+
+      return ok('CDN site candidate is successfully processed');
+    } catch (e) {
+      log.warn('Could not process the CDN site candidate', e);
+      return ok('CDN site candidate disregarded'); // webhook should return success
+    }
+  }
+
+  async processRUMHook(context) {
+    if (verifyHookSecret(context, RUM_HOOK_SECRET_NAME)) notFound();
+
+    const { log } = context;
+    const { cdn: { domain } } = context.data;
+
+    try {
+      const source = SITE_CANDIDATE_SOURCES.RUM;
+
+      const url = await this.#processSiteCandidate(domain, source);
+
+      await this.#sendDiscoveryMessage(url.href, source);
+
+      return ok('RUM site candidate is successfully processed');
+    } catch (e) {
+      log.warn('Could not process the RUM site candidate', e);
+      return ok('RUM site candidate disregarded'); // webhook should return success
+    }
+  }
 }
 
 export default HooksController;
