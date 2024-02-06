@@ -21,6 +21,13 @@ import { fetch } from '../support/utils.js';
 const CDN_HOOK_SECRET = 'INCOMING_WEBHOOK_SECRET_CDN';
 // const RUM_HOOK_SECRET = 'INCOMING_WEBHOOK_SECRET_RUM';
 
+const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--'];
+
+function isValidSubdomain(hostname) {
+  const subdomain = hostname.split('.').slice(0, -2).join('.');
+  return !IGNORED_SUBDOMAIN_TOKENS.some((ignored) => subdomain.includes(ignored));
+}
+
 function isIPAddress(hostname) {
   return /^\d{1,3}(\.\d{1,3}){3}$|^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(hostname);
 }
@@ -71,6 +78,10 @@ async function getBaseURLFromXForwardedHostHeader(forwardedHost) {
 
   if (isIPAddress(url.hostname)) {
     throw Error('we dont accept ip addresses');
+  }
+
+  if (!isValidSubdomain(url.hostname)) {
+    throw Error(`subdomain contains an ignored string: ${url.href}`);
   }
 
   await verifyHelixSite(url.href);
