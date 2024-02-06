@@ -189,7 +189,7 @@ class HooksController {
     if (verifyHookSecret(context, RUM_HOOK_SECRET_NAME)) notFound();
 
     const { log } = context;
-    const { cdn: { domain } } = context.data;
+    const { domain } = context.data;
 
     try {
       const source = SITE_CANDIDATE_SOURCES.RUM;
