@@ -91,7 +91,7 @@ function HooksController() {
 
     let baseURL;
     try {
-      baseURL = getBaseURLFromXForwardedHostHeader(forwardedHost);
+      baseURL = await getBaseURLFromXForwardedHostHeader(forwardedHost);
     } catch (e) {
       log.warn('Forwarded host does not contain a valid', e);
       return ok('you sure this is valid?');
