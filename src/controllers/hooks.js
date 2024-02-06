@@ -16,6 +16,7 @@ import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import { fetch } from '../support/utils.js';
 
 const CDN_HOOK_SECRET = 'INCOMING_WEBHOOK_SECRET_CDN';
 // const RUM_HOOK_SECRET = 'INCOMING_WEBHOOK_SECRET_RUM';
@@ -34,17 +35,47 @@ function verifySecret(fn, opts) {
   };
 }
 
-function getBaseURLFromXForwardedHostHeader(forwardedHost) {
-  const domain = forwardedHost.split(',')[0]?.trim();
-  domain.replace(/:(\d{1,5})$/, ''); // replace the port at the end
+async function verifyHelixSite(url) {
+  let finalUrl;
+  try {
+    const resp = await fetch(url);
+    finalUrl = resp.url;
+  } catch (e) {
+    throw Error(`url is unreachable: ${url}`, { cause: e });
+  }
+
+  finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
+  let finalResp;
+
+  try {
+    finalResp = await fetch(finalUrl);
+  } catch (e) {
+    throw Error(`.plain.html is unreachable for ${finalUrl}`, { cause: e });
+  }
+
+  if (!finalResp.ok) {
+    throw Error(`.plain.html does not exist for ${finalUrl}`);
+  }
+  return true;
+}
+
+async function getBaseURLFromXForwardedHostHeader(forwardedHost) {
+  let domain = forwardedHost.split(',')[0]?.trim();
+  domain = domain.replace(/:(\d{1,5})$/, ''); // omit the port at the end
   const baseURL = domain.startsWith('https://') ? domain : `https://${domain}`;
-  const url = new URL(baseURL);
+  const url = new URL(baseURL); // sneakily check if a valid URL
+
+  if (url.pathname !== '/' || url.search !== '') {
+    throw Error(`unrecognized pathname/search: ${url.href}/${url.search}`);
+  }
 
   if (isIPAddress(url.hostname)) {
     throw Error('we dont accept ip addresses');
   }
 
-  return url.href; // sneakily check if a valid URL
+  await verifyHelixSite(url.href);
+
+  return url.href;
 }
 
 /**
