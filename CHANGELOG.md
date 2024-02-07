@@ -1,3 +1,10 @@
+## [1.19.4](https://github.com/adobe/spacecat-api-service/compare/v1.19.3...v1.19.4) (2024-02-07)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#154](https://github.com/adobe/spacecat-api-service/issues/154)) ([9cf73f9](https://github.com/adobe/spacecat-api-service/commit/9cf73f91e3bbc39f904d90e6092f84ab648c070b))
+
 ## [1.19.3](https://github.com/adobe/spacecat-api-service/compare/v1.19.2...v1.19.3) (2024-02-07)
 
 
