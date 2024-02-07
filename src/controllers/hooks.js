@@ -12,6 +12,7 @@
 
 import { Message, Blocks, Elements } from 'slack-block-builder';
 import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import { composeBaseURL } from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
@@ -69,15 +70,9 @@ async function extractDomainFromXForwardedHostHeader(forwardedHost) {
   return forwardedHost.split(',')[0]?.trim(); // get the domain from x-fw-host header
 }
 
-function composeSanitizedURL(domain) {
-  let sanitized = domain.startsWith('www.') ? domain.slice(4) : domain; // ignore the www
-  sanitized = sanitized.replace(/:(\d{1,5})$/, ''); // omit the port at the end
-  sanitized = sanitized.endsWith('.') ? sanitized.slice(0, -1) : sanitized; // omit the dot(.) at the end
-  const baseURL = sanitized.startsWith('https://') ? sanitized : `https://${sanitized}`; // prepend schema if needed
-  return new URL(baseURL); // create a URL object
-}
+function verifyURLCandidate(baseURL) {
+  const url = new URL(baseURL);
 
-function verifyURLCandidate(url) {
   // x-fw-host header should contain hostname only. If it contains path and/or search
   // params, then it's most likely a h4ck attempt
   if (containsPathOrSearchParams(url)) {
@@ -126,19 +121,13 @@ function buildSlackMessage(baseURL, source, channel) {
  * @returns {object} Hooks controller.
  * @constructor
  */
-class HooksController {
-  constructor(context) {
-    this.context = context;
-  }
+function HooksController(lambdaContext) {
+  const { dataAccess } = lambdaContext;
 
-  async #processSiteCandidate(domain, source) {
-    const { dataAccess } = this.context;
-
-    const url = composeSanitizedURL(domain);
-    verifyURLCandidate(url);
-    await verifyHelixSite(url.href);
-
-    const baseURL = url.href;
+  async function processSiteCandidate(domain, source) {
+    const baseURL = composeBaseURL(domain);
+    verifyURLCandidate(baseURL);
+    await verifyHelixSite(baseURL);
 
     const siteCandidate = {
       baseURL,
@@ -156,16 +145,16 @@ class HooksController {
       throw Error('Site candidate already exists in sites db');
     }
 
-    return url;
+    return baseURL;
   }
 
-  async #sendDiscoveryMessage(url, source) {
-    const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = this.context.env;
-    const slackClient = BaseSlackClient.createFrom(this.context, SLACK_TARGETS.WORKSPACE_INTERNAL);
+  async function sendDiscoveryMessage(url, source) {
+    const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = lambdaContext.env;
+    const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
     await slackClient.postMessage(buildSlackMessage(url, source, channel));
   }
 
-  async processCDNHook(context) {
+  async function processCDNHook(context) {
     if (verifyHookSecret(context, CDN_HOOK_SECRET_NAME)) notFound();
 
     const { log } = context;
@@ -176,9 +165,9 @@ class HooksController {
       const domain = await extractDomainFromXForwardedHostHeader(forwardedHost);
       const source = SITE_CANDIDATE_SOURCES.CDN;
 
-      const url = await this.#processSiteCandidate(domain, source);
+      const baseURL = await processSiteCandidate(domain, source);
 
-      await this.#sendDiscoveryMessage(url.href, source);
+      await sendDiscoveryMessage(baseURL, source);
 
       return ok('CDN site candidate is successfully processed');
     } catch (e) {
@@ -187,7 +176,7 @@ class HooksController {
     }
   }
 
-  async processRUMHook(context) {
+  async function processRUMHook(context) {
     if (verifyHookSecret(context, RUM_HOOK_SECRET_NAME)) notFound();
 
     const { log } = context;
@@ -196,9 +185,9 @@ class HooksController {
     try {
       const source = SITE_CANDIDATE_SOURCES.RUM;
 
-      const url = await this.#processSiteCandidate(domain, source);
+      const baseURL = await processSiteCandidate(domain, source);
 
-      await this.#sendDiscoveryMessage(url.href, source);
+      await sendDiscoveryMessage(baseURL, source);
 
       return ok('RUM site candidate is successfully processed');
     } catch (e) {
@@ -206,6 +195,11 @@ class HooksController {
       return ok('RUM site candidate disregarded'); // webhook should return success
     }
   }
+
+  return {
+    processCDNHook,
+    processRUMHook,
+  };
 }
 
 export default HooksController;
