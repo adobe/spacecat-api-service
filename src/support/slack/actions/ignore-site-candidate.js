@@ -10,32 +10,30 @@
  * governing permissions and limitations under the License.
  */
 
+import { SITE_CANDIDATE_STATUS } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import { composeReply, extractURLFromSlackMessage } from './commons.js';
+
 export default function ignoreSiteCandidate(lambdaContext) {
+  const { dataAccess, log } = lambdaContext;
+
   return async ({ ack, body, respond }) => {
-    await ack();
+    const { message = {}, user } = body;
+    const { blocks } = message;
 
-    lambdaContext.log.info(JSON.stringify(body));
+    log.info(JSON.stringify(body));
 
-    const {
-      message: {
-        blocks,
-      },
-    } = body;
+    await ack(); // slack expects acknowledgement within 3s
 
-    const newBlocks = [blocks[0]];
+    const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
-    newBlocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: 'Ignored :cross-x:',
-      },
-    });
+    const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
 
-    await respond({
-      replace_original: true,
-      text: newBlocks[0].text.text,
-      blocks: newBlocks,
-    });
+    siteCandidate.setStatus(SITE_CANDIDATE_STATUS.IGNORED);
+    siteCandidate.setUpdatedBy(user.username);
+
+    await dataAccess.updateSiteCandidate(siteCandidate);
+
+    const reply = composeReply(blocks, true);
+    await respond(reply);
   };
 }

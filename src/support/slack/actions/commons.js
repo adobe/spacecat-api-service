@@ -10,13 +10,31 @@
  * governing permissions and limitations under the License.
  */
 
+import { Blocks, Message } from 'slack-block-builder';
+
 export function extractURLFromSlackMessage(inputString) {
   // Regular expression to match URLs
-  const regex = /(https?:\/\/[^\s<>]+)/;
+  const start = inputString.indexOf('https');
+  const end = inputString.indexOf('|', inputString.indexOf('<'));
 
-  // Match the first URL in the input string
-  const match = inputString.match(regex);
+  return inputString.substring(start, end);
+}
 
-  // If a URL is found, return it, otherwise return null
-  return match ? match[0] : null;
+export function composeReply(blocks, approved) {
+  const reaction = approved ? 'Added :checked:' : 'Ignored :cross-x:';
+
+  const message = Message()
+    .blocks(
+      Blocks.Section()
+        .blockId(blocks[0]?.block_id)
+        .text(blocks[0]?.text?.text),
+      Blocks.Section().text(reaction),
+    )
+    .buildToObject();
+
+  return {
+    ...message,
+    text: blocks[0]?.text?.text,
+    replace_original: true,
+  };
 }

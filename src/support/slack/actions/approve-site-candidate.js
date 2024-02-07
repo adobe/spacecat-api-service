@@ -10,36 +10,36 @@
  * governing permissions and limitations under the License.
  */
 
-import { extractURLFromSlackMessage } from './commons.js';
+import { SITE_CANDIDATE_STATUS } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import { composeReply, extractURLFromSlackMessage } from './commons.js';
 
 export default function approveSiteCandidate(lambdaContext) {
+  const { dataAccess, log } = lambdaContext;
+
   return async ({ ack, body, respond }) => {
-    lambdaContext.log.info(JSON.stringify(body));
+    const { message = {}, user } = body;
+    const { blocks } = message;
 
-    await ack();
+    log.info(JSON.stringify(body));
 
-    const {
-      message: {
-        blocks,
-      },
-    } = body;
+    await ack(); // slack expects acknowledgement within 3s
 
-    const newBlocks = [blocks[0]];
+    const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
-    lambdaContext.log.info(`The URL is ${extractURLFromSlackMessage(newBlocks[0].text.text)}`);
+    const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
 
-    newBlocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: 'Added :checked:',
-      },
+    const site = await dataAccess.addSite({
+      baseURL: siteCandidate.getBaseURL,
+      isLive: true,
     });
 
-    await respond({
-      replace_original: true,
-      text: newBlocks[0].text.text,
-      blocks: newBlocks,
-    });
+    siteCandidate.setSiteId(site.getSiteId());
+    siteCandidate.setStatus(SITE_CANDIDATE_STATUS.APPROVED);
+    siteCandidate.setUpdatedBy(user.username);
+
+    await dataAccess.updateSiteCandidate(siteCandidate);
+
+    const reply = composeReply(blocks, true);
+    await respond(reply);
   };
 }
