@@ -93,8 +93,9 @@ function verifyURLCandidate(baseURL) {
 function buildSlackMessage(baseURL, source, channel) {
   const discoveryMessage = Message()
     .channel(channel)
-    .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (Source: *${source}*`)
     .blocks(
+      Blocks.Section()
+        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (Source: *${source}*`),
       Blocks.Actions()
         .elements(
           Elements.Button()
@@ -148,10 +149,10 @@ function HooksController(lambdaContext) {
     return baseURL;
   }
 
-  async function sendDiscoveryMessage(url, source) {
+  async function sendDiscoveryMessage(baseURL, source) {
     const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
-    await slackClient.postMessage(buildSlackMessage(url, source, channel));
+    await slackClient.postMessage(buildSlackMessage(baseURL, source, channel));
   }
 
   async function processCDNHook(context) {
