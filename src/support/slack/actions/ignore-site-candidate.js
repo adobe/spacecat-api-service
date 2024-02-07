@@ -26,6 +26,8 @@ export default function ignoreSiteCandidate(lambdaContext) {
 
     const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
+    log.info(`Site is ignored: ${baseURL}`);
+
     const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
 
     siteCandidate.setStatus(SITE_CANDIDATE_STATUS.IGNORED);

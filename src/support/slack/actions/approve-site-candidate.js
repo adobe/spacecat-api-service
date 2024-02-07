@@ -28,6 +28,8 @@ export default function approveSiteCandidate(lambdaContext) {
 
     const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
 
+    log.info(`Creating a new site: ${baseURL}`);
+
     const site = await dataAccess.addSite({
       baseURL: siteCandidate.getBaseURL,
       isLive: true,
