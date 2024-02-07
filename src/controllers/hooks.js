@@ -95,7 +95,7 @@ function buildSlackMessage(baseURL, source, channel) {
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (Source: *${source}*`),
+        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*)`),
       Blocks.Actions()
         .elements(
           Elements.Button()
@@ -152,7 +152,7 @@ function HooksController(lambdaContext) {
   async function sendDiscoveryMessage(baseURL, source) {
     const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
-    await slackClient.postMessage(buildSlackMessage(baseURL, source, channel));
+    return slackClient.postMessage(buildSlackMessage(baseURL, source, channel));
   }
 
   async function processCDNHook(context) {
@@ -168,7 +168,8 @@ function HooksController(lambdaContext) {
 
       const baseURL = await processSiteCandidate(domain, source);
 
-      await sendDiscoveryMessage(baseURL, source);
+      const resp = await sendDiscoveryMessage(baseURL, source);
+      log.info(JSON.stringify(resp));
 
       return ok('CDN site candidate is successfully processed');
     } catch (e) {

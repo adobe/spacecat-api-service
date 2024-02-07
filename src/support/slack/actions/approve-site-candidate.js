@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { extractURLFromSlackMessage } from './commons.js';
+
 export default function approveSiteCandidate(lambdaContext) {
   return async ({ ack, body, respond }) => {
     lambdaContext.log.info(JSON.stringify(body));
@@ -23,6 +25,8 @@ export default function approveSiteCandidate(lambdaContext) {
     } = body;
 
     const newBlocks = [blocks[0]];
+
+    lambdaContext.log.info(`The URL is ${extractURLFromSlackMessage(newBlocks[0].text.text)}`);
 
     newBlocks.push({
       type: 'section',
