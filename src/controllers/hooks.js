@@ -150,7 +150,7 @@ function HooksController(lambdaContext) {
   }
 
   async function sendDiscoveryMessage(baseURL, source) {
-    const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = lambdaContext.env;
+    const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
     return slackClient.postMessage(buildSlackMessage(baseURL, source, channel));
   }

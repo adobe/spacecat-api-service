@@ -11,7 +11,22 @@
  */
 
 import { SITE_CANDIDATE_STATUS } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
+import { Blocks, Message } from 'slack-block-builder';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
+
+async function announceSiteDiscovery(context, baseURL, source) {
+  const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
+  const slackClient = BaseSlackClient.createFrom(context, SLACK_TARGETS.WORKSPACE_INTERNAL);
+  const announcementMessage = Message()
+    .channel(channel)
+    .blocks(
+      Blocks.Section()
+        .text(`A new site, *<${baseURL}|${baseURL}>*, has been discovered on Edge Delivery Services and has been added to the Star Catalogue. (_source:_ *${source}*)`),
+    )
+    .buildToObject();
+  return slackClient.postMessage(announcementMessage);
+}
 
 export default function approveSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
@@ -43,5 +58,7 @@ export default function approveSiteCandidate(lambdaContext) {
 
     const reply = composeReply(blocks, true);
     await respond(reply);
+
+    await announceSiteDiscovery(lambdaContext, baseURL, siteCandidate.getSource());
   };
 }

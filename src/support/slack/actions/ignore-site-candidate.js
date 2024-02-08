@@ -35,7 +35,7 @@ export default function ignoreSiteCandidate(lambdaContext) {
 
     await dataAccess.updateSiteCandidate(siteCandidate);
 
-    const reply = composeReply(blocks, true);
+    const reply = composeReply(blocks, false);
     await respond(reply);
   };
 }
