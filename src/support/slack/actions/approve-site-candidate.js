@@ -35,7 +35,7 @@ export default function approveSiteCandidate(lambdaContext) {
       isLive: true,
     });
 
-    siteCandidate.setSiteId(site.getSiteId());
+    siteCandidate.setSiteId(site.getId());
     siteCandidate.setStatus(SITE_CANDIDATE_STATUS.APPROVED);
     siteCandidate.setUpdatedBy(user.username);
 
