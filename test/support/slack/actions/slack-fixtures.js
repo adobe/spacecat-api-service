@@ -10,11 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
+import { Blocks, Message } from 'slack-block-builder';
+
 export const slackActionResponse = {
   type: 'block_actions',
   user: {
     id: 'user-id',
-    username: 'username',
+    username: 'approvers-username',
     name: 'username',
     team_id: 'team-id',
   },
@@ -150,4 +152,38 @@ export const slackIgnoredReply = {
   ],
   replace_original: true,
   text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',
+};
+
+export const expectedAnnouncedMessage = Message()
+  .channel('channel-id')
+  .blocks(
+    Blocks.Section()
+      .text('A new site, *<https://spacecat.com|https://spacecat.com>*, has been discovered on Edge Delivery Services and has been added to the Star Catalogue. (_source:_ *CDN*)'),
+  )
+  .buildToObject();
+
+export const expectedApprovedReply = {
+  ...Message()
+    .blocks(
+      Blocks.Section()
+        .blockId('initial-block-id')
+        .text('I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)'),
+      Blocks.Section().text('Added :checked:'),
+    )
+    .buildToObject(),
+  text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',
+  replace_original: true,
+};
+
+export const expectedIgnoredReply = {
+  ...Message()
+    .blocks(
+      Blocks.Section()
+        .blockId('initial-block-id')
+        .text('I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)'),
+      Blocks.Section().text('Ignored :cross-x:'),
+    )
+    .buildToObject(),
+  text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',
+  replace_original: true,
 };
