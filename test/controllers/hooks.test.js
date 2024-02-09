@@ -176,7 +176,7 @@ describe('Hooks Controller', () => {
       expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: .plain.html is unreachable for https://some-domain.com/index.plain.html');
     });
 
-    it('URLs with non-200 plain.htmls are disregarded', async () => {
+    it('URLs with non-200 index plain.htmls are disregarded', async () => {
       nock('https://some-domain.com')
         .get('/')
         .reply(200);
@@ -192,6 +192,28 @@ describe('Hooks Controller', () => {
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
       expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: .plain.html does not exist for https://some-domain.com/index.plain.html');
+    });
+
+    it('URLs with redirects and returns non-200 plain.htmls are disregarded', async () => {
+      nock('https://some-domain.com')
+        .get('/')
+        .reply(301, undefined, { location: 'https://some-domain.com/en/us' });
+      nock('https://some-domain.com')
+        .get('/en/us')
+        .reply(200);
+
+      nock('https://some-domain.com')
+        .get('/en/us.plain.html')
+        .reply(404);
+
+      context.data = {
+        forwardedHost: 'some-domain.com, some-fw-domain.com',
+      };
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+      expect(resp).to.equal('CDN site candidate disregarded');
+      expect(slackClient.postMessage.notCalled).to.be.true;
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: .plain.html does not exist for https://some-domain.com/en/us.plain.html');
     });
   });
 
