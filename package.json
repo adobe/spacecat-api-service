@@ -15,7 +15,7 @@
     "build": "hedy -v --test-bundle",
     "deploy": "hedy -v --deploy --test",
     "deploy-routes": "hedy --no-build -no-hints -l major",
-    "deploy-ci": "hedy -v --deploy --test --pkgVersion=ci$CIRCLE_BUILD_NUM -l ci --cleanup-ci=120h",
+    "deploy-ci": "hedy -v --deploy --test --pkgVersion=ci$CIRCLE_BUILD_NUM -l ci --cleanup-ci=24h",
     "deploy-secrets": "hedy --aws-update-secrets --params-file=secrets/secrets.env",
     "docs": "npm run docs:lint && npm run docs:build",
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
@@ -29,7 +29,7 @@
     "memory": 4096,
     "awsRole!important": "arn:aws:iam::282898975672:role/spacecat-role-services",
     "testUrl": "/_status_check/healthcheck.json",
-    "awsAttachAuthorizer": "",
+    "awsAttachAuthorizer": "spacecat-token-authorizer",
     "dev": {
       "params-file": "secrets/dev-secrets.json"
     },
@@ -73,7 +73,7 @@
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.6",
-    "@adobe/helix-deploy": "10.4.0",
+    "@adobe/helix-deploy": "11.0.2",
     "@adobe/helix-universal": "4.4.1",
     "@adobe/semantic-release-coralogix": "1.1.27",
     "@adobe/semantic-release-skms-cmr": "1.0.14",
