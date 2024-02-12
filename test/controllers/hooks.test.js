@@ -28,7 +28,11 @@ function getExpectedSlackMessage(baseURL, channel, source) {
     .channel(channel)
     .blocks(
       Blocks.Section().text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*)`),
-      Blocks.Actions().elements(Elements.Button().text('Yes').actionId('approveSiteCandidate').primary(), Elements.Button().text('Ignore').actionId('ignoreSiteCandidate').danger()),
+      Blocks.Actions().elements(
+        Elements.Button().text('As Customer').actionId('approveSiteCandidate').primary(),
+        Elements.Button().text('As Friends/Family').actionId('approveSiteCandidate').primary(),
+        Elements.Button().text('Ignore').actionId('ignoreSiteCandidate').danger(),
+      ),
     )
     .buildToObject();
 }

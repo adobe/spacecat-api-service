@@ -17,7 +17,8 @@ import sinon from 'sinon';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
-import { expectedAnnouncedMessage, expectedApprovedReply, slackActionResponse } from './slack-fixtures.js';
+import { expectedAnnouncedMessage, expectedApprovedReply } from './slack-fixtures.js';
+import { BUTTON_LABELS } from '../../../../src/controllers/hooks.js';
 
 describe('approveSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';
@@ -28,8 +29,9 @@ describe('approveSiteCandidate', () => {
   let site;
   let siteCandidate;
   let clock;
+  let slackActionResponse;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     clock = sinon.useFakeTimers();
 
     slackClient = {
@@ -47,6 +49,7 @@ describe('approveSiteCandidate', () => {
       },
       env: {
         SLACK_REPORT_CHANNEL_INTERNAL: 'channel-id',
+        ORGANIZATION_ID_FRIENDS_FAMILY: 'friends-family-org',
       },
       slackClients: {
         WORKSPACE_INTERNAL_STANDARD: slackClient,
@@ -66,6 +69,8 @@ describe('approveSiteCandidate', () => {
 
     ackMock = sinon.stub().resolves();
     respondMock = sinon.stub().resolves();
+
+    ({ slackActionResponse } = await import('./slack-fixtures.js'));
   });
 
   afterEach(() => {
@@ -94,6 +99,38 @@ describe('approveSiteCandidate', () => {
     expect(ackMock.calledOnce).to.be.true;
     expect(context.dataAccess.getSiteCandidateByBaseURL.calledOnceWithExactly(baseURL)).to.be.true;
     expect(context.dataAccess.addSite.calledOnceWithExactly({ baseURL, isLive: true })).to.be.true;
+    expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
+    expect(respondMock.calledOnceWith(expectedApprovedReply)).to.be.true;
+    expect(slackClient.postMessage.calledOnceWith(expectedAnnouncedMessage)).to.be.true;
+  });
+
+  it('should approve site candidate, add friends family org and announce site discovery', async () => {
+    slackActionResponse.actions[0].text.text = BUTTON_LABELS.APPROVE_FRIENDS_FAMILY;
+
+    const expectedSiteCandidate = createSiteCandidate({
+      baseURL,
+      source: SITE_CANDIDATE_SOURCES.CDN,
+      status: SITE_CANDIDATE_STATUS.APPROVED,
+      updatedBy: 'approvers-username',
+      siteId: site.getId(),
+    });
+
+    context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.addSite.resolves(site);
+
+    // Call the function under test
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    const actualUpdatedSiteCandidate = context.dataAccess.updateSiteCandidate.getCall(0).args[0];
+
+    expect(ackMock.calledOnce).to.be.true;
+    expect(context.dataAccess.getSiteCandidateByBaseURL.calledOnceWithExactly(baseURL)).to.be.true;
+    expect(context.dataAccess.addSite.calledOnceWithExactly({
+      baseURL,
+      isLive: true,
+      orgId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
+    })).to.be.true;
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock.calledOnceWith(expectedApprovedReply)).to.be.true;
     expect(slackClient.postMessage.calledOnceWith(expectedAnnouncedMessage)).to.be.true;

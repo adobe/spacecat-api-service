@@ -13,6 +13,7 @@
 import { SITE_CANDIDATE_STATUS } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { Blocks, Message } from 'slack-block-builder';
+import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 
 async function announceSiteDiscovery(context, baseURL, source) {
@@ -22,7 +23,7 @@ async function announceSiteDiscovery(context, baseURL, source) {
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`A new site, *<${baseURL}|${baseURL}>*, has been discovered on Edge Delivery Services and has been added to the Star Catalogue. (_source:_ *${source}*)`),
+        .text(`A new site, *<${baseURL}|${baseURL}>*, has gone *live*  on Edge Delivery Services :rocket: and has been added to the Star Catalogue. (_source:_ *${source}*)`),
     )
     .buildToObject();
   return slackClient.postMessage(announcementMessage);
@@ -30,9 +31,10 @@ async function announceSiteDiscovery(context, baseURL, source) {
 
 export default function approveSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
+  const { ORGANIZATION_ID_FRIENDS_FAMILY: friendsFamilyOrgId } = lambdaContext.env;
 
   return async ({ ack, body, respond }) => {
-    const { message = {}, user } = body;
+    const { actions = [], message = {}, user } = body;
     const { blocks } = message;
 
     log.info(JSON.stringify(body));
@@ -45,9 +47,13 @@ export default function approveSiteCandidate(lambdaContext) {
 
     log.info(`Creating a new site: ${baseURL}`);
 
+    const orgId = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
+      && friendsFamilyOrgId;
+
     const site = await dataAccess.addSite({
       baseURL: siteCandidate.getBaseURL(),
       isLive: true,
+      ...(orgId && { orgId: friendsFamilyOrgId }),
     });
 
     siteCandidate.setSiteId(site.getId());
@@ -56,7 +62,7 @@ export default function approveSiteCandidate(lambdaContext) {
 
     await dataAccess.updateSiteCandidate(siteCandidate);
 
-    const reply = composeReply(blocks, true);
+    const reply = composeReply(blocks, user.username, true);
     await respond(reply);
 
     await announceSiteDiscovery(lambdaContext, baseURL, siteCandidate.getSource());

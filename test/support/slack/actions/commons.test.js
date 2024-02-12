@@ -28,12 +28,12 @@ describe('Slack action commons', () => {
   describe('compose reply', () => {
     it('composes the approved reply', () => {
       const { blocks } = slackActionResponse.message;
-      expect(composeReply(blocks, true)).to.eql(slackApprovedReply);
+      expect(composeReply(blocks, 'some-user', true)).to.eql(slackApprovedReply);
     });
 
     it('composes the ignored reply', () => {
       const { blocks } = slackActionResponse.message;
-      expect(composeReply(blocks, false)).to.eql(slackIgnoredReply);
+      expect(composeReply(blocks, 'some-user', false)).to.eql(slackIgnoredReply);
     });
   });
 });

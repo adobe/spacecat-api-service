@@ -20,8 +20,8 @@ export function extractURLFromSlackMessage(inputString) {
   return inputString.substring(start, end);
 }
 
-export function composeReply(blocks, approved) {
-  const reaction = approved ? 'Added :checked:' : 'Ignored :cross-x:';
+export function composeReply(blocks, username, approved) {
+  const reaction = approved ? `Added by @${username} :checked:` : `Ignored by @${username} :cross-x:`;
 
   const message = Message()
     .blocks(

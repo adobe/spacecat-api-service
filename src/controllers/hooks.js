@@ -22,6 +22,12 @@ import { fetch } from '../support/utils.js';
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
 const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
 
+export const BUTTON_LABELS = {
+  APPROVE_CUSTOMER: 'As Customer',
+  APPROVE_FRIENDS_FAMILY: 'As Friends/Family',
+  IGNORE: 'Ignore',
+};
+
 const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--'];
 
 function hookAuth(fn, opts) {
@@ -114,11 +120,15 @@ function buildSlackMessage(baseURL, source, channel) {
       Blocks.Actions()
         .elements(
           Elements.Button()
-            .text('Yes')
+            .text(BUTTON_LABELS.APPROVE_CUSTOMER)
             .actionId('approveSiteCandidate')
             .primary(),
           Elements.Button()
-            .text('Ignore')
+            .text(BUTTON_LABELS.APPROVE_FRIENDS_FAMILY)
+            .actionId('approveSiteCandidate')
+            .primary(),
+          Elements.Button()
+            .text(BUTTON_LABELS.IGNORE)
             .actionId('ignoreSiteCandidate')
             .danger(),
         ),

@@ -100,7 +100,7 @@ export const slackActionResponse = {
       block_id: 'action-block-id',
       text: {
         type: 'plain_text',
-        text: 'Yes',
+        text: 'As Customer',
         emoji: true,
       },
       style: 'primary',
@@ -122,7 +122,7 @@ export const slackApprovedReply = {
     },
     {
       text: {
-        text: 'Added :checked:',
+        text: 'Added by @some-user :checked:',
         type: 'mrkdwn',
       },
       type: 'section',
@@ -144,7 +144,7 @@ export const slackIgnoredReply = {
     },
     {
       text: {
-        text: 'Ignored :cross-x:',
+        text: 'Ignored by @some-user :cross-x:',
         type: 'mrkdwn',
       },
       type: 'section',
@@ -158,7 +158,7 @@ export const expectedAnnouncedMessage = Message()
   .channel('channel-id')
   .blocks(
     Blocks.Section()
-      .text('A new site, *<https://spacecat.com|https://spacecat.com>*, has been discovered on Edge Delivery Services and has been added to the Star Catalogue. (_source:_ *CDN*)'),
+      .text('A new site, *<https://spacecat.com|https://spacecat.com>*, has gone *live*  on Edge Delivery Services :rocket: and has been added to the Star Catalogue. (_source:_ *CDN*)'),
   )
   .buildToObject();
 
@@ -168,7 +168,7 @@ export const expectedApprovedReply = {
       Blocks.Section()
         .blockId('initial-block-id')
         .text('I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)'),
-      Blocks.Section().text('Added :checked:'),
+      Blocks.Section().text('Added by @approvers-username :checked:'),
     )
     .buildToObject(),
   text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',
@@ -181,7 +181,7 @@ export const expectedIgnoredReply = {
       Blocks.Section()
         .blockId('initial-block-id')
         .text('I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)'),
-      Blocks.Section().text('Ignored :cross-x:'),
+      Blocks.Section().text('Ignored by @approvers-username :cross-x:'),
     )
     .buildToObject(),
   text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',
