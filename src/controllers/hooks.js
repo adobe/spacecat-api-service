@@ -60,14 +60,24 @@ async function verifyHelixSite(url) {
   let finalResp;
 
   try {
-    finalResp = await fetch(finalUrl);
+    // redirects are disabled because .plain.html should return 200
+    finalResp = await fetch(finalUrl, { redirect: 'manual' });
   } catch (e) {
     throw Error(`.plain.html is unreachable for ${finalUrl}`, { cause: e });
   }
 
+  // reject if .plain.html does not return 2XX
   if (!finalResp.ok) {
-    throw Error(`.plain.html does not exist for ${finalUrl}`);
+    throw Error(`.plain.html does not return 2XX for ${finalUrl}`);
   }
+
+  const respText = await finalResp.text();
+
+  // reject if .plain.html contains <head>
+  if (respText.includes('<head>')) {
+    throw Error('.plain.html should not contain <head>');
+  }
+
   return true;
 }
 
