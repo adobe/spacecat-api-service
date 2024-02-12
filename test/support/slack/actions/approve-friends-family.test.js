@@ -97,7 +97,7 @@ describe('approveSiteCandidate', () => {
     expect(context.dataAccess.addSite.calledOnceWithExactly({
       baseURL,
       isLive: true,
-      orgId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
+      organizationId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
     })).to.be.true;
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock.calledOnceWith(expectedApprovedFnFReply)).to.be.true;

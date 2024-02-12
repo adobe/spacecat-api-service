@@ -198,7 +198,7 @@ export const expectedAnnouncedMessage = Message()
   .channel('channel-id')
   .blocks(
     Blocks.Section()
-      .text('A new site, *<https://spacecat.com|https://spacecat.com>*, has gone *live* :rocket: on Edge Delivery Services and has been added to the Star Catalogue. (_source:_ *CDN*)'),
+      .text('A new site, *<https://spacecat.com|https://spacecat.com>*, has gone *live* on Edge Delivery Services and has been added to the Star Catalogue :rocket: (_source:_ *CDN*)'),
   )
   .buildToObject();
 

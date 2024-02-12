@@ -23,7 +23,7 @@ async function announceSiteDiscovery(context, baseURL, source) {
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`A new site, *<${baseURL}|${baseURL}>*, has gone *live* :rocket: on Edge Delivery Services and has been added to the Star Catalogue. (_source:_ *${source}*)`),
+        .text(`A new site, *<${baseURL}|${baseURL}>*, has gone *live* on Edge Delivery Services and has been added to the Star Catalogue :rocket: (_source:_ *${source}*)`),
     )
     .buildToObject();
   return slackClient.postMessage(announcementMessage);
@@ -53,7 +53,7 @@ export default function approveSiteCandidate(lambdaContext) {
     const site = await dataAccess.addSite({
       baseURL: siteCandidate.getBaseURL(),
       isLive: true,
-      ...(orgId && { orgId: friendsFamilyOrgId }),
+      ...(orgId && { organizationId: friendsFamilyOrgId }),
     });
 
     siteCandidate.setSiteId(site.getId());
