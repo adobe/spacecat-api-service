@@ -16,8 +16,8 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
-import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
-import { expectedAnnouncedMessage, expectedApprovedReply, slackActionResponse } from './slack-fixtures.js';
+import approveFriendsFamily from '../../../../src/support/slack/actions/approve-friends-family.js';
+import { expectedAnnouncedMessage, expectedApprovedReply, slackFriendsFamilyResponse } from './slack-fixtures.js';
 
 describe('approveSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';
@@ -74,7 +74,7 @@ describe('approveSiteCandidate', () => {
     clock.restore();
   });
 
-  it('should approve site candidate and announce site discovery', async () => {
+  it('should approve site candidate, add friends family org and announce site discovery', async () => {
     const expectedSiteCandidate = createSiteCandidate({
       baseURL,
       source: SITE_CANDIDATE_SOURCES.CDN,
@@ -87,14 +87,18 @@ describe('approveSiteCandidate', () => {
     context.dataAccess.addSite.resolves(site);
 
     // Call the function under test
-    const approveFunction = approveSiteCandidate(context);
-    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+    const approveFunction = approveFriendsFamily(context);
+    await approveFunction({ ack: ackMock, body: slackFriendsFamilyResponse, respond: respondMock });
 
     const actualUpdatedSiteCandidate = context.dataAccess.updateSiteCandidate.getCall(0).args[0];
 
     expect(ackMock.calledOnce).to.be.true;
     expect(context.dataAccess.getSiteCandidateByBaseURL.calledOnceWithExactly(baseURL)).to.be.true;
-    expect(context.dataAccess.addSite.calledOnceWithExactly({ baseURL, isLive: true })).to.be.true;
+    expect(context.dataAccess.addSite.calledOnceWithExactly({
+      baseURL,
+      isLive: true,
+      orgId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
+    })).to.be.true;
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock.calledOnceWith(expectedApprovedReply)).to.be.true;
     expect(slackClient.postMessage.calledOnceWith(expectedAnnouncedMessage)).to.be.true;

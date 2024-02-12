@@ -125,7 +125,7 @@ function buildSlackMessage(baseURL, source, channel) {
             .primary(),
           Elements.Button()
             .text(BUTTON_LABELS.APPROVE_FRIENDS_FAMILY)
-            .actionId('approveSiteCandidate')
+            .actionId('approveFriendsFamily')
             .primary(),
           Elements.Button()
             .text(BUTTON_LABELS.IGNORE)

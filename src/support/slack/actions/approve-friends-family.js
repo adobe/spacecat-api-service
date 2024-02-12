@@ -11,13 +11,10 @@
  */
 
 import approveSiteCandidate from './approve-site-candidate.js';
-import approveFriendsFamily from './approve-friends-family.js';
-import ignoreSiteCandidate from './ignore-site-candidate.js';
 
-const actions = {
-  approveSiteCandidate,
-  approveFriendsFamily,
-  ignoreSiteCandidate,
-};
-
-export default actions;
+// Slack does not accept two different buttons with same action id
+// therefore we have this function pointing to approveSiteCandidate function which has the
+// business logic for approving site candidate
+export default function approveFriendsFamily(lambdaContext) {
+  return approveSiteCandidate(lambdaContext);
+}

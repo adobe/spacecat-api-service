@@ -110,6 +110,24 @@ export const slackActionResponse = {
   ],
 };
 
+export const slackFriendsFamilyResponse = {
+  ...slackActionResponse,
+  actions: [
+    {
+      action_id: 'approveSiteCandidate',
+      block_id: 'action-block-id',
+      text: {
+        type: 'plain_text',
+        text: 'As Friends/Family',
+        emoji: true,
+      },
+      style: 'primary',
+      type: 'button',
+      action_ts: 'action-thread',
+    },
+  ],
+};
+
 export const slackApprovedReply = {
   blocks: [
     {
