@@ -58,6 +58,7 @@ describe('Hooks Controller', () => {
       log: {
         info: sinon.stub(),
         warn: sinon.stub(),
+        error: sinon.stub(),
       },
       env: {
         INCOMING_WEBHOOK_SECRET_CDN: 'hook-secret-for-cdn',
@@ -123,22 +124,22 @@ describe('Hooks Controller', () => {
 
     it('hostnames with path are not accepted', async () => {
       await assertInvalidCase('some.domain/some/path, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some.domain/some/path. Reason: Path/search params are not accepted');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: Path/search params are not accepted https://some.domain/some/path');
     });
 
     it('hostnames with query params are not accepted', async () => {
       await assertInvalidCase('some.domain?param=value, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some.domain?param=value. Reason: Path/search params are not accepted');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: Path/search params are not accepted https://some.domain/?param=value');
     });
 
     it('hostnames in IPs are not accepted', async () => {
       await assertInvalidCase('https://112.12.12.112, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: https://112.12.12.112. Reason: Hostname is an IP address');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: Hostname is an IP address https://112.12.12.112/');
     });
 
     it('hostnames with suspected non-prod subdomains are not accepted', async () => {
       await assertInvalidCase('stage.some.domain, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: stage.some.domain. Reason: URL most likely contains a non-prod domain');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: URL most likely contains a non-prod domain https://stage.some.domain/');
     });
   });
 
@@ -159,7 +160,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: URL is unreachable: https://some-domain.com');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: URL is unreachable https://some-domain.com');
     });
 
     it('URLs without valid plain.htmls are disregarded', async () => {
@@ -177,7 +178,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: .plain.html is unreachable for https://some-domain.com/index.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: .plain.html is unreachable for https://some-domain.com/index.plain.html');
     });
 
     it('URLs with non-200 index plain.htmls are disregarded', async () => {
@@ -195,7 +196,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: .plain.html does not return 2XX for https://some-domain.com/index.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: .plain.html does not return 2XX for https://some-domain.com/index.plain.html');
     });
 
     it('URLs with redirects and returns non-200 plain.htmls are disregarded', async () => {
@@ -217,7 +218,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: .plain.html does not return 2XX for https://some-domain.com/en/us.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: .plain.html does not return 2XX for https://some-domain.com/en/us.plain.html');
     });
 
     it('plain.htmls with redirects are disregarded', async () => {
@@ -235,7 +236,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: .plain.html does not return 2XX for https://some-domain.com/index.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: .plain.html does not return 2XX for https://some-domain.com/index.plain.html');
     });
 
     it('plain.htmls containing <head> are disregarded', async () => {
@@ -253,7 +254,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: .plain.html should not contain <head>');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: .plain.html should not contain <head>');
     });
   });
 
@@ -278,7 +279,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: Site candidate previously evaluated');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: Site candidate previously evaluated');
     });
 
     it('candidate is disregarded if a site exists with same baseURL', async () => {
@@ -288,7 +289,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: Site candidate already exists in sites db');
+      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate. Reason: Site candidate already exists in sites db');
     });
   });
 
@@ -341,10 +342,10 @@ describe('Hooks Controller', () => {
 
       slackClient.postMessage.rejects(new Error('Slack message failure'));
 
-      const resp = await (await hooksController.processCDNHook(context)).json();
+      const resp = await hooksController.processCDNHook(context);
 
-      expect(resp).to.equal('CDN site candidate disregarded');
-      expect(context.log.warn).to.have.been.calledWith('Could not process the CDN site candidate: some-domain.com. Reason: Slack message failure');
+      expect(resp.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWith('Unexpected error while processing the CDN site candidate');
     });
 
     it('Slack message sending fails for RUM candidate', async () => {
@@ -355,10 +356,10 @@ describe('Hooks Controller', () => {
 
       slackClient.postMessage.rejects(new Error('Slack message failure'));
 
-      const resp = await (await hooksController.processRUMHook(context)).json();
+      const resp = await hooksController.processRUMHook(context);
 
-      expect(resp).to.equal('RUM site candidate disregarded');
-      expect(context.log.warn).to.have.been.calledWith('Could not process the RUM site candidate: some-domain.com. Reason: Slack message failure');
+      expect(resp.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWith('Unexpected error while processing the RUM site candidate');
     });
   });
 });

@@ -12,7 +12,7 @@
 
 import wrap from '@adobe/helix-shared-wrap';
 import { Message, Blocks, Elements } from 'slack-block-builder';
-import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
@@ -30,6 +30,8 @@ export const BUTTON_LABELS = {
 
 const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--'];
 
+class InvalidSiteCandidate extends Error {}
+
 function hookAuth(fn, opts) {
   return (context) => {
     const expectedSecret = context.env[opts.secretName];
@@ -37,6 +39,23 @@ function hookAuth(fn, opts) {
     return hasText(expectedSecret) && expectedSecret === secretFromPath
       ? fn(context)
       : notFound();
+  };
+}
+
+function errorHandler(fn, opts) {
+  const { type } = opts;
+  return async (context) => {
+    const { log } = context;
+    try {
+      return await fn(context);
+    } catch (e) {
+      if (e instanceof InvalidSiteCandidate) {
+        log.warn(`Could not process the ${type} site candidate. Reason: ${e.message}`);
+        return ok(`${type} site candidate disregarded`);
+      }
+      log.error(`Unexpected error while processing the ${type} site candidate`, e);
+      return internalServerError();
+    }
   };
 }
 
@@ -59,7 +78,7 @@ async function verifyHelixSite(url) {
     const resp = await fetch(url);
     finalUrl = resp.url;
   } catch (e) {
-    throw Error(`URL is unreachable: ${url}`, { cause: e });
+    throw new InvalidSiteCandidate(`URL is unreachable ${url}`, { cause: e });
   }
 
   finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
@@ -69,19 +88,19 @@ async function verifyHelixSite(url) {
     // redirects are disabled because .plain.html should return 200
     finalResp = await fetch(finalUrl, { redirect: 'manual' });
   } catch (e) {
-    throw Error(`.plain.html is unreachable for ${finalUrl}`, { cause: e });
+    throw new InvalidSiteCandidate(`.plain.html is unreachable for ${finalUrl}`, { cause: e });
   }
 
   // reject if .plain.html does not return 2XX
   if (!finalResp.ok) {
-    throw Error(`.plain.html does not return 2XX for ${finalUrl}`);
+    throw new InvalidSiteCandidate(`.plain.html does not return 2XX for ${finalUrl}`);
   }
 
   const respText = await finalResp.text();
 
   // reject if .plain.html contains <head>
   if (respText.includes('<head>')) {
-    throw Error('.plain.html should not contain <head>');
+    throw new InvalidSiteCandidate('.plain.html should not contain <head>');
   }
 
   return true;
@@ -97,17 +116,17 @@ function verifyURLCandidate(baseURL) {
   // x-fw-host header should contain hostname only. If it contains path and/or search
   // params, then it's most likely a h4ck attempt
   if (containsPathOrSearchParams(url)) {
-    throw Error('Path/search params are not accepted');
+    throw new InvalidSiteCandidate(`Path/search params are not accepted ${url.href}`);
   }
 
   // disregard the IP addresses
   if (isIPAddress(url.hostname)) {
-    throw Error('Hostname is an IP address');
+    throw new InvalidSiteCandidate(`Hostname is an IP address ${url.href}`);
   }
 
   // disregard the non-prod hostnames
   if (isInvalidSubdomain(url.hostname)) {
-    throw Error('URL most likely contains a non-prod domain');
+    throw new InvalidSiteCandidate(`URL most likely contains a non-prod domain ${url.href}`);
   }
 }
 
@@ -156,13 +175,13 @@ function HooksController(lambdaContext) {
     };
 
     if (await dataAccess.siteCandidateExists(siteCandidate.baseURL)) {
-      throw Error('Site candidate previously evaluated');
+      throw new InvalidSiteCandidate('Site candidate previously evaluated');
     }
 
     await dataAccess.upsertSiteCandidate(siteCandidate);
 
     if (await dataAccess.getSiteByBaseURL(siteCandidate.baseURL)) {
-      throw Error('Site candidate already exists in sites db');
+      throw new InvalidSiteCandidate('Site candidate already exists in sites db');
     }
 
     return baseURL;
@@ -178,47 +197,37 @@ function HooksController(lambdaContext) {
     const { log } = context;
     const { forwardedHost } = context.data;
 
-    let domain;
+    log.info(`Processing CDN site candidate. Input: ${forwardedHost}`);
 
-    try {
-      // extract the url from the x-forwarded-host header
-      domain = await extractDomainFromXForwardedHostHeader(forwardedHost);
-      const source = SITE_CANDIDATE_SOURCES.CDN;
+    // extract the url from the x-forwarded-host header
+    const domain = await extractDomainFromXForwardedHostHeader(forwardedHost);
 
-      const baseURL = await processSiteCandidate(domain, source);
+    const source = SITE_CANDIDATE_SOURCES.CDN;
+    const baseURL = await processSiteCandidate(domain, source);
+    await sendDiscoveryMessage(baseURL, source);
 
-      const resp = await sendDiscoveryMessage(baseURL, source);
-      log.info(JSON.stringify(resp));
-
-      return ok('CDN site candidate is successfully processed');
-    } catch (e) {
-      log.warn(`Could not process the CDN site candidate: ${domain}. Reason: ${e.message}`);
-      return ok('CDN site candidate disregarded'); // webhook should return success
-    }
+    return ok('CDN site candidate is successfully processed');
   }
 
   async function processRUMHook(context) {
     const { log } = context;
     const { domain } = context.data;
 
-    try {
-      const source = SITE_CANDIDATE_SOURCES.RUM;
+    log.info(`Processing RUM site candidate. Input: ${domain}`);
 
-      const baseURL = await processSiteCandidate(domain, source);
+    const source = SITE_CANDIDATE_SOURCES.RUM;
+    const baseURL = await processSiteCandidate(domain, source);
+    await sendDiscoveryMessage(baseURL, source);
 
-      await sendDiscoveryMessage(baseURL, source);
-
-      return ok('RUM site candidate is successfully processed');
-    } catch (e) {
-      log.warn(`Could not process the RUM site candidate: ${domain}. Reason: ${e.message}`);
-      return ok('RUM site candidate disregarded'); // webhook should return success
-    }
+    return ok('RUM site candidate is successfully processed');
   }
 
   return {
     processCDNHook: wrap(processCDNHook)
+      .with(errorHandler, { type: 'CDN' })
       .with(hookAuth, { secretName: CDN_HOOK_SECRET_NAME }),
     processRUMHook: wrap(processRUMHook)
+      .with(errorHandler, { type: 'RUM' })
       .with(hookAuth, { secretName: RUM_HOOK_SECRET_NAME }),
   };
 }
