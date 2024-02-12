@@ -14,7 +14,12 @@
 
 import { expect } from 'chai';
 import { composeReply, extractURLFromSlackMessage } from '../../../../src/support/slack/actions/commons.js';
-import { slackActionResponse, slackApprovedReply, slackIgnoredReply } from './slack-fixtures.js';
+import {
+  slackActionResponse,
+  slackApprovedFriendsFamilyReply,
+  slackApprovedReply,
+  slackIgnoredReply,
+} from './slack-fixtures.js';
 
 describe('Slack action commons', () => {
   describe('extractURLFromSlackMessage', () => {
@@ -26,14 +31,32 @@ describe('Slack action commons', () => {
   });
 
   describe('compose reply', () => {
-    it('composes the approved reply', () => {
+    it('composes the approved as customer reply', () => {
       const { blocks } = slackActionResponse.message;
-      expect(composeReply(blocks, 'some-user', true)).to.eql(slackApprovedReply);
+      expect(composeReply({
+        blocks,
+        username: 'some-user',
+        approved: true,
+      })).to.eql(slackApprovedReply);
+    });
+
+    it('composes the approved as friends and family reply', () => {
+      const { blocks } = slackActionResponse.message;
+      expect(composeReply({
+        blocks,
+        username: 'some-user',
+        orgId: 'some-org',
+        approved: true,
+      })).to.eql(slackApprovedFriendsFamilyReply);
     });
 
     it('composes the ignored reply', () => {
       const { blocks } = slackActionResponse.message;
-      expect(composeReply(blocks, 'some-user', false)).to.eql(slackIgnoredReply);
+      expect(composeReply({
+        blocks,
+        username: 'some-user',
+        approved: false,
+      })).to.eql(slackIgnoredReply);
     });
   });
 });

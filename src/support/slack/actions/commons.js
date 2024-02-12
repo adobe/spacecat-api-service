@@ -11,6 +11,8 @@
  */
 
 import { Blocks, Message } from 'slack-block-builder';
+import { hasText } from '@adobe/spacecat-shared-utils';
+import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 
 export function extractURLFromSlackMessage(inputString) {
   // Regular expression to match URLs
@@ -20,8 +22,23 @@ export function extractURLFromSlackMessage(inputString) {
   return inputString.substring(start, end);
 }
 
-export function composeReply(blocks, username, approved) {
-  const reaction = approved ? `Added by @${username} :checked:` : `Ignored by @${username} :cross-x:`;
+export function composeReply(opts) {
+  const {
+    blocks,
+    username,
+    orgId,
+    approved,
+  } = opts;
+
+  let reaction;
+  if (approved) {
+    const type = hasText(orgId)
+      ? BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
+      : BUTTON_LABELS.APPROVE_CUSTOMER;
+    reaction = `Added by @${username} \`${type}\` :checked:`;
+  } else {
+    reaction = `Ignored by @${username} :cross-x:`;
+  }
 
   const message = Message()
     .blocks(

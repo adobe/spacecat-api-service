@@ -140,7 +140,29 @@ export const slackApprovedReply = {
     },
     {
       text: {
-        text: 'Added by @some-user :checked:',
+        text: 'Added by @some-user `As Customer` :checked:',
+        type: 'mrkdwn',
+      },
+      type: 'section',
+    },
+  ],
+  replace_original: true,
+  text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',
+};
+
+export const slackApprovedFriendsFamilyReply = {
+  blocks: [
+    {
+      block_id: 'initial-block-id',
+      text: {
+        text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',
+        type: 'mrkdwn',
+      },
+      type: 'section',
+    },
+    {
+      text: {
+        text: 'Added by @some-user `As Friends/Family` :checked:',
         type: 'mrkdwn',
       },
       type: 'section',
@@ -176,7 +198,7 @@ export const expectedAnnouncedMessage = Message()
   .channel('channel-id')
   .blocks(
     Blocks.Section()
-      .text('A new site, *<https://spacecat.com|https://spacecat.com>*, has gone *live*  on Edge Delivery Services :rocket: and has been added to the Star Catalogue. (_source:_ *CDN*)'),
+      .text('A new site, *<https://spacecat.com|https://spacecat.com>*, has gone *live* :rocket: on Edge Delivery Services and has been added to the Star Catalogue. (_source:_ *CDN*)'),
   )
   .buildToObject();
 
@@ -186,7 +208,20 @@ export const expectedApprovedReply = {
       Blocks.Section()
         .blockId('initial-block-id')
         .text('I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)'),
-      Blocks.Section().text('Added by @approvers-username :checked:'),
+      Blocks.Section().text('Added by @approvers-username `As Customer` :checked:'),
+    )
+    .buildToObject(),
+  text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',
+  replace_original: true,
+};
+
+export const expectedApprovedFnFReply = {
+  ...Message()
+    .blocks(
+      Blocks.Section()
+        .blockId('initial-block-id')
+        .text('I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)'),
+      Blocks.Section().text('Added by @approvers-username `As Friends/Family` :checked:'),
     )
     .buildToObject(),
   text: 'I discovered a new site on Edge Delivery Services: *<https://spacecat.com|https://spacecat.com>*. Would you like me to include it in the Star Catalogue? (_source:_ *CDN*)',

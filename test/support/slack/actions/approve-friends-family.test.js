@@ -17,7 +17,7 @@ import sinon from 'sinon';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import approveFriendsFamily from '../../../../src/support/slack/actions/approve-friends-family.js';
-import { expectedAnnouncedMessage, expectedApprovedReply, slackFriendsFamilyResponse } from './slack-fixtures.js';
+import { expectedAnnouncedMessage, expectedApprovedFnFReply, slackFriendsFamilyResponse } from './slack-fixtures.js';
 
 describe('approveSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';
@@ -100,7 +100,7 @@ describe('approveSiteCandidate', () => {
       orgId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
     })).to.be.true;
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
-    expect(respondMock.calledOnceWith(expectedApprovedReply)).to.be.true;
+    expect(respondMock.calledOnceWith(expectedApprovedFnFReply)).to.be.true;
     expect(slackClient.postMessage.calledOnceWith(expectedAnnouncedMessage)).to.be.true;
   });
 });
