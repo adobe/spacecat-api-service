@@ -10,7 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { createAudit, AUDIT_TYPE_BROKEN_BACKLINKS } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
+import {
+  createAudit, AUDIT_TYPE_BROKEN_BACKLINKS, AUDIT_TYPE_ORGANIC_TRAFFIC, AUDIT_TYPE_ORGANIC_KEYWORDS,
+} from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 
 /**
  * Data transfer object for Site.
@@ -75,7 +77,9 @@ export const AuditDto = {
    * }} JSON object.
    */
   toAbbreviatedJSON: (audit) => {
-    if (audit.getAuditType() === AUDIT_TYPE_BROKEN_BACKLINKS) {
+    if (audit.getAuditType() === AUDIT_TYPE_BROKEN_BACKLINKS
+      || audit.getAuditType() === AUDIT_TYPE_ORGANIC_KEYWORDS
+      || audit.getAuditType() === AUDIT_TYPE_ORGANIC_TRAFFIC) {
       return AuditDto.toJSON(audit);
     }
     return {
