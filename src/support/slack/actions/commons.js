@@ -30,15 +30,9 @@ export function composeReply(opts) {
     approved,
   } = opts;
 
-  let reaction;
-  if (approved) {
-    const type = hasText(orgId)
-      ? BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
-      : BUTTON_LABELS.APPROVE_CUSTOMER;
-    reaction = `Added by @${username} \`${type}\` :checked:`;
-  } else {
-    reaction = `Ignored by @${username} :cross-x:`;
-  }
+  const reaction = approved
+    ? `Added by @${username} \`${hasText(orgId) ? BUTTON_LABELS.APPROVE_FRIENDS_FAMILY : BUTTON_LABELS.APPROVE_CUSTOMER}\` :checked:`
+    : `Ignored by @${username} :cross-x:`;
 
   const message = Message()
     .blocks(
