@@ -286,10 +286,6 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
   const init = (ctx) => {
     baseCommand.init(ctx);
 
-    if (!ctx.boltApp?.action) {
-      return;
-    }
-
     ctx.boltApp.action(/^paginate_sites_(prev|next|page_\d+)$/, paginationHandler);
   };
 

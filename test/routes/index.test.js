@@ -25,6 +25,9 @@ describe('getRouteHandlers', () => {
     getLatestForSite: sinon.stub(),
   };
 
+  const mockHooksController = {
+  };
+
   const mockSitesController = {
     getAll: sinon.stub(),
     getAllByDeliveryType: sinon.stub(),
@@ -50,6 +53,7 @@ describe('getRouteHandlers', () => {
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
+      mockHooksController,
       mockOrganizationsController,
       mockSitesController,
       mockSlackController,
@@ -78,6 +82,8 @@ describe('getRouteHandlers', () => {
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
+      'POST /hooks/site-detection/cdn/:hookSecret',
+      'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/sites',
       'PATCH /organizations/:organizationId',

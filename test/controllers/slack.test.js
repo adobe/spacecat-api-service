@@ -32,6 +32,7 @@ describe('SlackController', () => {
     class MockSlackApp {
       constructor(opts) {
         this.event = sinon.stub();
+        this.action = sinon.stub();
         this.use = (middleware) => {
           middlewares.push(middleware);
         };
