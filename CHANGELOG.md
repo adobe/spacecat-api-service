@@ -1,3 +1,10 @@
+# [1.20.0](https://github.com/adobe/spacecat-api-service/compare/v1.19.10...v1.20.0) (2024-02-14)
+
+
+### Features
+
+* site discovery ([#142](https://github.com/adobe/spacecat-api-service/issues/142)) ([158c858](https://github.com/adobe/spacecat-api-service/commit/158c8585d23f6374502e946962fa9c4b5e474a83))
+
 ## [1.19.10](https://github.com/adobe/spacecat-api-service/compare/v1.19.9...v1.19.10) (2024-02-12)
 
 
