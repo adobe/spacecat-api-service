@@ -1,0 +1,59 @@
+site-detection-cdn:
+  parameters:
+    - $ref: './parameters.yaml#/HookSecret'
+  get:
+    tags:
+      - hooks
+    summary: Process incoming site discovery hooks from CDN logs
+    description: |
+      This endpoint processes hooks that include x-forwarded-host header value from CDN logs 
+      Upon receiving the incoming webhook, it initiates a sequence of validation and sanitization procedures
+      Once successful sanitization and validation are completed, 
+      it proceeds to send a Slack message notifying about the discovered domain
+    operationId: siteDetectionCdn
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/CDNXForwardedHostAlert'
+    responses:
+      '202':
+        description: hook is accepted
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+site-detection-rum:
+  get:
+    tags:
+      - hooks
+    summary: Process incoming site discovery hooks from RUM logs
+    description: |
+      This endpoint processes hooks that include URL and domain information from RUM logs 
+      Upon receiving the incoming webhook, it initiates a sequence of validation and sanitization procedures
+      Once successful sanitization and validation are completed, 
+      it proceeds to send a Slack message notifying about the discovered domain
+    operationId: siteDetectionRum
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/RUMDomainDiscoveryAlert'
+    responses:
+      '202':
+        description: hook is accepted
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
