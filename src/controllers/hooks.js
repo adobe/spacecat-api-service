@@ -30,7 +30,12 @@ export const BUTTON_LABELS = {
 
 const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--'];
 
-class InvalidSiteCandidate extends Error {}
+class InvalidSiteCandidate extends Error {
+  constructor(message, url) {
+    super(message);
+    this.url = url;
+  }
+}
 
 function hookAuth(fn, opts) {
   return (context) => {
@@ -50,7 +55,7 @@ function errorHandler(fn, opts) {
       return await fn(context);
     } catch (e) {
       if (e instanceof InvalidSiteCandidate) {
-        log.warn(`Could not process the ${type} site candidate. Reason: ${e.message}`);
+        log.warn(`Could not process site candidate. Reason: ${e.message}, Source: ${type}, Candidate: ${e.url}`);
         return ok(`${type} site candidate disregarded`);
       }
       log.error(`Unexpected error while processing the ${type} site candidate`, e);
@@ -78,7 +83,7 @@ async function verifyHelixSite(url) {
     const resp = await fetch(url);
     finalUrl = resp.url;
   } catch (e) {
-    throw new InvalidSiteCandidate(`URL is unreachable ${url}`, { cause: e });
+    throw new InvalidSiteCandidate(`Cannot fetch the candidate due to ${e.message}`, url);
   }
 
   finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
@@ -88,19 +93,19 @@ async function verifyHelixSite(url) {
     // redirects are disabled because .plain.html should return 200
     finalResp = await fetch(finalUrl, { redirect: 'manual' });
   } catch (e) {
-    throw new InvalidSiteCandidate(`.plain.html is unreachable for ${finalUrl}`, { cause: e });
+    throw new InvalidSiteCandidate('.plain.html is unreachable', finalUrl);
   }
 
   // reject if .plain.html does not return 2XX
   if (!finalResp.ok) {
-    throw new InvalidSiteCandidate(`.plain.html does not return 2XX for ${finalUrl}`);
+    throw new InvalidSiteCandidate(`.plain.html does not return 2XX, returns ${finalResp.status}`, finalUrl);
   }
 
   const respText = await finalResp.text();
 
   // reject if .plain.html contains <head>
   if (respText.includes('<head>')) {
-    throw new InvalidSiteCandidate('.plain.html should not contain <head>');
+    throw new InvalidSiteCandidate('.plain.html should not contain <head>', finalUrl);
   }
 
   return true;
@@ -116,17 +121,17 @@ function verifyURLCandidate(baseURL) {
   // x-fw-host header should contain hostname only. If it contains path and/or search
   // params, then it's most likely a h4ck attempt
   if (containsPathOrSearchParams(url)) {
-    throw new InvalidSiteCandidate(`Path/search params are not accepted ${url.href}`);
+    throw new InvalidSiteCandidate('Path/search params are not accepted', url.href);
   }
 
   // disregard the IP addresses
   if (isIPAddress(url.hostname)) {
-    throw new InvalidSiteCandidate(`Hostname is an IP address ${url.href}`);
+    throw new InvalidSiteCandidate('Hostname is an IP address', url.href);
   }
 
   // disregard the non-prod hostnames
   if (isInvalidSubdomain(url.hostname)) {
-    throw new InvalidSiteCandidate(`URL most likely contains a non-prod domain ${url.href}`);
+    throw new InvalidSiteCandidate('URL most likely contains a non-prod domain', url.href);
   }
 }
 
@@ -175,14 +180,14 @@ function HooksController(lambdaContext) {
     };
 
     if (await dataAccess.siteCandidateExists(siteCandidate.baseURL)) {
-      throw new InvalidSiteCandidate('Site candidate previously evaluated');
+      throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
+    }
+
+    if (await dataAccess.getSiteByBaseURL(siteCandidate.baseURL)) {
+      throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
 
     await dataAccess.upsertSiteCandidate(siteCandidate);
-
-    if (await dataAccess.getSiteByBaseURL(siteCandidate.baseURL)) {
-      throw new InvalidSiteCandidate('Site candidate already exists in sites db');
-    }
 
     return baseURL;
   }
