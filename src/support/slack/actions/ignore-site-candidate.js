@@ -17,29 +17,37 @@ export default function ignoreSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
 
   return async ({ ack, body, respond }) => {
-    const { message = {}, user } = body;
-    const { blocks } = message;
+    try {
+      const { message = {}, user } = body;
+      const { blocks } = message;
 
-    log.info(JSON.stringify(body));
+      log.info(JSON.stringify(body));
 
-    await ack(); // slack expects acknowledgement within 3s
+      await ack(); // slack expects acknowledgement within 3s
 
-    const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
+      const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
-    log.info(`Site is ignored: ${baseURL}`);
+      log.info(`Site is ignored: ${baseURL}`);
 
-    const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
+      const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
 
-    siteCandidate.setStatus(SITE_CANDIDATE_STATUS.IGNORED);
-    siteCandidate.setUpdatedBy(user.username);
+      siteCandidate.setStatus(SITE_CANDIDATE_STATUS.IGNORED);
+      siteCandidate.setUpdatedBy(user.username);
 
-    await dataAccess.updateSiteCandidate(siteCandidate);
+      await dataAccess.updateSiteCandidate(siteCandidate);
 
-    const reply = composeReply({
-      blocks,
-      username: user.username,
-      approved: false,
-    });
-    await respond(reply);
+      const reply = composeReply({
+        blocks,
+        username: user.username,
+        approved: false,
+      });
+
+      log.info(`Responding site candidate ignore with: ${JSON.stringify(reply)}`);
+
+      await respond(reply);
+    } catch (e) {
+      log.error('Error occurred while acknowledging site candidate ignore', e);
+      throw e;
+    }
   };
 }

@@ -12,12 +12,23 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import chai from 'chai';
+import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
-import { expectedAnnouncedMessage, expectedApprovedReply, slackActionResponse } from './slack-fixtures.js';
+import {
+  expectedAnnouncedMessage,
+  expectedApprovedReply,
+  slackActionResponse,
+  slackFriendsFamilyResponse,
+} from './slack-fixtures.js';
+
+chai.use(chaiAsPromised);
+chai.use(sinonChai);
+const { expect } = chai;
 
 describe('approveSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';
@@ -44,6 +55,7 @@ describe('approveSiteCandidate', () => {
       },
       log: {
         info: sinon.stub(),
+        error: sinon.stub(),
       },
       env: {
         SLACK_REPORT_CHANNEL_INTERNAL: 'channel-id',
@@ -98,5 +110,17 @@ describe('approveSiteCandidate', () => {
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock.calledOnceWith(expectedApprovedReply)).to.be.true;
     expect(slackClient.postMessage.calledOnceWith(expectedAnnouncedMessage)).to.be.true;
+  });
+
+  it('logs and throws the error again if something goes wrong', async () => {
+    ackMock.rejects(new Error('processing error'));
+
+    const approveFunction = approveSiteCandidate(context);
+
+    await expect(
+      approveFunction({ ack: ackMock, body: slackFriendsFamilyResponse, respond: respondMock }),
+    ).to.be.rejectedWith('processing error');
+    expect;
+    expect(context.log.error).to.have.been.calledWith('Error occurred while acknowledging site candidate approval');
   });
 });

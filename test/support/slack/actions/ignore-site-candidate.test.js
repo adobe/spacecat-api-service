@@ -12,12 +12,18 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import chai from 'chai';
+import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import ignoreSiteCandidate from '../../../../src/support/slack/actions/ignore-site-candidate.js';
-import { expectedIgnoredReply, slackActionResponse } from './slack-fixtures.js';
+import { expectedIgnoredReply, slackActionResponse, slackFriendsFamilyResponse } from './slack-fixtures.js';
+
+chai.use(chaiAsPromised);
+chai.use(sinonChai);
+const { expect } = chai;
 
 describe('ignoreSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';
@@ -44,6 +50,7 @@ describe('ignoreSiteCandidate', () => {
       },
       log: {
         info: sinon.stub(),
+        error: sinon.stub(),
       },
       env: {
         SLACK_REPORT_CHANNEL_INTERNAL: 'channel-id',
@@ -96,5 +103,17 @@ describe('ignoreSiteCandidate', () => {
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock.calledOnceWith(expectedIgnoredReply)).to.be.true;
     expect(slackClient.postMessage.notCalled).to.be.true;
+  });
+
+  it('logs and throws the error again if something goes wrong', async () => {
+    ackMock.rejects(new Error('processing error'));
+
+    const approveFunction = ignoreSiteCandidate(context);
+
+    await expect(
+      approveFunction({ ack: ackMock, body: slackFriendsFamilyResponse, respond: respondMock }),
+    ).to.be.rejectedWith('processing error');
+    expect;
+    expect(context.log.error).to.have.been.calledWith('Error occurred while acknowledging site candidate ignore');
   });
 });

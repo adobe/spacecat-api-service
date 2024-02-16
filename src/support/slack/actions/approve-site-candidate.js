@@ -34,43 +34,50 @@ export default function approveSiteCandidate(lambdaContext) {
   const { ORGANIZATION_ID_FRIENDS_FAMILY: friendsFamilyOrgId } = lambdaContext.env;
 
   return async ({ ack, body, respond }) => {
-    const { actions = [], message = {}, user } = body;
-    const { blocks } = message;
+    try {
+      const { actions = [], message = {}, user } = body;
+      const { blocks } = message;
 
-    log.info(JSON.stringify(body));
+      log.info(JSON.stringify(body));
 
-    await ack(); // slack expects acknowledgement within 3s
+      await ack(); // slack expects acknowledgement within 3s
 
-    const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
+      const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
-    const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
+      const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
 
-    log.info(`Creating a new site: ${baseURL}`);
+      log.info(`Creating a new site: ${baseURL}`);
 
-    const orgId = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
-      && friendsFamilyOrgId;
+      const orgId = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
+        && friendsFamilyOrgId;
 
-    const site = await dataAccess.addSite({
-      baseURL: siteCandidate.getBaseURL(),
-      isLive: true,
-      ...(orgId && { organizationId: friendsFamilyOrgId }),
-    });
+      const site = await dataAccess.addSite({
+        baseURL: siteCandidate.getBaseURL(),
+        isLive: true,
+        ...(orgId && { organizationId: friendsFamilyOrgId }),
+      });
 
-    siteCandidate.setSiteId(site.getId());
-    siteCandidate.setStatus(SITE_CANDIDATE_STATUS.APPROVED);
-    siteCandidate.setUpdatedBy(user.username);
+      siteCandidate.setSiteId(site.getId());
+      siteCandidate.setStatus(SITE_CANDIDATE_STATUS.APPROVED);
+      siteCandidate.setUpdatedBy(user.username);
 
-    await dataAccess.updateSiteCandidate(siteCandidate);
+      await dataAccess.updateSiteCandidate(siteCandidate);
 
-    const reply = composeReply({
-      blocks,
-      username: user.username,
-      orgId,
-      approved: true,
-    });
+      const reply = composeReply({
+        blocks,
+        username: user.username,
+        orgId,
+        approved: true,
+      });
 
-    await respond(reply);
+      log.info(`Responding site candidate approval with: ${JSON.stringify(reply)}`);
 
-    await announceSiteDiscovery(lambdaContext, baseURL, siteCandidate.getSource());
+      await respond(reply);
+
+      await announceSiteDiscovery(lambdaContext, baseURL, siteCandidate.getSource());
+    } catch (e) {
+      log.error('Error occurred while acknowledging site candidate approval', e);
+      throw e;
+    }
   };
 }
