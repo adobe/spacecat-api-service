@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Adobe. All rights reserved.
+ * Copyright 2024 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -10,51 +10,34 @@
  * governing permissions and limitations under the License.
  */
 
-import { hasText } from '@adobe/spacecat-shared-utils';
-import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
-import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 
-import { isAuditForAllUrls } from '../../support/utils.js';
 import { getSlackContext } from '../../utils/slack/base.js';
+import { triggerFromData } from './common/trigger.js';
 
 export const INITIAL_EXPERIMENT_SLACK_MESSAGE = '*Experiment REPORT* for the *last week* :thread:';
 
 export default async function triggerAudit(context) {
-  const { log, sqs } = context;
+  const { log } = context;
   const { type, url } = context.data;
   const {
-    RUM_DOMAIN_KEY: domainkey,
-    AUDIT_JOBS_QUEUE_URL: queueUrl,
     AUDIT_REPORT_SLACK_CHANNEL_ID: slackChannelId,
     SLACK_BOT_TOKEN: token,
   } = context.env;
 
-  if (!hasText(domainkey) || !hasText(queueUrl)) {
-    throw Error('Required env variables are missing');
-  }
-  const rumApiClient = RUMAPIClient.createFrom(context);
-
-  const urls = await rumApiClient.getDomainList();
-  const filteredUrls = isAuditForAllUrls(url) ? urls : urls.filter((row) => url === row);
-
-  if (filteredUrls.length === 0) {
-    return notFound('', { 'x-error': 'did not match any url' });
-  }
+  const config = {
+    url,
+    auditTypes: [type],
+    deliveryType: DELIVERY_TYPES.AEM_EDGE,
+  };
 
   const slackContext = await getSlackContext({
     slackChannelId, url, message: INITIAL_EXPERIMENT_SLACK_MESSAGE, token, log,
   });
 
-  for (const filteredUrl of filteredUrls) {
-    const auditContext = {
-      ...(slackContext && { slackContext }),
-    };
-    // eslint-disable-next-line no-await-in-loop
-    await sqs.sendMessage(queueUrl, { type, url: filteredUrl, auditContext });
-  }
+  const auditContext = {
+    slackContext,
+  };
 
-  const message = `Successfully queued ${type} audit jobs for ${filteredUrls.length} url/s`;
-  log.info(message);
-
-  return ok(JSON.stringify({ message }));
+  return triggerFromData(context, config, auditContext);
 }
