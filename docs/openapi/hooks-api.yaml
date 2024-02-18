@@ -1,6 +1,6 @@
 site-detection-cdn:
   parameters:
-    - $ref: './parameters.yaml#/HookSecret'
+    - $ref: './parameters.yaml#/hookSecret'
   get:
     tags:
       - hooks
@@ -29,6 +29,8 @@ site-detection-cdn:
     security:
       - api_key: [ ]
 site-detection-rum:
+  parameters:
+    - $ref: './parameters.yaml#/hookSecret'
   get:
     tags:
       - hooks

@@ -70,7 +70,7 @@ imsOrgId:
   required: true
   schema:
     $ref: './schemas.yaml#/ImsOrganizationId'
-HookSecret:
+hookSecret:
   name: hookSecret
   description: Secret for the incoming webhook
   in: path
