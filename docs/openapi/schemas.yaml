@@ -29,6 +29,10 @@ URL:
   type: string
   format: url
   example: 'https://www.example.com'
+Domain:
+  type: string
+  format: domain
+  example: 'www.example.com'
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
@@ -612,3 +616,21 @@ FulfillmentProcessingResults:
     - status: 'accepted'
       requestId: '123e4567-e89b-12d3-a456-426614174000'
     - status: 'rejected'
+CDNXForwardedHostAlert:
+  type: object
+  additionalProperties: true
+  properties:
+    forwardedHost:
+      description: value of x-forwarded-host header in the CDN log which trggered the domain discovery alert
+      type: string
+      example: 'blog.adobe.com, main--blog--adobecom.hlx.live, main--blog--adobecom.hlx.live, main--blog--adobecom.hlx-fastly.page'
+RUMDomainDiscoveryAlert:
+  type: object
+  additionalProperties: true
+  properties:
+    url:
+      description: URL of the page which triggered the domain discovery alert
+      $ref: '#/URL'
+    domain:
+      description: Domain of the page which triggered the domain discovery alert
+      $ref: '#/Domain'

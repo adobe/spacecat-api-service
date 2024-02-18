@@ -1,3 +1,108 @@
+# [1.21.0](https://github.com/adobe/spacecat-api-service/compare/v1.20.0...v1.21.0) (2024-02-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.0 ([#164](https://github.com/adobe/spacecat-api-service/issues/164)) ([b59d82b](https://github.com/adobe/spacecat-api-service/commit/b59d82bd1ec7fce47a18d7e235bf909660c05fc3))
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.1 ([#165](https://github.com/adobe/spacecat-api-service/issues/165)) ([b416296](https://github.com/adobe/spacecat-api-service/commit/b4162961675a2809c309f572ac97e0298b0a9dca))
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.1.2 ([#162](https://github.com/adobe/spacecat-api-service/issues/162)) ([5dc69a8](https://github.com/adobe/spacecat-api-service/commit/5dc69a878134899a8d75e0b0683bcd82ff5eda0b))
+* **deps:** update external fixes ([#168](https://github.com/adobe/spacecat-api-service/issues/168)) ([d5876fd](https://github.com/adobe/spacecat-api-service/commit/d5876fd9033d7986f2255b074c889dfa4d8eeba9))
+* **site-discovery:** error logs ([#166](https://github.com/adobe/spacecat-api-service/issues/166)) ([352222f](https://github.com/adobe/spacecat-api-service/commit/352222f73d8e1fff76364601707bf83c1342ca14))
+* **site-discovery:** unified logs ([#163](https://github.com/adobe/spacecat-api-service/issues/163)) ([d29993c](https://github.com/adobe/spacecat-api-service/commit/d29993cd7bf290f58e5dfe4c805b24d681e7d9ae))
+
+
+### Features
+
+* implement audit for experimentation ([#149](https://github.com/adobe/spacecat-api-service/issues/149)) ([9e3cd56](https://github.com/adobe/spacecat-api-service/commit/9e3cd56dd2e3ca588d0235adc68665cea71bd607))
+
+# [1.21.0](https://github.com/adobe/spacecat-api-service/compare/v1.20.0...v1.21.0) (2024-02-17)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.0 ([#164](https://github.com/adobe/spacecat-api-service/issues/164)) ([b59d82b](https://github.com/adobe/spacecat-api-service/commit/b59d82bd1ec7fce47a18d7e235bf909660c05fc3))
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.1 ([#165](https://github.com/adobe/spacecat-api-service/issues/165)) ([b416296](https://github.com/adobe/spacecat-api-service/commit/b4162961675a2809c309f572ac97e0298b0a9dca))
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.1.2 ([#162](https://github.com/adobe/spacecat-api-service/issues/162)) ([5dc69a8](https://github.com/adobe/spacecat-api-service/commit/5dc69a878134899a8d75e0b0683bcd82ff5eda0b))
+* **site-discovery:** error logs ([#166](https://github.com/adobe/spacecat-api-service/issues/166)) ([352222f](https://github.com/adobe/spacecat-api-service/commit/352222f73d8e1fff76364601707bf83c1342ca14))
+* **site-discovery:** unified logs ([#163](https://github.com/adobe/spacecat-api-service/issues/163)) ([d29993c](https://github.com/adobe/spacecat-api-service/commit/d29993cd7bf290f58e5dfe4c805b24d681e7d9ae))
+
+
+### Features
+
+* implement audit for experimentation ([#149](https://github.com/adobe/spacecat-api-service/issues/149)) ([9e3cd56](https://github.com/adobe/spacecat-api-service/commit/9e3cd56dd2e3ca588d0235adc68665cea71bd607))
+
+# [1.21.0](https://github.com/adobe/spacecat-api-service/compare/v1.20.0...v1.21.0) (2024-02-16)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.0 ([#164](https://github.com/adobe/spacecat-api-service/issues/164)) ([b59d82b](https://github.com/adobe/spacecat-api-service/commit/b59d82bd1ec7fce47a18d7e235bf909660c05fc3))
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.1 ([#165](https://github.com/adobe/spacecat-api-service/issues/165)) ([b416296](https://github.com/adobe/spacecat-api-service/commit/b4162961675a2809c309f572ac97e0298b0a9dca))
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.1.2 ([#162](https://github.com/adobe/spacecat-api-service/issues/162)) ([5dc69a8](https://github.com/adobe/spacecat-api-service/commit/5dc69a878134899a8d75e0b0683bcd82ff5eda0b))
+* **site-discovery:** error logs ([#166](https://github.com/adobe/spacecat-api-service/issues/166)) ([352222f](https://github.com/adobe/spacecat-api-service/commit/352222f73d8e1fff76364601707bf83c1342ca14))
+* **site-discovery:** unified logs ([#163](https://github.com/adobe/spacecat-api-service/issues/163)) ([d29993c](https://github.com/adobe/spacecat-api-service/commit/d29993cd7bf290f58e5dfe4c805b24d681e7d9ae))
+
+
+### Features
+
+* implement audit for experimentation ([#149](https://github.com/adobe/spacecat-api-service/issues/149)) ([9e3cd56](https://github.com/adobe/spacecat-api-service/commit/9e3cd56dd2e3ca588d0235adc68665cea71bd607))
+
+# [1.21.0](https://github.com/adobe/spacecat-api-service/compare/v1.20.0...v1.21.0) (2024-02-16)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.0 ([#164](https://github.com/adobe/spacecat-api-service/issues/164)) ([b59d82b](https://github.com/adobe/spacecat-api-service/commit/b59d82bd1ec7fce47a18d7e235bf909660c05fc3))
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.1 ([#165](https://github.com/adobe/spacecat-api-service/issues/165)) ([b416296](https://github.com/adobe/spacecat-api-service/commit/b4162961675a2809c309f572ac97e0298b0a9dca))
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.1.2 ([#162](https://github.com/adobe/spacecat-api-service/issues/162)) ([5dc69a8](https://github.com/adobe/spacecat-api-service/commit/5dc69a878134899a8d75e0b0683bcd82ff5eda0b))
+* **site-discovery:** unified logs ([#163](https://github.com/adobe/spacecat-api-service/issues/163)) ([d29993c](https://github.com/adobe/spacecat-api-service/commit/d29993cd7bf290f58e5dfe4c805b24d681e7d9ae))
+
+
+### Features
+
+* implement audit for experimentation ([#149](https://github.com/adobe/spacecat-api-service/issues/149)) ([9e3cd56](https://github.com/adobe/spacecat-api-service/commit/9e3cd56dd2e3ca588d0235adc68665cea71bd607))
+
+## [1.20.1](https://github.com/adobe/spacecat-api-service/compare/v1.20.0...v1.20.1) (2024-02-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.0 ([#164](https://github.com/adobe/spacecat-api-service/issues/164)) ([b59d82b](https://github.com/adobe/spacecat-api-service/commit/b59d82bd1ec7fce47a18d7e235bf909660c05fc3))
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.1 ([#165](https://github.com/adobe/spacecat-api-service/issues/165)) ([b416296](https://github.com/adobe/spacecat-api-service/commit/b4162961675a2809c309f572ac97e0298b0a9dca))
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.1.2 ([#162](https://github.com/adobe/spacecat-api-service/issues/162)) ([5dc69a8](https://github.com/adobe/spacecat-api-service/commit/5dc69a878134899a8d75e0b0683bcd82ff5eda0b))
+* **site-discovery:** unified logs ([#163](https://github.com/adobe/spacecat-api-service/issues/163)) ([d29993c](https://github.com/adobe/spacecat-api-service/commit/d29993cd7bf290f58e5dfe4c805b24d681e7d9ae))
+
+## [1.20.1](https://github.com/adobe/spacecat-api-service/compare/v1.20.0...v1.20.1) (2024-02-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.17.0 ([#164](https://github.com/adobe/spacecat-api-service/issues/164)) ([b59d82b](https://github.com/adobe/spacecat-api-service/commit/b59d82bd1ec7fce47a18d7e235bf909660c05fc3))
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.1.2 ([#162](https://github.com/adobe/spacecat-api-service/issues/162)) ([5dc69a8](https://github.com/adobe/spacecat-api-service/commit/5dc69a878134899a8d75e0b0683bcd82ff5eda0b))
+* **site-discovery:** unified logs ([#163](https://github.com/adobe/spacecat-api-service/issues/163)) ([d29993c](https://github.com/adobe/spacecat-api-service/commit/d29993cd7bf290f58e5dfe4c805b24d681e7d9ae))
+
+## [1.20.1](https://github.com/adobe/spacecat-api-service/compare/v1.20.0...v1.20.1) (2024-02-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.1.2 ([#162](https://github.com/adobe/spacecat-api-service/issues/162)) ([5dc69a8](https://github.com/adobe/spacecat-api-service/commit/5dc69a878134899a8d75e0b0683bcd82ff5eda0b))
+* **site-discovery:** unified logs ([#163](https://github.com/adobe/spacecat-api-service/issues/163)) ([d29993c](https://github.com/adobe/spacecat-api-service/commit/d29993cd7bf290f58e5dfe4c805b24d681e7d9ae))
+
+## [1.20.1](https://github.com/adobe/spacecat-api-service/compare/v1.20.0...v1.20.1) (2024-02-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.1.2 ([#162](https://github.com/adobe/spacecat-api-service/issues/162)) ([5dc69a8](https://github.com/adobe/spacecat-api-service/commit/5dc69a878134899a8d75e0b0683bcd82ff5eda0b))
+
+# [1.20.0](https://github.com/adobe/spacecat-api-service/compare/v1.19.10...v1.20.0) (2024-02-14)
+
+
+### Features
+
+* site discovery ([#142](https://github.com/adobe/spacecat-api-service/issues/142)) ([158c858](https://github.com/adobe/spacecat-api-service/commit/158c8585d23f6374502e946962fa9c4b5e474a83))
+
 ## [1.19.10](https://github.com/adobe/spacecat-api-service/compare/v1.19.9...v1.19.10) (2024-02-12)
 
 

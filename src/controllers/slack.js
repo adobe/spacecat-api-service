@@ -17,6 +17,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import SlackHandler from '../support/slack/slack-handler.js';
 import commands from '../support/slack/commands.js';
+import actions from '../support/slack/actions/index.js';
 
 /**
  * Initializes the slack bot.
@@ -67,6 +68,9 @@ export function initSlackBot(lambdaContext, App) {
   const slackHandler = SlackHandler(commands(lambdaContext), log);
 
   app.event('app_mention', slackHandler.onAppMention);
+
+  Object.entries(actions)
+    .forEach(([action, fn]) => app.action(action, fn(lambdaContext)));
 
   return app;
 }

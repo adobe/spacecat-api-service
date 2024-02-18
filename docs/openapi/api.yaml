@@ -43,6 +43,10 @@ paths:
     $ref: './audits-api.yaml#/latest-audits'
   /event/fulfillment:
     $ref: './event-api.yaml#/process-fulfillment-events'
+  /hooks/site-detection/cdn/{hookSecret}:
+    $ref: './hooks-api.yaml#/site-detection-cdn'
+  /hooks/site-detection/rum/{hookSecret}:
+    $ref: './hooks-api.yaml#/site-detection-rum'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
