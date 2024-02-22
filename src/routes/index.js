@@ -48,6 +48,7 @@ function isStaticRoute(routePattern) {
  * @param sitesController
  * @param slackController
  * @param triggerHandler
+ * @param fulfillmentController
  * @return {{staticRoutes: {}, dynamicRoutes: {}}}
  */
 export default function getRouteHandlers(
@@ -57,12 +58,14 @@ export default function getRouteHandlers(
   sitesController,
   slackController,
   triggerHandler,
+  fulfillmentController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
+    'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
     'GET /organizations': organizationsController.getAll,
