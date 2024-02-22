@@ -1,3 +1,15 @@
+# [1.22.0](https://github.com/adobe/spacecat-api-service/compare/v1.21.0...v1.22.0) (2024-02-22)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#172](https://github.com/adobe/spacecat-api-service/issues/172)) ([bc96621](https://github.com/adobe/spacecat-api-service/commit/bc96621cf0d0119bb790e778f6e5d230ae19839a))
+
+
+### Features
+
+* endpoint to handle fulfillment_completed events ([#143](https://github.com/adobe/spacecat-api-service/issues/143)) ([c18df3d](https://github.com/adobe/spacecat-api-service/commit/c18df3d283eb0bac52521184e022688d79fba6b4))
+
 ## [1.21.1](https://github.com/adobe/spacecat-api-service/compare/v1.21.0...v1.21.1) (2024-02-21)
 
 
