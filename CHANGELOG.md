@@ -1,3 +1,10 @@
+## [1.22.3](https://github.com/adobe/spacecat-api-service/compare/v1.22.2...v1.22.3) (2024-02-26)
+
+
+### Bug Fixes
+
+* **deps:** bump spacecat-shared-utils to 1.11.5 ([#177](https://github.com/adobe/spacecat-api-service/issues/177)) ([23b0406](https://github.com/adobe/spacecat-api-service/commit/23b0406414aa52672ac0c39f21bd8bb6042f8550))
+
 ## [1.22.2](https://github.com/adobe/spacecat-api-service/compare/v1.22.1...v1.22.2) (2024-02-24)
 
 
