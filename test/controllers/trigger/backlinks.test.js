@@ -12,7 +12,9 @@
 
 /* eslint-env mocha */
 
+import { AUDIT_TYPE_BROKEN_BACKLINKS } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import { expect } from 'chai';
 import sinon from 'sinon';
@@ -27,6 +29,7 @@ describe('Backlinks trigger', () => {
   let sqsMock;
   let sandbox;
   let sites;
+  let orgs;
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
@@ -49,7 +52,22 @@ describe('Backlinks trigger', () => {
       }),
     ];
 
+    orgs = [
+      createOrganization({
+        id: 'default',
+        name: 'ABCD',
+        config: {
+          audits: {
+            auditsDisabled: false,
+            auditTypeConfigs: {
+              [AUDIT_TYPE_BROKEN_BACKLINKS]: { disabled: false },
+            },
+          },
+        },
+      })];
+
     dataAccessMock = {
+      getOrganizations: sandbox.stub().resolves(orgs),
       getSitesByDeliveryType: sandbox.stub(),
     };
 

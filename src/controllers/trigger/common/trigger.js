@@ -14,6 +14,36 @@ import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-u
 
 import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from '../../../support/utils.js';
 
+function isAllAuditsDisabled(site, organization) {
+  const orgAuditConfig = organization.getAuditConfig();
+  const siteAuditConfig = site.getAuditConfig();
+
+  return orgAuditConfig.auditsDisabled() || siteAuditConfig.auditsDisabled();
+}
+
+function isAuditTypeDisabled(auditType, site, organization) {
+  const orgAuditDisabled = organization.getAuditConfig().getAuditTypeConfig(auditType)?.disabled();
+  const siteAuditDisabled = site.getAuditConfig().getAuditTypeConfig(auditType)?.disabled();
+
+  return orgAuditDisabled || siteAuditDisabled;
+}
+
+/**
+ * Retrieves all organizations and returns an object where key is organization id
+ * and the value is organization
+ *
+ * @param {Object} dataAccess - The data access object for site operations.
+ * @returns {Promise<object>} object{key: orgId, value: org object}
+ * @throws {Error} Throws an error if organizations retrieval fails
+ */
+async function getOrganizations(dataAccess) {
+  const organizations = await dataAccess.getOrganizations();
+  return organizations.reduce((acc, cur) => {
+    acc[cur.getId()] = cur;
+    return acc;
+  }, {});
+}
+
 /**
  * Retrieves sites for auditing based on the input URL. If the input URL has the value
  * 'all', then all sites will be audited. Otherwise, the input URL is assumed to be a base URL.
@@ -22,10 +52,11 @@ import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from
  * @param {Object} dataAccess - The data access object for site operations.
  * @param {string} url - The URL to check for auditing.
  * @param {string} deliveryType - The delivery type (ie aem_edge) to check for auditing.
+ * @param {Array<Organization>} orgs - List of spacecat orgs
  * @returns {Promise<Array<Site>>} The sites to audit.
  * @throws {Error} Throws an error if the site is not found.
  */
-async function getSitesToAudit(dataAccess, url, deliveryType) {
+async function getSitesToAudit(dataAccess, url, deliveryType, orgs) {
   let sitesToAudit;
   if (isAuditForAllUrls(url)) {
     sitesToAudit = isAuditForAllDeliveryTypes(deliveryType)
@@ -35,7 +66,7 @@ async function getSitesToAudit(dataAccess, url, deliveryType) {
     const site = await dataAccess.getSiteByBaseURL(url);
     sitesToAudit = site ? [site] : [];
   }
-  return sitesToAudit.filter((site) => !site.getAuditConfig().auditsDisabled());
+  return sitesToAudit.filter((site) => !isAllAuditsDisabled(site, orgs[site.getOrganizationId()]));
 }
 /**
  * Triggers audit processes for websites based on the provided URL.
@@ -52,7 +83,9 @@ export async function triggerFromData(context, config, auditContext = {}) {
     const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
     const { url, auditTypes, deliveryType } = config;
 
-    const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType);
+    const orgs = await getOrganizations(dataAccess);
+
+    const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType, orgs);
     if (!sitesToAudit.length) {
       return notFound('Site not found');
     }
@@ -60,10 +93,9 @@ export async function triggerFromData(context, config, auditContext = {}) {
     const message = [];
 
     for (const auditType of auditTypes) {
-      const sitesToAuditForType = sitesToAudit.filter((site) => {
-        const auditConfig = site.getAuditConfig();
-        return !auditConfig.getAuditTypeConfig(auditType)?.disabled();
-      });
+      const sitesToAuditForType = sitesToAudit.filter(
+        (site) => !isAuditTypeDisabled(auditType, site, orgs[site.getOrganizationId()]),
+      );
 
       if (!sitesToAuditForType.length) {
         message.push(`No site is enabled for ${auditType} audit type`);

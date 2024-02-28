@@ -36,7 +36,7 @@ export const SiteDto = {
       createdAt: jsonObject.createdAt,
       updatedAt: jsonObject.updatedAt,
       auditConfig: AuditConfig.fromDynamoItem(jsonObject.auditConfig),
-      config: Config.fromDynamoItem(jsonObject.config),
+      config: jsonObject.config,
       audits: jsonObject.audits ? jsonObject.audits.map((audit) => AuditDto.fromJson(audit)) : [],
     };
 
