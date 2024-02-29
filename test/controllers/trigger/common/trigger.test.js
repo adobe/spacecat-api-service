@@ -13,6 +13,7 @@
 /* eslint-env mocha */
 
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import { expect } from 'chai';
 import sinon from 'sinon';
@@ -25,6 +26,7 @@ describe('Trigger from data access', () => {
   let sqsMock;
   let sandbox;
   let sites;
+  let orgs;
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
@@ -40,9 +42,49 @@ describe('Trigger from data access', () => {
         baseURL: 'http://site2.com',
         organizationId: 'org123',
       }),
+      createSite({
+        id: 'site3',
+        baseURL: 'http://site3.com',
+        organizationId: 'org124',
+      }),
+      createSite({
+        id: 'site4',
+        baseURL: 'http://site2.com',
+        organizationId: 'org125',
+      }),
     ];
 
+    orgs = [
+      createOrganization({
+        id: 'org123',
+        name: 'ABCD',
+      }),
+      createOrganization({
+        id: 'org124',
+        name: 'ABCD',
+        config: {
+          audits: {
+            auditsDisabled: true,
+          },
+        },
+      }),
+      createOrganization({
+        id: 'org125',
+        name: 'ABCD',
+        config: {
+          audits: {
+            auditsDisabled: false,
+            auditTypeConfigs: {
+              auditType: { disabled: true },
+              type1: { disabled: true },
+              type2: { disabled: true },
+            },
+          },
+        },
+      })];
+
     dataAccessMock = {
+      getOrganizations: sandbox.stub().resolves(orgs),
       getSites: sandbox.stub(),
       getSitesByDeliveryType: sandbox.stub(),
       getSiteByBaseURL: sandbox.stub(),

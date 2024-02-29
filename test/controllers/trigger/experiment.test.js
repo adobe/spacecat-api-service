@@ -13,6 +13,7 @@
 /* eslint-env mocha */
 
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import { expect } from 'chai';
 import sinon from 'sinon';
@@ -27,6 +28,7 @@ describe('Experiment audit trigger', () => {
   let sqsMock;
   let sandbox;
   let sites;
+  let orgs;
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
@@ -49,7 +51,14 @@ describe('Experiment audit trigger', () => {
       }),
     ];
 
+    orgs = [
+      createOrganization({
+        id: 'default',
+        name: 'ABCD',
+      })];
+
     dataAccessMock = {
+      getOrganizations: sandbox.stub().resolves(orgs),
       getSitesByDeliveryType: sandbox.stub(),
     };
 

@@ -13,6 +13,7 @@
 /* eslint-env mocha */
 
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import { expect } from 'chai';
 import sinon from 'sinon';
@@ -27,6 +28,7 @@ describe('Apex trigger', () => {
   let sqsMock;
   let sandbox;
   let sites;
+  let orgs;
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
@@ -44,7 +46,14 @@ describe('Apex trigger', () => {
       }),
     ];
 
+    orgs = [
+      createOrganization({
+        id: 'org123',
+        name: 'ABCD',
+      })];
+
     dataAccessMock = {
+      getOrganizations: sandbox.stub().resolves(orgs),
       getSitesByDeliveryType: sandbox.stub(),
     };
 
