@@ -1,3 +1,10 @@
+# [1.23.0](https://github.com/adobe/spacecat-api-service/compare/v1.22.5...v1.23.0) (2024-02-29)
+
+
+### Features
+
+* **trigger:** organization level audit configs ([#181](https://github.com/adobe/spacecat-api-service/issues/181)) ([4ad93ad](https://github.com/adobe/spacecat-api-service/commit/4ad93add98fb983cecfe1985dab02f18ab8eaee8))
+
 ## [1.22.5](https://github.com/adobe/spacecat-api-service/compare/v1.22.4...v1.22.5) (2024-02-27)
 
 
