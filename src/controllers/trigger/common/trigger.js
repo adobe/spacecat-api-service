@@ -10,23 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
+import { isAuditsDisabled } from '@adobe/spacecat-shared-utils';
 import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
 import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from '../../../support/utils.js';
-
-function isAllAuditsDisabled(site, organization) {
-  const orgAuditConfig = organization.getAuditConfig();
-  const siteAuditConfig = site.getAuditConfig();
-
-  return orgAuditConfig.auditsDisabled() || siteAuditConfig.auditsDisabled();
-}
-
-function isAuditTypeDisabled(auditType, site, organization) {
-  const orgAuditDisabled = organization.getAuditConfig().getAuditTypeConfig(auditType)?.disabled();
-  const siteAuditDisabled = site.getAuditConfig().getAuditTypeConfig(auditType)?.disabled();
-
-  return orgAuditDisabled || siteAuditDisabled;
-}
 
 /**
  * Retrieves all organizations and returns an object where key is organization id
@@ -66,7 +53,7 @@ async function getSitesToAudit(dataAccess, url, deliveryType, orgs) {
     const site = await dataAccess.getSiteByBaseURL(url);
     sitesToAudit = site ? [site] : [];
   }
-  return sitesToAudit.filter((site) => !isAllAuditsDisabled(site, orgs[site.getOrganizationId()]));
+  return sitesToAudit.filter((site) => !isAuditsDisabled(site, orgs[site.getOrganizationId()]));
 }
 /**
  * Triggers audit processes for websites based on the provided URL.
@@ -94,7 +81,7 @@ export async function triggerFromData(context, config, auditContext = {}) {
 
     for (const auditType of auditTypes) {
       const sitesToAuditForType = sitesToAudit.filter(
-        (site) => !isAuditTypeDisabled(auditType, site, orgs[site.getOrganizationId()]),
+        (site) => !isAuditsDisabled(site, orgs[site.getOrganizationId()], auditType),
       );
 
       if (!sitesToAuditForType.length) {
