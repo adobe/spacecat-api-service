@@ -634,3 +634,12 @@ RUMDomainDiscoveryAlert:
     domain:
       description: Domain of the page which triggered the domain discovery alert
       $ref: '#/Domain'
+AnalyticsSiteIntegration:
+  type: object
+  additionalProperties: true
+  properties:
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+  example:
+    baseURL: 'https://www.example.com'

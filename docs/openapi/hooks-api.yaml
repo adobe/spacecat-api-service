@@ -58,4 +58,31 @@ site-detection-rum:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+site-integration-analaytics:
+  parameters:
+    - $ref: './parameters.yaml#/hookSecret'
+  post:
+    tags:
+      - hooks
+    summary: Process setup completed events for site integration with analytics
+    description: |
+      Process setup completed events for site integration with analytics
+    operationId: processAnalyticsSiteIntegration
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/AnalyticsSiteIntegration'
+    responses:
+      '202':
+        description: Accepted for processing
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 
