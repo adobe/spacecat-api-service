@@ -1,3 +1,10 @@
+# [1.24.0](https://github.com/adobe/spacecat-api-service/compare/v1.23.0...v1.24.0) (2024-03-01)
+
+
+### Features
+
+* **trigger:** no initial msg for backlink audit ([#184](https://github.com/adobe/spacecat-api-service/issues/184)) ([3e8c3eb](https://github.com/adobe/spacecat-api-service/commit/3e8c3eb6692ebfc79e90a6f0fadc34010c1cd771))
+
 # [1.23.0](https://github.com/adobe/spacecat-api-service/compare/v1.22.5...v1.23.0) (2024-02-29)
 
 
