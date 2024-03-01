@@ -12,7 +12,6 @@
 
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { triggerFromData } from './common/trigger.js';
-import { getSlackContext } from '../../utils/slack/base.js';
 
 export const INITIAL_BACKLINKS_SLACK_MESSAGE = '*BROKEN BACKLINKS REPORT* for the *last week* :thread:';
 
@@ -23,21 +22,9 @@ export const INITIAL_BACKLINKS_SLACK_MESSAGE = '*BROKEN BACKLINKS REPORT* for th
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
 export default async function trigger(context) {
-  const { log } = context;
-
   const { type, url } = context.data;
-  const {
-    AUDIT_REPORT_SLACK_CHANNEL_ID: slackChannelId,
-    SLACK_BOT_TOKEN: token,
-  } = context.env;
 
-  const slackContext = await getSlackContext({
-    slackChannelId, url, message: INITIAL_BACKLINKS_SLACK_MESSAGE, token, log,
-  });
-
-  const auditContext = {
-    slackContext,
-  };
+  const auditContext = {};
 
   const config = {
     url,
