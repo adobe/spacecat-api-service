@@ -13,6 +13,7 @@
 /* eslint-env mocha */
 
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import { expect } from 'chai';
 import sinon from 'sinon';
@@ -25,6 +26,7 @@ describe('LHS Trigger', () => {
   let sqsMock;
   let sandbox;
   let sites;
+  let orgs;
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
@@ -42,7 +44,14 @@ describe('LHS Trigger', () => {
       }),
     ];
 
+    orgs = [
+      createOrganization({
+        id: 'org123',
+        name: 'ABCD',
+      })];
+
     dataAccessMock = {
+      getOrganizations: sandbox.stub().resolves(orgs),
       getSites: sandbox.stub(),
       getSiteByBaseURL: sandbox.stub(),
       getSiteByID: sandbox.stub(),

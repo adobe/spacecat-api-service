@@ -30,7 +30,7 @@ export const OrganizationDto = {
       imsOrgId: jsonObject.imsOrgId,
       createdAt: jsonObject.createdAt,
       updatedAt: jsonObject.updatedAt,
-      config: Config.fromDynamoItem(jsonObject.config),
+      config: jsonObject.config,
     };
 
     return createOrganization(organizationData);

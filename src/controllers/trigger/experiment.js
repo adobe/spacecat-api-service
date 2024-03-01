@@ -11,25 +11,32 @@
  */
 
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+
+import { getSlackContext } from '../../utils/slack/base.js';
 import { triggerFromData } from './common/trigger.js';
 
-export const INITIAL_BACKLINKS_SLACK_MESSAGE = '*BROKEN BACKLINKS REPORT* for the *last week* :thread:';
+export const INITIAL_EXPERIMENT_SLACK_MESSAGE = '*Experiment REPORT* for the *last week* :thread:';
 
-/**
- * Triggers audit processes for websites based on the provided URL.
- *
- * @param {Object} context - The context object containing dataAccess, sqs, data, and env.
- * @returns {Response} The response object with the audit initiation message or an error message.
- */
-export default async function trigger(context) {
+export default async function triggerAudit(context) {
+  const { log } = context;
   const { type, url } = context.data;
-
-  const auditContext = {};
+  const {
+    AUDIT_REPORT_SLACK_CHANNEL_ID: slackChannelId,
+    SLACK_BOT_TOKEN: token,
+  } = context.env;
 
   const config = {
     url,
     auditTypes: [type],
     deliveryType: DELIVERY_TYPES.AEM_EDGE,
+  };
+
+  const slackContext = await getSlackContext({
+    slackChannelId, url, message: INITIAL_EXPERIMENT_SLACK_MESSAGE, token, log,
+  });
+
+  const auditContext = {
+    slackContext,
   };
 
   return triggerFromData(context, config, auditContext);

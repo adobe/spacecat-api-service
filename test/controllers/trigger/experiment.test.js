@@ -12,7 +12,6 @@
 
 /* eslint-env mocha */
 
-import { AUDIT_TYPE_BROKEN_BACKLINKS } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
@@ -20,10 +19,10 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 
 import nock from 'nock';
-import trigger, { INITIAL_BACKLINKS_SLACK_MESSAGE } from '../../../src/controllers/trigger/backlinks.js';
+import trigger, { INITIAL_EXPERIMENT_SLACK_MESSAGE } from '../../../src/controllers/trigger/experiment.js';
 import { getQueryParams } from '../../../src/utils/slack/base.js';
 
-describe('Backlinks trigger', () => {
+describe('Experiment audit trigger', () => {
   let context;
   let dataAccessMock;
   let sqsMock;
@@ -40,7 +39,7 @@ describe('Backlinks trigger', () => {
         baseURL: 'http://site1.com',
         auditConfig: {
           auditTypeConfigs: {
-            'broken-backlinks': {
+            experimentation: {
               disabled: false,
             },
           },
@@ -56,14 +55,6 @@ describe('Backlinks trigger', () => {
       createOrganization({
         id: 'default',
         name: 'ABCD',
-        config: {
-          audits: {
-            auditsDisabled: false,
-            auditTypeConfigs: {
-              [AUDIT_TYPE_BROKEN_BACKLINKS]: { disabled: false },
-            },
-          },
-        },
       })];
 
     dataAccessMock = {
@@ -80,12 +71,12 @@ describe('Backlinks trigger', () => {
     sandbox.restore();
   });
 
-  it('triggers a backlinks audit', async () => {
+  it('triggers an experimentation audit', async () => {
     context = {
       log: console,
       dataAccess: dataAccessMock,
       sqs: sqsMock,
-      data: { type: 'broken-backlinks', url: 'ALL' },
+      data: { type: 'experimentation', url: 'ALL' },
       env: {
         AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com',
         SLACK_BOT_TOKEN: 'token',
@@ -97,7 +88,7 @@ describe('Backlinks trigger', () => {
 
     nock('https://slack.com')
       .get('/api/chat.postMessage')
-      .query(getQueryParams('DSA', INITIAL_BACKLINKS_SLACK_MESSAGE))
+      .query(getQueryParams('DSA', INITIAL_EXPERIMENT_SLACK_MESSAGE))
       .reply(200, {
         ok: true,
         channel: 'DSA',
@@ -108,7 +99,7 @@ describe('Backlinks trigger', () => {
     const result = await response.json();
 
     expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
-    expect(sqsMock.sendMessage.callCount).to.equal(1);
-    expect(result.message[0]).to.equal('Triggered broken-backlinks audit for site1');
+    expect(sqsMock.sendMessage.callCount).to.equal(2);
+    expect(result.message[0]).to.equal('Triggered experimentation audit for all 2 sites');
   });
 });

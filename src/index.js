@@ -30,11 +30,13 @@ import matchPath from './utils/route-utils.js';
 import AuditsController from './controllers/audits.js';
 import OrganizationsController from './controllers/organizations.js';
 import SitesController from './controllers/sites.js';
+import HooksController from './controllers/hooks.js';
 import SlackController from './controllers/slack.js';
 import trigger from './controllers/trigger.js';
 
 // prevents webpack build error
 import { App as SlackApp } from './utils/slack/bolt.cjs';
+import FulfillmentController from './controllers/event/fulfillment.js';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
@@ -80,10 +82,12 @@ async function run(request, context) {
   try {
     const routeHandlers = getRouteHandlers(
       AuditsController(context.dataAccess),
+      HooksController(context),
       OrganizationsController(context.dataAccess, log),
       SitesController(context.dataAccess, log),
       SlackController(SlackApp),
       trigger,
+      FulfillmentController(context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

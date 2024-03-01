@@ -43,24 +43,31 @@ function isStaticRoute(routePattern) {
  * - paramNames: an array of parameter names extracted from the route pattern
  *
  * @param auditsController
+ * @param hooksController
  * @param organizationsController
  * @param sitesController
  * @param slackController
  * @param triggerHandler
+ * @param fulfillmentController
  * @return {{staticRoutes: {}, dynamicRoutes: {}}}
  */
 export default function getRouteHandlers(
   auditsController,
+  hooksController,
   organizationsController,
   sitesController,
   slackController,
   triggerHandler,
+  fulfillmentController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
 
   const routeDefinitions = {
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
+    'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
+    'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
+    'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
     'GET /organizations': organizationsController.getAll,
     'POST /organizations': organizationsController.createOrganization,
     'GET /organizations/:organizationId': organizationsController.getByID,

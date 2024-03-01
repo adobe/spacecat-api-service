@@ -12,6 +12,7 @@
 
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import AuditConfig from '@adobe/spacecat-shared-data-access/src/models/site/audit-config.js';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { AuditDto } from './audit.js';
 
 /**
@@ -35,6 +36,7 @@ export const SiteDto = {
       createdAt: jsonObject.createdAt,
       updatedAt: jsonObject.updatedAt,
       auditConfig: AuditConfig.fromDynamoItem(jsonObject.auditConfig),
+      config: jsonObject.config,
       audits: jsonObject.audits ? jsonObject.audits.map((audit) => AuditDto.fromJson(audit)) : [],
     };
 
@@ -65,6 +67,7 @@ export const SiteDto = {
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
     auditConfig: AuditConfig.toDynamoItem(site.getAuditConfig()),
+    config: Config.toDynamoItem(site.getConfig()),
     ...(site.getAudits().length > 0
       && { audits: [AuditDto.toAbbreviatedJSON(site.getAudits()[0])] }),
   }),

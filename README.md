@@ -86,3 +86,9 @@ AUDIT_REPORT_SLACK_CHANNEL_ID=slack channel id to send the audit reports to
 RUM_DOMAIN_KEY=global domain key for the rum api
 SLACK_BOT_TOKEN=slack bot's token,
 ```
+
+Fulfillment worker requires the following env variable:
+
+```plaintext
+FULFILLMENT_EVENTS_QUEUE_URL=url of the queue to send fulfillment events to
+```

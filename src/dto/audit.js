@@ -10,7 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
+import {
+  createAudit, AUDIT_TYPE_BROKEN_BACKLINKS, AUDIT_TYPE_ORGANIC_TRAFFIC, AUDIT_TYPE_ORGANIC_KEYWORDS,
+} from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 
 /**
  * Data transfer object for Site.
@@ -74,27 +76,35 @@ export const AuditDto = {
    * siteId: string
    * }} JSON object.
    */
-  toAbbreviatedJSON: (audit) => ({
-    auditResult: {
-      finalUrl: audit.getAuditResult()?.finalUrl,
-      runtimeError: audit.getAuditResult()?.runtimeError,
-      scores: audit.getAuditResult()?.scores,
-      totalBlockingTime: audit.getAuditResult()?.totalBlockingTime,
-    },
-    previousAuditResult: {
-      finalUrl: audit.getPreviousAuditResult()?.finalUrl,
-      runtimeError: audit.getPreviousAuditResult()?.runtimeError,
-      scores: audit.getPreviousAuditResult()?.scores,
-      totalBlockingTime: audit.getPreviousAuditResult()?.totalBlockingTime,
-      fullAuditRef: audit.getPreviousAuditResult()?.fullAuditRef,
-      auditedAt: audit.getPreviousAuditResult()?.auditedAt,
-    },
-    auditType: audit.getAuditType(),
-    auditedAt: audit.getAuditedAt(),
-    expiresAt: audit.getExpiresAt().toISOString(),
-    fullAuditRef: audit.getFullAuditRef(),
-    isLive: audit.isLive(),
-    isError: audit.isError(),
-    siteId: audit.getSiteId(),
-  }),
+  toAbbreviatedJSON: (audit) => {
+    if (audit.getAuditType() === AUDIT_TYPE_BROKEN_BACKLINKS
+      || audit.getAuditType() === AUDIT_TYPE_ORGANIC_KEYWORDS
+      || audit.getAuditType() === AUDIT_TYPE_ORGANIC_TRAFFIC) {
+      return AuditDto.toJSON(audit);
+    }
+    return {
+      auditResult: {
+        finalUrl: audit.getAuditResult()?.finalUrl,
+        runtimeError: audit.getAuditResult()?.runtimeError,
+        scores: audit.getAuditResult()?.scores,
+        totalBlockingTime: audit.getAuditResult()?.totalBlockingTime,
+      },
+      previousAuditResult: {
+        finalUrl: audit.getPreviousAuditResult()?.finalUrl,
+        runtimeError: audit.getPreviousAuditResult()?.runtimeError,
+        scores: audit.getPreviousAuditResult()?.scores,
+        totalBlockingTime: audit.getPreviousAuditResult()?.totalBlockingTime,
+        fullAuditRef: audit.getPreviousAuditResult()?.fullAuditRef,
+        auditedAt: audit.getPreviousAuditResult()?.auditedAt,
+      },
+      auditType: audit.getAuditType(),
+      auditedAt: audit.getAuditedAt(),
+      expiresAt: audit.getExpiresAt()
+        .toISOString(),
+      fullAuditRef: audit.getFullAuditRef(),
+      isLive: audit.isLive(),
+      isError: audit.isError(),
+      siteId: audit.getSiteId(),
+    };
+  },
 };

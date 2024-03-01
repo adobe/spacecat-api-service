@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import { AUDIT_TYPE_BROKEN_BACKLINKS } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
+import { AUDIT_TYPE_ORGANIC_TRAFFIC } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
@@ -20,10 +20,10 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 
 import nock from 'nock';
-import trigger, { INITIAL_BACKLINKS_SLACK_MESSAGE } from '../../../src/controllers/trigger/backlinks.js';
+import trigger, { INITIAL_ORGANIC_TRAFFIC_SLACK_MESSAGE } from '../../../src/controllers/trigger/organictraffic.js';
 import { getQueryParams } from '../../../src/utils/slack/base.js';
 
-describe('Backlinks trigger', () => {
+describe('Organic Traffic trigger', () => {
   let context;
   let dataAccessMock;
   let sqsMock;
@@ -40,7 +40,7 @@ describe('Backlinks trigger', () => {
         baseURL: 'http://site1.com',
         auditConfig: {
           auditTypeConfigs: {
-            'broken-backlinks': {
+            'organic-traffic': {
               disabled: false,
             },
           },
@@ -60,7 +60,7 @@ describe('Backlinks trigger', () => {
           audits: {
             auditsDisabled: false,
             auditTypeConfigs: {
-              [AUDIT_TYPE_BROKEN_BACKLINKS]: { disabled: false },
+              [AUDIT_TYPE_ORGANIC_TRAFFIC]: { disabled: false },
             },
           },
         },
@@ -80,12 +80,12 @@ describe('Backlinks trigger', () => {
     sandbox.restore();
   });
 
-  it('triggers a backlinks audit', async () => {
+  it('triggers an organic traffic audit', async () => {
     context = {
       log: console,
       dataAccess: dataAccessMock,
       sqs: sqsMock,
-      data: { type: 'broken-backlinks', url: 'ALL' },
+      data: { type: 'organic-traffic', url: 'ALL' },
       env: {
         AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com',
         SLACK_BOT_TOKEN: 'token',
@@ -97,7 +97,7 @@ describe('Backlinks trigger', () => {
 
     nock('https://slack.com')
       .get('/api/chat.postMessage')
-      .query(getQueryParams('DSA', INITIAL_BACKLINKS_SLACK_MESSAGE))
+      .query(getQueryParams('DSA', INITIAL_ORGANIC_TRAFFIC_SLACK_MESSAGE))
       .reply(200, {
         ok: true,
         channel: 'DSA',
@@ -109,6 +109,6 @@ describe('Backlinks trigger', () => {
 
     expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(1);
-    expect(result.message[0]).to.equal('Triggered broken-backlinks audit for site1');
+    expect(result.message[0]).to.equal('Triggered organic-traffic audit for site1');
   });
 });
