@@ -56,8 +56,8 @@
   "dependencies": {
     "@adobe/fetch": "4.1.1",
     "@adobe/helix-shared-body-data": "2.0.2",
-    "@adobe/helix-shared-bounce": "2.0.16",
-    "@adobe/helix-shared-secrets": "2.2.4",
+    "@adobe/helix-shared-bounce": "2.0.17",
+    "@adobe/helix-shared-secrets": "2.2.5",
     "@adobe/helix-shared-utils": "3.0.1",
     "@adobe/helix-shared-wrap": "2.0.1",
     "@adobe/helix-status": "10.0.11",
@@ -73,7 +73,7 @@
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.6",
-    "@adobe/helix-deploy": "11.0.6",
+    "@adobe/helix-deploy": "11.0.7",
     "@adobe/helix-universal": "4.5.0",
     "@adobe/semantic-release-coralogix": "1.1.27",
     "@adobe/semantic-release-skms-cmr": "1.0.14",
