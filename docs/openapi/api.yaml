@@ -47,6 +47,8 @@ paths:
     $ref: './hooks-api.yaml#/site-detection-cdn'
   /hooks/site-detection/rum/{hookSecret}:
     $ref: './hooks-api.yaml#/site-detection-rum'
+  /hooks/site-integration/analytics/{hookSecret}:
+    $ref: './hooks-api.yaml#/site-integration-analytics'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
