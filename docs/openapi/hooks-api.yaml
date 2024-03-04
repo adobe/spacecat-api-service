@@ -58,7 +58,7 @@ site-detection-rum:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-site-integration-analaytics:
+site-integration-analytics:
   parameters:
     - $ref: './parameters.yaml#/hookSecret'
   post:
