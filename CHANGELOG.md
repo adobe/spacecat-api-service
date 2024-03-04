@@ -1,3 +1,10 @@
+# [1.25.0](https://github.com/adobe/spacecat-api-service/compare/v1.24.3...v1.25.0) (2024-03-04)
+
+
+### Features
+
+* sitemap detection audit ([#136](https://github.com/adobe/spacecat-api-service/issues/136)) ([a922e65](https://github.com/adobe/spacecat-api-service/commit/a922e655273e8edbcdec3d33a8e9c9ce5ac06bad))
+
 ## [1.24.3](https://github.com/adobe/spacecat-api-service/compare/v1.24.2...v1.24.3) (2024-03-03)
 
 
