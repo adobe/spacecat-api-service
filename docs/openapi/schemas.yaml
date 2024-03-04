@@ -658,7 +658,7 @@ AnalyticsSiteIntegration:
       additionalProperties:
         type: string
       require:
-        - prod
+        - production
       properties:
         development:
           description: The URL or ID of the development data collection script
