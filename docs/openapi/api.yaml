@@ -94,3 +94,5 @@ components:
       name: x-api-key
   schemas:
     $ref: './schemas.yaml'
+  examples:
+    $ref: './examples.yaml'

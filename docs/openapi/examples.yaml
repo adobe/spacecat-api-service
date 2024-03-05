@@ -1,0 +1,92 @@
+analytics-site-integration-aa-tags:
+  summary: Example for an integration with Adobe Analytics via Adobe Tags
+  value:
+    baseURL: 'https://www.example.com'
+    reporting:
+      link: 'https://www5.an.adobe.com/x/5_19xzaq4'
+      timezone: 'UTC-07:00'
+    dataCollection:
+      type: 'adobe-tags'
+      environments:
+        development: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678-development.min.js'
+        production: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678.min.js'
+    dataStore:
+      type: 'adobe-analytics'
+      id: 'ageo1xxpnwexamplerumanalytics'
+    dataMapping:
+      type: 'adobe-analytics'
+      mappings:
+        'All Page Views': 'event4'
+        'Page URL': 'evar2'
+        'Data Source': 'evar3'
+        'Site Domain': 'evar4'
+analytics-site-integration-aa-aep-websdk:
+  summary: Example for an integration with Adobe Analytics via Adobe Experience Platform and WebSDK
+  value:
+    baseURL: 'https://www.example.com'
+    reporting:
+      link: 'https://www5.an.adobe.com/x/5_19xzaq4'
+      timezone: 'UTC-07:00'
+    dataCollection:
+      type: 'aep-websdk'
+      environments:
+        development: 'caad777c-c410-4ceb-8b36-167f12435'
+        production: 'caad777c-c410-4ceb-43f2-167f12435'
+    dataStore:
+      type: 'adobe-analytics'
+      id: 'ageo1xxpnwexamplerumanalytics'
+    dataMapping:
+      type: 'xdm'
+      mappings:
+        'All Page Views': 'web.webPageDetails.pageViews.value'
+        'Page URL': 'web.webPageDetails.URL'
+        'Data Source': '_example.dataSource'
+        'Site Domain': 'web.webPageDetails.server'
+analytics-site-integration-cja-tags:
+  summary: Example for an integration with Customer Adobe Analytics via Adobe Experience Platform and Adobe Tags
+  value:
+    baseURL: 'https://www.example.com'
+    reporting:
+      link: 'https://analytics.adobe.com/?linkId=8296eaea-aa9a-4840-8a86-71df75661&dpc=acc'
+      timezone: 'UTC-07:00'
+    dataCollection:
+      type: 'adobe-tags'
+      environments:
+        development: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678-development.min.js'
+        production: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678.min.js'
+    dataStore:
+      type: 'aep'
+      id: '64cd250cdc886828d309a2215'
+    dataSchema:
+      id: 'https://ns.adobe.com/example/schemas/203ff63ed073c85d5fad4274f27d2fc2e9b834b06778f8'
+    dataMapping:
+      type: 'xdm'
+      mappings:
+        'All Page Views': 'web.webPageDetails.pageViews.value'
+        'Page URL': 'web.webPageDetails.URL'
+        'Data Source': '_example.dataSource'
+        'Site Domain': 'web.webPageDetails.server'
+analytics-site-integration-cja-websdk:
+  summary: Example for an integration with Customer Adobe Analytics via Adobe Experience Platform and WebSDK
+  value:
+    baseURL: 'https://www.example.com'
+    reporting:
+      link: 'https://analytics.adobe.com/?linkId=8296eaea-aa9a-4840-8a86-71df75661&dpc=acc'
+      timezone: 'UTC-07:00'
+    dataCollection:
+      type: 'aep-websdk'
+      environments:
+        development: 'caad777c-c410-4ceb-8b36-167f12435'
+        production: 'caad777c-c410-4ceb-43f2-167f12435'
+    dataStore:
+      type: 'aep'
+      id: '64cd250cdc886828d309a2215'
+    dataSchema:
+      id: 'https://ns.adobe.com/example/schemas/203ff63ed073c85d5fad4274f27d2fc2e9b834b06778f8'
+    dataMapping:
+      type: 'xdm'
+      mappings:
+        'All Page Views': 'web.webPageDetails.pageViews.value'
+        'Page URL': 'web.webPageDetails.URL'
+        'Data Source': '_example.dataSource'
+        'Site Domain': 'web.webPageDetails.server'
