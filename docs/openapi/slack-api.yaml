@@ -1,0 +1,54 @@
+create:
+  post:
+    tags:
+      - slack
+    summary: Request a new Slack channel
+    description: |
+      This endpoint can be used to request the creation of a new Slack channel 
+      for the given organization. As a prerequisite, there must be an existing 
+      Spacecat organization for the given IMS org ID in order to create the channel.
+    operationId: createSlackChannel
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SlackChannelCreateRequest'
+    responses:
+      '202':
+        description: Request accepted, invite(s) to follow by email if successful
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+invite:
+  post:
+    tags:
+      - slack
+    summary: Request invitation to an existing Slack channel
+    description: |
+      This endpoint can be used to invite users to an organization's Slack 
+      channel. As a prerequisite, there must be an existing Spacecat organization
+      and Slack channel for the given IMS org ID.
+    operationId: inviteToSlackChannel
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SlackChannelInviteRequest'
+    responses:
+      '202':
+        description: Request accepted, invite(s) to follow by email if successful
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
