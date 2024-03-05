@@ -24,6 +24,7 @@ export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
+const MAX_CHUNK_SIZE = '25';
 
 /**
  * Extracts a URL from a given input string. The input can be in a Slack message
@@ -100,6 +101,14 @@ const postSiteNotFoundMessage = async (say, baseURL) => {
   await say(`:x: No site found with base URL '${baseURL}'.`);
 };
 
+const splitBlocksIntoChunks = (blocks, chunkSize = MAX_CHUNK_SIZE) => {
+  const chunks = [];
+  for (let i = 0; i < blocks.length; i += chunkSize) {
+    chunks.push(blocks.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
 /**
  * Sends a message with blocks to the user.
  *
@@ -125,8 +134,11 @@ const sendMessageBlocks = async (say, textSections, additionalBlocks = []) => {
   });
 
   blocks.push(...additionalBlocks);
-
-  await say({ blocks });
+  const chunks = splitBlocksIntoChunks(blocks);
+  for (const chunk of chunks) {
+    // eslint-disable-next-line no-await-in-loop
+    await say({ blocks: chunk });
+  }
 };
 
 /**
