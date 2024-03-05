@@ -128,7 +128,7 @@ function generatePaginationBlocks(
         type: 'plain_text',
         text: 'Previous',
       },
-      value: `${String(start - PAGE_SIZE)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
+      value: `${String(start - PAGE_SIZE)}:${filterStatus}:${psiStrategy}:${deliveryType}:${threadTs}`,
       action_id: 'paginate_sites_prev',
     });
   }
@@ -142,7 +142,7 @@ function generatePaginationBlocks(
         type: 'plain_text',
         text: `${i + 1}`,
       },
-      value: `${String(pageStart)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
+      value: `${String(pageStart)}:${filterStatus}:${psiStrategy}:${deliveryType}:${threadTs}`,
       action_id: `paginate_sites_page_${i + 1}`,
     });
   }
@@ -155,16 +155,10 @@ function generatePaginationBlocks(
         type: 'plain_text',
         text: 'Next',
       },
-      value: `${String(start + PAGE_SIZE)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
+      value: `${String(start + PAGE_SIZE)}:${filterStatus}:${psiStrategy}:${deliveryType}:${threadTs}`,
       action_id: 'paginate_sites_next',
     });
   }
-
-  // Modify each block to include thread_ts in the value
-  blocks.forEach((block) => {
-    // eslint-disable-next-line no-param-reassign
-    block.value += `:${threadTs}`;
-  });
 
   return {
     type: 'actions',
