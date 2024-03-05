@@ -647,25 +647,6 @@ AnalyticsSiteIntegration:
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
-    dataCollection:
-      description: |
-        The configuration for the data collection to embed on the site.
-        The keys represent the environments (development, staging, production).
-        The values represent the URL or ID of the data collection script.
-        For Adobe Analytics and Customer Journey Analytics, the values are either
-        URL for the Adobe Launch script or the datastream ID.
-      type: object
-      additionalProperties:
-        type: string
-      required:
-        - production
-      properties:
-        development:
-          description: The URL or ID of the development data collection script
-          type: string
-        production:
-          description: The URL or ID of the production data collection script
-          type: string
     reporting:
       description: The reporting details
       type: object
@@ -673,24 +654,61 @@ AnalyticsSiteIntegration:
         - link
       additionalProperties: true
       properties:
-          link:
-            description: |
-              The link to the report in the reporting tool.
-              For Adobe Analytics and Customer Journey Analytics, the link to the Analysis Workspace report.
-            $ref: '#/URL'
-          timezone:
-            description: The timezone for the data in the report
+        link:
+          description: |
+            The link to the report in the reporting tool.
+            For Adobe Analytics and Customer Journey Analytics, the link to the Analysis Workspace report.
+          $ref: '#/URL'
+        timezone:
+          description: The timezone for the data in the report
+          type: string
+    dataCollection:
+      description: The configuration for the data collection to embed on the site.
+      type: object
+      required:
+        - type
+        - environments
+      properties:
+        type:
+          description: The type of the data collection
+          type: string
+          enum:
+            - 'adobe-tags'
+            - 'aep-websdk'
+        environments:
+          description: |
+            The environments for the data collection script.
+            At least the script for the production environment is required.
+            The keys represent the environments (development, staging, production).
+            The values represent the URL or ID of the data collection script.
+            For Adobe Analytics and Customer Journey Analytics, the values are either
+            URL for the Adobe Launch script or the datastream ID.
+          type: object
+          additionalProperties:
             type: string
+          required:
+            - production
+          properties:
+            production:
+              description: The URL or ID of the production data collection script
+              type: string
     dataStore:
       description: The data store details
       type: object
       required:
         - id
+        - type
       additionalProperties: true
       properties:
         id:
           description: The ID of the data store
           type: string
+        type:
+          description: The type of the data store
+          type: string
+          enum:
+            - 'adobe-analytics'
+            - 'aep'
     dataSchema:
       description: The data schema details
       type: object
@@ -702,67 +720,117 @@ AnalyticsSiteIntegration:
           description: The ID of the data schema
           type: string
     dataMapping:
-      description: |
-        The data mapping details. The keys represent human-friendly naming of metrics and dimensions captured by the 
-        instrumentation of the site. The values represent the corresponding metric and dimension names in the data store.
-        For Adobe Analytics, the values are either evars or events.
-        For Customer Journey Analytics, the values are the paths in the data schema.
+      description: The data mapping details
       type: object
-      additionalProperties:
-        type: string
+      required:
+        - type
+        - mappings
+      properties:
+        type:
+          description: The type of the data mapping
+          type: string
+          enum:
+            - 'adobe-analytics'
+            - 'xdm'
+        mappings:
+          description: |
+            The data mapping details. The keys represent human-friendly naming of metrics and dimensions captured by the
+            instrumentation of the site. The values represent the corresponding metric and dimension names in the data store.
+            For Adobe Analytics, the values are either evars or events.
+            For XDM, the values are the paths in the data schema.
+          type: object
+          additionalProperties:
+            type: string
   examples:
-    example-generic:
-      summary: Example for an integration with a generic analytics solution
+    example-aa-tags:
+      summary: Example for an integration with Adobe Analytics via Adobe Tags
       value:
         baseURL: 'https://www.example.com'
-        dataCollection:
-          development: 'https://www.example.com/analytics-tracking-dev?id=24353456576.js'
-          production: 'https://www.example.com/analytics-tracking?id=24353456576.js'
-        reporting:
-          link: 'https://www.analytics/reports/some-report-id'
-          timezone: 'UTC-07:00'
-        dataStore:
-          id: 'example-data-store-id'
-        dataSchema:
-          id: 'example-schema-id'
-        dataMapping:
-          'All Page Views': 'metric1'
-          'Page URL': 'dimension1'
-          'Data Source': 'dimension2'
-          'Site Domain': 'dimension3'
-    example-aa:
-      summary: Example for an integration with Adobe Analytics
-      value:
-        baseURL: 'https://www.example.com'
-        dataCollection:
-          development: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678-development.min.js'
-          production: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678.min.js'
         reporting:
           link: 'https://www5.an.adobe.com/x/5_19xzaq4'
           timezone: 'UTC-07:00'
+        dataCollection:
+          type: 'adobe-tags'
+          environments:
+            development: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678-development.min.js'
+            production: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678.min.js'
         dataStore:
+          type: 'adobe-analytics'
           id: 'ageo1xxpnwexamplerumanalytics'
         dataMapping:
-          'All Page Views': 'event4'
-          'Page URL': 'evar2'
-          'Data Source': 'evar3'
-          'Site Domain': 'evar4'
-    example-cja:
-      summary: Example for an integration with Customer Adobe Analytics via Adobe Experience Platform
+          type: 'adobe-analytics'
+          mappings:
+            'All Page Views': 'event4'
+            'Page URL': 'evar2'
+            'Data Source': 'evar3'
+            'Site Domain': 'evar4'
+    example-aa-aep-websdk:
+      summary: Example for an integration with Adobe Analytics via Adobe Experience Platform and WebSDK
       value:
         baseURL: 'https://www.example.com'
+        reporting:
+          link: 'https://www5.an.adobe.com/x/5_19xzaq4'
+          timezone: 'UTC-07:00'
         dataCollection:
-          development: 'caad777c-c410-4ceb-8b36-167f12435'
-          production: 'caad777c-c410-4ceb-43f2-167f12435'
+          type: 'aep-websdk'
+          environments:
+            development: 'caad777c-c410-4ceb-8b36-167f12435'
+            production: 'caad777c-c410-4ceb-43f2-167f12435'
+        dataStore:
+          type: 'adobe-analytics'
+          id: 'ageo1xxpnwexamplerumanalytics'
+        dataMapping:
+          type: 'xdm'
+          mappings:
+            'All Page Views': 'web.webPageDetails.pageViews.value'
+            'Page URL': 'web.webPageDetails.URL'
+            'Data Source': '_example.dataSource'
+            'Site Domain': 'web.webPageDetails.server'
+    example-cja-tags:
+      summary: Example for an integration with Customer Adobe Analytics via Adobe Experience Platform and Adobe Tags
+      value:
+        baseURL: 'https://www.example.com'
         reporting:
           link: 'https://analytics.adobe.com/?linkId=8296eaea-aa9a-4840-8a86-71df75661&dpc=acc'
           timezone: 'UTC-07:00'
+        dataCollection:
+          type: 'adobe-tags'
+          environments:
+            development: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678-development.min.js'
+            production: 'https://assets.adobedtm.com/51b39232f777/342ccd9ca453/launch-e2732f4a5678.min.js'
         dataStore:
+          type: 'aep'
           id: '64cd250cdc886828d309a2215'
         dataSchema:
           id: 'https://ns.adobe.com/example/schemas/203ff63ed073c85d5fad4274f27d2fc2e9b834b06778f8'
         dataMapping:
-          'All Page Views': 'web.webPageDetails.pageViews.value'
-          'Page URL': 'web.webPageDetails.URL'
-          'Data Source': '_example.dataSource'
-          'Site Domain': 'web.webPageDetails.server'
+          type: 'xdm'
+          mappings:
+            'All Page Views': 'web.webPageDetails.pageViews.value'
+            'Page URL': 'web.webPageDetails.URL'
+            'Data Source': '_example.dataSource'
+            'Site Domain': 'web.webPageDetails.server'
+    example-cja-websdk:
+      summary: Example for an integration with Customer Adobe Analytics via Adobe Experience Platform and WebSDK
+      value:
+        baseURL: 'https://www.example.com'
+        reporting:
+          link: 'https://analytics.adobe.com/?linkId=8296eaea-aa9a-4840-8a86-71df75661&dpc=acc'
+          timezone: 'UTC-07:00'
+        dataCollection:
+          type: 'aep-websdk'
+          environments:
+            development: 'caad777c-c410-4ceb-8b36-167f12435'
+            production: 'caad777c-c410-4ceb-43f2-167f12435'
+        dataStore:
+          type: 'aep'
+          id: '64cd250cdc886828d309a2215'
+        dataSchema:
+          id: 'https://ns.adobe.com/example/schemas/203ff63ed073c85d5fad4274f27d2fc2e9b834b06778f8'
+        dataMapping:
+          type: 'xdm'
+          mappings:
+            'All Page Views': 'web.webPageDetails.pageViews.value'
+            'Page URL': 'web.webPageDetails.URL'
+            'Data Source': '_example.dataSource'
+            'Site Domain': 'web.webPageDetails.server'
