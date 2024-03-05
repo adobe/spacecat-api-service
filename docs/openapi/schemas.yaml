@@ -657,7 +657,7 @@ AnalyticsSiteIntegration:
       type: object
       additionalProperties:
         type: string
-      require:
+      required:
         - production
       properties:
         development:
