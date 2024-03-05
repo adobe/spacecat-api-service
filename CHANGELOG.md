@@ -1,3 +1,10 @@
+## [1.25.1](https://github.com/adobe/spacecat-api-service/compare/v1.25.0...v1.25.1) (2024-03-05)
+
+
+### Bug Fixes
+
+* get sites slack command ([b82fc09](https://github.com/adobe/spacecat-api-service/commit/b82fc0950e530d04af88aad493d3fb8ec94ef33f))
+
 # [1.25.0](https://github.com/adobe/spacecat-api-service/compare/v1.24.3...v1.25.0) (2024-03-04)
 
 
