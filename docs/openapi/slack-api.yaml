@@ -4,6 +4,8 @@ create-aem-project-channel:
       - slack
     summary: Request a new Slack channel for an AEM project
     description: |
+      *Note: Not implemented yet.*
+      
       This endpoint can be used to request the creation of a new Slack channel 
       for the given organization. Channel will be created with the name 
       "#aem-\<imsTenantId\>(-\<optionalSuffix\>)". As a prerequisite, there must be 
@@ -33,6 +35,8 @@ invite-by-email:
       - slack
     summary: Request invitation to an existing Slack channel
     description: |
+      *Note: Not implemented yet.*
+      
       This endpoint can be used to invite users to an organization's Slack 
       channel by email address. As a prerequisite, there must be an existing
       Spacecat organization and Slack channel for the given IMS org ID.
