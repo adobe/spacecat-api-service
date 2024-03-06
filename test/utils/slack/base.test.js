@@ -153,8 +153,8 @@ describe('Base Slack Utils', () => {
           { type: 'divider' },
         ];
 
-        expect(say.calledOnce).to.be.true;
-        expect(say.firstCall.args[0]).to.deep.equal({ blocks: expectedBlocks });
+        expect(say.callCount).to.equal(3);
+        expect(say.firstCall.args[0]).to.deep.equal({ blocks: [expectedBlocks[0]] });
       });
 
       it('sends a message with only the text sections if no additional blocks are provided', async () => {
