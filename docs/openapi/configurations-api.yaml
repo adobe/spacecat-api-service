@@ -1,0 +1,19 @@
+configurations:
+  get:
+    summary: Get all application configurations
+    operationId: getAllConfigurations
+    security:
+      - admin_key: [ ]
+    responses:
+      '200':
+        description: A list of all known configurations or empty list if no configurations are present.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Configuration'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
