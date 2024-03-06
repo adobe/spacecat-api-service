@@ -38,6 +38,7 @@ ImsOrganizationId:
   example: '1234567890ABCDEF12345678@AdobeOrg'
 EmailAddress:
   type: string
+  format: email
   example: 'user@example.com'
 SlackMentionConfig:
   type: object
@@ -637,16 +638,16 @@ RUMDomainDiscoveryAlert:
     domain:
       description: Domain of the page which triggered the domain discovery alert
       $ref: '#/Domain'
-SlackChannelCreateRequest:
+SlackCreateAemProjectChannelRequest:
   type: object
   required:
     - imsOrgId
-    - users
+    - emails
   properties:
     imsOrgId:
       description: The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
-    users:
+    emails:
       description: Email addresses to invite to the Slack channel. Must be members of the IMS org
       type: array
       items:
@@ -655,16 +656,16 @@ SlackChannelCreateRequest:
       description: Optional. The suffix to append to the channel name, after `#aem-<tenantId>-`
       type: string
       example: 'new-project'
-SlackChannelInviteRequest:
+SlackInviteToChannelByEmailRequest:
   type: object
   required:
     - imsOrgId
-    - users
+    - emails
   properties:
     imsOrgId:
       description: The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
-    users:
+    emails:
       description: Email addresses to invite to the Slack channel. Must be members of the IMS org
       type: array
       items:
