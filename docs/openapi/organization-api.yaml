@@ -86,6 +86,7 @@ organization-by-ims-org-id:
     summary: Retrieve an organization by IMS Org ID
     description: |
       Not implemented yet.
+
       This endpoint is useful for retrieving an organization by IMS Org ID.
     operationId: getOrganizationByImsOrgId
     responses:
@@ -114,6 +115,7 @@ organization-slack-config-by-ims-org-id:
     summary: Retrieve Slack config for an organization by IMS Org ID
     description: |
       Not implemented yet.
+      
       This endpoint is useful for retrieving the Slack config of an 
       organization by IMS Org ID.
     operationId: getSlackConfigByImsOrgId

@@ -37,6 +37,10 @@ Domain:
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
+EmailAddress:
+  type: string
+  format: email
+  example: 'user@example.com'
 SlackMentionConfig:
   type: object
   additionalProperties: true
@@ -635,6 +639,20 @@ RUMDomainDiscoveryAlert:
     domain:
       description: Domain of the page which triggered the domain discovery alert
       $ref: '#/Domain'
+SlackInviteToChannelByEmailRequest:
+  type: object
+  required:
+    - imsOrgId
+    - emails
+  properties:
+    imsOrgId:
+      description: The ID of the Adobe IMS organization
+      $ref: '#/ImsOrganizationId'
+    emails:
+      description: Email addresses to invite to the Slack channel. Must be members of the IMS org
+      type: array
+      items:
+        $ref: '#/EmailAddress'
 Configuration:
   type: object
   properties:
