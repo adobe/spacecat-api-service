@@ -28,6 +28,12 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-empty-config-or-validation-failure':
+  description: |
+    Bad request. No or empty request body or required Configuration properties missing.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '400-empty-request-body-validation-failure':
   description: |
     Bad request. No or empty request body or required Organization properties missing.
@@ -76,6 +82,11 @@
   description: Not authenticated.
 '404':
   description: Not found.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'404-configuration-not-found-with-version':
+  description: Configuration not found with this version.
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'

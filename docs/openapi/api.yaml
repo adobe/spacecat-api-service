@@ -37,10 +37,18 @@ tags:
     description: Trigger operations
   - name: hooks
     description: Webhooks for receiving events
+  - name: slack
+    description: Slack channel management
 
 paths:
   /audits/latest/{auditType}:
     $ref: './audits-api.yaml#/latest-audits'
+  /configurations:
+    $ref: './configurations-api.yaml#/configurations'
+  /configurations/latest:
+    $ref: './configuration-api.yaml#/latest-configuration'
+  /configurations/{version}:
+    $ref: './configuration-api.yaml#/configuration'
   /event/fulfillment:
     $ref: './event-api.yaml#/process-fulfillment-events'
   /hooks/site-detection/cdn/{hookSecret}:
@@ -77,6 +85,8 @@ paths:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/latest-audit/{auditType}:
     $ref: './audit-api.yaml#/latest-audit-for-site'
+  /slack/channels/invite-by-email:
+    $ref: './slack-api.yaml#/invite-by-email'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'
 
