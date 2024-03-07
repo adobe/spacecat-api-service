@@ -1,41 +1,10 @@
-create-aem-project-channel:
-  post:
-    tags:
-      - slack
-    summary: Request a new Slack channel for an AEM project
-    description: |
-      *Note: Not implemented yet.*
-      
-      This endpoint can be used to request the creation of a new Slack channel 
-      for the given organization. Channel will be created with the name 
-      "#aem-\<imsTenantId\>(-\<optionalSuffix\>)". As a prerequisite, there must be 
-      an existing Spacecat organization for the given IMS org ID in order to 
-      create the channel.
-    operationId: createAemProjectSlackChannel
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: './schemas.yaml#/SlackCreateAemProjectChannelRequest'
-    responses:
-      '202':
-        description: Request accepted, invite(s) to follow by email if successful
-      '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404-organization-not-found-with-id'
-      '500':
-        $ref: './responses.yaml#/500'
 invite-by-email:
   post:
     tags:
       - slack
-    summary: Request invitation to an existing Slack channel
+    summary: Request invitation to an organization's existing Slack channel
     description: |
-      *Note: Not implemented yet.*
+      Not implemented yet.
       
       This endpoint can be used to invite users to an organization's Slack 
       channel by email address. As a prerequisite, there must be an existing
