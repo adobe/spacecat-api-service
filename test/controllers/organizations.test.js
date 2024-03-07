@@ -37,7 +37,7 @@ describe('Organizations Controller', () => {
 
   const organizations = [
     { id: 'org1', name: 'Org 1' },
-    { id: 'org2', name: 'Org 2' },
+    { id: 'org2', name: 'Org 2', imsOrgId: '1234567890ABCDEF12345678@AdobeOrg' },
   ].map((org) => OrganizationDto.fromJson(org));
 
   const organizationFunctions = [
@@ -45,6 +45,7 @@ describe('Organizations Controller', () => {
     'getAll',
     'getByID',
     'getSitesForOrganization',
+    'getByImsOrgID',
     'removeOrganization',
     'updateOrganization',
   ];
@@ -60,6 +61,7 @@ describe('Organizations Controller', () => {
       getOrganizations: sandbox.stub().resolves(organizations),
       getOrganizationByID: sandbox.stub().resolves(organizations[0]),
       getSitesByOrganizationID: sandbox.stub().resolves([sites[0]]),
+      getOrganizationByImsOrgID: sandbox.stub().resolves(organizations[1]),
     };
 
     organizationsController = OrganizationsController(mockDataAccess);
@@ -237,5 +239,34 @@ describe('Organizations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Organization ID required');
+  });
+
+  it('gets an organization by IMS org ID', async () => {
+    const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
+    const result = await organizationsController.getByImsOrgID({ params: { imsOrgId } });
+    const organization = await result.json();
+
+    expect(mockDataAccess.getOrganizationByImsOrgID.calledOnce).to.be.true;
+
+    expect(organization).to.be.an('object');
+    expect(organization).to.have.property('imsOrgId', imsOrgId);
+  });
+
+  it('returns not found when an organization is not found by IMS org ID', async () => {
+    mockDataAccess.getOrganizationByImsOrgID.resolves(null);
+
+    const result = await organizationsController.getByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Organization not found by IMS org ID: not-found@AdobeOrg');
+  });
+
+  it('returns bad request if IMS org ID is not provided', async () => {
+    const result = await organizationsController.getByImsOrgID({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'IMS org ID required');
   });
 });

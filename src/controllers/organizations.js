@@ -85,6 +85,27 @@ function OrganizationsController(dataAccess) {
   };
 
   /**
+   * Gets an organization by its IMS organization ID.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<object>} Organization.
+   * @throws {Error} If IMS organization ID is not provided, or if not found.
+   */
+  const getByImsOrgID = async (context) => {
+    const imsOrgId = context.params?.imsOrgId;
+
+    if (!hasText(imsOrgId)) {
+      return badRequest('IMS org ID required');
+    }
+
+    const organization = await dataAccess.getOrganizationByImsOrgID(imsOrgId);
+    if (!organization) {
+      return notFound(`Organization not found by IMS org ID: ${imsOrgId}`);
+    }
+
+    return ok(OrganizationDto.toJSON(organization));
+  };
+
+  /**
    * Gets all sites for an organization.
    *
    * @param {object} context - Context of the request.
@@ -169,6 +190,7 @@ function OrganizationsController(dataAccess) {
     createOrganization,
     getAll,
     getByID,
+    getByImsOrgID,
     getSitesForOrganization,
     removeOrganization,
     updateOrganization,
