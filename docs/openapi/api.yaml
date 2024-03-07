@@ -43,6 +43,12 @@ tags:
 paths:
   /audits/latest/{auditType}:
     $ref: './audits-api.yaml#/latest-audits'
+  /configurations:
+    $ref: './configurations-api.yaml#/configurations'
+  /configurations/latest:
+    $ref: './configuration-api.yaml#/latest-configuration'
+  /configurations/{version}:
+    $ref: './configuration-api.yaml#/configuration'
   /event/fulfillment:
     $ref: './event-api.yaml#/process-fulfillment-events'
   /hooks/site-detection/cdn/{hookSecret}:
