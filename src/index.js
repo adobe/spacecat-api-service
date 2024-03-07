@@ -36,6 +36,7 @@ import trigger from './controllers/trigger.js';
 
 // prevents webpack build error
 import { App as SlackApp } from './utils/slack/bolt.cjs';
+import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 
 export function enrichPathInfo(fn) { // export for testing
@@ -82,6 +83,7 @@ async function run(request, context) {
   try {
     const routeHandlers = getRouteHandlers(
       AuditsController(context.dataAccess),
+      ConfigurationController(context.dataAccess),
       HooksController(context),
       OrganizationsController(context.dataAccess, log),
       SitesController(context.dataAccess, log),
