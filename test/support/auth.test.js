@@ -169,4 +169,28 @@ describe('auth', () => {
     expect(await resp.text()).to.equal('Server configuration error');
     expect(resp.status).to.equal(500);
   });
+
+  it('checks that an admin endpoint CANNOT be reached with the user API key', async () => {
+    context.pathInfo.suffix = '/event/fulfillment';
+    const resp = await action(new Request('https://space.cat/', {
+      headers: {
+        'x-api-key': context.env.USER_API_KEY,
+      },
+      method: 'POST',
+    }), context);
+
+    expect(resp.status).to.equal(401);
+  });
+
+  it('checks that an admin endpoint can be reached with the admin API key', async () => {
+    context.pathInfo.suffix = '/event/fulfillment';
+    const resp = await action(new Request('https://space.cat/', {
+      headers: {
+        'x-api-key': context.env.ADMIN_API_KEY,
+      },
+      method: 'POST',
+    }), context);
+
+    expect(resp).to.equal(42);
+  });
 });
