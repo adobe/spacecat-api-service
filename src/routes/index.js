@@ -77,6 +77,8 @@ export default function getRouteHandlers(
     'GET /organizations': organizationsController.getAll,
     'POST /organizations': organizationsController.createOrganization,
     'GET /organizations/:organizationId': organizationsController.getByID,
+    'GET /organizations/by-ims-org-id/:imsOrgId': organizationsController.getByImsOrgID,
+    'GET /organizations/by-ims-org-id/:imsOrgId/slack-config': organizationsController.getSlackConfigByImsOrgID,
     'PATCH /organizations/:organizationId': organizationsController.updateOrganization,
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
