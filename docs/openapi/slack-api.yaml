@@ -10,6 +10,8 @@ invite-by-email:
       channel by email address. As a prerequisite, there must be an existing
       Spacecat organization and Slack channel for the given IMS org ID.
     operationId: inviteToSlackChannelByEmail
+    security:
+      - admin_key: [ ]
     requestBody:
       required: true
       content:
