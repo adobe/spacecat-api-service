@@ -25,6 +25,13 @@ describe('getRouteHandlers', () => {
     getLatestForSite: sinon.stub(),
   };
 
+  const mockConfigurationController = {
+    getAll: sinon.stub(),
+    getByVersion: sinon.stub(),
+    getLatest: sinon.stub(),
+    updateConfiguration: sinon.stub(),
+  };
+
   const mockHooksController = {
   };
 
@@ -59,6 +66,7 @@ describe('getRouteHandlers', () => {
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
+      mockConfigurationController,
       mockHooksController,
       mockOrganizationsController,
       mockSitesController,
@@ -68,6 +76,9 @@ describe('getRouteHandlers', () => {
     );
 
     expect(staticRoutes).to.have.all.keys(
+      'GET /configurations',
+      'GET /configurations/latest',
+      'PUT /configurations/latest',
       'GET /organizations',
       'POST /organizations',
       'GET /sites',
@@ -80,6 +91,9 @@ describe('getRouteHandlers', () => {
       'POST /event/fulfillment',
     );
 
+    expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
+    expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
+    expect(staticRoutes['PUT /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);
     expect(staticRoutes['GET /sites']).to.equal(mockSitesController.getAll);
@@ -90,6 +104,7 @@ describe('getRouteHandlers', () => {
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
+      'GET /configurations/:version',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
@@ -113,6 +128,8 @@ describe('getRouteHandlers', () => {
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
     expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);
+    expect(dynamicRoutes['GET /configurations/:version'].handler).to.equal(mockConfigurationController.getByVersion);
+    expect(dynamicRoutes['GET /configurations/:version'].paramNames).to.deep.equal(['version']);
     expect(dynamicRoutes['GET /organizations/:organizationId'].handler).to.equal(mockOrganizationsController.getByID);
     expect(dynamicRoutes['GET /organizations/:organizationId'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['GET /organizations/:organizationId/sites'].handler).to.equal(mockOrganizationsController.getSitesForOrganization);

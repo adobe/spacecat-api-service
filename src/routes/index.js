@@ -42,17 +42,19 @@ function isStaticRoute(routePattern) {
  * - handler: the route handler function
  * - paramNames: an array of parameter names extracted from the route pattern
  *
- * @param auditsController
- * @param hooksController
- * @param organizationsController
- * @param sitesController
- * @param slackController
- * @param triggerHandler
- * @param fulfillmentController
- * @return {{staticRoutes: {}, dynamicRoutes: {}}}
+ * @param {Object} auditsController - The audits controller.
+ * @param {Object} configurationController - The configuration controller.
+ * @param {Object} hooksController - The hooks controller.
+ * @param {Object} organizationsController - The organizations controller.
+ * @param {Object} sitesController - The sites controller.
+ * @param {Object} slackController - The slack controller.
+ * @param {Function} triggerHandler - The trigger handler function.
+ * @param {Object} fulfillmentController - The fulfillment controller.
+ * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
   auditsController,
+  configurationController,
   hooksController,
   organizationsController,
   sitesController,
@@ -65,6 +67,10 @@ export default function getRouteHandlers(
 
   const routeDefinitions = {
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
+    'GET /configurations': configurationController.getAll,
+    'GET /configurations/latest': configurationController.getLatest,
+    'PUT /configurations/latest': configurationController.updateConfiguration,
+    'GET /configurations/:version': configurationController.getByVersion,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
