@@ -21,6 +21,7 @@ const ANONYMOUS_ENDPOINTS = [
 const ADMIN_ENDPOINTS = [
   'GET /trigger',
   'POST /sites',
+  'POST /event/fulfillment',
 ];
 
 /*
