@@ -1,3 +1,10 @@
+## [1.26.1](https://github.com/adobe/spacecat-api-service/compare/v1.26.0...v1.26.1) (2024-03-08)
+
+
+### Bug Fixes
+
+* configure /event/fulfillment as one of the ADMIN_ENDPOINTS ([#199](https://github.com/adobe/spacecat-api-service/issues/199)) ([a2759c7](https://github.com/adobe/spacecat-api-service/commit/a2759c7c43b24b3107c992ce7ff56c0b07bb4dee))
+
 # [1.26.0](https://github.com/adobe/spacecat-api-service/compare/v1.25.1...v1.26.0) (2024-03-08)
 
 
