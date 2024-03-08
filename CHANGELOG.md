@@ -1,6 +1,18 @@
 # [1.26.0](https://github.com/adobe/spacecat-api-service/compare/v1.25.1...v1.26.0) (2024-03-08)
 
 
+### Bug Fixes
+
+* openapi spec - security key ([d28e77c](https://github.com/adobe/spacecat-api-service/commit/d28e77c37c664534ed0b29f3c397c59c1922ff02))
+
+
+### Features
+
+* get and update configurations ([#198](https://github.com/adobe/spacecat-api-service/issues/198)) ([269ba10](https://github.com/adobe/spacecat-api-service/commit/269ba103c3e03f85e22105a6604e5c82bbee9a2a))
+
+# [1.26.0](https://github.com/adobe/spacecat-api-service/compare/v1.25.1...v1.26.0) (2024-03-08)
+
+
 ### Features
 
 * get and update configurations ([#198](https://github.com/adobe/spacecat-api-service/issues/198)) ([269ba10](https://github.com/adobe/spacecat-api-service/commit/269ba103c3e03f85e22105a6604e5c82bbee9a2a))
