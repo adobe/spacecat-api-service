@@ -1,3 +1,10 @@
+# [1.27.0](https://github.com/adobe/spacecat-api-service/compare/v1.26.1...v1.27.0) (2024-03-08)
+
+
+### Features
+
+* Endpoints for querying SpaceCat organization details by IMS org ID ([#200](https://github.com/adobe/spacecat-api-service/issues/200)) ([76cdba1](https://github.com/adobe/spacecat-api-service/commit/76cdba1dd88dc33a45b0f4f6e90f9d664a48380b))
+
 ## [1.26.1](https://github.com/adobe/spacecat-api-service/compare/v1.26.0...v1.26.1) (2024-03-08)
 
 
