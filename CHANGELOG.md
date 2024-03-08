@@ -1,3 +1,10 @@
+# [1.26.0](https://github.com/adobe/spacecat-api-service/compare/v1.25.1...v1.26.0) (2024-03-08)
+
+
+### Features
+
+* get and update configurations ([#198](https://github.com/adobe/spacecat-api-service/issues/198)) ([269ba10](https://github.com/adobe/spacecat-api-service/commit/269ba103c3e03f85e22105a6604e5c82bbee9a2a))
+
 ## [1.25.1](https://github.com/adobe/spacecat-api-service/compare/v1.25.0...v1.25.1) (2024-03-05)
 
 
