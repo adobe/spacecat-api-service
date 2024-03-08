@@ -99,7 +99,7 @@ function ConfigurationController(dataAccess) {
       }
 
       validateConfiguration(updatedConfigData);
-      const updatedConfig = await dataAccess.updateConfiguration(updatedConfigData); //
+      const updatedConfig = await dataAccess.updateConfiguration(updatedConfigData);
 
       return ok(updatedConfig);
     } catch (e) {

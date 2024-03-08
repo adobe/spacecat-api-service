@@ -12,28 +12,18 @@
 
 import { isObject } from '@adobe/spacecat-shared-utils';
 
-function isDuplicateJob(job1, job2) {
-  return job1.group === job2.group && job1.type === job2.type;
-}
-
 function mergeJobsArray(targetJobs, sourceJobs) {
-  const mergedJobs = [...targetJobs];
+  // Create a Map from targetJobs for efficient lookups
+  const jobsMap = new Map(targetJobs.map((job) => [`${job.group}-${job.type}`, job]));
 
+  // Iterate over sourceJobs to merge or add
   sourceJobs.forEach((sourceJob) => {
-    const duplicateIndex = mergedJobs.findIndex(
-      (targetJob) => isDuplicateJob(targetJob, sourceJob),
-    );
-    if (duplicateIndex > -1) {
-      // If duplicate based on 'group' and 'type', replace the existing job
-      // to update 'interval' or other fields
-      mergedJobs[duplicateIndex] = sourceJob;
-    } else {
-      // If not a duplicate, add the job to the merged array
-      mergedJobs.push(sourceJob);
-    }
+    const jobKey = `${sourceJob.group}-${sourceJob.type}`;
+    jobsMap.set(jobKey, sourceJob); // This will overwrite if the key exists, or add if it doesn't
   });
 
-  return mergedJobs;
+  // Convert the Map values back to an array
+  return [...jobsMap.values()];
 }
 
 /**
@@ -46,25 +36,28 @@ function mergeJobsArray(targetJobs, sourceJobs) {
  * @return {object} The merged object
  */
 
-/* eslint-disable no-param-reassign */
 function configMerge(target, source) {
+  const result = JSON.parse(JSON.stringify(target)); // Start with a deep clone of the target
+
   Object.keys(source).forEach((key) => {
     if (isObject(source[key])) {
-      if (!target[key]) target[key] = {};
-      configMerge(target[key], source[key]);
-    } else if (Array.isArray(source[key]) && key === 'jobs') {
-      // Special handling for jobs array
-      if (!target[key]) target[key] = [];
-      target[key] = mergeJobsArray(target[key], source[key]);
+      if (!result[key]) result[key] = {};
+      result[key] = configMerge(result[key], source[key]); // Use result[key] to accumulate merge
     } else if (Array.isArray(source[key])) {
-      // General array merging logic (could be adapted for unique items
-      // or concatenation based on requirements)
-      target[key] = [...new Set([...(target[key] || []), ...source[key]])];
+      if (key === 'jobs') {
+        // Special handling for jobs array
+        if (!result[key]) result[key] = [];
+        result[key] = mergeJobsArray(result[key], source[key]);
+      } else {
+        // General array merging logic
+        result[key] = [...new Set([...(result[key] || []), ...source[key]])];
+      }
     } else {
-      target[key] = source[key];
+      result[key] = source[key];
     }
   });
-  return target;
+
+  return result; // Return the new merged object
 }
 
 export default configMerge;
