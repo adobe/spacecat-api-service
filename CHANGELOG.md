@@ -1,3 +1,10 @@
+## [1.27.2](https://github.com/adobe/spacecat-api-service/compare/v1.27.1...v1.27.2) (2024-03-11)
+
+
+### Bug Fixes
+
+* log error path ([#204](https://github.com/adobe/spacecat-api-service/issues/204)) ([c67a614](https://github.com/adobe/spacecat-api-service/commit/c67a6144be57ad2ac877871067b55d091838b4e0))
+
 ## [1.27.1](https://github.com/adobe/spacecat-api-service/compare/v1.27.0...v1.27.1) (2024-03-09)
 
 
