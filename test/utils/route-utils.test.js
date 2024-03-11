@@ -13,7 +13,7 @@
 /* eslint-env mocha */
 
 import { expect } from 'chai';
-import matchPath from '../../src/utils/route-utils.js';
+import matchPath, { sanitizePath } from '../../src/utils/route-utils.js';
 
 describe('matchPath', () => {
   const staticRoutes = {
@@ -100,5 +100,18 @@ describe('matchPath', () => {
 
   it('throws an error if dynamicRoutes is not provided', () => {
     expect(() => matchPath('GET', '/home', { staticRoutes })).to.throw('Route definitions required');
+  });
+
+  describe('sanitize path', () => {
+    it('sanitize if necessary', () => {
+      const sanitized = sanitizePath('/hooks/site-detection/cdn/some-secret');
+      expect(sanitized).to.equal('/hooks/site-detection/cdn/***********');
+    });
+
+    it('do not sanitize if necessary', () => {
+      const path = '/sites/site-abc/audits';
+      const sanitized = sanitizePath(path);
+      expect(sanitized).to.equal(path);
+    });
   });
 });

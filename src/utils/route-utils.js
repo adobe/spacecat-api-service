@@ -92,3 +92,12 @@ export default function matchPath(httpMethod, incomingPath, routeDefinitions) {
     return null; // Continue reducing if no match
   }, null); // Initial value is null
 }
+
+export function sanitizePath(path) {
+  if (path.startsWith('/hooks')) {
+    const segments = path.split('/');
+    segments[segments.length - 1] = segments[segments.length - 1].replace(/./g, '*');
+    return segments.join('/');
+  }
+  return path;
+}
