@@ -25,7 +25,7 @@ import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
-import matchPath from './utils/route-utils.js';
+import matchPath, { sanitizePath } from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
 import OrganizationsController from './controllers/organizations.js';
@@ -106,7 +106,7 @@ async function run(request, context) {
     }
   } catch (e) {
     const t1 = Date.now();
-    log.error(`Handler exception after ${t1 - t0} ms`, e);
+    log.error(`Handler exception after ${t1 - t0} ms. Path: ${sanitizePath(suffix)}`, e);
     return internalServerError(e.message);
   }
 }
