@@ -122,6 +122,16 @@ describe('Hooks Controller', () => {
       expect(slackClient.postMessage.notCalled).to.be.true;
     }
 
+    async function assertInvalidSubdomain(xFwHost) {
+      await assertInvalidCase(xFwHost);
+      expect(context.log.warn).to.have.been.calledWith(`Could not process site candidate. Reason: URL most likely contains a non-prod domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
+    }
+
+    async function assertUnwantedDomain(xFwHost) {
+      await assertInvalidCase(xFwHost);
+      expect(context.log.warn).to.have.been.calledWith(`Could not process site candidate. Reason: URL contains an unwanted domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
+    }
+
     it('hostnames with path are not accepted', async () => {
       await assertInvalidCase('some.domain/some/path, some-fw-domain.com');
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/some/path');
@@ -137,9 +147,54 @@ describe('Hooks Controller', () => {
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Hostname is an IP address, Source: CDN, Candidate: https://112.12.12.112/');
     });
 
-    it('hostnames with suspected non-prod subdomains are not accepted', async () => {
-      await assertInvalidCase('stage.some.domain, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: URL most likely contains a non-prod domain, Source: CDN, Candidate: https://stage.some.domain/');
+    it('hostnames with suspected stage subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('stage.some.domain, some-fw-domain.com');
+    });
+    it('hostnames with suspected sitemap subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('sitemap.etomaello.com, some-fw-domain.com');
+    });
+    it('hostnames with suspected test subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('test03.playground.name, some-fw-domain.com');
+    });
+    it('hostnames with suspected preview subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('preview.some.domain, some-fw-domain.com');
+    });
+    it('hostnames with suspected cm-verify subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('raduxyz.cm-verify.adobe.com, some-fw-domain.com');
+    });
+    it('hostnames with suspected owa subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('owa.shuyi-guan.com, some-fw-domain.com');
+    });
+    it('hostnames with suspected webmail subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('webmail.cafeandmore.me, some-fw-domain.com');
+    });
+    it('hostnames with suspected ssl subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('ddttom-prod.global.ssl.fastly.net, some-fw-domain.com');
+    });
+    it('hostnames with suspected secure subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('secure.etomaello.com, some-fw-domain.com');
+    });
+    it('hostnames with suspected publish subdomains are not accepted', async () => {
+      await assertInvalidSubdomain('publish-p65153-e554220.adobeaemcloud.com, some-fw-domain.com');
+    });
+
+    it('hostnames with helix3 domains are not accepted', async () => {
+      await assertUnwantedDomain('beagleboy.helix3.dev, some-fw-domain.com');
+    });
+    it('hostnames with fastly domains are not accepted', async () => {
+      await assertUnwantedDomain('somesubdomain.fastly.net, some-fw-domain.com');
+    });
+    it('hostnames with ngrok-free domains are not accepted', async () => {
+      await assertUnwantedDomain('1c7f-187-18-140-37.ngrok-free.app, some-fw-domain.com');
+    });
+    it('hostnames with oastify domains are not accepted', async () => {
+      await assertUnwantedDomain('mlby4yga9ts92892emqdg5lm4da7y5rtku8kvajz.oastify.com, some-fw-domain.com');
+    });
+    it('hostnames with fastly-aem domains are not accepted', async () => {
+      await assertUnwantedDomain('dylan.fastly-aem.page, some-fw-domain.com');
+    });
+    it('hostnames with findmy.media domains are not accepted', async () => {
+      await assertUnwantedDomain('wknd.findmy.media, some-fw-domain.com');
     });
   });
 

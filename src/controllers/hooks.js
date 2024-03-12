@@ -28,7 +28,8 @@ export const BUTTON_LABELS = {
   IGNORE: 'Ignore',
 };
 
-const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--'];
+const IGNORED_DOMAINS = ['helix3.dev', 'fastly.net', 'ngrok-free.app', 'oastify.com', 'fastly-aem.page', 'findmy.media'];
+const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--', 'sitemap', 'test', 'preview', 'cm-verify', 'owa', 'mail', 'ssl', 'secure', 'publish'];
 
 class InvalidSiteCandidate extends Error {
   constructor(message, url) {
@@ -67,6 +68,10 @@ function errorHandler(fn, opts) {
 function isInvalidSubdomain(hostname) {
   const subdomain = hostname.split('.').slice(0, -2).join('.');
   return IGNORED_SUBDOMAIN_TOKENS.some((ignored) => subdomain.includes(ignored));
+}
+
+function isInvalidDomain(hostname) {
+  return IGNORED_DOMAINS.some((ignored) => hostname.includes(ignored));
 }
 
 function isIPAddress(hostname) {
@@ -132,6 +137,11 @@ function verifyURLCandidate(baseURL) {
   // disregard the non-prod hostnames
   if (isInvalidSubdomain(url.hostname)) {
     throw new InvalidSiteCandidate('URL most likely contains a non-prod domain', url.href);
+  }
+
+  // disregard unwanted domains
+  if (isInvalidDomain(url.hostname)) {
+    throw new InvalidSiteCandidate('URL contains an unwanted domain', url.href);
   }
 }
 
