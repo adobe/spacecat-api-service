@@ -1,4 +1,4 @@
-invite-by-email:
+invite-by-user-id:
   post:
     tags:
       - slack
@@ -6,10 +6,11 @@ invite-by-email:
     description: |
       Not implemented yet.
       
-      This endpoint can be used to invite users to an organization's Slack 
-      channel by email address. As a prerequisite, there must be an existing
-      Spacecat organization and Slack channel for the given IMS org ID.
-    operationId: inviteToSlackChannelByEmail
+      This endpoint can be used to invite a user to their organization's Slack 
+      channel by IMS user ID, which is read from the IMS user token. As a 
+      prerequisite, there must be an existing Spacecat organization and Slack 
+      channel for the given IMS org ID.
+    operationId: inviteToSlackChannelByUserId
     security:
       - admin_key: [ ]
     requestBody:
@@ -17,7 +18,7 @@ invite-by-email:
       content:
         application/json:
           schema:
-            $ref: './schemas.yaml#/SlackInviteToChannelByEmailRequest'
+            $ref: './schemas.yaml#/SlackInviteToChannelByUserIdRequest'
     responses:
       '202':
         description: Request accepted, invite(s) to follow by email if successful

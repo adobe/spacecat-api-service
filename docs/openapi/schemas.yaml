@@ -37,6 +37,9 @@ Domain:
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
+ImsUserAccessToken:
+  type: string
+  example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
 EmailAddress:
   type: string
   format: email
@@ -639,20 +642,18 @@ RUMDomainDiscoveryAlert:
     domain:
       description: Domain of the page which triggered the domain discovery alert
       $ref: '#/Domain'
-SlackInviteToChannelByEmailRequest:
+SlackInviteToChannelByUserIdRequest:
   type: object
   required:
     - imsOrgId
-    - emails
+    - imsUserAccessToken
   properties:
     imsOrgId:
       description: The ID of the Adobe IMS organization
       $ref: '#/ImsOrganizationId'
-    emails:
-      description: Email addresses to invite to the Slack channel. Must be members of the IMS org
-      type: array
-      items:
-        $ref: '#/EmailAddress'
+    imsUserAccessToken:
+      description: The IMS access token of the user to invite to the Slack channel
+      $ref: '#/ImsUserAccessToken'
 Configuration:
   type: object
   properties:
