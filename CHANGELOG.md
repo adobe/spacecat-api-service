@@ -1,3 +1,10 @@
+# [1.28.0](https://github.com/adobe/spacecat-api-service/compare/v1.27.4...v1.28.0) (2024-03-12)
+
+
+### Features
+
+* Endpoint to request an invite to an organization's Slack channel by user ID - API spec update ([#208](https://github.com/adobe/spacecat-api-service/issues/208)) ([5bd5c92](https://github.com/adobe/spacecat-api-service/commit/5bd5c92a9e2ee3b9cfdd93901ebd0cd99816a3fa))
+
 ## [1.27.4](https://github.com/adobe/spacecat-api-service/compare/v1.27.3...v1.27.4) (2024-03-12)
 
 
