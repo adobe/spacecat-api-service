@@ -1,3 +1,10 @@
+## [1.27.4](https://github.com/adobe/spacecat-api-service/compare/v1.27.3...v1.27.4) (2024-03-12)
+
+
+### Bug Fixes
+
+* **site-discovery:** more domains and subdomains filtered ([#206](https://github.com/adobe/spacecat-api-service/issues/206)) ([2770213](https://github.com/adobe/spacecat-api-service/commit/2770213d43b3053059f65668da0283a0d6d7d510))
+
 ## [1.27.3](https://github.com/adobe/spacecat-api-service/compare/v1.27.2...v1.27.3) (2024-03-11)
 
 
