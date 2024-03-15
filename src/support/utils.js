@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import { context as h2, h1 } from '@adobe/fetch';
+import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 
 /* c8 ignore next 3 */
 export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
@@ -97,3 +98,103 @@ export const triggerAuditForSite = async (
   },
   site.getId(),
 );
+
+/**
+ * Checks if a given URL corresponds to a Helix site.
+ * @param {string} url - The URL to check.
+ * @returns {Promise<{ isHelix: boolean, reason?: string }>} A Promise that resolves to an object
+ * containing the result of the Helix site check and an optional reason if it's not a Helix site.
+ */
+export async function isHelixSite(url) {
+  let finalUrl;
+  try {
+    const resp = await fetch(url);
+    finalUrl = resp.url;
+  } catch (e) {
+    return {
+      isHelix: false,
+      reason: `Cannot fetch the site due to ${e.message}`,
+    };
+  }
+
+  finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
+  let finalResp;
+
+  try {
+    // redirects are disabled because .plain.html should return 200
+    finalResp = await fetch(finalUrl, { redirect: 'manual' });
+  } catch (e) {
+    return {
+      isHelix: false,
+      reason: '.plain.html is unreachable',
+    };
+  }
+
+  // reject if .plain.html does not return 2XX
+  if (!finalResp.ok) {
+    return {
+      isHelix: false,
+      reason: `.plain.html does not return 2XX, returns ${finalResp.status}`,
+    };
+  }
+
+  const respText = await finalResp.text();
+
+  // reject if .plain.html contains <head>
+  if (respText.includes('<head>')) {
+    return {
+      isHelix: false,
+      reason: '.plain.html should not contain <head>',
+    };
+  }
+
+  return {
+    isHelix: true,
+  };
+}
+
+/**
+ * Checks if a given URL corresponds to an AEM site.
+ * @param {string} url - The URL to check.
+ * @returns {Promise<{ isAEM: boolean, reason: string }>} A Promise that resolves to an object
+ * containing the result of the AEM site check and a reason if it's not an AEM site.
+ */
+export async function isAEMSite(url) {
+  let pageContent;
+  try {
+    const response = await fetch(url);
+    pageContent = await response.text();
+  } catch (e) {
+    return {
+      isAEM: false,
+      reason: `Cannot fetch the site due to ${e.message}`,
+    };
+  }
+
+  const aemTokens = ['/content/dam/', '/etc.clientlibs', 'cq:template', 'sling.resourceType'];
+  const isAEM = aemTokens.some((token) => pageContent.includes(token));
+
+  return {
+    isAEM,
+    reason: 'Does not contain AEM paths or meta properties',
+  };
+}
+
+/**
+ * Finds the delivery type of the site, url of which is provided.
+ * @param {string} url - url of the site to find the delivery type for.
+ * @returns {Promise<"aem_edge" | "aem_cs" | "others">} A Promise that resolves to the delivery type
+ */
+export async function findDeliveryType(url) {
+  const { isHelix } = await isHelixSite(url);
+  if (isHelix) {
+    return DELIVERY_TYPES.AEM_EDGE;
+  }
+
+  const { isAEM } = await isAEMSite(url);
+  if (isAEM) {
+    return DELIVERY_TYPES.AEM_CS;
+  }
+
+  return DELIVERY_TYPES.OTHER;
+}
