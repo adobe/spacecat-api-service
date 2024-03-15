@@ -25,7 +25,7 @@ const PHRASES = ['get sites', 'get all sites'];
  */
 export function formatSitesToCSV(sites = []) {
   // Define the CSV header
-  let csvContent = 'Base URL,Live Status,Go Live Date,Performance Score,SEO Score,Accessibility Score,Best Practices Score,GitHub URL,Error\n';
+  let csvContent = 'Base URL,Delivery Type,Live Status,Go Live Date,Performance Score,SEO Score,Accessibility Score,Best Practices Score,GitHub URL,Error\n';
 
   // Iterate over each site to format its data into CSV rows
   sites.forEach((site) => {
@@ -33,7 +33,8 @@ export function formatSitesToCSV(sites = []) {
     const audits = site.getAudits();
     const githubURL = site.getGitHubURL();
     const liveStatus = site.isLive() ? 'Live' : 'Non-Live';
-    const goLiveDate = site.getIsLiveToggledAt() || site.getCreatedAt();
+    const goLiveDate = (site.getIsLiveToggledAt() || site.getCreatedAt()).split('T')[0];
+    const deliveryType = site.getDeliveryType();
 
     if (audits.length) {
       const lastAudit = audits[0];
@@ -46,9 +47,9 @@ export function formatSitesToCSV(sites = []) {
       } = scores;
 
       if (lastAudit.isError()) {
-        csvContent += `${baseURL},${liveStatus},${goLiveDate},---,---,---,---,${githubURL ? `${githubURL}` : ''},${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}\n`;
+        csvContent += `${baseURL},${deliveryType},${liveStatus},${goLiveDate},---,---,---,---,${githubURL ? `${githubURL}` : ''},${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}\n`;
       } else {
-        csvContent += `${baseURL},${liveStatus},${goLiveDate},${formatScore(performance)},${formatScore(seo)},${formatScore(accessibility)},${formatScore(bestPractices)},${githubURL ? `${githubURL}` : ''},\n`;
+        csvContent += `${baseURL},${deliveryType},${liveStatus},${goLiveDate},${formatScore(performance)},${formatScore(seo)},${formatScore(accessibility)},${formatScore(bestPractices)},${githubURL ? `${githubURL}` : ''},\n`;
       }
     }
   });
