@@ -10,14 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-
 import {
   extractURLFromSlackInput,
   postErrorMessage,
 } from '../../../utils/slack/base.js';
 
-import { triggerAuditForSite } from '../../utils.js';
+import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
 
 import BaseCommand from './base.js';
 
@@ -36,7 +34,7 @@ function AddSiteCommand(context) {
     name: 'Add Site',
     description: 'Adds a new site to track.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [deliveryType (${Object.values(DELIVERY_TYPES).join('|')})]`,
+    usageText: `${PHRASES[0]} {site}`,
   });
 
   const { dataAccess, log } = context;
@@ -54,17 +52,12 @@ function AddSiteCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [baseURLInput, deliveryTypeInput = 'aem_edge'] = args;
+      const [baseURLInput] = args;
 
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!baseURL) {
         await say(':warning: Please provide a valid site base URL.');
-        return;
-      }
-
-      if (!Object.values(DELIVERY_TYPES).includes(deliveryTypeInput)) {
-        await say(':warning: Please provide a valid delivery type.');
         return;
       }
 
@@ -75,7 +68,9 @@ function AddSiteCommand(context) {
         return;
       }
 
-      const newSite = await dataAccess.addSite({ baseURL, deliveryType: deliveryTypeInput });
+      const deliveryType = await findDeliveryType(baseURL);
+
+      const newSite = await dataAccess.addSite({ baseURL, deliveryType });
 
       if (!newSite) {
         await say(':x: Problem adding the site. Please contact the admins.');

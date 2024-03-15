@@ -215,7 +215,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Cannot fetch the candidate due to rainy weather, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Cannot fetch the site due to rainy weather, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('URLs without valid plain.htmls are disregarded', async () => {
@@ -233,7 +233,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html is unreachable, Source: CDN, Candidate: https://some-domain.com/index.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html is unreachable, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('URLs with non-200 index plain.htmls are disregarded', async () => {
@@ -251,7 +251,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 404, Source: CDN, Candidate: https://some-domain.com/index.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 404, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('URLs with redirects and returns non-200 plain.htmls are disregarded', async () => {
@@ -273,7 +273,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 404, Source: CDN, Candidate: https://some-domain.com/en/us.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 404, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('plain.htmls with redirects are disregarded', async () => {
@@ -291,7 +291,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 301, Source: CDN, Candidate: https://some-domain.com/index.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 301, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('plain.htmls containing <head> are disregarded', async () => {
@@ -309,7 +309,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html should not contain <head>, Source: CDN, Candidate: https://some-domain.com/index.plain.html');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html should not contain <head>, Source: CDN, Candidate: https://some-domain.com');
     });
   });
 

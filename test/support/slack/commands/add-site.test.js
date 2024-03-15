@@ -12,10 +12,16 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import chai from 'chai';
 import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
 
+import nock from 'nock';
+import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
+
+chai.use(sinonChai);
+const { expect } = chai;
 
 describe('AddSiteCommand', () => {
   let context;
@@ -51,9 +57,18 @@ describe('AddSiteCommand', () => {
   });
 
   describe('Handle Execution Method', () => {
+    beforeEach(() => {
+      nock.cleanAll();
+    });
+
     it('handles valid input and adds a new site', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+
       dataAccessStub.getSiteByBaseURL.resolves(null);
-      dataAccessStub.addSite.resolves({ getId: () => '123' });
+      dataAccessStub.addSite.resolves(createSite({ baseURL, deliveryType: 'other' }));
 
       const args = ['example.com'];
       const command = AddSiteCommand(context);
@@ -61,7 +76,7 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.addSite.calledOnce).to.be.true;
+      expect(dataAccessStub.addSite).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'other' });
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
@@ -72,15 +87,7 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith(':warning: Please provide a valid site base URL.')).to.be.true;
-    });
-
-    it('warns when an invalid site delivery type is provided', async () => {
-      const args = ['example.com', 'invalid-delivery-type'];
-      const command = AddSiteCommand(context);
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say.calledWith(':warning: Please provide a valid delivery type.')).to.be.true;
+      expect(dataAccessStub.addSite.notCalled).to.be.true;
     });
 
     it('informs when the site is already added', async () => {
@@ -92,9 +99,13 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith(":x: 'https://example.com' was already added before. You can run _@spacecat get site https://example.com_")).to.be.true;
+      expect(dataAccessStub.addSite.notCalled).to.be.true;
     });
 
     it('handles error during site addition', async () => {
+      nock('https://example.com')
+        .get('/')
+        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
       dataAccessStub.addSite.resolves(null);
 
@@ -107,66 +118,65 @@ describe('AddSiteCommand', () => {
     });
 
     it('sends an audit message after adding the site', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
-      dataAccessStub.addSite.resolves({
-        getId: () => '123',
-        getAuditConfig: sinon.stub().returns({
-          auditsDisabled: sinon.stub().returns(false),
-          getAuditTypeConfig: sinon.stub().returns({
-            disabled: sinon.stub().returns(false),
-          }),
-        }),
-      });
+      dataAccessStub.addSite.resolves(createSite({ baseURL, deliveryType: 'other' }));
 
       const args = ['example.com'];
       const command = AddSiteCommand(context);
 
       await command.handleExecution(args, slackContext);
 
+      expect(dataAccessStub.addSite).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'other' });
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
     it('does not trigger audit after adding site when audits are disabled', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
-      dataAccessStub.addSite.resolves({
-        getId: () => '123',
-        getAuditConfig: sinon.stub().returns({
-          auditsDisabled: sinon.stub().returns(true),
-          getAuditTypeConfig: sinon.stub().returns({
-            disabled: sinon.stub().returns(false),
-          }),
-        }),
-      });
+      const site = createSite({ baseURL, deliveryType: 'other' });
+      site.setAllAuditsDisabled(true);
+      dataAccessStub.addSite.resolves(site);
 
       const args = ['example.com'];
       const command = AddSiteCommand(context);
 
       await command.handleExecution(args, slackContext);
 
+      expect(dataAccessStub.addSite).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'other' });
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
     it('does not trigger audit after adding site when audit type is disabled', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
-      dataAccessStub.addSite.resolves({
-        getId: () => '123',
-        getAuditConfig: sinon.stub().returns({
-          auditsDisabled: sinon.stub().returns(false),
-          getAuditTypeConfig: sinon.stub().returns({
-            disabled: sinon.stub().returns(true),
-          }),
-        }),
-      });
+      const site = createSite({ baseURL, deliveryType: 'other' });
+      site.updateAuditTypeConfig('lhs-mobile', { disabled: true });
+      dataAccessStub.addSite.resolves(site);
 
       const args = ['example.com'];
       const command = AddSiteCommand(context);
 
       await command.handleExecution(args, slackContext);
 
+      expect(dataAccessStub.addSite).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'other' });
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
     it('reports when an error occurs', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.rejects(new Error('test error'));
 
       const args = ['example.com'];
@@ -175,6 +185,51 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
+    });
+
+    it('adds an aem_edge site', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .reply(200);
+      nock(baseURL)
+        .get('/index.plain.html')
+        .reply(200);
+
+      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.addSite.resolves(createSite({ baseURL, deliveryType: 'aem_edge' }));
+
+      const args = ['example.com'];
+      const command = AddSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(dataAccessStub.addSite).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'aem_edge' });
+      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
+    });
+
+    it('adds an aem_cs site', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .times(2)
+        .reply(200, '<html><head><link rel="shortcut icon" href="/content/dam/some-company/favicon.ico"></script></head></html>');
+      nock(baseURL)
+        .get('/index.plain.html')
+        .reply(404);
+
+      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.addSite.resolves(createSite({ baseURL, deliveryType: 'aem_cs' }));
+
+      const args = ['example.com'];
+      const command = AddSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(dataAccessStub.addSite).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'aem_cs' });
+      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
   });
 });

@@ -17,7 +17,7 @@ import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
-import { fetch } from '../support/utils.js';
+import { isHelixSite } from '../support/utils.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
 const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
@@ -83,34 +83,10 @@ function containsPathOrSearchParams(url) {
 }
 
 async function verifyHelixSite(url) {
-  let finalUrl;
-  try {
-    const resp = await fetch(url);
-    finalUrl = resp.url;
-  } catch (e) {
-    throw new InvalidSiteCandidate(`Cannot fetch the candidate due to ${e.message}`, url);
-  }
+  const { isHelix, reason } = await isHelixSite(url);
 
-  finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
-  let finalResp;
-
-  try {
-    // redirects are disabled because .plain.html should return 200
-    finalResp = await fetch(finalUrl, { redirect: 'manual' });
-  } catch (e) {
-    throw new InvalidSiteCandidate('.plain.html is unreachable', finalUrl);
-  }
-
-  // reject if .plain.html does not return 2XX
-  if (!finalResp.ok) {
-    throw new InvalidSiteCandidate(`.plain.html does not return 2XX, returns ${finalResp.status}`, finalUrl);
-  }
-
-  const respText = await finalResp.text();
-
-  // reject if .plain.html contains <head>
-  if (respText.includes('<head>')) {
-    throw new InvalidSiteCandidate('.plain.html should not contain <head>', finalUrl);
+  if (!isHelix) {
+    throw new InvalidSiteCandidate(reason, url);
   }
 
   return true;
