@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -69,8 +70,9 @@ function AddSiteCommand(context) {
       }
 
       const deliveryType = await findDeliveryType(baseURL);
+      const isLive = deliveryType === DELIVERY_TYPES.AEM_EDGE;
 
-      const newSite = await dataAccess.addSite({ baseURL, deliveryType });
+      const newSite = await dataAccess.addSite({ baseURL, deliveryType, isLive });
 
       if (!newSite) {
         await say(':x: Problem adding the site. Please contact the admins.');
@@ -81,6 +83,10 @@ function AddSiteCommand(context) {
       const auditConfig = newSite.getAuditConfig();
 
       let message = `:white_check_mark: *Successfully added new site '${baseURL}*'.\n`;
+      message += `:delivrer: *Delivery type* ${deliveryType}'.\n`;
+      if (newSite.isLive()) {
+        message += ':rocket: Site is set to *live* by default\n';
+      }
 
       // we still check for auditConfig.auditsDisabled() here as the default audit config may change
       if (!auditConfig.auditsDisabled() && !auditConfig.getAuditTypeConfig(auditType)?.disabled()) {
