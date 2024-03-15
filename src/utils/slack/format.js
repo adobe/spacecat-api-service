@@ -67,7 +67,7 @@ function formatScore(score) {
   if (Number.isNaN(score)) {
     return '---';
   }
-  return `${Math.round(score * PERCENT_MULTIPLIER)}%`;
+  return `${Math.round(score * PERCENT_MULTIPLIER)}`;
 }
 
 const printSiteDetails = (site, psiStrategy = 'mobile', latestAudit = null) => {

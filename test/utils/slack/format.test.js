@@ -57,7 +57,7 @@ describe('Utility Functions', () => {
 
   describe('formatScore()', () => {
     it('formats a number as a percentage', () => {
-      expect(formatScore(0.85)).to.equal('85%');
+      expect(formatScore(0.85)).to.equal('85');
     });
 
     it('returns "---" for non-numeric values', () => {

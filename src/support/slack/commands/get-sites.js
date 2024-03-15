@@ -12,7 +12,7 @@
 
 import BaseCommand from './base.js';
 
-import { formatLighthouseError } from '../../../utils/slack/format.js';
+import { formatLighthouseError, formatScore } from '../../../utils/slack/format.js';
 import { postErrorMessage, sendFile, sendMessageBlocks } from '../../../utils/slack/base.js';
 
 const PHRASES = ['get sites', 'get all sites'];
@@ -40,16 +40,16 @@ export function formatSitesToCSV(sites = []) {
       const lastAudit = audits[0];
       const scores = lastAudit.getScores();
       const {
-        performance = '---',
-        accessibility = '---',
-        'best-practices': bestPractices = '---',
-        seo = '---',
+        performance = 0,
+        accessibility = 0,
+        'best-practices': bestPractices = 0,
+        seo = 0,
       } = scores;
 
       if (lastAudit.isError()) {
         csvContent += `${baseURLText},${liveStatus},${goLiveDate},---,---,---,---,${githubURL ? `${githubURL}` : ''},${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}\n`;
       } else {
-        csvContent += `${baseURLText},${liveStatus},${goLiveDate},${performance},${seo},${accessibility},${bestPractices},${githubURL ? `${githubURL}` : ''},\n`;
+        csvContent += `${baseURLText},${liveStatus},${goLiveDate},${formatScore(performance)},${formatScore(seo)},${formatScore(accessibility)},${formatScore(bestPractices)},${githubURL ? `${githubURL}` : ''},\n`;
       }
     }
   });
