@@ -17,6 +17,7 @@ import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { isHelixSite } from '../support/utils.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
@@ -169,7 +170,8 @@ function HooksController(lambdaContext) {
       throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
     }
 
-    if (await dataAccess.getSiteByBaseURL(siteCandidate.baseURL)) {
+    const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
+    if (site && site.isLive() && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
 
