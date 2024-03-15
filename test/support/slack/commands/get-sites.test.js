@@ -85,7 +85,9 @@ describe('GetSitesCommand', () => {
     slackContext = {
       say: sinon.spy(),
       client: {
-        fileUpload: sinon.stub().resolves(),
+        files: {
+          uploadV2: sinon.stub().resolves(),
+        },
       },
     };
   });

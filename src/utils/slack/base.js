@@ -148,7 +148,7 @@ const sendFile = async (slackContext, file, filename) => {
     threadTs,
   } = slackContext;
 
-  await client.fileUpload({
+  await client.files.uploadV2({
     channel_id: channelId,
     thread_ts: threadTs,
     file,

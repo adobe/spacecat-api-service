@@ -123,7 +123,9 @@ describe('Base Slack Utils', () => {
     beforeEach(() => {
       say = sinon.stub();
       client = {
-        fileUpload: sinon.stub().resolves(),
+        files: {
+          uploadV2: sinon.stub().resolves(),
+        },
       };
     });
 
@@ -182,8 +184,8 @@ describe('Base Slack Utils', () => {
 
         await sendFile({ client, channelId, threadTs }, file, filename);
 
-        expect(client.fileUpload.calledOnce).to.be.true;
-        expect(client.fileUpload.firstCall.args[0]).to.deep.equal({
+        expect(client.files.uploadV2.calledOnce).to.be.true;
+        expect(client.files.uploadV2.firstCall.args[0]).to.deep.equal({
           channel_id: channelId,
           thread_ts: threadTs,
           file,
