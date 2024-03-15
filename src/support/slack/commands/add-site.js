@@ -83,7 +83,7 @@ function AddSiteCommand(context) {
       const auditConfig = newSite.getAuditConfig();
 
       let message = `:white_check_mark: *Successfully added new site '${baseURL}*'.\n`;
-      message += `:delivrer: *Delivery type* ${deliveryType}'.\n`;
+      message += `:delivrer: *Delivery type:* ${deliveryType}.\n`;
       if (newSite.isLive()) {
         message += ':rocket: Site is set to *live* by default\n';
       }
