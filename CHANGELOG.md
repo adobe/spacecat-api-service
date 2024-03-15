@@ -1,3 +1,10 @@
+# [1.29.0](https://github.com/adobe/spacecat-api-service/compare/v1.28.0...v1.29.0) (2024-03-15)
+
+
+### Features
+
+* **add-site:** auto detect site type in add site command ([#213](https://github.com/adobe/spacecat-api-service/issues/213)) ([97d4b54](https://github.com/adobe/spacecat-api-service/commit/97d4b5422f25b1737c86ad8e326fd877c4829861))
+
 # [1.28.0](https://github.com/adobe/spacecat-api-service/compare/v1.27.4...v1.28.0) (2024-03-12)
 
 
