@@ -47,9 +47,9 @@ export function formatSitesToCSV(sites = []) {
       } = scores;
 
       if (lastAudit.isError()) {
-        csvContent += `${rank}.,${liveStatus},${formatLighthouseError(lastAudit.getAuditResult().runtimeError)},${baseURLText},${githubURL ? `(${githubURL})` : ''}\n`;
+        csvContent += `${rank}.,${liveStatus},${formatLighthouseError(lastAudit.getAuditResult().runtimeError)},${baseURLText},${githubURL ? `${githubURL}` : ''}\n`;
       } else {
-        csvContent += `${rank}.,${liveStatus},${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)},${baseURLText},${githubURL ? `(${githubURL})` : ''}\n`;
+        csvContent += `${rank}.,${liveStatus},${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)},${baseURLText},${githubURL ? `${githubURL}` : ''}\n`;
       }
     }
   });

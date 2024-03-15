@@ -200,9 +200,9 @@ describe('GetSitesCommand', () => {
       const formattedSites = formatSitesToCSV(sites).toString('utf-8');
 
       expect(formattedSites).to.equal('Rank,Live Status,Scores,Base URL,GitHub URL\n'
-        + '1.,Live,Lighthouse Error: No First Contentful Paint [NO_FCP],https://site-0.com,(https://github.com/site-0)\n'
+        + '1.,Live,Lighthouse Error: No First Contentful Paint [NO_FCP],https://site-0.com,https://github.com/site-0\n'
         + '2.,Non-Live,90% - 80% - 70% - 60%,https://site-1.com,\n'
-        + '3.,Live,90% - 80% - 70% - 60%,https://site-2.com,(https://github.com/site-2)\n'
+        + '3.,Live,90% - 80% - 70% - 60%,https://site-2.com,https://github.com/site-2\n'
         + '4.,Non-Live,Lighthouse Error: No First Contentful Paint [NO_FCP],https://site-3.com,');
     });
   });
