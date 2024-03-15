@@ -12,7 +12,7 @@
 
 import BaseCommand from './base.js';
 
-import { formatLighthouseError, formatScore } from '../../../utils/slack/format.js';
+import { formatLighthouseError } from '../../../utils/slack/format.js';
 import { postErrorMessage, sendFile, sendMessageBlocks } from '../../../utils/slack/base.js';
 
 const PHRASES = ['get sites', 'get all sites'];
@@ -25,31 +25,31 @@ const PHRASES = ['get sites', 'get all sites'];
  */
 export function formatSitesToCSV(sites = []) {
   // Define the CSV header
-  let csvContent = 'Rank,Live Status,Scores,Base URL,GitHub URL\n';
+  let csvContent = 'Base URL,Live Status,Go Live Date,Performance Score,SEO Score,Accessibility Score,Best Practices Score,GitHub URL,Error\n';
 
   // Iterate over each site to format its data into CSV rows
-  sites.forEach((site, index) => {
+  sites.forEach((site) => {
     const baseURL = site.getBaseURL();
     const baseURLText = baseURL.replace(/^main--/, '').replace(/--.*/, '');
-    const rank = index + 1;
     const audits = site.getAudits();
     const githubURL = site.getGitHubURL();
     const liveStatus = site.isLive() ? 'Live' : 'Non-Live';
+    const goLiveDate = site.getIsLiveToggledAt() || site.getCreatedAt();
 
     if (audits.length) {
       const lastAudit = audits[0];
       const scores = lastAudit.getScores();
       const {
-        performance = 0,
-        accessibility = 0,
-        'best-practices': bestPractices = 0,
-        seo = 0,
+        performance = '---',
+        accessibility = '---',
+        'best-practices': bestPractices = '---',
+        seo = '---',
       } = scores;
 
       if (lastAudit.isError()) {
-        csvContent += `${rank}.,${liveStatus},${formatLighthouseError(lastAudit.getAuditResult().runtimeError)},${baseURLText},${githubURL ? `${githubURL}` : ''}\n`;
+        csvContent += `${baseURLText},${liveStatus},${goLiveDate},---,---,---,---,${githubURL ? `${githubURL}` : ''},${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}\n`;
       } else {
-        csvContent += `${rank}.,${liveStatus},${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)},${baseURLText},${githubURL ? `${githubURL}` : ''}\n`;
+        csvContent += `${baseURLText},${liveStatus},${goLiveDate},${performance},${seo},${accessibility},${bestPractices},${githubURL ? `${githubURL}` : ''},\n`;
       }
     }
   });

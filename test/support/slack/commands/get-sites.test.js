@@ -33,6 +33,8 @@ function generateSites(count) {
       baseURL: `https://site-${index}.com`,
       gitHubURL: (index % 2 === 0) ? `https://github.com/site-${index}` : '',
       isLive: (index % 2 === 0),
+      createdAt: 'createdAtDate',
+      isLiveToggledAt: (index % 2 === 0) ? 'isToggledLiveAtDate' : null,
     };
 
     const runtimeError = index % 3 === 0 ? { code: 'NO_FCP', message: 'Test LH Error' } : null;
@@ -199,11 +201,11 @@ describe('GetSitesCommand', () => {
       const sites = generateSites(4);
       const formattedSites = formatSitesToCSV(sites).toString('utf-8');
 
-      expect(formattedSites).to.equal('Rank,Live Status,Scores,Base URL,GitHub URL\n'
-        + '1.,Live,Lighthouse Error: No First Contentful Paint [NO_FCP],https://site-0.com,https://github.com/site-0\n'
-        + '2.,Non-Live,90% - 80% - 70% - 60%,https://site-1.com,\n'
-        + '3.,Live,90% - 80% - 70% - 60%,https://site-2.com,https://github.com/site-2\n'
-        + '4.,Non-Live,Lighthouse Error: No First Contentful Paint [NO_FCP],https://site-3.com,');
+      expect(formattedSites).to.equal('Base URL,Live Status,Go Live Date,Performance Score,SEO Score,Accessibility Score,Best Practices Score,GitHub URL,Error\n'
+        + 'https://site-0.com,Live,isToggledLiveAtDate,---,---,---,---,https://github.com/site-0,Lighthouse Error: No First Contentful Paint [NO_FCP]\n'
+        + 'https://site-1.com,Non-Live,createdAtDate,0.9,0.8,0.7,0.6,,\n'
+        + 'https://site-2.com,Live,isToggledLiveAtDate,0.9,0.8,0.7,0.6,https://github.com/site-2,\n'
+        + 'https://site-3.com,Non-Live,createdAtDate,---,---,---,---,,Lighthouse Error: No First Contentful Paint [NO_FCP]');
     });
   });
 });
