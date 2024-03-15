@@ -82,7 +82,12 @@ describe('GetSitesCommand', () => {
     };
 
     context = { dataAccess: dataAccessStub, boltApp: boltAppStub, log: logStub };
-    slackContext = { say: sinon.spy() };
+    slackContext = {
+      say: sinon.spy(),
+      client: {
+        fileUpload: sinon.stub().resolves(),
+      },
+    };
   });
 
   describe('Initialization and BaseCommand Integration', () => {

@@ -19,7 +19,7 @@ import {
   extractURLFromSlackInput,
   FALLBACK_SLACK_CHANNEL,
   getSlackContext,
-  postErrorMessage,
+  postErrorMessage, sendFile,
   sendMessageBlocks,
 } from '../../../src/utils/slack/base.js';
 
@@ -118,9 +118,13 @@ describe('Base Slack Utils', () => {
 
   describe('Messaging Functions', () => {
     let say;
+    let client;
 
     beforeEach(() => {
       say = sinon.stub();
+      client = {
+        fileUpload: sinon.stub().resolves(),
+      };
     });
 
     afterEach(() => {
@@ -168,6 +172,27 @@ describe('Base Slack Utils', () => {
         expect(say.firstCall.args[0]).to.deep.equal({ blocks: expectedBlocks });
       });
     });
+
+    describe('sendFile()', () => {
+      it('sends a file', async () => {
+        const file = 'some-file';
+        const filename = 'some-filename';
+        const channelId = 'foo';
+        const threadTs = 'bar';
+
+        await sendFile({ client, channelId, threadTs }, file, filename);
+
+        expect(client.fileUpload.calledOnce).to.be.true;
+        expect(client.fileUpload.firstCall.args[0]).to.deep.equal({
+          channel_id: channelId,
+          thread_ts: threadTs,
+          file,
+          filename,
+          unfurl_links: false,
+        });
+      });
+    });
+
     describe('getSlackContext()', async () => {
       it('fallbacks to default slack channel when no configured', async () => {
         const slackContext = await getSlackContext({ url: 'some-url', log: console });
