@@ -29,12 +29,12 @@ export function formatSitesToCSV(sites = []) {
 
   // Iterate over each site to format its data into CSV rows
   sites.forEach((site) => {
-    const baseURL = site.getBaseURL();
     const audits = site.getAudits();
-    const githubURL = site.getGitHubURL();
-    const liveStatus = site.isLive() ? 'Live' : 'Non-Live';
-    const goLiveDate = (site.getIsLiveToggledAt() || site.getCreatedAt()).split('T')[0];
+    const baseURL = site.getBaseURL();
     const deliveryType = site.getDeliveryType();
+    const githubURL = site.getGitHubURL();
+    const goLiveDate = (site.getIsLiveToggledAt() || site.getCreatedAt()).split('T')[0];
+    const liveStatus = site.isLive() ? 'Live' : 'Non-Live';
 
     if (audits.length) {
       const lastAudit = audits[0];

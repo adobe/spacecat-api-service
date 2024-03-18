@@ -177,9 +177,9 @@ describe('Base Slack Utils', () => {
 
     describe('sendFile()', () => {
       it('sends a file', async () => {
+        const channelId = 'foo';
         const file = 'some-file';
         const filename = 'some-filename';
-        const channelId = 'foo';
         const threadTs = 'bar';
 
         await sendFile({ client, channelId, threadTs }, file, filename);
