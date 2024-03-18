@@ -202,11 +202,11 @@ describe('GetSitesCommand', () => {
       const sites = generateSites(4);
       const formattedSites = formatSitesToCSV(sites).toString('utf-8');
 
-      expect(formattedSites).to.equal('Base URL,Delivery Type,Live Status,Go Live Date,Performance Score,SEO Score,Accessibility Score,Best Practices Score,GitHub URL,Error\n'
-        + 'https://site-0.com,aem_edge,Live,istoggledLiveAtDate,---,---,---,---,https://github.com/site-0,Lighthouse Error: No First Contentful Paint [NO_FCP]\n'
-        + 'https://site-1.com,aem_cs,Non-Live,createdAtDate,90,80,70,60,,\n'
-        + 'https://site-2.com,aem_edge,Live,istoggledLiveAtDate,90,80,70,60,https://github.com/site-2,\n'
-        + 'https://site-3.com,aem_cs,Non-Live,createdAtDate,---,---,---,---,,Lighthouse Error: No First Contentful Paint [NO_FCP]');
+      expect(formattedSites).to.equal('"Base URL","Delivery Type","Live Status","Go Live Date","GitHub URL","Performance Score","SEO Score","Accessibility Score","Best Practices Score","Error"\n'
+        + '"https://site-0.com","aem_edge","Live","istoggledLiveAtDate","https://github.com/site-0","---","---","---","---","Lighthouse Error: No First Contentful Paint [NO_FCP]"\n'
+        + '"https://site-1.com","aem_cs","Non-Live","createdAtDate","","90","80","70","60",""\n'
+        + '"https://site-2.com","aem_edge","Live","istoggledLiveAtDate","https://github.com/site-2","90","80","70","60",""\n'
+        + '"https://site-3.com","aem_cs","Non-Live","createdAtDate","","---","---","---","---","Lighthouse Error: No First Contentful Paint [NO_FCP]"');
     });
   });
 });

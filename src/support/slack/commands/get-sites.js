@@ -10,12 +10,19 @@
  * governing permissions and limitations under the License.
  */
 
+import { Parser } from '@json2csv/plainjs';
 import BaseCommand from './base.js';
 
 import { formatLighthouseError, formatScore } from '../../../utils/slack/format.js';
 import { postErrorMessage, sendFile, sendMessageBlocks } from '../../../utils/slack/base.js';
 
 const PHRASES = ['get sites', 'get all sites'];
+
+// TODO: Move this to shared
+function generateCSVFile(data) {
+  const json2csvParser = new Parser();
+  return Buffer.from(json2csvParser.parse(data), 'utf-8');
+}
 
 /**
  * Formats a list of sites into CSV content.
@@ -24,37 +31,44 @@ const PHRASES = ['get sites', 'get all sites'];
  * @returns {Buffer} - The CSV file buffer.
  */
 export function formatSitesToCSV(sites = []) {
-  // Define the CSV header
-  let csvContent = 'Base URL,Delivery Type,Live Status,Go Live Date,Performance Score,SEO Score,Accessibility Score,Best Practices Score,GitHub URL,Error\n';
-
-  // Iterate over each site to format its data into CSV rows
-  sites.forEach((site) => {
+  const sitesData = sites.map((site) => {
     const audits = site.getAudits();
-    const baseURL = site.getBaseURL();
-    const deliveryType = site.getDeliveryType();
-    const githubURL = site.getGitHubURL();
-    const goLiveDate = (site.getIsLiveToggledAt() || site.getCreatedAt()).split('T')[0];
-    const liveStatus = site.isLive() ? 'Live' : 'Non-Live';
+
+    const siteData = {
+      'Base URL': site.getBaseURL(),
+      'Delivery Type': site.getDeliveryType(),
+      'Live Status': site.isLive() ? 'Live' : 'Non-Live',
+      'Go Live Date': (site.getIsLiveToggledAt() || site.getCreatedAt()).split('T')[0],
+      'GitHub URL': site.getGitHubURL() || '',
+      'Performance Score': '---',
+      'SEO Score': '---',
+      'Accessibility Score': '---',
+      'Best Practices Score': '---',
+      Error: '',
+    };
 
     if (audits.length) {
       const lastAudit = audits[0];
-      const scores = lastAudit.getScores();
-      const {
-        performance = 0,
-        accessibility = 0,
-        'best-practices': bestPractices = 0,
-        seo = 0,
-      } = scores;
 
       if (lastAudit.isError()) {
-        csvContent += `${baseURL},${deliveryType},${liveStatus},${goLiveDate},---,---,---,---,${githubURL ? `${githubURL}` : ''},${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}\n`;
+        siteData.Error = formatLighthouseError(lastAudit.getAuditResult().runtimeError);
       } else {
-        csvContent += `${baseURL},${deliveryType},${liveStatus},${goLiveDate},${formatScore(performance)},${formatScore(seo)},${formatScore(accessibility)},${formatScore(bestPractices)},${githubURL ? `${githubURL}` : ''},\n`;
+        const {
+          performance = 0,
+          accessibility = 0,
+          'best-practices': bestPractices = 0,
+          seo = 0,
+        } = lastAudit.getScores();
+        siteData['Performance Score'] = formatScore(performance);
+        siteData['SEO Score'] = formatScore(seo);
+        siteData['Accessibility Score'] = formatScore(accessibility);
+        siteData['Best Practices Score'] = formatScore(bestPractices);
       }
     }
+    return siteData;
   });
 
-  return Buffer.from(csvContent.trim(), 'utf-8');
+  return generateCSVFile(sitesData);
 }
 
 /**
