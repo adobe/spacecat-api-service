@@ -89,7 +89,7 @@ function GetSitesCommand(context) {
 
     // filter sites from friends and family org
     sites = sites.filter(
-      (site) => site.getOrganizationId() !== process.env.ORGANIZATION_ID_FRIENDS_FAMILY,
+      (site) => site.getOrganizationId() !== context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
     );
 
     if (filterStatus !== 'all') {

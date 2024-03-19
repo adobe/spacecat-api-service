@@ -84,7 +84,9 @@ describe('GetSitesCommand', () => {
       info: sinon.stub(),
     };
 
-    context = { dataAccess: dataAccessStub, boltApp: boltAppStub, log: logStub };
+    context = {
+      dataAccess: dataAccessStub, boltApp: boltAppStub, log: logStub, env: { ORGANIZATION_ID_FRIENDS_FAMILY: 'F&F' },
+    };
     slackContext = {
       say: sinon.spy(),
       client: {
