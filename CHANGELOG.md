@@ -1,3 +1,10 @@
+# [1.30.0](https://github.com/adobe/spacecat-api-service/compare/v1.29.2...v1.30.0) (2024-03-19)
+
+
+### Features
+
+* Slack command to get all sites posts a CSV file of the sites ([#214](https://github.com/adobe/spacecat-api-service/issues/214)) ([2b3049d](https://github.com/adobe/spacecat-api-service/commit/2b3049df365af49a034b823c52203b35e3565cbe))
+
 ## [1.29.2](https://github.com/adobe/spacecat-api-service/compare/v1.29.1...v1.29.2) (2024-03-18)
 
 
