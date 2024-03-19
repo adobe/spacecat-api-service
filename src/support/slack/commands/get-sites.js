@@ -87,6 +87,11 @@ function GetSitesCommand(context) {
   async function fetchAndFormatSites(threadTs, filterStatus, psiStrategy, deliveryType) {
     let sites = await dataAccess.getSitesWithLatestAudit(`lhs-${psiStrategy}`, true, deliveryType);
 
+    // filter sites from friends and family org
+    sites = sites.filter(
+      (site) => site.getOrganizationId() !== process.env.ORGANIZATION_ID_FRIENDS_FAMILY,
+    );
+
     if (filterStatus !== 'all') {
       sites = sites.filter((site) => (filterStatus === 'live' ? site.isLive() : !site.isLive()));
     }
