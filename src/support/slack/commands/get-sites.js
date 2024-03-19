@@ -10,19 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-import { Parser } from '@json2csv/plainjs';
+import { generateCSVFile } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 
 import { formatLighthouseError, formatScore } from '../../../utils/slack/format.js';
 import { postErrorMessage, sendFile, sendMessageBlocks } from '../../../utils/slack/base.js';
 
 const PHRASES = ['get sites', 'get all sites'];
-
-// TODO: Move this to shared
-function generateCSVFile(data) {
-  const json2csvParser = new Parser();
-  return Buffer.from(json2csvParser.parse(data), 'utf-8');
-}
 
 /**
  * Formats a list of sites into CSV content.
