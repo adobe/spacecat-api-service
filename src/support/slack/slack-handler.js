@@ -30,9 +30,12 @@ function SlackHandler(commands, log) {
    * @param {object} event - The event.
    * @param {function} say - The say function.
    * @param {object} context - The slack bot context.
+   * @param {object} client - The slack client.
    * @return {Promise<void>}
    */
-  const onAppMention = async ({ event, say, context }) => {
+  const onAppMention = async ({
+    event, say, context, client,
+  }) => {
     const threadTs = getThreadTimestamp(event);
     const threadedSay = wrapSayForThread(say, threadTs);
     const message = getMessageFromEvent(event);
@@ -40,6 +43,7 @@ function SlackHandler(commands, log) {
       say: threadedSay,
       channelId: event.channel,
       threadTs,
+      client,
     };
 
     log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);

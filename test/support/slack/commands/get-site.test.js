@@ -183,8 +183,8 @@ describe('GetSiteCommand', () => {
       expect(formatted).to.equal('```\n'
         + 'Audited At (UTC)  Perf  SEO   A11y  Best Pr.  Live\n'
         + '2023-12-16 09:21:09  Lighthouse Error: No First Contentful Paint [NO_FCP]\n'
-        + '2023-12-16 09:21:09  90%   80%   70%   60%   No  \n'
-        + '2023-12-16 09:21:09  90%   80%   70%   60%   Yes \n'
+        + '2023-12-16 09:21:09  90    80    70    60    No  \n'
+        + '2023-12-16 09:21:09  90    80    70    60    Yes \n'
         + '2023-12-16 09:21:09  Lighthouse Error: No First Contentful Paint [NO_FCP]\n'
         + '```');
     });

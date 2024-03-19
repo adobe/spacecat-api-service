@@ -141,6 +141,22 @@ const sendMessageBlocks = async (say, textSections, additionalBlocks = []) => {
   }
 };
 
+const sendFile = async (slackContext, file, filename) => {
+  const {
+    client,
+    channelId,
+    threadTs,
+  } = slackContext;
+
+  await client.files.uploadV2({
+    channel_id: channelId,
+    thread_ts: threadTs,
+    file,
+    filename,
+    unfurl_links: false,
+  });
+};
+
 /**
  * Gets the query parameters for the Slack API. THe query parameters include the channel ID and
  * the message blocks.
@@ -261,6 +277,7 @@ export {
   postSiteNotFoundMessage,
   postSlackMessage,
   sendMessageBlocks,
+  sendFile,
   getThreadTimestamp,
   getMessageFromEvent,
   wrapSayForThread,
