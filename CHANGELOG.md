@@ -1,3 +1,10 @@
+# [1.31.0](https://github.com/adobe/spacecat-api-service/compare/v1.30.3...v1.31.0) (2024-03-20)
+
+
+### Features
+
+* filter friends and family organization from get all sites command ([#224](https://github.com/adobe/spacecat-api-service/issues/224)) ([7cfa3d1](https://github.com/adobe/spacecat-api-service/commit/7cfa3d1614e9d6fc29439a8b22e2a24951e03248))
+
 ## [1.30.3](https://github.com/adobe/spacecat-api-service/compare/v1.30.2...v1.30.3) (2024-03-20)
 
 
