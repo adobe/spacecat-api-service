@@ -16,13 +16,9 @@ import sinon from 'sinon';
 import chai from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
-import nock from 'nock';
-import cwv, {
-  INITIAL_CWV_SLACK_MESSAGE,
-} from '../../../src/controllers/trigger/cwv.js';
-import { getQueryParams } from '../../../src/utils/slack/base.js';
-
-import { emptyResponse, fullResponse } from './data.js';
+import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
+import cwv from '../../../src/controllers/trigger/cwv.js';
 
 chai.use(sinonChai);
 chai.use(chaiAsPromised);
@@ -31,157 +27,77 @@ const { expect } = chai;
 
 const sandbox = sinon.createSandbox();
 
-const DEFAULT_PARAMS = {
-  interval: 30,
-  offset: 0,
-  limit: 100000,
-};
-
 describe('cvw handler', () => {
   let context;
+  let dataAccessMock;
+  let sqsMock;
+  let sites;
+  let orgs;
 
-  beforeEach('setup', () => {
-    context = {
-      log: console,
-      runtime: {
-        region: 'us-east-1',
-      },
-      data: {},
-      env: {
-        AUDIT_JOBS_QUEUE_URL: 'queueUrl',
-        RUM_DOMAIN_KEY: 'domainkey',
-        SLACK_BOT_TOKEN: 'token',
-        AUDIT_REPORT_SLACK_CHANNEL_ID: 'DSA',
-      },
-      sqs: {
-        sendMessage: sandbox.stub().resolves(),
-      },
+  beforeEach(() => {
+    sites = [
+      createSite({
+        id: 'site1',
+        baseURL: 'http://site1.com',
+        auditConfig: {
+          auditTypeConfigs: {
+            cwv: {
+              disabled: true,
+            },
+          },
+        },
+      }),
+      createSite({
+        id: 'site2',
+        baseURL: 'http://site2.com',
+      }),
+    ];
+
+    orgs = [
+      createOrganization({
+        id: 'default',
+        name: 'ABCD',
+        config: {
+          audits: {
+            auditsDisabled: false,
+          },
+        },
+      })];
+
+    dataAccessMock = {
+      getOrganizations: sandbox.stub().resolves(orgs),
+      getSitesByDeliveryType: sandbox.stub(),
+    };
+
+    sqsMock = {
+      sendMessage: sandbox.stub().resolves(),
     };
   });
 
-  afterEach('clean', () => {
+  afterEach(() => {
     sandbox.restore();
   });
 
-  it('rejects when domainkey is not set', async () => {
-    delete context.env.RUM_DOMAIN_KEY;
-    await expect(cwv(context)).to.be.rejectedWith('Required env variables are missing');
-  });
-
-  it('rejects when queueUrl is not set', async () => {
-    delete context.env.AUDIT_JOBS_QUEUE_URL;
-    await expect(cwv(context)).to.be.rejectedWith('Required env variables are missing');
-  });
-
-  it('rejects when response is not in expected shape', async () => {
-    context.data.url = 'space.cat';
-    nock('https://helix-pages.anywhere.run')
-      .get('/helix-services/run-query@v3/dash/domain-list')
-      .query({
-        ...DEFAULT_PARAMS,
-        domainkey: context.env.RUM_DOMAIN_KEY,
-      })
-      .reply(200, '{"key": "value"}');
-
-    await expect(cwv(context)).to.be.rejectedWith('Unexpected response from rum api. $.results.data is not array');
-  });
-
-  it('return 404 when empty response is received from the rum api', async () => {
-    context.data.url = 'all';
-    nock('https://helix-pages.anywhere.run')
-      .get('/helix-services/run-query@v3/dash/domain-list')
-      .query({
-        ...DEFAULT_PARAMS,
-        domainkey: context.env.RUM_DOMAIN_KEY,
-      })
-      .reply(200, emptyResponse);
-
-    const resp = await cwv(context);
-
-    expect(resp.status).to.equal(404);
-  });
-
-  it('return 404 when desired url not found in the response coming from the rum api', async () => {
-    context.data.url = 'non-existing-url.com';
-
-    nock('https://helix-pages.anywhere.run')
-      .get('/helix-services/run-query@v3/dash/domain-list')
-      .query({
-        ...DEFAULT_PARAMS,
-        domainkey: context.env.RUM_DOMAIN_KEY,
-      })
-      .reply(200, fullResponse);
-
-    const resp = await cwv(context);
-
-    expect(resp.status).to.equal(404);
-  });
-
-  it('queue the audit task when requested url in rum api', async () => {
-    context.data.type = 'cwv';
-    context.data.url = 'adobe.com';
-
-    nock('https://helix-pages.anywhere.run')
-      .get('/helix-services/run-query@v3/dash/domain-list')
-      .query({
-        ...DEFAULT_PARAMS,
-        domainkey: context.env.RUM_DOMAIN_KEY,
-      })
-      .reply(200, fullResponse);
-
-    const resp = await cwv(context);
-
-    const message = {
-      type: context.data.type,
-      url: context.data.url,
-      auditContext: { slackContext: { channel: 'DSA' } },
+  it('triggers a cwv audit', async () => {
+    context = {
+      log: console,
+      dataAccess: dataAccessMock,
+      sqs: sqsMock,
+      data: { type: 'cwv', url: 'ALL' },
+      env: {
+        AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com',
+        SLACK_BOT_TOKEN: 'token',
+        AUDIT_REPORT_SLACK_CHANNEL_ID: 'DSA',
+      },
     };
 
-    expect(context.sqs.sendMessage).to.have.been.calledOnce;
-    expect(context.sqs.sendMessage).to.have.been
-      .calledWith(context.env.AUDIT_JOBS_QUEUE_URL, message);
-    expect(resp.status).to.equal(200);
-  });
+    dataAccessMock.getSitesByDeliveryType.resolves(sites);
 
-  it('queue multiple audit tasks when all urls requested', async () => {
-    context.data.type = 'cwv';
-    context.data.url = 'all';
+    const response = await cwv(context);
+    const result = await response.json();
 
-    nock('https://helix-pages.anywhere.run')
-      .get('/helix-services/run-query@v3/dash/domain-list')
-      .query({
-        ...DEFAULT_PARAMS,
-        domainkey: context.env.RUM_DOMAIN_KEY,
-      })
-      .reply(200, fullResponse);
-
-    nock('https://slack.com')
-      .get('/api/chat.postMessage')
-      .query(getQueryParams('DSA', INITIAL_CWV_SLACK_MESSAGE))
-      .reply(200, {
-        ok: true,
-        channel: 'DSA',
-        ts: 'ts1',
-      });
-
-    const resp = await cwv(context);
-
-    expect(context.sqs.sendMessage).to.have.been.calledThrice;
-    expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
-      type: 'cwv',
-      url: 'adobe.com',
-      auditContext: { slackContext: { channel: 'DSA', ts: 'ts1' } },
-    });
-    expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
-      type: 'cwv',
-      url: 'bamboohr.com',
-      auditContext: { slackContext: { channel: 'DSA', ts: 'ts1' } },
-    });
-    expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
-      type: 'cwv',
-      url: 'nurtec.com',
-      auditContext: { slackContext: { channel: 'DSA', ts: 'ts1' } },
-    });
-    expect(resp.status).to.equal(200);
+    expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
+    expect(sqsMock.sendMessage.callCount).to.equal(1);
+    expect(result.message[0]).to.equal('Triggered cwv audit for site2');
   });
 });
