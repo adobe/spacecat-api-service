@@ -1,3 +1,10 @@
+## [1.30.3](https://github.com/adobe/spacecat-api-service/compare/v1.30.2...v1.30.3) (2024-03-20)
+
+
+### Bug Fixes
+
+* **trigger:** trigger cwv audit using sites db ([#221](https://github.com/adobe/spacecat-api-service/issues/221)) ([f112fa3](https://github.com/adobe/spacecat-api-service/commit/f112fa3773ef5dcdc4bcd51590af8ff577d7d170))
+
 ## [1.30.2](https://github.com/adobe/spacecat-api-service/compare/v1.30.1...v1.30.2) (2024-03-19)
 
 
