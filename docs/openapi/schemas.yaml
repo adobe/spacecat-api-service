@@ -235,11 +235,9 @@ Site:
     gitHubURL:
       description: The optional GitHub URL of the site
       $ref: '#/URL'
-    isLive:
-      description: Whether the site is live or not
-      type: boolean
-    isLiveToggledAt:
-      description: The date and time when the site was last toggled to live or non-live
+    goLiveDate:
+      description: The date and time when the site went live on AEM Edge
+      nullable: true
       $ref: '#/DateTime'
     auditConfig:
       description: The audit configuration for this site
@@ -259,8 +257,7 @@ Site:
     baseURL: 'https://example-site.com'
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
-    isLive: true
-    isLiveToggledAt: '2024-01-20T10:00:00Z'
+    goLiveDate: '2024-01-20T10:00:00Z'
     auditConfig:
       auditsDisabled: false
       auditTypeConfigs:
@@ -303,8 +300,7 @@ SiteWithLatestAudit:
     baseURL: 'https://example-site.com'
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
-    isLive: true
-    isLiveToggledAt: '2024-01-20T10:00:00Z'
+    goLiveDate: '2024-01-20T10:00:00Z'
     auditConfig:
       auditsDisabled: false
       auditTypeConfigs:
@@ -320,7 +316,7 @@ SiteWithLatestAudit:
         expiresAt: '2024-07-20T12:00:00Z'
         auditType: 'cwv'
         isError: false
-        isLive: true
+        deliveryType: 'aem_edge'
         fullAuditRef: 'https://some-audit-system/full-report/1234'
         auditResult:
           someProperty: 'someValue'
@@ -353,10 +349,10 @@ SiteCreate:
     gitHubURL:
       description: The optional GitHub URL of the site
       $ref: '#/URL'
-    isLive:
-      description: Whether the site is live or not.
-      default: false
-      type: boolean
+    goLiveDate:
+      description: The date and time when the site went live on AEM Edge
+      nullable: true
+      $ref: '#/DateTime'
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
@@ -373,9 +369,10 @@ SiteUpdate:
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
-    isLive:
-      description: Whether the site is live or not.
-      type: boolean
+    goLiveDate:
+      description: The date and time when the site went live on AEM Edge
+      nullable: true
+      $ref: '#/DateTime'
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
@@ -385,7 +382,7 @@ SiteUpdate:
   example:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
-    isLive: true
+    goLiveDate: '2024-01-20T10:00:00Z'
 AuditConfigType:
   type: object
   properties:
@@ -429,8 +426,9 @@ Audit:
       $ref: '#/AuditType'
     isError:
       type: boolean
-    isLive:
-      type: boolean
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
     fullAuditRef:
       description: |
         A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
@@ -445,7 +443,7 @@ Audit:
     expiresAt: '2024-07-20T12:00:00Z'
     auditType: 'cwv'
     isError: false
-    isLive: true
+    deliveryType: 'aem_edge'
     fullAuditRef: 'https://some-audit-system/full-report/1234'
     auditResult:
       someProperty: 'someValue'
