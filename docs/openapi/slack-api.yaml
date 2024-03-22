@@ -7,9 +7,9 @@ invite-by-user-id:
       Not implemented yet.
       
       This endpoint can be used to invite a user to their organization's Slack 
-      channel by IMS user ID, which is read from the IMS user token. As a 
-      prerequisite, there must be an existing Spacecat organization and Slack 
-      channel for the given IMS org ID.
+      channel by IMS user ID, which is read from the IMS API via the provided 
+      user access token. As a prerequisite, there must be an existing Spacecat 
+      organization and Slack channel for the given IMS org ID.
     operationId: inviteToSlackChannelByUserId
     security:
       - admin_key: [ ]

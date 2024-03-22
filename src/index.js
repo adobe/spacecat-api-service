@@ -20,6 +20,7 @@ import {
   noContent,
   notFound,
 } from '@adobe/spacecat-shared-http-utils';
+import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
 import auth from './support/auth.js';
@@ -118,4 +119,5 @@ export const main = wrap(run)
   .with(bodyData)
   .with(sqs)
   .with(secrets, { name: resolveSecretsName })
-  .with(helixStatus);
+  .with(helixStatus)
+  .with(imsClientWrapper);

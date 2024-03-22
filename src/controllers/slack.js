@@ -12,7 +12,11 @@
 
 import { Response } from '@adobe/fetch';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
-import { internalServerError } from '@adobe/spacecat-shared-http-utils';
+import {
+  badRequest,
+  createResponse,
+  internalServerError, notFound,
+} from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import SlackHandler from '../support/slack/slack-handler.js';
@@ -131,7 +135,53 @@ function SlackController(SlackApp) {
     return new Response('');
   };
 
-  return { handleEvent };
+  const inviteUserToChannel = async (context) => {
+    const {
+      data, dataAccess, imsClient, log,
+    } = context;
+    const { imsUserAccessToken, imsOrgId } = data;
+
+    let userProfile;
+    try {
+      userProfile = await imsClient.getImsUserProfile(imsUserAccessToken);
+    } catch (error) {
+      log.error(`Error fetching user profile: ${error.message}`);
+      // Return a 404 response if we fail to find the user's profile
+      return notFound('Error fetching user profile with the given access token.');
+    }
+
+    // Verify that this user is a member of the given organization
+    if (!userProfile.organizations.includes(imsOrgId)) {
+      // The given org is not part of this user's profile - do not grant them access to Slack
+      return badRequest('User is not a member of the given organization.');
+    }
+
+    let organization;
+    try {
+      organization = await dataAccess.getOrganizationByImsOrgID(imsOrgId);
+    } catch (error) {
+      log.error(`Error reading organization by IMS org ID: '${imsOrgId}'. Details: ${error.message}`);
+      return notFound('Error reading organization: not found.');
+    }
+
+    log.info(`Inviting userId '${userProfile.userId}' to the Slack channel for IMS org Id '${imsOrgId}' (organizationId ${organization.id}).`);
+
+    /*
+    TODO:
+      - Wire up ElevatedSlackClient with a wrapper in index.js
+      - Invite user to slack
+      - Update invitedUserCount in the organization's Slack config
+      - Persist organization back to data store
+      - Test cases, including admin_route check
+    */
+
+    return createResponse('', 202);
+  };
+
+  return {
+    handleEvent,
+    inviteUserToChannel,
+  };
 }
 
 export default SlackController;
