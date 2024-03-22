@@ -1,3 +1,10 @@
+## [1.31.3](https://github.com/adobe/spacecat-api-service/compare/v1.31.2...v1.31.3) (2024-03-22)
+
+
+### Bug Fixes
+
+* **site-discovery:** filter impactful-site domains ([#229](https://github.com/adobe/spacecat-api-service/issues/229)) ([25e1daf](https://github.com/adobe/spacecat-api-service/commit/25e1daf11dbc6317d6bceadf16696da6687c2bc9))
+
 ## [1.31.2](https://github.com/adobe/spacecat-api-service/compare/v1.31.1...v1.31.2) (2024-03-21)
 
 
