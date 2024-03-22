@@ -1,3 +1,10 @@
+# [1.32.0](https://github.com/adobe/spacecat-api-service/compare/v1.31.3...v1.32.0) (2024-03-22)
+
+
+### Features
+
+* **api-spec:** the new edge go live date field ([#231](https://github.com/adobe/spacecat-api-service/issues/231)) ([6e81951](https://github.com/adobe/spacecat-api-service/commit/6e819516c1bd88e3b62728857bcdb23e6c9d9abb))
+
 ## [1.31.3](https://github.com/adobe/spacecat-api-service/compare/v1.31.2...v1.31.3) (2024-03-22)
 
 
