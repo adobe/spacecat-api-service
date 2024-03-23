@@ -1,3 +1,10 @@
+## [1.32.2](https://github.com/adobe/spacecat-api-service/compare/v1.32.1...v1.32.2) (2024-03-23)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#233](https://github.com/adobe/spacecat-api-service/issues/233)) ([c3d4afa](https://github.com/adobe/spacecat-api-service/commit/c3d4afad02341b3994ecfa6cddba403cb575ea07))
+
 ## [1.32.1](https://github.com/adobe/spacecat-api-service/compare/v1.32.0...v1.32.1) (2024-03-23)
 
 
