@@ -10,166 +10,59 @@
  * governing permissions and limitations under the License.
  */
 
+import { generateCSVFile } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 
-import { formatLighthouseError, formatScore, formatURL } from '../../../utils/slack/format.js';
-import { sendMessageBlocks, postErrorMessage, wrapSayForThread } from '../../../utils/slack/base.js';
+import { formatLighthouseError, formatScore } from '../../../utils/slack/format.js';
+import { postErrorMessage, sendFile, sendMessageBlocks } from '../../../utils/slack/base.js';
 
-const PAGE_SIZE = 10;
 const PHRASES = ['get sites', 'get all sites'];
 
 /**
- * Generate an overflow accessory object for a Slack message.
- *
- * @returns {Object} The overflow accessory object.
- */
-function generateOverflowAccessory() {
-  return {
-    type: 'overflow',
-    options: [
-      {
-        text: {
-          type: 'plain_text',
-          text: ':page_facing_up: Download as CSV',
-          emoji: true,
-        },
-        value: 'csv',
-      },
-      {
-        text: {
-          type: 'plain_text',
-          text: ':excel: Download as XLS',
-          emoji: true,
-        },
-        value: 'xlsx',
-      },
-    ],
-    action_id: 'sites_overflow_action',
-  };
-}
-
-/**
- * Format a list of sites for output.
+ * Formats a list of sites into CSV content.
  *
  * @param {Array} [sites=[]] - The sites to format.
- * @param {number} start - The index to start slicing the array.
- * @param {number} end - The index to end slicing the array.
- * @returns {string} The formatted sites message.
+ * @returns {Buffer} - The CSV file buffer.
  */
-// eslint-disable-next-line default-param-last
-export function formatSites(sites = [], start, end) {
-  return sites.slice(start, end)
-    .reduce((message, site, index) => {
-      const baseURL = site.getBaseURL();
-      const baseURLText = baseURL.replace(/^main--/, '')
-        .replace(/--.*/, '');
-      const rank = start + index + 1;
+export function formatSitesToCSV(sites = []) {
+  const sitesData = sites.map((site) => {
+    const audits = site.getAudits();
 
-      let siteMessage = `${rank}. No audits found for ${baseURLText}`;
-      const audits = site.getAudits();
+    const siteData = {
+      'Base URL': site.getBaseURL(),
+      'Delivery Type': site.getDeliveryType(),
+      'Live Status': site.isLive() ? 'Live' : 'Non-Live',
+      'Go Live Date': (site.getIsLiveToggledAt() || site.getCreatedAt()).split('T')[0],
+      'GitHub URL': site.getGitHubURL() || '',
+      'Performance Score': '---',
+      'SEO Score': '---',
+      'Accessibility Score': '---',
+      'Best Practices Score': '---',
+      Error: '',
+    };
 
-      if (audits.length) {
-        const lastAudit = audits[0];
-        const icon = site.isLive() ? ':rocket:' : ':submarine:';
+    if (audits.length) {
+      const lastAudit = audits[0];
 
-        const scores = lastAudit.getScores();
+      if (lastAudit.isError()) {
+        siteData.Error = formatLighthouseError(lastAudit.getAuditResult().runtimeError);
+      } else {
         const {
           performance = 0,
           accessibility = 0,
           'best-practices': bestPractices = 0,
           seo = 0,
-        } = scores;
-
-        if (lastAudit.isError()) {
-          siteMessage = `${rank}. ${icon} ${formatLighthouseError(lastAudit.getAuditResult().runtimeError)}: <${formatURL(baseURL)}|${baseURLText}>`;
-        } else {
-          siteMessage = `${rank}. ${icon} ${formatScore(performance)} - ${formatScore(seo)} - ${formatScore(accessibility)} - ${formatScore(bestPractices)}: <${formatURL(baseURL)}|${baseURLText}>`;
-        }
-        siteMessage += site.getGitHubURL() ? ` (<${site.getGitHubURL()}|GH>)` : '';
+        } = lastAudit.getScores();
+        siteData['Performance Score'] = formatScore(performance);
+        siteData['SEO Score'] = formatScore(seo);
+        siteData['Accessibility Score'] = formatScore(accessibility);
+        siteData['Best Practices Score'] = formatScore(bestPractices);
       }
-
-      return `${message}\n${siteMessage.trim()}`;
-    }, '');
-}
-
-/**
- * Generate pagination blocks for a Slack message. The pagination blocks
- * include buttons for the previous page, next page, and specific pages.
- * The pagination blocks also include the thread timestamp to use for the
- * pagination actions. The pagination actions are handled by the
- * paginationHandler function.
- *
- * @param {string} threadTs - The thread timestamp to use for the pagination actions.
- * @param {number} start - The index to start the page.
- * @param {number} end - The index to end the page.
- * @param {number} totalSites - The total number of sites.
- * @param {string} filterStatus - The status to filter sites by.
- * @param {string} psiStrategy - The strategy to show scores of.
- * @param {string} deliveryType - The delivery type to filter sites by.
- * @returns {Object} The pagination blocks object.
- */
-function generatePaginationBlocks(
-  threadTs,
-  start,
-  end,
-  totalSites,
-  filterStatus,
-  psiStrategy = 'mobile',
-  deliveryType = 'all',
-) {
-  const blocks = [];
-  const numberOfPages = Math.ceil(totalSites / PAGE_SIZE);
-
-  // add 'Previous' button if not on first page
-  if (start > 0) {
-    blocks.push({
-      type: 'button',
-      text: {
-        type: 'plain_text',
-        text: 'Previous',
-      },
-      value: `${String(start - PAGE_SIZE)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
-      action_id: 'paginate_sites_prev',
-    });
-  }
-
-  // add numbered page buttons
-  for (let i = 0; i < numberOfPages; i += 1) {
-    const pageStart = i * PAGE_SIZE;
-    blocks.push({
-      type: 'button',
-      text: {
-        type: 'plain_text',
-        text: `${i + 1}`,
-      },
-      value: `${String(pageStart)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
-      action_id: `paginate_sites_page_${i + 1}`,
-    });
-  }
-
-  // add 'Next' button if not on last page
-  if (end < totalSites) {
-    blocks.push({
-      type: 'button',
-      text: {
-        type: 'plain_text',
-        text: 'Next',
-      },
-      value: `${String(start + PAGE_SIZE)}:${filterStatus}:${psiStrategy}:${deliveryType}`,
-      action_id: 'paginate_sites_next',
-    });
-  }
-
-  // Modify each block to include thread_ts in the value
-  blocks.forEach((block) => {
-    // eslint-disable-next-line no-param-reassign
-    block.value += `:${threadTs}`;
+    }
+    return siteData;
   });
 
-  return {
-    type: 'actions',
-    elements: blocks,
-  };
+  return generateCSVFile(sitesData);
 }
 
 /**
@@ -191,14 +84,18 @@ function GetSitesCommand(context) {
 
   const { dataAccess, log } = context;
 
-  async function fetchAndFormatSites(threadTs, start, filterStatus, psiStrategy, deliveryType) {
+  async function fetchAndFormatSites(threadTs, filterStatus, psiStrategy, deliveryType) {
     let sites = await dataAccess.getSitesWithLatestAudit(`lhs-${psiStrategy}`, true, deliveryType);
+
+    // filter sites from friends and family org
+    sites = sites.filter(
+      (site) => site.getOrganizationId() !== context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
+    );
 
     if (filterStatus !== 'all') {
       sites = sites.filter((site) => (filterStatus === 'live' ? site.isLive() : !site.isLive()));
     }
 
-    const end = start + PAGE_SIZE;
     const totalSites = sites.length;
 
     if (totalSites === 0) {
@@ -223,70 +120,22 @@ PSI Strategy: *${psiStrategy}*
 Delivery Type: *${deliveryType}*
 
 _Sites are ordered by performance score, then all other scores, ascending._
-_Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices >> Base URL_
-    ${formatSites(sites, start, end)}
     `,
-      accessory: generateOverflowAccessory(),
     }];
 
-    const additionalBlocks = [
-      generatePaginationBlocks(
-        threadTs,
-        start,
-        end,
-        totalSites,
-        filterStatus,
-        psiStrategy,
-        deliveryType,
-      ),
-    ];
+    const csvFile = formatSitesToCSV(sites);
 
     return {
       textSections,
-      additionalBlocks,
+      csvFile,
     };
   }
-
-  /**
-   * Handler for the pagination actions (previous page, next page, or specific page).
-   *
-   * @param {Object} param0 - The object containing the acknowledgement
-   * function (ack), say function, and action.
-   */
-  const paginationHandler = async ({ ack, say, action }) => {
-    log.info(`Pagination request received for get sites. Page: ${action.value}`);
-
-    const startTime = process.hrtime();
-
-    await ack();
-
-    const [newStart, filterStatus, psiStrategy, deliveryType, threadTs] = action.value.split(':');
-    const threadedSay = wrapSayForThread(say, threadTs);
-    const start = parseInt(newStart, 10);
-
-    try {
-      const {
-        textSections,
-        additionalBlocks,
-      } = await fetchAndFormatSites(threadTs, start, filterStatus, psiStrategy, deliveryType);
-      await sendMessageBlocks(threadedSay, textSections, additionalBlocks);
-    } catch (error) {
-      await postErrorMessage(threadedSay, error);
-    }
-
-    const endTime = process.hrtime(startTime);
-    const elapsedTime = (endTime[0] + endTime[1] / 1e9).toFixed(2);
-
-    log.info(`Pagination request processed in ${elapsedTime} seconds`);
-  };
 
   /**
    * Initializes the bot with the necessary action handlers.
    */
   const init = (ctx) => {
     baseCommand.init(ctx);
-
-    ctx.boltApp.action(/^paginate_sites_(prev|next|page_\d+)$/, paginationHandler);
   };
 
   /**
@@ -340,16 +189,18 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
     try {
       const {
         textSections,
-        additionalBlocks,
+        csvFile,
       } = await fetchAndFormatSites(
         slackContext.threadTs,
-        0,
         filterStatus,
         psiStrategy,
         deliveryType,
       );
 
-      await sendMessageBlocks(say, textSections, additionalBlocks);
+      const fileName = `sites-${filterStatus}-${psiStrategy}-${deliveryType}-${new Date().toISOString()}.csv`;
+
+      await sendMessageBlocks(say, textSections);
+      await sendFile(slackContext, csvFile, fileName);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
@@ -361,7 +212,6 @@ _Columns: Rank: (Live-Status) Performance - SEO - Accessibility - Best Practices
   return {
     ...baseCommand,
     handleExecution,
-    paginationHandler, // for testing
     init,
   };
 }

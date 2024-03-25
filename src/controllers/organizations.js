@@ -30,13 +30,19 @@ import { SiteDto } from '../dto/site.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {DataAccess} dataAccess - Data access.
+ * @param {object} env - Environment object.
  * @returns {object} Organizations controller.
  * @constructor
  */
-function OrganizationsController(dataAccess) {
+function OrganizationsController(dataAccess, env) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
+
+  if (!isObject(env)) {
+    throw new Error('Environment object required');
+  }
+  const { SLACK_URL_WORKSPACE_EXTERNAL: slackExternalWorkspaceUrl } = env;
 
   /**
    * Creates an organization. The organization ID is generated automatically.
@@ -82,6 +88,53 @@ function OrganizationsController(dataAccess) {
     }
 
     return ok(OrganizationDto.toJSON(organization));
+  };
+
+  /**
+   * Gets an organization by its IMS organization ID.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<object>} Organization.
+   * @throws {Error} If IMS organization ID is not provided, or if not found.
+   */
+  const getByImsOrgID = async (context) => {
+    const imsOrgId = context.params?.imsOrgId;
+
+    if (!hasText(imsOrgId)) {
+      return badRequest('IMS org ID required');
+    }
+
+    const organization = await dataAccess.getOrganizationByImsOrgID(imsOrgId);
+    if (!organization) {
+      return notFound(`Organization not found by IMS org ID: ${imsOrgId}`);
+    }
+
+    return ok(OrganizationDto.toJSON(organization));
+  };
+
+  /**
+   * Gets an organization's Slack configuration by IMS organization ID.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<object>} Slack config object.
+   * @throws {Error} If IMS org ID is not provided, org not found, or Slack config not found.
+   */
+  const getSlackConfigByImsOrgID = async (context) => {
+    const response = await getByImsOrgID(context);
+    if (response.status !== 200) {
+      return response;
+    }
+
+    const body = await response.json();
+    const slack = body.config?.slack;
+
+    if (hasText(slack?.channel)) {
+      // This organization has a Slack channel configured
+      return ok({
+        ...slack,
+        'channel-url': `${slackExternalWorkspaceUrl}/archives/${slack.channel}`,
+      });
+    }
+
+    return notFound(`Slack config not found for IMS org ID: ${context.params.imsOrgId}`);
   };
 
   /**
@@ -169,6 +222,8 @@ function OrganizationsController(dataAccess) {
     createOrganization,
     getAll,
     getByID,
+    getByImsOrgID,
+    getSlackConfigByImsOrgID,
     getSitesForOrganization,
     removeOrganization,
     updateOrganization,

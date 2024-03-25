@@ -92,3 +92,9 @@ Fulfillment worker requires the following env variable:
 ```plaintext
 FULFILLMENT_EVENTS_QUEUE_URL=url of the queue to send fulfillment events to
 ```
+
+Organizations controller requires the following env variable:
+
+```plaintext
+SLACK_URL_WORKSPACE_EXTERNAL=url of the external Slack workspace, used to generate the Slack channel url
+```

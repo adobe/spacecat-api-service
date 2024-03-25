@@ -24,6 +24,7 @@ AuditType:
     - 'lhs-desktop'
     - 'lhs-mobile'
     - 'broken-backlinks'
+    - 'sitemap'
   example: 'cwv'
 URL:
   type: string
@@ -36,6 +37,13 @@ Domain:
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
+ImsUserAccessToken:
+  type: string
+  example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
+EmailAddress:
+  type: string
+  format: email
+  example: 'user@example.com'
 SlackMentionConfig:
   type: object
   additionalProperties: true
@@ -227,11 +235,9 @@ Site:
     gitHubURL:
       description: The optional GitHub URL of the site
       $ref: '#/URL'
-    isLive:
-      description: Whether the site is live or not
-      type: boolean
-    isLiveToggledAt:
-      description: The date and time when the site was last toggled to live or non-live
+    goLiveDate:
+      description: The date and time when the site went live on AEM Edge
+      nullable: true
       $ref: '#/DateTime'
     auditConfig:
       description: The audit configuration for this site
@@ -251,8 +257,7 @@ Site:
     baseURL: 'https://example-site.com'
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
-    isLive: true
-    isLiveToggledAt: '2024-01-20T10:00:00Z'
+    goLiveDate: '2024-01-20T10:00:00Z'
     auditConfig:
       auditsDisabled: false
       auditTypeConfigs:
@@ -261,22 +266,22 @@ Site:
         'cwv':
           disabled: false
     config:
-        slack:
-          channel: 'C1234567890'
-          workspace: 'example-workspace'
-        alerts:
-          - type: '404'
-            byOrg: true
-            mentions:
-              - slack:
-                  - '@user1'
-                  - '@user2'
-          - type: 'cwv'
-            byOrg: false
-            mentions:
-                - slack:
-                    - '@user5'
-                    - '@user6'
+      slack:
+        channel: 'C1234567890'
+        workspace: 'example-workspace'
+      alerts:
+        - type: '404'
+          byOrg: true
+          mentions:
+            - slack:
+                - '@user1'
+                - '@user2'
+        - type: 'cwv'
+          byOrg: false
+          mentions:
+            - slack:
+                - '@user5'
+                - '@user6'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -295,8 +300,7 @@ SiteWithLatestAudit:
     baseURL: 'https://example-site.com'
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
-    isLive: true
-    isLiveToggledAt: '2024-01-20T10:00:00Z'
+    goLiveDate: '2024-01-20T10:00:00Z'
     auditConfig:
       auditsDisabled: false
       auditTypeConfigs:
@@ -312,7 +316,7 @@ SiteWithLatestAudit:
         expiresAt: '2024-07-20T12:00:00Z'
         auditType: 'cwv'
         isError: false
-        isLive: true
+        deliveryType: 'aem_edge'
         fullAuditRef: 'https://some-audit-system/full-report/1234'
         auditResult:
           someProperty: 'someValue'
@@ -345,10 +349,10 @@ SiteCreate:
     gitHubURL:
       description: The optional GitHub URL of the site
       $ref: '#/URL'
-    isLive:
-      description: Whether the site is live or not.
-      default: false
-      type: boolean
+    goLiveDate:
+      description: The date and time when the site went live on AEM Edge
+      nullable: true
+      $ref: '#/DateTime'
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
@@ -365,9 +369,10 @@ SiteUpdate:
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
-    isLive:
-      description: Whether the site is live or not.
-      type: boolean
+    goLiveDate:
+      description: The date and time when the site went live on AEM Edge
+      nullable: true
+      $ref: '#/DateTime'
     auditConfig:
       description: The audit configuration for this site
       $ref: '#/AuditConfig'
@@ -377,7 +382,7 @@ SiteUpdate:
   example:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
-    isLive: true
+    goLiveDate: '2024-01-20T10:00:00Z'
 AuditConfigType:
   type: object
   properties:
@@ -421,8 +426,9 @@ Audit:
       $ref: '#/AuditType'
     isError:
       type: boolean
-    isLive:
-      type: boolean
+    deliveryType:
+      description: The type of the delivery this site is using
+      $ref: '#/DeliveryType'
     fullAuditRef:
       description: |
         A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
@@ -437,7 +443,7 @@ Audit:
     expiresAt: '2024-07-20T12:00:00Z'
     auditType: 'cwv'
     isError: false
-    isLive: true
+    deliveryType: 'aem_edge'
     fullAuditRef: 'https://some-audit-system/full-report/1234'
     auditResult:
       someProperty: 'someValue'
@@ -634,6 +640,80 @@ RUMDomainDiscoveryAlert:
     domain:
       description: Domain of the page which triggered the domain discovery alert
       $ref: '#/Domain'
+SlackInviteToChannelByUserIdRequest:
+  type: object
+  required:
+    - imsOrgId
+    - imsUserAccessToken
+  properties:
+    imsOrgId:
+      description: The ID of the Adobe IMS organization
+      $ref: '#/ImsOrganizationId'
+    imsUserAccessToken:
+      description: The IMS access token of the user to invite to the Slack channel
+      $ref: '#/ImsUserAccessToken'
+Configuration:
+  type: object
+  properties:
+    version:
+      type: string
+      readOnly: true
+      description: Internal version of the configuration, managed and incremented by the system. Not exposed for external control via the API.
+    jobs:
+      type: array
+      items:
+        $ref: '#/Job'
+      description: A list of job configurations, detailing job type, its group, and execution interval.
+    queues:
+      type: object
+      properties:
+        audits:
+          type: string
+          format: url
+          description: The SQS queue name for audit jobs
+        imports:
+          type: string
+          format: url
+          description: The SQS queue name for import jobs
+        reports:
+          type: string
+          format: url
+          description: The SQS queue name for report jobs
+Job:
+  type: object
+  properties:
+    group:
+      type: string
+      description: The group or category to which the job belongs, helping in organizing jobs by their functional area.
+    interval:
+      type: string
+      description: Specifies how often the job should run, e.g., 'daily'. This is part of job scheduling information.
+    type:
+      type: string
+      description: The job type, indicating the specific action or task that the job performs, such as 'rum-to-aa' indicating a data import job from RUM to AA.
+ConfigurationUpdate:
+  type: object
+  properties:
+    jobs:
+      type: array
+      items:
+        $ref: '#/Job'
+      description: Optional. Provide to update the job configurations.
+    queues:
+      type: object
+      properties:
+        audits:
+          type: string
+          format: url
+          description: Optional. Provide to update the SQS queue name for audit jobs.
+        imports:
+          type: string
+          format: url
+          description: Optional. Provide to update the SQS queue name for import jobs.
+        reports:
+          type: string
+          format: url
+          description: Optional. Provide to update the SQS queue name for report jobs.
 AnalyticsSiteIntegration:
   type: object
   additionalProperties: true

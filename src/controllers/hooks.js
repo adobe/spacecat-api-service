@@ -17,7 +17,7 @@ import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
-import { fetch } from '../support/utils.js';
+import { isHelixSite } from '../support/utils.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
 const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
@@ -28,7 +28,8 @@ export const BUTTON_LABELS = {
   IGNORE: 'Ignore',
 };
 
-const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--'];
+const IGNORED_DOMAINS = [/helix3.dev/, /fastly.net/, /ngrok-free.app/, /oastify.co/, /fastly-aem.page/, /findmy.media/, /impactful-[0-9]+\.site/];
+const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--', 'sitemap', 'test', 'preview', 'cm-verify', 'owa', 'mail', 'ssl', 'secure', 'publish'];
 
 class InvalidSiteCandidate extends Error {
   constructor(message, url) {
@@ -69,6 +70,10 @@ function isInvalidSubdomain(hostname) {
   return IGNORED_SUBDOMAIN_TOKENS.some((ignored) => subdomain.includes(ignored));
 }
 
+function isInvalidDomain(hostname) {
+  return IGNORED_DOMAINS.some((ignored) => hostname.match(ignored));
+}
+
 function isIPAddress(hostname) {
   return /^\d{1,3}(\.\d{1,3}){3}$|^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(hostname);
 }
@@ -78,34 +83,10 @@ function containsPathOrSearchParams(url) {
 }
 
 async function verifyHelixSite(url) {
-  let finalUrl;
-  try {
-    const resp = await fetch(url);
-    finalUrl = resp.url;
-  } catch (e) {
-    throw new InvalidSiteCandidate(`Cannot fetch the candidate due to ${e.message}`, url);
-  }
+  const { isHelix, reason } = await isHelixSite(url);
 
-  finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
-  let finalResp;
-
-  try {
-    // redirects are disabled because .plain.html should return 200
-    finalResp = await fetch(finalUrl, { redirect: 'manual' });
-  } catch (e) {
-    throw new InvalidSiteCandidate('.plain.html is unreachable', finalUrl);
-  }
-
-  // reject if .plain.html does not return 2XX
-  if (!finalResp.ok) {
-    throw new InvalidSiteCandidate(`.plain.html does not return 2XX, returns ${finalResp.status}`, finalUrl);
-  }
-
-  const respText = await finalResp.text();
-
-  // reject if .plain.html contains <head>
-  if (respText.includes('<head>')) {
-    throw new InvalidSiteCandidate('.plain.html should not contain <head>', finalUrl);
+  if (!isHelix) {
+    throw new InvalidSiteCandidate(reason, url);
   }
 
   return true;
@@ -132,6 +113,11 @@ function verifyURLCandidate(baseURL) {
   // disregard the non-prod hostnames
   if (isInvalidSubdomain(url.hostname)) {
     throw new InvalidSiteCandidate('URL most likely contains a non-prod domain', url.href);
+  }
+
+  // disregard unwanted domains
+  if (isInvalidDomain(url.hostname)) {
+    throw new InvalidSiteCandidate('URL contains an unwanted domain', url.href);
   }
 }
 

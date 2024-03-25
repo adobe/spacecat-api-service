@@ -32,7 +32,7 @@ describe('trigger handler', () => {
     context = {
       log: console,
       data: {
-        type: 'cwv',
+        type: '404',
         url: 'space.cat',
       },
     };
@@ -71,7 +71,7 @@ describe('trigger handler', () => {
       .query(true)
       .reply(200, 'invalid-response');
 
-    await expect(handler(context)).to.be.rejectedWith('Failed to trigger cwv audit for space.cat');
+    await expect(handler(context)).to.be.rejectedWith('Failed to trigger 404 audit for space.cat');
   });
 
   it('successfully executes when RUM API response is correct json format', async () => {

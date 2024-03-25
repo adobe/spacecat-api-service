@@ -25,7 +25,7 @@ import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
-import matchPath from './utils/route-utils.js';
+import matchPath, { sanitizePath } from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
 import OrganizationsController from './controllers/organizations.js';
@@ -36,6 +36,7 @@ import trigger from './controllers/trigger.js';
 
 // prevents webpack build error
 import { App as SlackApp } from './utils/slack/bolt.cjs';
+import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 
 export function enrichPathInfo(fn) { // export for testing
@@ -82,8 +83,9 @@ async function run(request, context) {
   try {
     const routeHandlers = getRouteHandlers(
       AuditsController(context.dataAccess),
+      ConfigurationController(context.dataAccess),
       HooksController(context),
-      OrganizationsController(context.dataAccess, log),
+      OrganizationsController(context.dataAccess, context.env),
       SitesController(context.dataAccess, log),
       SlackController(SlackApp),
       trigger,
@@ -104,7 +106,7 @@ async function run(request, context) {
     }
   } catch (e) {
     const t1 = Date.now();
-    log.error(`Handler exception after ${t1 - t0} ms`, e);
+    log.error(`Handler exception after ${t1 - t0} ms. Path: ${sanitizePath(suffix)}`, e);
     return internalServerError(e.message);
   }
 }

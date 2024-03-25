@@ -1,0 +1,32 @@
+invite-by-user-id:
+  post:
+    tags:
+      - slack
+    summary: Request invitation to an organization's existing Slack channel
+    description: |
+      Not implemented yet.
+      
+      This endpoint can be used to invite a user to their organization's Slack 
+      channel by IMS user ID, which is read from the IMS user token. As a 
+      prerequisite, there must be an existing Spacecat organization and Slack 
+      channel for the given IMS org ID.
+    operationId: inviteToSlackChannelByUserId
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SlackInviteToChannelByUserIdRequest'
+    responses:
+      '202':
+        description: Request accepted, invite(s) to follow by email if successful
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'

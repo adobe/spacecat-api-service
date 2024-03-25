@@ -16,6 +16,8 @@ import chai from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
+import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
+
 import OrganizationsController from '../../src/controllers/organizations.js';
 import { OrganizationDto } from '../../src/dto/organization.js';
 import { SiteDto } from '../../src/dto/site.js';
@@ -37,7 +39,27 @@ describe('Organizations Controller', () => {
 
   const organizations = [
     { id: 'org1', name: 'Org 1' },
-    { id: 'org2', name: 'Org 2' },
+    {
+      id: 'org2',
+      name: 'Org 2',
+      imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+      config: {
+        slack: {
+          channel: 'C0123456789',
+          workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
+        },
+      },
+    },
+    {
+      id: 'org3',
+      name: 'Org 3',
+      imsOrgId: '9876567890ABCDEF12345678@AdobeOrg',
+      config: {
+        slack: {
+          workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
+        },
+      },
+    },
   ].map((org) => OrganizationDto.fromJson(org));
 
   const organizationFunctions = [
@@ -45,6 +67,8 @@ describe('Organizations Controller', () => {
     'getAll',
     'getByID',
     'getSitesForOrganization',
+    'getByImsOrgID',
+    'getSlackConfigByImsOrgID',
     'removeOrganization',
     'updateOrganization',
   ];
@@ -60,9 +84,14 @@ describe('Organizations Controller', () => {
       getOrganizations: sandbox.stub().resolves(organizations),
       getOrganizationByID: sandbox.stub().resolves(organizations[0]),
       getSitesByOrganizationID: sandbox.stub().resolves([sites[0]]),
+      getOrganizationByImsOrgID: sandbox.stub().resolves(organizations[1]),
     };
 
-    organizationsController = OrganizationsController(mockDataAccess);
+    const env = {
+      SLACK_URL_WORKSPACE_EXTERNAL: 'https://example-workspace.slack.com',
+    };
+
+    organizationsController = OrganizationsController(mockDataAccess, env);
   });
 
   afterEach(() => {
@@ -83,6 +112,10 @@ describe('Organizations Controller', () => {
 
   it('throws an error if data access is not an object', () => {
     expect(() => OrganizationsController()).to.throw('Data access required');
+  });
+
+  it('throws an error if env param is not an object', () => {
+    expect(() => OrganizationsController(mockDataAccess)).to.throw('Environment object required');
   });
 
   it('creates an organization', async () => {
@@ -186,7 +219,7 @@ describe('Organizations Controller', () => {
     const resultOrganizations = await result.json();
 
     expect(mockDataAccess.getOrganizations.calledOnce).to.be.true;
-    expect(resultOrganizations).to.be.an('array').with.lengthOf(2);
+    expect(resultOrganizations).to.be.an('array').with.lengthOf(3);
     expect(resultOrganizations[0]).to.have.property('id', 'org1');
     expect(resultOrganizations[1]).to.have.property('id', 'org2');
   });
@@ -237,5 +270,77 @@ describe('Organizations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Organization ID required');
+  });
+
+  it('gets an organization by IMS org ID', async () => {
+    const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
+    const result = await organizationsController.getByImsOrgID({ params: { imsOrgId } });
+    const organization = await result.json();
+
+    expect(mockDataAccess.getOrganizationByImsOrgID.calledOnce).to.be.true;
+
+    expect(organization).to.be.an('object');
+    expect(organization).to.have.property('imsOrgId', imsOrgId);
+  });
+
+  it('returns not found when an organization is not found by IMS org ID', async () => {
+    mockDataAccess.getOrganizationByImsOrgID.resolves(null);
+
+    const result = await organizationsController.getByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Organization not found by IMS org ID: not-found@AdobeOrg');
+  });
+
+  it('returns bad request if IMS org ID is not provided', async () => {
+    const result = await organizationsController.getByImsOrgID({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'IMS org ID required');
+  });
+
+  it('gets the Slack config of an organization by IMS org ID', async () => {
+    const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
+    const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId } });
+    const slackConfig = await result.json();
+
+    expect(mockDataAccess.getOrganizationByImsOrgID.calledOnce).to.be.true;
+
+    expect(slackConfig).to.be.an('object');
+    expect(slackConfig).to.deep.equal({
+      channel: 'C0123456789',
+      workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
+      'channel-url': 'https://example-workspace.slack.com/archives/C0123456789',
+    });
+  });
+
+  it('returns not found when an organization is not found by IMS org ID', async () => {
+    mockDataAccess.getOrganizationByImsOrgID.resolves(null);
+
+    const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Organization not found by IMS org ID: not-found@AdobeOrg');
+  });
+
+  it('returns bad request if IMS org ID is not provided', async () => {
+    const result = await organizationsController.getSlackConfigByImsOrgID({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'IMS org ID required');
+  });
+
+  it('returns not found when an organization does not have a Slack channel configuration', async () => {
+    mockDataAccess.getOrganizationByImsOrgID.resolves(organizations[2]);
+
+    const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId: '9876567890ABCDEF12345678@AdobeOrg' } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Slack config not found for IMS org ID: 9876567890ABCDEF12345678@AdobeOrg');
   });
 });
