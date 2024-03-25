@@ -718,15 +718,15 @@ AnalyticsSiteIntegration:
   type: object
   additionalProperties: true
   required:
-    - baseURL
+    - siteId
     - reporting
     - dataCollection
     - dataStore
     - dataMapping
   properties:
-    baseURL:
-      description: The base URL of the site
-      $ref: '#/URL'
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
     reporting:
       description: The reporting details
       type: object

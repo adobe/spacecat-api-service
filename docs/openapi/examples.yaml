@@ -1,7 +1,7 @@
 analytics-site-integration-aa-tags:
   summary: Example for an integration with Adobe Analytics via Adobe Tags
   value:
-    baseURL: 'https://www.example.com'
+    siteId: 'a31fa5e4-90be-4440-a063-e6d6aa5a127a'
     reporting:
       link: 'https://www5.an.adobe.com/x/5_19xzaq4'
       timezone: 'UTC-07:00'
@@ -23,7 +23,7 @@ analytics-site-integration-aa-tags:
 analytics-site-integration-aa-aep-websdk:
   summary: Example for an integration with Adobe Analytics via Adobe Experience Platform and WebSDK
   value:
-    baseURL: 'https://www.example.com'
+    siteId: 'a31fa5e4-90be-4440-a063-e6d6aa5a127a'
     reporting:
       link: 'https://www5.an.adobe.com/x/5_19xzaq4'
       timezone: 'UTC-07:00'
@@ -45,7 +45,7 @@ analytics-site-integration-aa-aep-websdk:
 analytics-site-integration-cja-tags:
   summary: Example for an integration with Customer Adobe Analytics via Adobe Experience Platform and Adobe Tags
   value:
-    baseURL: 'https://www.example.com'
+    siteId: 'a31fa5e4-90be-4440-a063-e6d6aa5a127a'
     reporting:
       link: 'https://analytics.adobe.com/?linkId=8296eaea-aa9a-4840-8a86-71df75661&dpc=acc'
       timezone: 'UTC-07:00'
@@ -69,7 +69,7 @@ analytics-site-integration-cja-tags:
 analytics-site-integration-cja-websdk:
   summary: Example for an integration with Customer Adobe Analytics via Adobe Experience Platform and WebSDK
   value:
-    baseURL: 'https://www.example.com'
+    siteId: 'a31fa5e4-90be-4440-a063-e6d6aa5a127a'
     reporting:
       link: 'https://analytics.adobe.com/?linkId=8296eaea-aa9a-4840-8a86-71df75661&dpc=acc'
       timezone: 'UTC-07:00'
