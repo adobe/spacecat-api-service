@@ -110,7 +110,7 @@ describe('AddRepoCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith('\n'
-        + '      :white_check_mark: *GitHub repo added for undefined!*\n'
+        + '      :white_check_mark: GitHub repo added for undefined\n'
         + '      \n'
         + '\n'
         + '      :identification_card: some-id\n'
