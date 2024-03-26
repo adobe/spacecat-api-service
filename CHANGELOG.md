@@ -1,3 +1,10 @@
+## [1.32.4](https://github.com/adobe/spacecat-api-service/compare/v1.32.3...v1.32.4) (2024-03-26)
+
+
+### Bug Fixes
+
+* remove config update ([#244](https://github.com/adobe/spacecat-api-service/issues/244)) ([99d913c](https://github.com/adobe/spacecat-api-service/commit/99d913c9a8f18a4706d58524dc3b2e258235d1f3))
+
 ## [1.32.3](https://github.com/adobe/spacecat-api-service/compare/v1.32.2...v1.32.3) (2024-03-25)
 
 
