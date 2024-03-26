@@ -13,16 +13,14 @@
 import {
   badRequest,
   notFound,
-  ok, internalServerError,
+  ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
   isObject,
 } from '@adobe/spacecat-shared-utils';
-import { createConfiguration as validateConfiguration } from '@adobe/spacecat-shared-data-access/src/models/configuration.js';
 
 import { ConfigurationDto } from '../dto/configuration.js';
-import configMerge from '../utils/configMerge.js';
 
 function ConfigurationController(dataAccess) {
   if (!isObject(dataAccess)) {
@@ -71,47 +69,10 @@ function ConfigurationController(dataAccess) {
     return ok(ConfigurationDto.toJSON(configuration));
   };
 
-  /**
-   * Updates the configuration.
-   * @param {UniversalContext} context - Context of the request.
-   * @return {Promise<Response>} Configuration response.
-   */
-  const updateConfiguration = async (context) => {
-    const { data: configurationData } = context;
-
-    if (!isObject(configurationData)) {
-      return badRequest('Request body required');
-    }
-
-    try {
-      const currentConfiguration = await dataAccess.getConfiguration();
-
-      // merge with existing configuration if available, else use the new data directly
-      let updatedConfigData;
-      if (isObject(currentConfiguration)) {
-        updatedConfigData = configMerge(
-          ConfigurationDto.toJSON(currentConfiguration),
-          configurationData,
-        );
-      } else {
-        updatedConfigData = configurationData;
-        updatedConfigData.version = 'v0';
-      }
-
-      validateConfiguration(updatedConfigData);
-      const updatedConfig = await dataAccess.updateConfiguration(updatedConfigData);
-
-      return ok(updatedConfig);
-    } catch (e) {
-      return internalServerError(e.message);
-    }
-  };
-
   return {
     getAll,
     getByVersion,
     getLatest,
-    updateConfiguration,
   };
 }
 
