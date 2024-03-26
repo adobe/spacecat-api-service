@@ -1,3 +1,10 @@
+## [1.32.5](https://github.com/adobe/spacecat-api-service/compare/v1.32.4...v1.32.5) (2024-03-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.3.0 ([#246](https://github.com/adobe/spacecat-api-service/issues/246)) ([dce9ee8](https://github.com/adobe/spacecat-api-service/commit/dce9ee8438238d3aa798167f26606353a689c8c2))
+
 ## [1.32.4](https://github.com/adobe/spacecat-api-service/compare/v1.32.3...v1.32.4) (2024-03-26)
 
 
