@@ -57,7 +57,6 @@ describe('Configurations Controller', () => {
     'getAll',
     'getLatest',
     'getByVersion',
-    'updateConfiguration',
   ];
 
   let mockDataAccess;
@@ -71,8 +70,6 @@ describe('Configurations Controller', () => {
         .resolves(configurations[1]),
       getConfigurationByVersion: sandbox.stub()
         .resolves(configurations.find((config) => config.getVersion() === 'v1')),
-      updateConfiguration: sandbox.stub()
-        .resolves(configurations[1]),
     };
 
     configurationsController = ConfigurationsController(mockDataAccess);
@@ -162,73 +159,5 @@ describe('Configurations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Configuration version required');
-  });
-
-  it('returns bad request if no update payload is provided', async () => {
-    const result = await configurationsController.updateConfiguration({ data: null });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Request body required');
-  });
-
-  it('returns internal server error when an error occurs during update', async () => {
-    mockDataAccess.updateConfiguration.rejects(new Error('Test error'));
-
-    const result = await configurationsController.updateConfiguration({ data: {} });
-    const error = await result.json();
-
-    expect(result.status).to.equal(500);
-    expect(error).to.have.property('message', 'Test error');
-  });
-
-  it('updates the configuration', async () => {
-    const jobToBeAdded = {
-      group: 'reports',
-      type: 'additional',
-      interval: 'monthly',
-    };
-
-    const expectedConfigData = ConfigurationDto.toJSON(configurations[1]);
-    expectedConfigData.jobs.push(jobToBeAdded);
-    const expectedConfig = ConfigurationDto.fromJson(expectedConfigData);
-
-    mockDataAccess.getConfiguration.resolves(expectedConfig);
-    const result = await configurationsController.updateConfiguration({
-      data: {
-        jobs: [{
-          group: 'reports',
-          type: 'additional',
-          interval: 'monthly',
-        }],
-      },
-    });
-    const configuration = await result.json();
-
-    expect(mockDataAccess.updateConfiguration.calledOnce).to.be.true;
-    expect(configuration).to.be.an('object');
-    expect(configuration).to.deep.equal(expectedConfigData);
-  });
-
-  it('updates the configuration if there is no base', async () => {
-    mockDataAccess.getConfiguration.resolves(null);
-    const configData = {
-      jobs: [{
-        group: 'reports',
-        type: 'additional',
-        interval: 'monthly',
-      }],
-      queues: {
-        reports: 'sqs://some-reports-queue',
-      },
-    };
-
-    const result = await configurationsController.updateConfiguration({
-      data: configData,
-    });
-    const configuration = await result.json();
-
-    expect(mockDataAccess.updateConfiguration.calledOnce).to.be.true;
-    expect(configuration).to.be.an('object');
   });
 });
