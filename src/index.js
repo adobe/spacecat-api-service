@@ -124,7 +124,7 @@ export const main = wrap(run)
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
-  .with(secrets, { name: resolveSecretsName })
-  .with(helixStatus)
   .with(imsClientWrapper)
-  .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL });
+  .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
+  .with(secrets, { name: resolveSecretsName })
+  .with(helixStatus);
