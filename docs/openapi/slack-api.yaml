@@ -4,8 +4,6 @@ invite-by-user-id:
       - slack
     summary: Request invitation to an organization's existing Slack channel
     description: |
-      Not implemented yet.
-      
       This endpoint can be used to invite a user to their organization's Slack 
       channel by IMS user ID, which is read from the IMS API via the provided 
       user access token. As a prerequisite, there must be an existing Spacecat 
