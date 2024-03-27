@@ -17,7 +17,7 @@ import {
   createResponse,
   internalServerError, notFound,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import SlackHandler from '../support/slack/slack-handler.js';
 import commands from '../support/slack/commands.js';
@@ -135,9 +135,18 @@ function SlackController(SlackApp) {
     return new Response('');
   };
 
+  /**
+   * Invites a user to the project collaboration Slack channel set up for their organization.
+   * Requires their IMS user access token as well as the IMS organization ID of the Slack channel
+   * that they are requesting access to.
+   *
+   * @param {Object} context - Object containing data, dataAccess, imsClient, slack, and log.
+   * @param {Object} context.data - Object containing imsUserAccessToken, and imsOrgId.
+   * @returns {Promise<Response>} - HTTP response object.
+   */
   const inviteUserToChannel = async (context) => {
     const {
-      data, dataAccess, imsClient, log,
+      data, dataAccess, imsClient, slack: { elevatedClient }, log,
     } = context;
     const { imsUserAccessToken, imsOrgId } = data;
 
@@ -145,34 +154,45 @@ function SlackController(SlackApp) {
     try {
       userProfile = await imsClient.getImsUserProfile(imsUserAccessToken);
     } catch (error) {
-      log.error(`Error fetching user profile: ${error.message}`);
-      // Return a 404 response if we fail to find the user's profile
+      log.error(`Error fetching user profile from IMS API: ${error.message}`);
+      // Return a 404 response if we fail to fetch the user's profile
       return notFound('Error fetching user profile with the given access token.');
     }
 
     // Verify that this user is a member of the given organization
     if (!userProfile.organizations.includes(imsOrgId)) {
-      // The given org is not part of this user's profile - do not grant them access to Slack
+      log.error(`User profile (${userProfile.userId}) did not include the requested IMS org ID: ${imsOrgId}. `
+        + `The values in the user profile were: ${userProfile.organizations.join(', ')}`);
       return badRequest('User is not a member of the given organization.');
     }
 
-    let organization;
-    try {
-      organization = await dataAccess.getOrganizationByImsOrgID(imsOrgId);
-    } catch (error) {
-      log.error(`Error reading organization by IMS org ID: '${imsOrgId}'. Details: ${error.message}`);
+    const spaceCatOrg = await dataAccess.getOrganizationByImsOrgID(imsOrgId);
+
+    if (!isObject(spaceCatOrg)) {
+      log.error(`Organization not found in Star Catalogue data layer: ${imsOrgId}.`);
       return notFound('Error reading organization: not found.');
     }
 
-    log.info(`Inviting userId '${userProfile.userId}' to the Slack channel for IMS org Id '${imsOrgId}' (organizationId ${organization.id}).`);
+    const orgSlackChannelId = spaceCatOrg.getConfig().slack?.channel;
+
+    if (!hasText(orgSlackChannelId)) {
+      log.error(`No Slack channel found for the IMS org ID: ${imsOrgId} in its organization configuration.`);
+      return notFound('Slack channel not found for this organization.');
+    }
+
+    log.info(`Inviting userId: ${userProfile.userId} to the Slack channel for IMS org ID: ${imsOrgId} (organizationId ${spaceCatOrg.id}).`);
+
+    try {
+      await elevatedClient.inviteUsersByEmail(orgSlackChannelId, [userProfile]);
+    } catch (error) {
+      log.error(`Error inviting user: ${userProfile.userId} to Slack channel: ${orgSlackChannelId}. Message: ${error.message}`);
+      return internalServerError('Error inviting user to Slack channel.');
+    }
 
     /*
     TODO:
-      - Wire up ElevatedSlackClient with a wrapper in index.js
-      - Invite user to slack
       - Update invitedUserCount in the organization's Slack config
       - Persist organization back to data store
-      - Test cases, including admin_route check
     */
 
     return createResponse('', 202);
