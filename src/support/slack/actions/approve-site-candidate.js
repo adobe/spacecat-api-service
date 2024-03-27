@@ -11,6 +11,7 @@
  */
 
 import { SITE_CANDIDATE_STATUS } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { Blocks, Message } from 'slack-block-builder';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
@@ -51,11 +52,24 @@ export default function approveSiteCandidate(lambdaContext) {
       const orgId = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
         && friendsFamilyOrgId;
 
-      const site = await dataAccess.addSite({
-        baseURL: siteCandidate.getBaseURL(),
-        isLive: true,
-        ...(orgId && { organizationId: friendsFamilyOrgId }),
-      });
+      let site = await dataAccess.getSiteByBaseURL(siteCandidate.getBaseURL());
+
+      // if site didn't exist before, then directly save it
+      if (!site) {
+        site = await dataAccess.addSite({
+          baseURL: siteCandidate.getBaseURL(),
+          isLive: true,
+          ...(orgId && { organizationId: friendsFamilyOrgId }),
+        });
+      } else {
+        // site might've been added before manually. In that case, make sure it is promoted to live
+        // and edge delivery type
+        if (!site.isLive()) {
+          site.toggleLive();
+        }
+        site.updateDeliveryType(DELIVERY_TYPES.AEM_EDGE);
+        site = await dataAccess.updateSite(site);
+      }
 
       siteCandidate.setSiteId(site.getId());
       siteCandidate.setStatus(SITE_CANDIDATE_STATUS.APPROVED);
