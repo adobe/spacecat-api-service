@@ -17,28 +17,6 @@ latest-configuration:
         description: Latest configuration not found.
       '500':
         $ref: './responses.yaml#/500'
-  put:
-    summary: Update the configuration, creating a new configuration version
-    operationId: updateConfiguration
-    security:
-      - admin_key: [ ]
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: './schemas.yaml#/ConfigurationUpdate'
-    responses:
-      '200':
-        description: Configuration updated successfully.
-      '400':
-        $ref: './responses.yaml#/400-empty-config-or-validation-failure'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404-configuration-not-found-with-version'
-      '500':
-        $ref: './responses.yaml#/500'
 configuration:
   get:
     summary: Get a specific version of the application configuration

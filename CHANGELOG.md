@@ -1,3 +1,38 @@
+## [1.32.5](https://github.com/adobe/spacecat-api-service/compare/v1.32.4...v1.32.5) (2024-03-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.3.0 ([#246](https://github.com/adobe/spacecat-api-service/issues/246)) ([dce9ee8](https://github.com/adobe/spacecat-api-service/commit/dce9ee8438238d3aa798167f26606353a689c8c2))
+
+## [1.32.4](https://github.com/adobe/spacecat-api-service/compare/v1.32.3...v1.32.4) (2024-03-26)
+
+
+### Bug Fixes
+
+* remove config update ([#244](https://github.com/adobe/spacecat-api-service/issues/244)) ([99d913c](https://github.com/adobe/spacecat-api-service/commit/99d913c9a8f18a4706d58524dc3b2e258235d1f3))
+
+## [1.32.3](https://github.com/adobe/spacecat-api-service/compare/v1.32.2...v1.32.3) (2024-03-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.21.0 ([#239](https://github.com/adobe/spacecat-api-service/issues/239)) ([3bd223e](https://github.com/adobe/spacecat-api-service/commit/3bd223e2411365c572625057f608676043bd5a24))
+
+## [1.32.2](https://github.com/adobe/spacecat-api-service/compare/v1.32.1...v1.32.2) (2024-03-23)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#233](https://github.com/adobe/spacecat-api-service/issues/233)) ([c3d4afa](https://github.com/adobe/spacecat-api-service/commit/c3d4afad02341b3994ecfa6cddba403cb575ea07))
+
+## [1.32.1](https://github.com/adobe/spacecat-api-service/compare/v1.32.0...v1.32.1) (2024-03-23)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#232](https://github.com/adobe/spacecat-api-service/issues/232)) ([e9a1e34](https://github.com/adobe/spacecat-api-service/commit/e9a1e343b17dcba4d252564f9dd04519aebb5db3))
+
 # [1.32.0](https://github.com/adobe/spacecat-api-service/compare/v1.31.3...v1.32.0) (2024-03-22)
 
 
