@@ -15,7 +15,8 @@ import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import {
   badRequest,
   createResponse,
-  internalServerError, notFound,
+  internalServerError,
+  notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
