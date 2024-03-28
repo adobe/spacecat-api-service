@@ -691,29 +691,6 @@ Job:
     type:
       type: string
       description: The job type, indicating the specific action or task that the job performs, such as 'rum-to-aa' indicating a data import job from RUM to AA.
-ConfigurationUpdate:
-  type: object
-  properties:
-    jobs:
-      type: array
-      items:
-        $ref: '#/Job'
-      description: Optional. Provide to update the job configurations.
-    queues:
-      type: object
-      properties:
-        audits:
-          type: string
-          format: url
-          description: Optional. Provide to update the SQS queue name for audit jobs.
-        imports:
-          type: string
-          format: url
-          description: Optional. Provide to update the SQS queue name for import jobs.
-        reports:
-          type: string
-          format: url
-          description: Optional. Provide to update the SQS queue name for report jobs.
 AnalyticsSiteIntegration:
   type: object
   additionalProperties: true
