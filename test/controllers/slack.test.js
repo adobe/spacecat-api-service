@@ -14,11 +14,18 @@
 
 import { Response } from '@adobe/fetch';
 
-import { expect } from 'chai';
+import chai, { expect } from 'chai';
 import nock from 'nock';
 import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
+import chaiAsPromised from 'chai-as-promised';
+
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import SlackController from '../../src/controllers/slack.js';
+
+chai.use(sinonChai);
+chai.use(chaiAsPromised);
 
 describe('SlackController', () => {
   let testPayload;
@@ -43,6 +50,7 @@ describe('SlackController', () => {
         opts.logger.setLevel();
       }
     }
+
     return MockSlackApp;
   }
 
@@ -65,7 +73,7 @@ describe('SlackController', () => {
       },
       log: logStub,
       data: testPayload,
-      pathInfo: { headers: { } },
+      pathInfo: { headers: {} },
     };
   });
 
@@ -81,7 +89,9 @@ describe('SlackController', () => {
       const response = await controller.handleEvent(context);
 
       expect(response.status).to.equal(500);
-      expect(response.headers.plain()['x-error']).to.equal('Missing SLACK_SIGNING_SECRET');
+      expect(response.headers.plain()['x-error']).to.equal(
+        'Missing SLACK_SIGNING_SECRET',
+      );
     });
 
     it('throws error when slack bot token is missing', async () => {
@@ -91,7 +101,9 @@ describe('SlackController', () => {
       const response = await controller.handleEvent(context);
 
       expect(response.status).to.equal(500);
-      expect(response.headers.plain()['x-error']).to.equal('Missing SLACK_BOT_TOKEN');
+      expect(response.headers.plain()['x-error']).to.equal(
+        'Missing SLACK_BOT_TOKEN',
+      );
     });
 
     it('responds to URL verification', async () => {
@@ -170,7 +182,9 @@ describe('SlackController', () => {
       const response = await controller.handleEvent(context);
 
       expect(processEventStub.calledOnce).to.be.true;
-      expect(processEventStub.firstCall.firstArg.body).to.deep.equal(testPayload);
+      expect(processEventStub.firstCall.firstArg.body).to.deep.equal(
+        testPayload,
+      );
       expect(response).to.be.an.instanceof(Response);
       expect(response.status).to.equal(200);
     });
@@ -182,7 +196,9 @@ describe('SlackController', () => {
       const response = await controller.handleEvent(context);
 
       expect(processEventStub.calledOnce).to.be.true;
-      expect(processEventStub.firstCall.firstArg.body).to.deep.equal({ test: 'payload' });
+      expect(processEventStub.firstCall.firstArg.body).to.deep.equal(
+        { test: 'payload' },
+      );
       expect(response).to.be.an.instanceof(Response);
       expect(response.status).to.equal(200);
     });
@@ -197,11 +213,133 @@ describe('SlackController', () => {
       const response = await controller.handleEvent(context);
 
       expect(processEventStub.calledOnce).to.be.true;
-      expect(processEventStub.firstCall.firstArg.body).to.deep.equal(testPayload);
-      expect(logStub.error.calledWith(`Error processing event: ${testError.message}`)).to.be.true;
+      expect(processEventStub.firstCall.firstArg.body).to.deep.equal(
+        testPayload,
+      );
+      expect(logStub.error.calledWith(
+        `Error processing event: ${testError.message}`,
+      )).to.be.true;
       expect(response).to.be.an.instanceof(Response);
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal(testError.message);
+    });
+  });
+
+  describe('inviteUserToChannel', () => {
+    let controller;
+    const mockOrgObject = {
+      id: 'mock-id',
+      name: 'Test org #1',
+      imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+    };
+    const mockConfig = {
+      config: {
+        slack: {
+          channel: 'mock-channel-id',
+        },
+      },
+    };
+
+    beforeEach(() => {
+      controller = SlackController(mockSlackApp);
+      const mockImsClient = {
+        getImsUserProfile: sinon.stub().resolves({
+          userId: '9876547890ABCDEF12345678@abcdef123456789.e',
+          email: 'mock-user@example.com',
+          organizations: ['1234567890ABCDEF12345678@AdobeOrg'],
+        }),
+      };
+      context.imsClient = mockImsClient;
+
+      const mockDataAccess = {
+        getOrganizationByImsOrgID: sinon.stub().resolves(createOrganization(mockOrgObject)),
+      };
+      context.dataAccess = mockDataAccess;
+
+      context.slack = {};
+
+      context.data = {
+        imsUserAccessToken: 'mock-token',
+        imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+      };
+    });
+
+    it('throws error when IMS client fails to fetch the user profile', async () => {
+      context.imsClient = {
+        getImsUserProfile: sinon.stub().rejects(new Error('IMS getImsUserProfile request failed with status: 401')),
+      };
+
+      const response = await controller.inviteUserToChannel(context);
+      expect(response.status).to.equal(404);
+      expect(response.headers.plain()['x-error']).to.equal('Error fetching user profile with the given access token.');
+    });
+
+    it('throws error when the user profile response does not include the requested IMS org ID', async () => {
+      context.data = {
+        imsUserAccessToken: 'mock-token',
+        // User is requesting access to this org's Slack channel
+        // Note that this value is not inlcuded in the organizations array above
+        imsOrgId: '9988776690ABCDEF12345678@AdobeOrg',
+      };
+
+      const response = await controller.inviteUserToChannel(context);
+      expect(response.status).to.equal(400);
+      expect(response.headers.plain()['x-error']).to.equal('User is not a member of the given organization.');
+    });
+
+    it('throws error when there is no Star Catalogue entry for the requested IMS org ID', async () => {
+      context.dataAccess = {
+        // Simulate a 'not found' org lookup from Star Catalogue
+        getOrganizationByImsOrgID: sinon.stub().resolves(null),
+      };
+
+      const response = await controller.inviteUserToChannel(context);
+      expect(response.status).to.equal(404);
+      expect(response.headers.plain()['x-error']).to.equal('Error reading organization: not found.');
+    });
+
+    it('should not find a Slack channel for the given organization', async () => {
+      const response = await controller.inviteUserToChannel(context);
+      expect(response.status).to.equal(404);
+      expect(response.headers.plain()['x-error']).to.equal('Slack channel not found for this organization.');
+    });
+
+    it('fails to invite the user to their orgs Slack channel', async () => {
+      context.slack.elevatedClient = {
+        inviteUsersByEmail: sinon.stub().rejects(new Error('Slack inviteUsersByEmail request failed with status: 401')),
+      };
+      const orgWithSlackConfig = {
+        ...mockOrgObject,
+        ...mockConfig,
+      };
+      context.dataAccess.getOrganizationByImsOrgID = sinon.stub()
+        .resolves(createOrganization(orgWithSlackConfig));
+
+      const response = await controller.inviteUserToChannel(context);
+      expect(response.status).to.equal(500);
+      expect(response.headers.plain()['x-error']).to.equal('Error inviting user to Slack channel.');
+    });
+
+    it('should succeed at inviting the user to the Slack channel', async () => {
+      const orgWithSlackConfig = {
+        ...mockOrgObject,
+        ...mockConfig,
+      };
+      context.dataAccess.getOrganizationByImsOrgID = sinon.stub()
+        .resolves(createOrganization(orgWithSlackConfig));
+
+      let validatedSlackCall = false;
+      context.slack.elevatedClient = {
+        inviteUsersByEmail: async (channelId, users) => {
+          expect(channelId).to.equal('mock-channel-id');
+          expect(users[0].email).to.equal('mock-user@example.com');
+          validatedSlackCall = true;
+        },
+      };
+
+      const response = await controller.inviteUserToChannel(context);
+      expect(response.status).to.equal(202);
+      expect(validatedSlackCall).to.be.true;
     });
   });
 });

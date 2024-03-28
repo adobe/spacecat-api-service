@@ -24,6 +24,10 @@ describe('auth', () => {
     .with(enrichPathInfo);
 
   let context;
+  const adminEndpointsToCheck = [
+    '/event/fulfillment',
+    '/slack/channels/invite-by-user-id',
+  ];
 
   beforeEach('setup', () => {
     context = {
@@ -170,27 +174,33 @@ describe('auth', () => {
     expect(resp.status).to.equal(500);
   });
 
-  it('checks that an admin endpoint CANNOT be reached with the user API key', async () => {
-    context.pathInfo.suffix = '/event/fulfillment';
-    const resp = await action(new Request('https://space.cat/', {
-      headers: {
-        'x-api-key': context.env.USER_API_KEY,
-      },
-      method: 'POST',
-    }), context);
+  it('checks that admin POST endpoints CANNOT be reached with the user API key', async () => {
+    for (const endpoint of adminEndpointsToCheck) {
+      context.pathInfo.suffix = endpoint;
+      // eslint-disable-next-line no-await-in-loop
+      const resp = await action(new Request('https://space.cat/', {
+        headers: {
+          'x-api-key': context.env.USER_API_KEY,
+        },
+        method: 'POST',
+      }), context);
 
-    expect(resp.status).to.equal(401);
+      expect(resp.status).to.equal(401);
+    }
   });
 
-  it('checks that an admin endpoint can be reached with the admin API key', async () => {
-    context.pathInfo.suffix = '/event/fulfillment';
-    const resp = await action(new Request('https://space.cat/', {
-      headers: {
-        'x-api-key': context.env.ADMIN_API_KEY,
-      },
-      method: 'POST',
-    }), context);
+  it('checks that admin POST endpoints can be reached with the admin API key', async () => {
+    for (const endpoint of adminEndpointsToCheck) {
+      context.pathInfo.suffix = endpoint;
+      // eslint-disable-next-line no-await-in-loop
+      const resp = await action(new Request('https://space.cat/', {
+        headers: {
+          'x-api-key': context.env.ADMIN_API_KEY,
+        },
+        method: 'POST',
+      }), context);
 
-    expect(resp).to.equal(42);
+      expect(resp).to.equal(42);
+    }
   });
 });

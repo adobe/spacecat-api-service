@@ -83,6 +83,10 @@ SlackConfig:
       description: The Slack workspace name to send notifications to
       type: string
       example: 'example-workspace'
+    invitedUserCount:
+      description: The number of external users invited to the Slack channel
+      type: integer
+      example: 5
     channel-url:
       description: Slack URL of the channel to send notifications to
       type: string
@@ -132,6 +136,7 @@ Organization:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
+        invitedUserCount: 5
       alerts:
         - type: '404'
           byOrg: true

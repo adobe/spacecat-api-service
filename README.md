@@ -98,3 +98,15 @@ Organizations controller requires the following env variable:
 ```plaintext
 SLACK_URL_WORKSPACE_EXTERNAL=url of the external Slack workspace, used to generate the Slack channel url
 ```
+
+Slack controller requires the following env variables:
+
+```plaintext
+IMS_CLIENT_ID=client id for the IMS API
+IMS_HOST=host for the IMS API
+IMS_CLIENT_CODE=client code for the IMS API
+IMS_CLIENT_SECRET=client secret for the IMS API
+
+SLACK_TOKEN_WORKSPACE_EXTERNAL_ELEVATED=Slack token for the external workspace, elevated permissions
+SLACK_OPS_CHANNEL_WORKSPACE_EXTERNAL=channel ID to use for operations messages in the external workspace
+```

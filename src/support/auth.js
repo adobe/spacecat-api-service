@@ -22,6 +22,7 @@ const ADMIN_ENDPOINTS = [
   'GET /trigger',
   'POST /sites',
   'POST /event/fulfillment',
+  'POST /slack/channels/invite-by-user-id',
 ];
 
 /*

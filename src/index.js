@@ -20,6 +20,11 @@ import {
   noContent,
   notFound,
 } from '@adobe/spacecat-shared-http-utils';
+import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
+import {
+  elevatedSlackClientWrapper,
+  SLACK_TARGETS,
+} from '@adobe/spacecat-shared-slack-client';
 import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
 import auth from './support/auth.js';
@@ -111,11 +116,15 @@ async function run(request, context) {
   }
 }
 
+const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
+
 export const main = wrap(run)
   .with(dataAccess)
   .with(auth)
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
+  .with(imsClientWrapper)
+  .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(secrets, { name: resolveSecretsName })
   .with(helixStatus);
