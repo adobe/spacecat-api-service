@@ -58,4 +58,43 @@ site-detection-rum:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+site-integration-analytics:
+  parameters:
+    - $ref: './parameters.yaml#/hookSecret'
+  post:
+    tags:
+      - hooks
+    summary: Process setup completed events for site integration with analytics
+    description: |
+      Not implemented yet (will be via https://github.com/adobe/spacecat-api-service/issues/237).
+      Process setup completed events for site integration with analytics.
+    operationId: processAnalyticsSiteIntegration
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/AnalyticsSiteIntegration'
+          examples:
+            analytics-site-integration-aa-tags:
+              $ref: './examples.yaml#/analytics-site-integration-aa-tags'
+            analytics-site-integration-aa-aep-websdk:
+              $ref: './examples.yaml#/analytics-site-integration-aa-aep-websdk'
+            analytics-site-integration-cja-tags:
+              $ref: './examples.yaml#/analytics-site-integration-cja-tags'
+            analytics-site-integration-cja-websdk:
+              $ref: './examples.yaml#/analytics-site-integration-cja-websdk'
+    responses:
+      '202':
+        description: Accepted for processing
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 
