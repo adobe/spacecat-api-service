@@ -63,6 +63,12 @@ describe('Index Tests', () => {
         ADMIN_API_KEY: apiKey,
         SLACK_BOT_TOKEN: slackBotToken,
         SLACK_SIGNING_SECRET: slackSigningSecret,
+        SLACK_OPS_CHANNEL_WORKSPACE_EXTERNAL: 'mock-external-channel',
+        SLACK_TOKEN_WORKSPACE_EXTERNAL_ELEVATED: 'mock-elevated-external-token',
+        IMS_HOST: 'mock-ims-host.example.com',
+        IMS_CLIENT_ID: 'mock-client-id',
+        IMS_CLIENT_CODE: 'mock-client-code',
+        IMS_CLIENT_SECRET: 'mock-client-secret',
       },
       dataAccess: {
         getSitesWithLatestAudit: sinon.stub().resolves([]),
@@ -112,12 +118,12 @@ describe('Index Tests', () => {
   it('handles errors', async () => {
     context.pathInfo.suffix = '/trigger';
 
-    request = new Request(`${baseUrl}/trigger?url=all&type=cwv`, { headers: { 'x-api-key': apiKey } });
+    request = new Request(`${baseUrl}/trigger?url=all&type=404`, { headers: { 'x-api-key': apiKey } });
 
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger cwv audit for all');
+    expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger 404 audit for all');
   });
 
   it('handles dynamic route errors', async () => {

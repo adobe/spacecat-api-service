@@ -1,3 +1,122 @@
+# [1.33.0](https://github.com/adobe/spacecat-api-service/compare/v1.32.5...v1.33.0) (2024-04-02)
+
+
+### Features
+
+* Endpoint to request an invite to an organization's Slack channel by user ID [#207](https://github.com/adobe/spacecat-api-service/issues/207) ([#249](https://github.com/adobe/spacecat-api-service/issues/249)) ([cae873e](https://github.com/adobe/spacecat-api-service/commit/cae873e651066e27ad887f598483000b5624e940))
+
+## [1.32.5](https://github.com/adobe/spacecat-api-service/compare/v1.32.4...v1.32.5) (2024-03-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.3.0 ([#246](https://github.com/adobe/spacecat-api-service/issues/246)) ([dce9ee8](https://github.com/adobe/spacecat-api-service/commit/dce9ee8438238d3aa798167f26606353a689c8c2))
+
+## [1.32.4](https://github.com/adobe/spacecat-api-service/compare/v1.32.3...v1.32.4) (2024-03-26)
+
+
+### Bug Fixes
+
+* remove config update ([#244](https://github.com/adobe/spacecat-api-service/issues/244)) ([99d913c](https://github.com/adobe/spacecat-api-service/commit/99d913c9a8f18a4706d58524dc3b2e258235d1f3))
+
+## [1.32.3](https://github.com/adobe/spacecat-api-service/compare/v1.32.2...v1.32.3) (2024-03-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.21.0 ([#239](https://github.com/adobe/spacecat-api-service/issues/239)) ([3bd223e](https://github.com/adobe/spacecat-api-service/commit/3bd223e2411365c572625057f608676043bd5a24))
+
+## [1.32.2](https://github.com/adobe/spacecat-api-service/compare/v1.32.1...v1.32.2) (2024-03-23)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#233](https://github.com/adobe/spacecat-api-service/issues/233)) ([c3d4afa](https://github.com/adobe/spacecat-api-service/commit/c3d4afad02341b3994ecfa6cddba403cb575ea07))
+
+## [1.32.1](https://github.com/adobe/spacecat-api-service/compare/v1.32.0...v1.32.1) (2024-03-23)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#232](https://github.com/adobe/spacecat-api-service/issues/232)) ([e9a1e34](https://github.com/adobe/spacecat-api-service/commit/e9a1e343b17dcba4d252564f9dd04519aebb5db3))
+
+# [1.32.0](https://github.com/adobe/spacecat-api-service/compare/v1.31.3...v1.32.0) (2024-03-22)
+
+
+### Features
+
+* **api-spec:** the new edge go live date field ([#231](https://github.com/adobe/spacecat-api-service/issues/231)) ([6e81951](https://github.com/adobe/spacecat-api-service/commit/6e819516c1bd88e3b62728857bcdb23e6c9d9abb))
+
+## [1.31.3](https://github.com/adobe/spacecat-api-service/compare/v1.31.2...v1.31.3) (2024-03-22)
+
+
+### Bug Fixes
+
+* **site-discovery:** filter impactful-site domains ([#229](https://github.com/adobe/spacecat-api-service/issues/229)) ([25e1daf](https://github.com/adobe/spacecat-api-service/commit/25e1daf11dbc6317d6bceadf16696da6687c2bc9))
+
+## [1.31.2](https://github.com/adobe/spacecat-api-service/compare/v1.31.1...v1.31.2) (2024-03-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-slack-client to v1.2.0 ([#228](https://github.com/adobe/spacecat-api-service/issues/228)) ([91eaa1c](https://github.com/adobe/spacecat-api-service/commit/91eaa1c83c14425eb0f14ace54b274aef585e8a9))
+
+## [1.31.1](https://github.com/adobe/spacecat-api-service/compare/v1.31.0...v1.31.1) (2024-03-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v1.6.9 ([#225](https://github.com/adobe/spacecat-api-service/issues/225)) ([ae69447](https://github.com/adobe/spacecat-api-service/commit/ae69447283579fdbfd108fcd8f03f55a7f78013c))
+
+# [1.31.0](https://github.com/adobe/spacecat-api-service/compare/v1.30.3...v1.31.0) (2024-03-20)
+
+
+### Features
+
+* filter friends and family organization from get all sites command ([#224](https://github.com/adobe/spacecat-api-service/issues/224)) ([7cfa3d1](https://github.com/adobe/spacecat-api-service/commit/7cfa3d1614e9d6fc29439a8b22e2a24951e03248))
+
+## [1.30.3](https://github.com/adobe/spacecat-api-service/compare/v1.30.2...v1.30.3) (2024-03-20)
+
+
+### Bug Fixes
+
+* **trigger:** trigger cwv audit using sites db ([#221](https://github.com/adobe/spacecat-api-service/issues/221)) ([f112fa3](https://github.com/adobe/spacecat-api-service/commit/f112fa3773ef5dcdc4bcd51590af8ff577d7d170))
+
+## [1.30.2](https://github.com/adobe/spacecat-api-service/compare/v1.30.1...v1.30.2) (2024-03-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.20.4 ([#223](https://github.com/adobe/spacecat-api-service/issues/223)) ([faaf4b8](https://github.com/adobe/spacecat-api-service/commit/faaf4b86409fc484c4746f00ad236cd82537f83c))
+
+## [1.30.1](https://github.com/adobe/spacecat-api-service/compare/v1.30.0...v1.30.1) (2024-03-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v1.6.8 ([#220](https://github.com/adobe/spacecat-api-service/issues/220)) ([68344ad](https://github.com/adobe/spacecat-api-service/commit/68344add622c958407a816b513447b4d91bb6cec))
+
+# [1.30.0](https://github.com/adobe/spacecat-api-service/compare/v1.29.2...v1.30.0) (2024-03-19)
+
+
+### Features
+
+* Slack command to get all sites posts a CSV file of the sites ([#214](https://github.com/adobe/spacecat-api-service/issues/214)) ([2b3049d](https://github.com/adobe/spacecat-api-service/commit/2b3049df365af49a034b823c52203b35e3565cbe))
+
+## [1.29.2](https://github.com/adobe/spacecat-api-service/compare/v1.29.1...v1.29.2) (2024-03-18)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#219](https://github.com/adobe/spacecat-api-service/issues/219)) ([2ed9421](https://github.com/adobe/spacecat-api-service/commit/2ed94216bbef9382170c9ab19f32317da853c77f))
+
+## [1.29.1](https://github.com/adobe/spacecat-api-service/compare/v1.29.0...v1.29.1) (2024-03-16)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#216](https://github.com/adobe/spacecat-api-service/issues/216)) ([5394f32](https://github.com/adobe/spacecat-api-service/commit/5394f3226b183f031c296946c87e536f13a8ac7d))
+
 # [1.29.0](https://github.com/adobe/spacecat-api-service/compare/v1.28.0...v1.29.0) (2024-03-15)
 
 

@@ -196,6 +196,9 @@ describe('Hooks Controller', () => {
     it('hostnames with findmy.media domains are not accepted', async () => {
       await assertUnwantedDomain('wknd.findmy.media, some-fw-domain.com');
     });
+    it('hostnames with impactful-site domains are not accepted', async () => {
+      await assertUnwantedDomain('site-93.impactful-5.site, some-fw-domain.com');
+    });
   });
 
   describe('Site content checks', () => {

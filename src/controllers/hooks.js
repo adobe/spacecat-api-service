@@ -29,7 +29,7 @@ export const BUTTON_LABELS = {
   IGNORE: 'Ignore',
 };
 
-const IGNORED_DOMAINS = ['helix3.dev', 'fastly.net', 'ngrok-free.app', 'oastify.com', 'fastly-aem.page', 'findmy.media'];
+const IGNORED_DOMAINS = [/helix3.dev/, /fastly.net/, /ngrok-free.app/, /oastify.co/, /fastly-aem.page/, /findmy.media/, /impactful-[0-9]+\.site/];
 const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--', 'sitemap', 'test', 'preview', 'cm-verify', 'owa', 'mail', 'ssl', 'secure', 'publish'];
 
 class InvalidSiteCandidate extends Error {
@@ -72,7 +72,7 @@ function isInvalidSubdomain(hostname) {
 }
 
 function isInvalidDomain(hostname) {
-  return IGNORED_DOMAINS.some((ignored) => hostname.includes(ignored));
+  return IGNORED_DOMAINS.some((ignored) => hostname.match(ignored));
 }
 
 function isIPAddress(hostname) {

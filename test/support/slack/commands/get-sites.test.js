@@ -18,7 +18,7 @@ import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.j
 import { expect } from 'chai';
 import sinon from 'sinon';
 
-import GetSitesCommand, { formatSites } from '../../../../src/support/slack/commands/get-sites.js';
+import GetSitesCommand, { formatSitesToCSV } from '../../../../src/support/slack/commands/get-sites.js';
 
 /**
  * Generates a specified number of mock sites with mock audits.
@@ -33,6 +33,9 @@ function generateSites(count) {
       baseURL: `https://site-${index}.com`,
       gitHubURL: (index % 2 === 0) ? `https://github.com/site-${index}` : '',
       isLive: (index % 2 === 0),
+      createdAt: 'createdAtDate',
+      isLiveToggledAt: (index % 2 === 0) ? 'istoggledLiveAtDate' : null,
+      deliveryType: (index % 2 === 0) ? 'aem_edge' : 'aem_cs',
     };
 
     const runtimeError = index % 3 === 0 ? { code: 'NO_FCP', message: 'Test LH Error' } : null;
@@ -81,8 +84,17 @@ describe('GetSitesCommand', () => {
       info: sinon.stub(),
     };
 
-    context = { dataAccess: dataAccessStub, boltApp: boltAppStub, log: logStub };
-    slackContext = { say: sinon.spy() };
+    context = {
+      dataAccess: dataAccessStub, boltApp: boltAppStub, log: logStub, env: { ORGANIZATION_ID_FRIENDS_FAMILY: 'F&F' },
+    };
+    slackContext = {
+      say: sinon.spy(),
+      client: {
+        files: {
+          uploadV2: sinon.stub().resolves(),
+        },
+      },
+    };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -91,12 +103,6 @@ describe('GetSitesCommand', () => {
 
       expect(command.id).to.equal('get-all-sites');
       expect(command.name).to.equal('Get All Sites');
-    });
-
-    it('registers action handlers correctly', () => {
-      GetSitesCommand(context);
-
-      expect(boltAppStub.action.calledWith(/^paginate_sites_(prev|next|page_\d+)$/)).to.be.true;
     });
   });
 
@@ -193,59 +199,16 @@ describe('GetSitesCommand', () => {
     });
   });
 
-  describe('Pagination and Overflow Handling', () => {
-    it('handles pagination correctly', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(50));
-      const command = GetSitesCommand(context);
-
-      await command.handleExecution([], slackContext);
-
-      // Assert that the pagination blocks are generated correctly
-      // Additional assertions for the 'Previous', 'Next', and numbered page buttons
-    });
-
-    it('handles pagination other than start', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(30));
-      const command = GetSitesCommand(context);
-
-      await command.paginationHandler({
-        say: slackContext.say,
-        ack: sinon.stub(),
-        action: { value: '2:all:mobile' },
-      });
-
-      expect(slackContext.say.called).to.be.true;
-      expect(logStub.info.called).to.be.true;
-      expect(dataAccessStub.getSitesWithLatestAudit.called).to.be.true;
-    });
-
-    it('handles error in pagination action', async () => {
-      dataAccessStub.getSitesWithLatestAudit.rejects(new Error('test error'));
-      const command = GetSitesCommand(context);
-
-      await command.paginationHandler({
-        say: slackContext.say,
-        ack: sinon.stub(),
-        action: { value: '2:all:mobile' },
-      });
-
-      expect(slackContext.say.calledWith({
-        text: ':nuclear-warning: Oops! Something went wrong: test error',
-        thread_ts: undefined,
-      })).to.be.true;
-    });
-  });
-
   describe('Site Formatting Logic', () => {
     it('formats a list of sites correctly', () => {
       const sites = generateSites(4);
-      const formattedSites = formatSites(sites, 0, sites.length);
+      const formattedSites = formatSitesToCSV(sites).toString('utf-8');
 
-      expect(formattedSites).to.equal('\n'
-        + '1. :rocket: Lighthouse Error: No First Contentful Paint [NO_FCP]: <https://site-0.com|https://site-0.com> (<https://github.com/site-0|GH>)\n'
-        + '2. :submarine: 90% - 80% - 70% - 60%: <https://site-1.com|https://site-1.com>\n'
-        + '3. :rocket: 90% - 80% - 70% - 60%: <https://site-2.com|https://site-2.com> (<https://github.com/site-2|GH>)\n'
-        + '4. :submarine: Lighthouse Error: No First Contentful Paint [NO_FCP]: <https://site-3.com|https://site-3.com>');
+      expect(formattedSites).to.equal('"Base URL","Delivery Type","Live Status","Go Live Date","GitHub URL","Performance Score","SEO Score","Accessibility Score","Best Practices Score","Error"\n'
+        + '"https://site-0.com","aem_edge","Live","istoggledLiveAtDate","https://github.com/site-0","---","---","---","---","Lighthouse Error: No First Contentful Paint [NO_FCP]"\n'
+        + '"https://site-1.com","aem_cs","Non-Live","createdAtDate","","90","80","70","60",""\n'
+        + '"https://site-2.com","aem_edge","Live","istoggledLiveAtDate","https://github.com/site-2","90","80","70","60",""\n'
+        + '"https://site-3.com","aem_cs","Non-Live","createdAtDate","","---","---","---","---","Lighthouse Error: No First Contentful Paint [NO_FCP]"');
     });
   });
 });

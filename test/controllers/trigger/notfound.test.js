@@ -113,7 +113,7 @@ describe('not found handler', () => {
   });
 
   it('queue the audit task when requested url in rum api', async () => {
-    context.data.type = 'cwv';
+    context.data.type = '404';
     context.data.url = 'adobe.com';
 
     nock('https://helix-pages.anywhere.run')
@@ -138,7 +138,7 @@ describe('not found handler', () => {
   });
 
   it('queue multiple audit tasks when all urls requested', async () => {
-    context.data.type = 'cwv';
+    context.data.type = '404';
     context.data.url = 'all';
 
     nock('https://helix-pages.anywhere.run')
@@ -153,15 +153,15 @@ describe('not found handler', () => {
 
     expect(context.sqs.sendMessage).to.have.been.calledThrice;
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
-      type: 'cwv',
+      type: '404',
       url: 'https://adobe.com',
     });
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
-      type: 'cwv',
+      type: '404',
       url: 'https://bamboohr.com',
     });
     expect(context.sqs.sendMessage).to.have.been.calledWith(context.env.AUDIT_JOBS_QUEUE_URL, {
-      type: 'cwv',
+      type: '404',
       url: 'https://nurtec.com',
     });
     expect(resp.status).to.equal(200);

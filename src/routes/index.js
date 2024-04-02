@@ -99,6 +99,7 @@ export default function getRouteHandlers(
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
+    'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
   };
 
