@@ -166,15 +166,16 @@ function HooksController(lambdaContext) {
       status: SITE_CANDIDATE_STATUS.PENDING,
     };
 
-    if (await dataAccess.siteCandidateExists(siteCandidate.baseURL)) {
-      throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
-    }
-
     const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
 
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
     if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
+    }
+
+    // discard the site candidate if previously evaluated
+    if (!site && (await dataAccess.siteCandidateExists(siteCandidate.baseURL))) {
+      throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
     }
 
     await dataAccess.upsertSiteCandidate(siteCandidate);
