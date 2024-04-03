@@ -171,7 +171,9 @@ function HooksController(lambdaContext) {
     }
 
     const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
-    if (site && site.isLive() && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
+
+    // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
+    if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
 

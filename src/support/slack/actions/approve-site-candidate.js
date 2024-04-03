@@ -63,7 +63,7 @@ export default function approveSiteCandidate(lambdaContext) {
         });
       } else {
         // site might've been added before manually. In that case, make sure it is promoted to live
-        // and edge delivery type
+        // and set delivery type to aem_edge then update
         if (!site.isLive()) {
           site.toggleLive();
         }
