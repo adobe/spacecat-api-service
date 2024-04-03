@@ -696,3 +696,119 @@ Job:
     type:
       type: string
       description: The job type, indicating the specific action or task that the job performs, such as 'rum-to-aa' indicating a data import job from RUM to AA.
+AnalyticsSiteIntegration:
+  type: object
+  additionalProperties: true
+  required:
+    - siteId
+    - reporting
+    - dataCollection
+    - dataStore
+    - dataMapping
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    reporting:
+      description: The reporting details
+      type: object
+      required:
+        - link
+      additionalProperties: true
+      properties:
+        link:
+          description: |
+            The link to the report in the reporting tool.
+            For Adobe Analytics and Customer Journey Analytics, the link to the Analysis Workspace report.
+          $ref: '#/URL'
+        timezone:
+          description: The timezone for the data in the report
+          type: string
+    dataCollection:
+      description: The configuration for the data collection to embed on the site.
+      type: object
+      required:
+        - type
+        - environments
+      properties:
+        type:
+          description: The type of the data collection
+          type: string
+          enum:
+            - 'adobe-tags'
+            - 'aep-websdk'
+        environments:
+          description: |
+            The environments for the data collection script.
+            At least the script for the production environment is required.
+            The keys represent the environments (development, staging, production).
+            The values represent the URL or ID of the data collection script.
+            For Adobe Analytics and Customer Journey Analytics, the values are either
+            URL for the Adobe Launch script or the datastream ID.
+          type: object
+          additionalProperties:
+            type: string
+          required:
+            - production
+          properties:
+            production:
+              description: The URL or ID of the production data collection script
+              type: string
+    dataStore:
+      description: The data store details
+      type: object
+      required:
+        - id
+        - type
+      additionalProperties: true
+      properties:
+        id:
+          description: The ID of the data store
+          type: string
+        type:
+          description: The type of the data store
+          type: string
+          enum:
+            - 'adobe-analytics'
+            - 'aep'
+    dataSchema:
+      description: The data schema details
+      type: object
+      required:
+        - id
+      additionalProperties: true
+      properties:
+        id:
+          description: The ID of the data schema
+          type: string
+    dataMapping:
+      description: The data mapping details
+      type: object
+      required:
+        - type
+        - mappings
+      properties:
+        type:
+          description: The type of the data mapping
+          type: string
+          enum:
+            - 'adobe-analytics'
+            - 'xdm'
+        mappings:
+          description: |
+            The data mapping details. The keys represent human-friendly naming of metrics and dimensions captured by the
+            instrumentation of the site. The values represent the corresponding metric and dimension names in the data store.
+            For Adobe Analytics, the values are either evars or events.
+            For XDM, the values are the paths in the data schema.
+          type: object
+          additionalProperties:
+            type: string
+  examples:
+    analytics-site-integration-aa-tags:
+      $ref: './examples.yaml#/analytics-site-integration-aa-tags'
+    analytics-site-integration-aa-aep-websdk:
+      $ref: './examples.yaml#/analytics-site-integration-aa-aep-websdk'
+    analytics-site-integration-cja-tags:
+      $ref: './examples.yaml#/analytics-site-integration-cja-tags'
+    analytics-site-integration-cja-websdk:
+      $ref: './examples.yaml#/analytics-site-integration-cja-websdk'
