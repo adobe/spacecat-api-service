@@ -1,3 +1,17 @@
+## [1.33.1](https://github.com/adobe/spacecat-api-service/compare/v1.33.0...v1.33.1) (2024-04-02)
+
+
+### Bug Fixes
+
+* use abbr audit only for lhs related audits ([#254](https://github.com/adobe/spacecat-api-service/issues/254)) ([b25344d](https://github.com/adobe/spacecat-api-service/commit/b25344d900d54d92cb8108f93af7132a280db7e4))
+
+# [1.33.0](https://github.com/adobe/spacecat-api-service/compare/v1.32.5...v1.33.0) (2024-04-02)
+
+
+### Features
+
+* Endpoint to request an invite to an organization's Slack channel by user ID [#207](https://github.com/adobe/spacecat-api-service/issues/207) ([#249](https://github.com/adobe/spacecat-api-service/issues/249)) ([cae873e](https://github.com/adobe/spacecat-api-service/commit/cae873e651066e27ad887f598483000b5624e940))
+
 ## [1.32.5](https://github.com/adobe/spacecat-api-service/compare/v1.32.4...v1.32.5) (2024-03-26)
 
 
