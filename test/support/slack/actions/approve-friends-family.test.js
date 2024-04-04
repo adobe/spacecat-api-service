@@ -45,6 +45,7 @@ describe('approveSiteCandidate', () => {
     context = {
       dataAccess: {
         getSiteCandidateByBaseURL: sinon.stub(),
+        getSiteByBaseURL: sinon.stub(),
         addSite: sinon.stub(),
         updateSiteCandidate: sinon.stub(),
       },
@@ -91,6 +92,7 @@ describe('approveSiteCandidate', () => {
     });
 
     context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.getSiteByBaseURL.resolves(null);
     context.dataAccess.addSite.resolves(site);
 
     // Call the function under test

@@ -340,10 +340,14 @@ describe('Hooks Controller', () => {
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate previously evaluated, Source: CDN, Candidate: https://some-domain.com');
     });
 
-    it('candidate is disregarded if a site exists with same baseURL', async () => {
+    it('candidate is disregarded if a live aem_edge site exists with same baseURL', async () => {
       context.dataAccess.siteCandidateExists.resolves(false);
       context.dataAccess.upsertSiteCandidate.resolves();
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({ baseURL: 'https://some-domain.com' }));
+      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
+        baseURL: 'https://some-domain.com',
+        isLive: true,
+        deliveryType: 'aem_edge',
+      }));
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
@@ -370,6 +374,21 @@ describe('Hooks Controller', () => {
         forwardedHost: 'some-domain.com, some-fw-domain.com',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(resp).to.equal('CDN site candidate is successfully processed');
+    });
+
+    it('CDN candidate is processed and slack message sent even if site was added previously but is not aem_edge', async () => {
+      context.data = {
+        forwardedHost: 'some-domain.com, some-fw-domain.com',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
+        baseURL: 'https://some-domain.com',
+        deliveryType: 'aem_cs',
+      }));
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
