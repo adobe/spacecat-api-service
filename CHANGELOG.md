@@ -1,3 +1,11 @@
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-04)
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
 # [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-03)
 
 
