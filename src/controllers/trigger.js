@@ -20,7 +20,6 @@ import sitemap from './trigger/sitemap.js';
 import notfound from './trigger/notfound.js';
 import backlinks from './trigger/backlinks.js';
 import organictraffic from './trigger/organictraffic.js';
-import experimentation from './trigger/experiment.js';
 
 const AUDITS = {
   apex,
@@ -32,7 +31,6 @@ const AUDITS = {
   404: notfound,
   'broken-backlinks': backlinks,
   'organic-traffic': organictraffic,
-  experimentation,
 };
 
 /**
