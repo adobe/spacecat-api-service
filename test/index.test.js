@@ -118,12 +118,12 @@ describe('Index Tests', () => {
   it('handles errors', async () => {
     context.pathInfo.suffix = '/trigger';
 
-    request = new Request(`${baseUrl}/trigger?url=all&type=404`, { headers: { 'x-api-key': apiKey } });
+    request = new Request(`${baseUrl}/trigger?url=all&type=cwv`, { headers: { 'x-api-key': apiKey } });
 
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger 404 audit for all');
+    expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger cwv audit for all');
   });
 
   it('handles dynamic route errors', async () => {
