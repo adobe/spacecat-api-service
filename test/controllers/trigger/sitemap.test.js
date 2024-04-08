@@ -104,6 +104,7 @@ describe('Sitemap trigger', () => {
 
     const response = await trigger(context);
     const result = await response.json();
+
     expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.be.greaterThanOrEqual(0);
     expect(result.message[0]).to.be.contain([]);
