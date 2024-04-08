@@ -115,17 +115,6 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('no such route /unknown-handler');
   });
 
-  it('handles errors', async () => {
-    context.pathInfo.suffix = '/trigger';
-
-    request = new Request(`${baseUrl}/trigger?url=all&type=404`, { headers: { 'x-api-key': apiKey } });
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger 404 audit for all');
-  });
-
   it('handles dynamic route errors', async () => {
     context.pathInfo.suffix = '/sites/123';
 

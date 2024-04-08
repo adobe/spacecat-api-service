@@ -12,9 +12,6 @@
 
 /* eslint-env mocha */
 
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
-
 import { expect } from 'chai';
 import sinon from 'sinon';
 
@@ -33,24 +30,23 @@ describe('Sitemap trigger', () => {
   beforeEach(() => {
     sandbox = sinon.createSandbox();
 
-    sites = [
-      createSite({
-        id: 'site1',
-        baseURL: 'http://site1.com',
-        organizationId: 'org123',
-      }),
-      createSite({
-        id: 'site2',
-        baseURL: 'http://site2.com',
-        organizationId: 'org123',
-      }),
+    sites = [{
+      id: 'site1',
+      baseURL: 'http://site1.com',
+      getOrganizationId: () => 'org123',
+    },
+    {
+      id: 'site2',
+      baseURL: 'http://site2.com',
+      getOrganizationId: () => 'org123',
+    },
     ];
 
     orgs = [
-      createOrganization({
-        id: 'default',
+      {
+        getId: () => 'org123',
         name: 'ABCD',
-      })];
+      }];
 
     dataAccessMock = {
       getOrganizations: sandbox.stub().resolves(orgs),
@@ -89,10 +85,25 @@ describe('Sitemap trigger', () => {
         channel: 'DSA',
         ts: 'ts1',
       });
+    for (const site of sites) {
+      site.getAuditConfig = sinon.stub().returns({
+        auditsDisabled: sinon.stub().returns(true),
+        getAuditTypeConfig: sinon.stub().returns({
+          disabled: sinon.stub().returns(false),
+        }),
+      });
+    }
+    for (const org of orgs) {
+      org.getAuditConfig = sinon.stub().returns({
+        auditsDisabled: sinon.stub().returns(true),
+        getAuditTypeConfig: sinon.stub().returns({
+          disabled: sinon.stub().returns(false),
+        }),
+      });
+    }
 
     const response = await trigger(context);
     const result = await response.json();
-
     expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.be.greaterThanOrEqual(0);
     expect(result.message[0]).to.be.contain([]);
