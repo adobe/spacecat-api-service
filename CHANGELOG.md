@@ -1,3 +1,10 @@
+## [1.34.2](https://github.com/adobe/spacecat-api-service/compare/v1.34.1...v1.34.2) (2024-04-09)
+
+
+### Bug Fixes
+
+* Remove experimentation ([#257](https://github.com/adobe/spacecat-api-service/issues/257)) ([816176e](https://github.com/adobe/spacecat-api-service/commit/816176e384de3e5348850e91475f518ef7c942b3))
+
 ## [1.34.1](https://github.com/adobe/spacecat-api-service/compare/v1.34.0...v1.34.1) (2024-04-09)
 
 
