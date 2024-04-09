@@ -15,7 +15,6 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { badRequest } from '@adobe/spacecat-shared-http-utils';
 import apex from './trigger/apex.js';
 import cwv from './trigger/cwv.js';
-import lhs from './trigger/lhs.js';
 import sitemap from './trigger/sitemap.js';
 import backlinks from './trigger/backlinks.js';
 import organictraffic from './trigger/organictraffic.js';
@@ -24,9 +23,6 @@ import experimentation from './trigger/experiment.js';
 const AUDITS = {
   apex,
   cwv,
-  'lhs-mobile': lhs,
-  'lhs-desktop': lhs,
-  lhs, // for all lhs variants
   sitemap,
   'broken-backlinks': backlinks,
   'organic-traffic': organictraffic,
