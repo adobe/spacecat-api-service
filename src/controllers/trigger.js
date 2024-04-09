@@ -18,7 +18,6 @@ import cwv from './trigger/cwv.js';
 import sitemap from './trigger/sitemap.js';
 import backlinks from './trigger/backlinks.js';
 import organictraffic from './trigger/organictraffic.js';
-import experimentation from './trigger/experiment.js';
 
 const AUDITS = {
   apex,
@@ -26,7 +25,6 @@ const AUDITS = {
   sitemap,
   'broken-backlinks': backlinks,
   'organic-traffic': organictraffic,
-  experimentation,
 };
 
 /**
