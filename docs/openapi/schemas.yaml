@@ -804,11 +804,11 @@ AnalyticsSiteIntegration:
           additionalProperties:
             type: string
   examples:
-    analytics-site-integration-aa-tags:
-      $ref: './examples.yaml#/analytics-site-integration-aa-tags'
-    analytics-site-integration-aa-aep-websdk:
-      $ref: './examples.yaml#/analytics-site-integration-aa-aep-websdk'
-    analytics-site-integration-cja-tags:
-      $ref: './examples.yaml#/analytics-site-integration-cja-tags'
-    analytics-site-integration-cja-websdk:
-      $ref: './examples.yaml#/analytics-site-integration-cja-websdk'
+    - analytics-site-integration-aa-tags:
+        $ref: './examples.yaml#/analytics-site-integration-aa-tags'
+    - analytics-site-integration-aa-aep-websdk:
+        $ref: './examples.yaml#/analytics-site-integration-aa-aep-websdk'
+    - analytics-site-integration-cja-tags:
+        $ref: './examples.yaml#/analytics-site-integration-cja-tags'
+    - analytics-site-integration-cja-websdk:
+        $ref: './examples.yaml#/analytics-site-integration-cja-websdk'
