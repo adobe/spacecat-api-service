@@ -1,3 +1,79 @@
+## [1.34.1](https://github.com/adobe/spacecat-api-service/compare/v1.34.0...v1.34.1) (2024-04-09)
+
+
+### Bug Fixes
+
+* remove lhs trigger handler ([#266](https://github.com/adobe/spacecat-api-service/issues/266)) ([967d127](https://github.com/adobe/spacecat-api-service/commit/967d1275be460b69336a1b581e5cd7b585266459))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-09)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+* docs linting, openapi version upgrade and multiple examples support ([#264](https://github.com/adobe/spacecat-api-service/issues/264)) ([eb9692e](https://github.com/adobe/spacecat-api-service/commit/eb9692e73f789eb37bd3290f618bc20e7e3d03d0))
+* migrate 404 to jobs-dispatcher ([3eb28af](https://github.com/adobe/spacecat-api-service/commit/3eb28affc0d4596e599b50495388bc90704836b1))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-08)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+* migrate 404 to jobs-dispatcher ([3eb28af](https://github.com/adobe/spacecat-api-service/commit/3eb28affc0d4596e599b50495388bc90704836b1))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-08)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+* migrate 404 to jobs-dispatcher ([3eb28af](https://github.com/adobe/spacecat-api-service/commit/3eb28affc0d4596e599b50495388bc90704836b1))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-06)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-06)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
 # [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-04)
 
 

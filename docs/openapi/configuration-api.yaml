@@ -1,5 +1,7 @@
 latest-configuration:
   get:
+    tags:
+      - configuration
     summary: Get the latest application configuration
     operationId: getLatestConfiguration
     security:
@@ -19,6 +21,8 @@ latest-configuration:
         $ref: './responses.yaml#/500'
 configuration:
   get:
+    tags:
+      - configuration
     summary: Get a specific version of the application configuration
     operationId: getConfigurationByVersion
     security:

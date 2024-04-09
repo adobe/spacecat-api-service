@@ -16,7 +16,6 @@ import sinon from 'sinon';
 import chai from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
-import nock from 'nock';
 import handler from '../../src/controllers/trigger.js';
 
 chai.use(sinonChai);
@@ -27,12 +26,33 @@ const sandbox = sinon.createSandbox();
 
 describe('trigger handler', () => {
   let context;
+  const orgs = [{
+    getId: () => 'org123',
+    getName: () => 'ABCD',
+    getAuditConfig: sinon.stub().returns({
+      auditsDisabled: sinon.stub().returns(true),
+      getAuditTypeConfig: sinon.stub().returns({
+        disabled: sinon.stub().returns(false),
+      }),
+    }),
+  }];
+  const site = {
+    id: 'site1',
+    baseURL: 'http://site1.com',
+    getOrganizationId: () => 'org123',
+    getAuditConfig: sinon.stub().returns({
+      auditsDisabled: sinon.stub().returns(true),
+      getAuditTypeConfig: sinon.stub().returns({
+        disabled: sinon.stub().returns(false),
+      }),
+    }),
+  };
 
   beforeEach('setup', () => {
     context = {
       log: console,
       data: {
-        type: '404',
+        type: 'cwv',
         url: 'space.cat',
       },
     };
@@ -60,33 +80,26 @@ describe('trigger handler', () => {
     expect(resp.status).to.equal(400);
   });
 
-  it('rejects when RUM API response is not in json format', async () => {
+  it('fails when cvw handler returns exception', async () => {
     context.env = {
       RUM_DOMAIN_KEY: 'domainkey',
       AUDIT_JOBS_QUEUE_URL: 'queueUrl',
     };
 
-    nock('https://helix-pages.anywhere.run')
-      .get('/helix-services/run-query@v3/dash/domain-list')
-      .query(true)
-      .reply(200, 'invalid-response');
-
-    await expect(handler(context)).to.be.rejectedWith('Failed to trigger 404 audit for space.cat');
+    await expect(handler(context)).to.be.rejectedWith('Failed to trigger cwv audit for space.cat');
   });
 
   it('successfully executes when RUM API response is correct json format', async () => {
+    context.data.type = 'cwv';
     context.env = {
-      RUM_DOMAIN_KEY: 'domainkey',
       AUDIT_JOBS_QUEUE_URL: 'queueUrl',
     };
-    context.data.type = '404';
     context.sqs = { sendMessage: () => {} };
-
-    nock('https://helix-pages.anywhere.run')
-      .get('/helix-services/run-query@v3/dash/domain-list')
-      .query(true)
-      .reply(200, { results: { data: [{ hostname: 'space.cat' }] } });
-
+    context.dataAccess = {
+      getOrganizations: sandbox.stub().resolves(orgs),
+      getSitesByDeliveryType: sandbox.stub(),
+      getSiteByBaseURL: sandbox.stub().resolves(site),
+    };
     await expect(handler(context)).to.be.fulfilled;
   });
 });

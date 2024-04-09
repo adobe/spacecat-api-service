@@ -11,7 +11,7 @@
  */
 
 import { isAuditsDisabled } from '@adobe/spacecat-shared-utils';
-import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
 import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from '../../../support/utils.js';
 
@@ -65,43 +65,39 @@ async function getSitesToAudit(dataAccess, url, deliveryType, orgs) {
  * @returns {Response} The response object with the audit initiation message or an error message.
  */
 export async function triggerFromData(context, config, auditContext = {}) {
-  try {
-    const { dataAccess, sqs } = context;
-    const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
-    const { url, auditTypes, deliveryType } = config;
+  const { dataAccess, sqs } = context;
+  const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
+  const { url, auditTypes, deliveryType } = config;
 
-    const orgs = await getOrganizations(dataAccess);
+  const orgs = await getOrganizations(dataAccess);
 
-    const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType, orgs);
-    if (!sitesToAudit.length) {
-      return notFound('Site not found');
-    }
-
-    const message = [];
-
-    for (const auditType of auditTypes) {
-      const sitesToAuditForType = sitesToAudit.filter(
-        (site) => !isAuditsDisabled(site, orgs[site.getOrganizationId()], auditType),
-      );
-
-      if (!sitesToAuditForType.length) {
-        message.push(`No site is enabled for ${auditType} audit type`);
-      } else {
-        message.push(
-          // eslint-disable-next-line no-await-in-loop
-          await sendAuditMessages(
-            sqs,
-            queueUrl,
-            auditType,
-            auditContext,
-            sitesToAuditForType.map((site) => site.getId()),
-          ),
-        );
-      }
-    }
-
-    return ok({ message });
-  } catch (e) {
-    return internalServerError(e);
+  const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType, orgs);
+  if (!sitesToAudit.length) {
+    return notFound('Site not found');
   }
+
+  const message = [];
+
+  for (const auditType of auditTypes) {
+    const sitesToAuditForType = sitesToAudit.filter(
+      (site) => !isAuditsDisabled(site, orgs[site.getOrganizationId()], auditType),
+    );
+
+    if (!sitesToAuditForType.length) {
+      message.push(`No site is enabled for ${auditType} audit type`);
+    } else {
+      message.push(
+        // eslint-disable-next-line no-await-in-loop
+        await sendAuditMessages(
+          sqs,
+          queueUrl,
+          auditType,
+          auditContext,
+          sitesToAuditForType.map((site) => site.getId()),
+        ),
+      );
+    }
+  }
+
+  return ok({ message });
 }
