@@ -1,3 +1,10 @@
+## [1.34.1](https://github.com/adobe/spacecat-api-service/compare/v1.34.0...v1.34.1) (2024-04-09)
+
+
+### Bug Fixes
+
+* remove lhs trigger handler ([#266](https://github.com/adobe/spacecat-api-service/issues/266)) ([967d127](https://github.com/adobe/spacecat-api-service/commit/967d1275be460b69336a1b581e5cd7b585266459))
+
 # [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-09)
 
 
