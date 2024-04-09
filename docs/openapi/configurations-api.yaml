@@ -1,5 +1,7 @@
 configurations:
   get:
+    tags:
+      - configuration
     summary: Get all application configurations
     operationId: getAllConfigurations
     security:
