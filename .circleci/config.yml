@@ -30,6 +30,9 @@ jobs:
           name: Lint
           command: npm run lint
       - run:
+          name: Docs Lint
+          command: npm run docs:lint
+      - run:
           name: Getting Code Coverage
           command: npm run test
       - codecov/upload

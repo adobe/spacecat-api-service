@@ -15,10 +15,13 @@
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
-import { expect } from 'chai';
+import chai, { expect } from 'chai';
+import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import { triggerFromData } from '../../../../src/controllers/trigger/common/trigger.js';
+
+chai.use(chaiAsPromised);
 
 describe('Trigger from data access', () => {
   let context;
@@ -322,7 +325,7 @@ describe('Trigger from data access', () => {
     expect(sqsMock.sendMessage.callCount).to.equal(1);
   });
 
-  it('should handle unexpected errors gracefully', async () => {
+  it('should throw exception on unexpected errors', async () => {
     context = {
       dataAccess: dataAccessMock,
       sqs: sqsMock,
@@ -338,9 +341,6 @@ describe('Trigger from data access', () => {
 
     dataAccessMock.getSiteByBaseURL.rejects(new Error('Unexpected error'));
 
-    const response = await triggerFromData(context, config);
-
-    expect(response.status).to.equal(500);
-    expect(response.headers.get('x-error')).to.equal('Error: Unexpected error');
+    await expect(triggerFromData(context, config)).to.be.rejectedWith('Unexpected error');
   });
 });

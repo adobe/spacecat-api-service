@@ -50,7 +50,9 @@ describe('approveSiteCandidate', () => {
     context = {
       dataAccess: {
         getSiteCandidateByBaseURL: sinon.stub(),
+        getSiteByBaseURL: sinon.stub(),
         addSite: sinon.stub(),
+        updateSite: sinon.stub(),
         updateSiteCandidate: sinon.stub(),
       },
       log: {
@@ -96,6 +98,7 @@ describe('approveSiteCandidate', () => {
     });
 
     context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.getSiteByBaseURL.resolves(null);
     context.dataAccess.addSite.resolves(site);
 
     // Call the function under test
@@ -104,12 +107,47 @@ describe('approveSiteCandidate', () => {
 
     const actualUpdatedSiteCandidate = context.dataAccess.updateSiteCandidate.getCall(0).args[0];
 
-    expect(ackMock.calledOnce).to.be.true;
-    expect(context.dataAccess.getSiteCandidateByBaseURL.calledOnceWithExactly(baseURL)).to.be.true;
-    expect(context.dataAccess.addSite.calledOnceWithExactly({ baseURL, isLive: true })).to.be.true;
+    expect(ackMock).to.have.been.calledOnce;
+    expect(context.dataAccess.getSiteCandidateByBaseURL).to.have.been.calledWith(baseURL);
+    expect(context.dataAccess.addSite).to.have.been.calledWith({ baseURL, isLive: true });
+    expect(context.dataAccess.updateSite).to.have.been.callCount(0);
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
-    expect(respondMock.calledOnceWith(expectedApprovedReply)).to.be.true;
-    expect(slackClient.postMessage.calledOnceWith(expectedAnnouncedMessage)).to.be.true;
+    expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
+    expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
+  });
+
+  it('should approve previously added non aem_edge sites then announce the discovery', async () => {
+    const expectedSiteCandidate = createSiteCandidate({
+      baseURL,
+      source: SITE_CANDIDATE_SOURCES.CDN,
+      status: SITE_CANDIDATE_STATUS.APPROVED,
+      updatedBy: 'approvers-username',
+      siteId: site.getId(),
+    });
+    site.toggleLive();
+    site.updateDeliveryType('aem_cs');
+
+    context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.getSiteByBaseURL.resolves(site);
+    context.dataAccess.updateSite.resolvesArg(0);
+
+    // Call the function under test
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    const actualUpdatedSiteCandidate = context.dataAccess.updateSiteCandidate.getCall(0).args[0];
+
+    expect(ackMock).to.have.been.calledOnce;
+    expect(context.dataAccess.getSiteCandidateByBaseURL).to.have.been.calledWith(baseURL);
+    expect(context.dataAccess.addSite).to.have.been.callCount(0);
+
+    expect(context.dataAccess.updateSite).to.have.been.calledOnce;
+    const updatedSite = context.dataAccess.updateSite.getCalls()[0].args[0];
+    expect(updatedSite.isLive()).to.be.true;
+    expect(updatedSite.getDeliveryType()).to.equal('aem_edge');
+    expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
+    expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
+    expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
   });
 
   it('logs and throws the error again if something goes wrong', async () => {
