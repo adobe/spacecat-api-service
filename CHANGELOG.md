@@ -1,3 +1,10 @@
+## [1.34.4](https://github.com/adobe/spacecat-api-service/compare/v1.34.3...v1.34.4) (2024-04-11)
+
+
+### Bug Fixes
+
+* Use of .id instead of .getId() results in undefined in logs [#256](https://github.com/adobe/spacecat-api-service/issues/256) ([#268](https://github.com/adobe/spacecat-api-service/issues/268)) ([8ba8fb6](https://github.com/adobe/spacecat-api-service/commit/8ba8fb656b64428eada8caeca7bd81a036fc7c70))
+
 ## [1.34.3](https://github.com/adobe/spacecat-api-service/compare/v1.34.2...v1.34.3) (2024-04-10)
 
 
