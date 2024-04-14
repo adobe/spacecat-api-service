@@ -1,3 +1,10 @@
+## [1.34.7](https://github.com/adobe/spacecat-api-service/compare/v1.34.6...v1.34.7) (2024-04-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-universal-logger to v3.0.15 ([#274](https://github.com/adobe/spacecat-api-service/issues/274)) ([1658006](https://github.com/adobe/spacecat-api-service/commit/16580060bb2c94b2dcf05ea4eae5167d2a251dec))
+
 ## [1.34.6](https://github.com/adobe/spacecat-api-service/compare/v1.34.5...v1.34.6) (2024-04-13)
 
 
