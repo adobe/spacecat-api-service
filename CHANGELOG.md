@@ -1,3 +1,52 @@
+## [1.34.9](https://github.com/adobe/spacecat-api-service/compare/v1.34.8...v1.34.9) (2024-04-17)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#276](https://github.com/adobe/spacecat-api-service/issues/276)) ([f82da9b](https://github.com/adobe/spacecat-api-service/commit/f82da9b6e9eafa392f14b2456a423c7858ba3b2a))
+
+## [1.34.8](https://github.com/adobe/spacecat-api-service/compare/v1.34.7...v1.34.8) (2024-04-16)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#275](https://github.com/adobe/spacecat-api-service/issues/275)) ([2ec7535](https://github.com/adobe/spacecat-api-service/commit/2ec75354065b53f4204f79ce9974b8613875d33a))
+
+## [1.34.7](https://github.com/adobe/spacecat-api-service/compare/v1.34.6...v1.34.7) (2024-04-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-universal-logger to v3.0.15 ([#274](https://github.com/adobe/spacecat-api-service/issues/274)) ([1658006](https://github.com/adobe/spacecat-api-service/commit/16580060bb2c94b2dcf05ea4eae5167d2a251dec))
+
+## [1.34.6](https://github.com/adobe/spacecat-api-service/compare/v1.34.5...v1.34.6) (2024-04-13)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#272](https://github.com/adobe/spacecat-api-service/issues/272)) ([f82e270](https://github.com/adobe/spacecat-api-service/commit/f82e2700841504746f0aadc5e0c026af0e08e13f))
+
+## [1.34.5](https://github.com/adobe/spacecat-api-service/compare/v1.34.4...v1.34.5) (2024-04-12)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#270](https://github.com/adobe/spacecat-api-service/issues/270)) ([1b63c55](https://github.com/adobe/spacecat-api-service/commit/1b63c55a94482121bb3fe3b8b29f41aae3e74462))
+
+## [1.34.4](https://github.com/adobe/spacecat-api-service/compare/v1.34.3...v1.34.4) (2024-04-11)
+
+
+### Bug Fixes
+
+* Use of .id instead of .getId() results in undefined in logs [#256](https://github.com/adobe/spacecat-api-service/issues/256) ([#268](https://github.com/adobe/spacecat-api-service/issues/268)) ([8ba8fb6](https://github.com/adobe/spacecat-api-service/commit/8ba8fb656b64428eada8caeca7bd81a036fc7c70))
+
+## [1.34.3](https://github.com/adobe/spacecat-api-service/compare/v1.34.2...v1.34.3) (2024-04-10)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#267](https://github.com/adobe/spacecat-api-service/issues/267)) ([fd24200](https://github.com/adobe/spacecat-api-service/commit/fd242007331a367905edc4e248749cca523d9817))
+
 ## [1.34.2](https://github.com/adobe/spacecat-api-service/compare/v1.34.1...v1.34.2) (2024-04-09)
 
 
