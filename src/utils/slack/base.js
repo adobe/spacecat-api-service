@@ -115,8 +115,9 @@ const splitBlocksIntoChunks = (blocks, chunkSize = MAX_CHUNK_SIZE) => {
  * @param {Function} say - The function to send a message to the user.
  * @param {Object[]} textSections - The sections of the message.
  * @param {Object[]} [additionalBlocks=[]] - Additional blocks to send in the message.
+ * @param options - Additional options which can include properties like 'unfurl_links'.
  */
-const sendMessageBlocks = async (say, textSections, additionalBlocks = []) => {
+const sendMessageBlocks = async (say, textSections, additionalBlocks = [], options = {}) => {
   const blocks = textSections.map((section) => {
     const block = {
       type: 'section',
@@ -137,7 +138,7 @@ const sendMessageBlocks = async (say, textSections, additionalBlocks = []) => {
   const chunks = splitBlocksIntoChunks(blocks);
   for (const chunk of chunks) {
     // eslint-disable-next-line no-await-in-loop
-    await say({ blocks: chunk });
+    await say({ ...options, blocks: chunk });
   }
 };
 
