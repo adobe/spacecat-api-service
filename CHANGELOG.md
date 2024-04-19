@@ -1,3 +1,10 @@
+## [1.34.11](https://github.com/adobe/spacecat-api-service/compare/v1.34.10...v1.34.11) (2024-04-19)
+
+
+### Bug Fixes
+
+* slack format messages ([#248](https://github.com/adobe/spacecat-api-service/issues/248)) ([c595acf](https://github.com/adobe/spacecat-api-service/commit/c595acfa55d62e76d06aa3dbe3abf72f30091936))
+
 ## [1.34.10](https://github.com/adobe/spacecat-api-service/compare/v1.34.9...v1.34.10) (2024-04-18)
 
 
