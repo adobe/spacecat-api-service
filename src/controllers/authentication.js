@@ -11,28 +11,32 @@
  */
 
 import { google } from 'googleapis';
+import crypto from 'crypto';
 
-function AuthenticationController(context) {
-  const { dataAccess } = context;
+function AuthenticationController(lambdaContext) {
+  const { dataAccess } = lambdaContext;
   const {
     GOOGLE_ENCRYPTION_KEY,
     GOOGLE_ENCRYPTION_IV,
-  } = context.env;
+  } = lambdaContext.env;
 
-  const siteId = context.params?.siteId;
-
-  const initGoogleAuthentication = () => {
+  const initGoogleAuthentication = async (context) => {
+    const siteId = context.params?.siteId;
     const decryptSecret = (encrypted) => {
-      const decipher = crypto.createDecipheriv('aes-256-cbc', GOOGLE_ENCRYPTION_KEY, GOOGLE_ENCRYPTION_IV);
+      const key = Buffer.from(GOOGLE_ENCRYPTION_KEY, 'base64');
+      const iv = Buffer.from(GOOGLE_ENCRYPTION_IV, 'base64');
+      const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
       let decrypted = decipher.update(encrypted, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
       return decrypted;
     };
 
-    const config = dataAccess.getSiteByID(siteId).getConfig();
+    const site = await dataAccess.getSiteByID(siteId);
+    const config = site.getConfig();
     const authClient = new google.auth.OAuth2(
       config.auth.google.client_id,
       decryptSecret(config.auth.google.client_secret),
+      config.auth.google.redirect_uri,
     );
     const scopes = [
       'https://www.googleapis.com/auth/webmasters.readonly',
