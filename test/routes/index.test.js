@@ -63,6 +63,11 @@ describe('getRouteHandlers', () => {
     processFulfillmentEvents: sinon.stub(),
   };
 
+  const mockAuthController = {
+    initGoogleAuthentication: sinon.stub(),
+    authenticateWithGoogle: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -73,6 +78,7 @@ describe('getRouteHandlers', () => {
       mockSlackController,
       mockTrigger,
       mockFulfillmentController,
+      mockAuthController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -90,6 +96,7 @@ describe('getRouteHandlers', () => {
       'GET /trigger',
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
+      'GET /auth/google?code=:code',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -125,6 +132,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/audits/:auditType/:auditedAt',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
+      'GET /sites/:siteId/auth/google',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
