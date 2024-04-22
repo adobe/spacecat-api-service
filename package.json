@@ -65,11 +65,12 @@
     "@adobe/spacecat-shared-data-access": "1.21.2",
     "@adobe/spacecat-shared-http-utils": "1.1.4",
     "@adobe/spacecat-shared-ims-client": "1.3.4",
-    "@adobe/spacecat-shared-slack-client": "1.3.3",
     "@adobe/spacecat-shared-rum-api-client": "1.7.2",
+    "@adobe/spacecat-shared-slack-client": "1.3.3",
     "@adobe/spacecat-shared-utils": "1.14.5",
     "@aws-sdk/client-sqs": "3.554.0",
     "@slack/bolt": "3.17.1",
+    "googleapis": "134.0.0",
     "slack-block-builder": "2.8.0"
   },
   "devDependencies": {

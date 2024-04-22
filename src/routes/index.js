@@ -50,6 +50,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} slackController - The slack controller.
  * @param {Function} triggerHandler - The trigger handler function.
  * @param {Object} fulfillmentController - The fulfillment controller.
+ * @param {Object} authenticationController - The authentication controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -61,6 +62,7 @@ export default function getRouteHandlers(
   slackController,
   triggerHandler,
   fulfillmentController,
+  authenticationController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -89,6 +91,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
     'DELETE /sites/:siteId': sitesController.removeSite,
+    'GET /sites/:siteId/auth/google': authenticationController.initGoogleAuthentication,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
@@ -101,6 +104,7 @@ export default function getRouteHandlers(
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
+    'GET /auth/google?code=:code': authenticationController.authenticateWithGoogle,
   };
 
   // Initialization of static and dynamic routes
