@@ -12,7 +12,7 @@
 
 import { google } from 'googleapis';
 import crypto from 'crypto';
-import { ok } from '@adobe/spacecat-shared-http-utils';
+import { badRequest, ok } from '@adobe/spacecat-shared-http-utils';
 
 function AuthenticationController(lambdaContext) {
   const { dataAccess } = lambdaContext;
@@ -21,16 +21,25 @@ function AuthenticationController(lambdaContext) {
     GOOGLE_ENCRYPTION_IV,
   } = lambdaContext.env;
 
-  const generateAuthClient = async (siteId) => {
-    const decryptSecret = (encrypted) => {
-      const key = Buffer.from(GOOGLE_ENCRYPTION_KEY, 'base64');
-      const iv = Buffer.from(GOOGLE_ENCRYPTION_IV, 'base64');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-      decrypted += decipher.final('utf8');
-      return decrypted;
-    };
+  const decryptSecret = (encrypted) => {
+    const key = Buffer.from(GOOGLE_ENCRYPTION_KEY, 'base64');
+    const iv = Buffer.from(GOOGLE_ENCRYPTION_IV, 'base64');
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  };
 
+  const encryptSecret = (secret) => {
+    const key = Buffer.from(GOOGLE_ENCRYPTION_KEY, 'base64');
+    const iv = Buffer.from(GOOGLE_ENCRYPTION_IV, 'base64');
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+    let encrypted = cipher.update(secret, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return encrypted;
+  };
+
+  const generateAuthClient = async (siteId) => {
     const site = await dataAccess.getSiteByID(siteId);
     const config = site.getConfig();
     return new google.auth.OAuth2(
@@ -58,19 +67,31 @@ function AuthenticationController(lambdaContext) {
   };
 
   const authenticateWithGoogle = async (context) => {
-    const siteId = context.data?.siteId;
+    if (!context.data?.state || !context.data?.code) {
+      return badRequest('state and authorization code required');
+    }
+    const state = JSON.parse(context.data?.state);
+    if (!state.siteId) {
+      return badRequest('siteId required');
+    }
+    const { siteId } = state;
     const authorizationCode = context.data?.code;
     const authClient = await generateAuthClient(siteId);
-    const { token } = await authClient.getToken(authorizationCode);
+    const { tokens } = await authClient.getToken(authorizationCode);
 
     const site = await dataAccess.getSiteByID(siteId);
+    const config = site.getConfig();
     site.updateConfig({
+      ...config,
       auth: {
         google: {
-          token,
+          ...config.auth.google,
+          token: encryptSecret(tokens.access_token),
+          expiration: tokens.expiry_date,
         },
       },
     });
+    await dataAccess.updateSite(site);
     return ok('Authentication to Google successful');
   };
 
