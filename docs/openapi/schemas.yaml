@@ -700,9 +700,20 @@ KeyEvent:
     date:
       description: Date of the key event occurred
       $ref: '#/DateTime'
+    type:
+      type: string
+      enum:
+        - 'performance'
+        - 'seo'
+        - 'content'
+        - 'code'
+        - 'third-party'
+        - 'experimentation'
+        - 'network'
   example:
     name: 'Multiple 404s detected'
     date: '2024-01-20T10:00:00Z'
+    type: 'seo'
 KeyEventsList:
   type: array
   items:
