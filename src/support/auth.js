@@ -16,6 +16,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 const ANONYMOUS_ENDPOINTS = [
   'GET /slack/events',
   'POST /slack/events',
+  'GET /auth/google',
 ];
 
 const ADMIN_ENDPOINTS = [
@@ -23,7 +24,6 @@ const ADMIN_ENDPOINTS = [
   'POST /sites',
   'POST /event/fulfillment',
   'POST /slack/channels/invite-by-user-id',
-  'GET /auth/google',
 ];
 
 /*
