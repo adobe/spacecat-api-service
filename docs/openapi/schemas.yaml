@@ -697,8 +697,8 @@ KeyEvent:
     name:
       description: Name of the key event
       type: string
-    date:
-      description: Date of the key event occurred
+    time:
+      description: Time of the key event occurred
       $ref: '#/DateTime'
     type:
       type: string
@@ -712,7 +712,7 @@ KeyEvent:
         - 'network'
   example:
     name: 'Multiple 404s detected'
-    date: '2024-01-20T10:00:00Z'
+    time: '2024-01-20T10:00:00Z'
     type: 'seo'
 KeyEventsList:
   type: array
