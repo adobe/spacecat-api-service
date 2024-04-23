@@ -23,6 +23,7 @@ const ADMIN_ENDPOINTS = [
   'POST /sites',
   'POST /event/fulfillment',
   'POST /slack/channels/invite-by-user-id',
+  'GET /auth/google',
 ];
 
 /*

@@ -12,6 +12,7 @@
 
 import { google } from 'googleapis';
 import crypto from 'crypto';
+import { ok } from '@adobe/spacecat-shared-http-utils';
 
 function AuthenticationController(lambdaContext) {
   const { dataAccess } = lambdaContext;
@@ -20,8 +21,7 @@ function AuthenticationController(lambdaContext) {
     GOOGLE_ENCRYPTION_IV,
   } = lambdaContext.env;
 
-  const initGoogleAuthentication = async (context) => {
-    const siteId = context.params?.siteId;
+  const generateAuthClient = async (siteId) => {
     const decryptSecret = (encrypted) => {
       const key = Buffer.from(GOOGLE_ENCRYPTION_KEY, 'base64');
       const iv = Buffer.from(GOOGLE_ENCRYPTION_IV, 'base64');
@@ -33,21 +33,46 @@ function AuthenticationController(lambdaContext) {
 
     const site = await dataAccess.getSiteByID(siteId);
     const config = site.getConfig();
-    const authClient = new google.auth.OAuth2(
+    return new google.auth.OAuth2(
       config.auth.google.client_id,
       decryptSecret(config.auth.google.client_secret),
       config.auth.google.redirect_uri,
     );
+  };
+
+  const initGoogleAuthentication = async (context) => {
+    const siteId = context.params?.siteId;
+
     const scopes = [
       'https://www.googleapis.com/auth/webmasters.readonly',
     ];
+    const state = JSON.stringify({
+      siteId,
+    });
+    const authClient = await generateAuthClient(siteId);
     return authClient.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
+      state,
     });
   };
 
-  const authenticateWithGoogle = async (code) => code;
+  const authenticateWithGoogle = async (context) => {
+    const siteId = context.data?.siteId;
+    const authorizationCode = context.data?.code;
+    const authClient = await generateAuthClient(siteId);
+    const { token } = await authClient.getToken(authorizationCode);
+
+    const site = await dataAccess.getSiteByID(siteId);
+    site.updateConfig({
+      auth: {
+        google: {
+          token,
+        },
+      },
+    });
+    return ok('Authentication to Google successful');
+  };
 
   return {
     initGoogleAuthentication,

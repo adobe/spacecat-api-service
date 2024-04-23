@@ -104,7 +104,7 @@ export default function getRouteHandlers(
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
-    'GET /auth/google?code=:code': authenticationController.authenticateWithGoogle,
+    'GET /auth/google': authenticationController.authenticateWithGoogle,
   };
 
   // Initialization of static and dynamic routes
