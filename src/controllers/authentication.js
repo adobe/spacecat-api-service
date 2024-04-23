@@ -59,11 +59,11 @@ function AuthenticationController(lambdaContext) {
       siteId,
     });
     const authClient = await generateAuthClient(siteId);
-    return authClient.generateAuthUrl({
+    return ok(authClient.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
       state,
-    });
+    }));
   };
 
   const authenticateWithGoogle = async (context) => {
@@ -82,7 +82,6 @@ function AuthenticationController(lambdaContext) {
     const site = await dataAccess.getSiteByID(siteId);
     const config = site.getConfig();
     site.updateConfig({
-      ...config,
       auth: {
         google: {
           ...config.auth.google,
