@@ -6,6 +6,7 @@ site-top-pages:
       - site top pages
     summary: Retrieve top pages for site
     description: |
+      Not implemented yet.
       This endpoint is useful for retrieving top pages for a site.
       The top pages will be ordered in buckets by source and geo,
       and in descending order by traffic within these buckets.
@@ -34,6 +35,7 @@ site-top-pages-by-source:
       - site top pages
     summary: Retrieve top pages for site by source
     description: |
+      Not implemented yet.
       This endpoint is useful for retrieving top pages for a site.
       The top pages will be ordered in buckets by geo,
       and in descending order by traffic within these buckets.
@@ -63,6 +65,7 @@ site-top-pages-by-source-and-geo:
       - site top pages
     summary: Retrieve top pages for site by source and geo
     description: |
+      Not implemented yet.
       This endpoint is useful for retrieving top pages for a site.
       The top pages will be ordered in descending order by traffic.
     operationId: getSiteTopPagesBySourceAndGeo
