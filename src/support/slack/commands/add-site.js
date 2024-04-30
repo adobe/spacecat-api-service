@@ -16,7 +16,7 @@ import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
+import { findDeliveryType, triggerAuditForSite, triggerImportForSite } from '../../utils.js';
 
 import BaseCommand from './base.js';
 
@@ -98,6 +98,13 @@ function AddSiteCommand(context) {
       }
 
       await say(message);
+
+      if (newSite.isLive() && newSite.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
+        await triggerImportForSite(newSite, 'top-pages', slackContext, context);
+        message = 'First top pages import is triggered! :adobe-run:\'\n';
+        message += `In a minute, you can run _@spacecat get site ${baseURL} top pages_`;
+        await say(message);
+      }
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
