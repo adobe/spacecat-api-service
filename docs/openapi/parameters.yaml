@@ -77,3 +77,21 @@ hookSecret:
   required: true
   schema:
     type: string
+source:
+  name: source
+  description: The source of the top pages
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'ahrefs'
+    example: 'ahrefs'
+geo:
+  name: geo
+  description: The geo of the top pages
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'au'
