@@ -1,0 +1,25 @@
+key-event:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/keyEventId'
+  delete:
+    tags:
+      - site
+      - key event
+    summary: Delete a key event
+    description: |
+      This endpoint is useful for deleting a key event.
+    operationId: deleteKeyEvent
+    security:
+      - api_key: [ ]
+    responses:
+      '204':
+        description: Key event deleted successfully
+      '400':
+        $ref: './responses.yaml#/400-no-key-event-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-key-event-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'

@@ -87,6 +87,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
+  /sites/{siteId}/key-events/{keyEventId}:
+    $ref: './key-event-api.yaml#/key-event'
   /slack/channels/invite-by-user-id:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:

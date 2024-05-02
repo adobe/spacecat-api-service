@@ -688,33 +688,57 @@ Job:
     interval:
       type: string
       description: Specifies how often the job should run, e.g., 'daily'. This is part of job scheduling information.
+      description: Specifies how often the job should run, e.g., 'daily'. This is part of job scheduling information.
     type:
       type: string
       description: The job type, indicating the specific action or task that the job performs, such as 'rum-to-aa' indicating a data import job from RUM to AA.
+KeyEventType:
+  type: string
+  enum:
+    - 'performance'
+    - 'seo'
+    - 'content'
+    - 'code'
+    - 'third-party'
+    - 'experimentation'
+    - 'network'
 KeyEvent:
   type: object
   properties:
+    id:
+      description: The key event ID in uuid format
+      $ref: '#/Id'
+    siteId:
+      description: The ID of the site this key event belongs to
+      $ref: '#/Id'
     name:
       description: Name of the key event
       type: string
+    type:
+      $ref: '#/KeyEventType'
     time:
       description: Time of the key event occurred
       $ref: '#/DateTime'
-    type:
-      type: string
-      enum:
-        - 'performance'
-        - 'seo'
-        - 'content'
-        - 'code'
-        - 'third-party'
-        - 'experimentation'
-        - 'network'
   example:
+    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'caskdla4-e5f6-7g8h-9i0j-maksn32i920'
     name: 'Multiple 404s detected'
-    time: '2024-01-20T10:00:00Z'
     type: 'seo'
+    time: '2023-12-15T09:30:00Z'
 KeyEventsList:
   type: array
   items:
     $ref: './schemas.yaml#/KeyEvent'
+KeyEventCreate:
+  type: object
+  properties:
+    name:
+      required: true
+      description: Name of the key event
+      type: string
+    type:
+      required: true
+      $ref: '#/KeyEventType'
+    time:
+      description: Time of the key event occurred (optional). Current time is used when the field is missing
+      $ref: '#/DateTime'
