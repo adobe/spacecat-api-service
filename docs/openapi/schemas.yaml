@@ -688,7 +688,6 @@ Job:
     interval:
       type: string
       description: Specifies how often the job should run, e.g., 'daily'. This is part of job scheduling information.
-      description: Specifies how often the job should run, e.g., 'daily'. This is part of job scheduling information.
     type:
       type: string
       description: The job type, indicating the specific action or task that the job performs, such as 'rum-to-aa' indicating a data import job from RUM to AA.
