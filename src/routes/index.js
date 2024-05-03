@@ -94,7 +94,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
-    'GET /sites/:siteId/key-events': sitesController.getKeyEventsForSite,
+    'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
     'POST /sites/:siteId/key-events': sitesController.createKeyEvent,
     'DELETE /sites/:siteId/key-events/:keyEventId': sitesController.removeKeyEvent,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
