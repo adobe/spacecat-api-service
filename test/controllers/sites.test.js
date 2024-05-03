@@ -16,6 +16,8 @@ import chai from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
+import { createKeyEvent, KEY_EVENT_TYPES } from '@adobe/spacecat-shared-data-access/src/models/key-event.js';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import SitesController from '../../src/controllers/sites.js';
 import { SiteDto } from '../../src/dto/site.js';
 
@@ -29,6 +31,15 @@ describe('Sites Controller', () => {
     { id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' },
     { id: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge' },
   ].map((site) => SiteDto.fromJson(site));
+
+  const keyEvents = [
+    createKeyEvent({
+      siteId: sites[0].getId(), name: 'some-key-event', type: KEY_EVENT_TYPES.CODE, time: new Date().toISOString(),
+    }),
+    createKeyEvent({
+      siteId: sites[0].getId(), name: 'other-key-event', type: KEY_EVENT_TYPES.SEO, time: new Date().toISOString(),
+    }),
+  ];
 
   const sitesWithLatestAudits = [
     {
@@ -84,6 +95,9 @@ describe('Sites Controller', () => {
     'getByID',
     'removeSite',
     'updateSite',
+    'createKeyEvent',
+    'getKeyEventsBySiteID',
+    'removeKeyEvent',
   ];
 
   let mockDataAccess;
@@ -100,6 +114,9 @@ describe('Sites Controller', () => {
       getSiteByBaseURL: sandbox.stub().resolves(sites[0]),
       getSiteByID: sandbox.stub().resolves(sites[0]),
       getAuditForSite: sandbox.stub().resolves(sitesWithLatestAudits[0].getAudits()[0]),
+      createKeyEvent: sandbox.stub(),
+      getKeyEventsForSite: sandbox.stub(),
+      removeKeyEvent: sandbox.stub(),
     };
 
     sitesController = SitesController(mockDataAccess);
@@ -454,5 +471,82 @@ describe('Sites Controller', () => {
     expect(updatedSite.auditConfig.auditsDisabled).to.be.true;
     expect(updatedSite.auditConfig.auditTypeConfigs.type1.disabled).to.be.true;
     expect(updatedSite.auditConfig.auditTypeConfigs.type2.disabled).to.be.false;
+  });
+
+  it('create key event returns created key event', async () => {
+    const siteId = sites[0].getId();
+    const keyEvent = keyEvents[0];
+
+    mockDataAccess.createKeyEvent.withArgs({
+      siteId, name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime(),
+    }).resolves(keyEvent);
+
+    const resp = await (await sitesController.createKeyEvent({
+      params: { siteId },
+      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
+    })).json();
+
+    expect(mockDataAccess.createKeyEvent.calledOnce).to.be.true;
+    expect(hasText(resp.id)).to.be.true;
+    expect(resp.name).to.equal(keyEvent.getName());
+    expect(resp.type).to.equal(keyEvent.getType());
+    expect(resp.time).to.equal(keyEvent.getTime());
+  });
+
+  it('get key events returns list of key events', async () => {
+    const siteId = sites[0].getId();
+
+    mockDataAccess.getKeyEventsForSite.withArgs(siteId).resolves(keyEvents);
+
+    const resp = await (await sitesController.getKeyEventsBySiteID({
+      params: { siteId },
+    })).json();
+
+    expect(mockDataAccess.getKeyEventsForSite.calledOnce).to.be.true;
+    expect(resp.length).to.equal(keyEvents.length);
+  });
+
+  it('get key events returns bad request when siteId is missing', async () => {
+    const result = await sitesController.getKeyEventsBySiteID({
+      params: {},
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('get key events returns not found when site is not found', async () => {
+    const siteId = sites[0].getId();
+    mockDataAccess.getSiteByID.resolves(null);
+
+    const result = await sitesController.getKeyEventsBySiteID({
+      params: { siteId },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('remove key events endpoint call', async () => {
+    const keyEventId = keyEvents[0].getId();
+
+    await sitesController.removeKeyEvent({
+      params: { keyEventId },
+    });
+
+    expect(mockDataAccess.removeKeyEvent.calledOnce).to.be.true;
+    expect(mockDataAccess.removeKeyEvent.calledWith(keyEventId)).to.be.true;
+  });
+
+  it('remove key events returns bad request when keyEventId is missing', async () => {
+    const result = await sitesController.removeKeyEvent({
+      params: {},
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Key Event ID required');
   });
 });
