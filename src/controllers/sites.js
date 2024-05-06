@@ -280,9 +280,9 @@ function SitesController(dataAccess) {
   };
 
   /**
-   * Creates a site. The site ID is generated automatically.
+   * Creates a key event. The key event ID is generated automatically.
    * @param {object} context - Context of the request.
-   * @return {Promise<Response>} Site response.
+   * @return {Promise<Response>} Key event response.
    */
   const createKeyEvent = async (context) => {
     const { siteId } = context.params;
