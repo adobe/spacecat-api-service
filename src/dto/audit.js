@@ -12,10 +12,8 @@
 
 import {
   createAudit,
-  AUDIT_TYPE_BROKEN_BACKLINKS,
-  AUDIT_TYPE_ORGANIC_TRAFFIC,
-  AUDIT_TYPE_ORGANIC_KEYWORDS,
-  AUDIT_TYPE_CWV,
+  AUDIT_TYPE_LHS_DESKTOP,
+  AUDIT_TYPE_LHS_MOBILE,
 } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 
 /**
@@ -81,10 +79,8 @@ export const AuditDto = {
    * }} JSON object.
    */
   toAbbreviatedJSON: (audit) => {
-    if (audit.getAuditType() === AUDIT_TYPE_BROKEN_BACKLINKS
-      || audit.getAuditType() === AUDIT_TYPE_ORGANIC_KEYWORDS
-      || audit.getAuditType() === AUDIT_TYPE_ORGANIC_TRAFFIC
-      || audit.getAuditType() === AUDIT_TYPE_CWV) {
+    if (audit.getAuditType() !== AUDIT_TYPE_LHS_DESKTOP
+      && audit.getAuditType() !== AUDIT_TYPE_LHS_MOBILE) {
       return AuditDto.toJSON(audit);
     }
     return {

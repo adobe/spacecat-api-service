@@ -89,6 +89,7 @@ describe('getRouteHandlers', () => {
       'POST /slack/events',
       'GET /trigger',
       'POST /event/fulfillment',
+      'POST /slack/channels/invite-by-user-id',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -124,6 +125,9 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/audits/:auditType/:auditedAt',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
+      'GET /sites/:siteId/key-events',
+      'POST /sites/:siteId/key-events',
+      'DELETE /sites/:siteId/key-events/:keyEventId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

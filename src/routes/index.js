@@ -94,11 +94,15 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
+    'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
+    'POST /sites/:siteId/key-events': sitesController.createKeyEvent,
+    'DELETE /sites/:siteId/key-events/:keyEventId': sitesController.removeKeyEvent,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
+    'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
   };
 

@@ -1,3 +1,255 @@
+# [1.35.0](https://github.com/adobe/spacecat-api-service/compare/v1.34.21...v1.35.0) (2024-05-07)
+
+
+### Features
+
+* key events api implementation ([#295](https://github.com/adobe/spacecat-api-service/issues/295)) ([2bdaac4](https://github.com/adobe/spacecat-api-service/commit/2bdaac449ccde2b9a9f2765cc1e9f801d78cef70))
+
+## [1.34.21](https://github.com/adobe/spacecat-api-service/compare/v1.34.20...v1.34.21) (2024-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#296](https://github.com/adobe/spacecat-api-service/issues/296)) ([92fc405](https://github.com/adobe/spacecat-api-service/commit/92fc405fab39261a9c2a9602c39f185b897f1cf9))
+
+## [1.34.20](https://github.com/adobe/spacecat-api-service/compare/v1.34.19...v1.34.20) (2024-05-03)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#294](https://github.com/adobe/spacecat-api-service/issues/294)) ([50f13d5](https://github.com/adobe/spacecat-api-service/commit/50f13d506b66b2be04e493e8b7c98cbeb0b733e6))
+
+## [1.34.19](https://github.com/adobe/spacecat-api-service/compare/v1.34.18...v1.34.19) (2024-04-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.22.1 ([#291](https://github.com/adobe/spacecat-api-service/issues/291)) ([08785f9](https://github.com/adobe/spacecat-api-service/commit/08785f948962286cb0146b3e5f23fa7c816db0c3))
+
+## [1.34.18](https://github.com/adobe/spacecat-api-service/compare/v1.34.17...v1.34.18) (2024-04-29)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.22.0 ([#290](https://github.com/adobe/spacecat-api-service/issues/290)) ([f777572](https://github.com/adobe/spacecat-api-service/commit/f777572056ed3192055edd74b81acfbe9008a56b))
+
+## [1.34.17](https://github.com/adobe/spacecat-api-service/compare/v1.34.16...v1.34.17) (2024-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#288](https://github.com/adobe/spacecat-api-service/issues/288)) ([fc553bf](https://github.com/adobe/spacecat-api-service/commit/fc553bfbf08351280fcc1db6af761e4d5a62d7b2))
+
+## [1.34.16](https://github.com/adobe/spacecat-api-service/compare/v1.34.15...v1.34.16) (2024-04-25)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#287](https://github.com/adobe/spacecat-api-service/issues/287)) ([aa53439](https://github.com/adobe/spacecat-api-service/commit/aa53439ea3b5033b98bfab9e4710533f13756029))
+
+## [1.34.15](https://github.com/adobe/spacecat-api-service/compare/v1.34.14...v1.34.15) (2024-04-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v1.8.1 ([#286](https://github.com/adobe/spacecat-api-service/issues/286)) ([761385f](https://github.com/adobe/spacecat-api-service/commit/761385f4a364336dc567cef15684e6e4283e64bd))
+
+## [1.34.14](https://github.com/adobe/spacecat-api-service/compare/v1.34.13...v1.34.14) (2024-04-20)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#282](https://github.com/adobe/spacecat-api-service/issues/282)) ([a4fee69](https://github.com/adobe/spacecat-api-service/commit/a4fee69f0bd84bc870d6044be4ed5d8643e61049))
+
+## [1.34.13](https://github.com/adobe/spacecat-api-service/compare/v1.34.12...v1.34.13) (2024-04-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v1.8.0 ([#280](https://github.com/adobe/spacecat-api-service/issues/280)) ([8357925](https://github.com/adobe/spacecat-api-service/commit/8357925b7a8ddebe9248bda9a4abe18a7dc7b47a))
+
+## [1.34.12](https://github.com/adobe/spacecat-api-service/compare/v1.34.11...v1.34.12) (2024-04-19)
+
+
+### Bug Fixes
+
+* improved logging for site discovery ([#281](https://github.com/adobe/spacecat-api-service/issues/281)) ([61cd607](https://github.com/adobe/spacecat-api-service/commit/61cd60794ceed8f1a5136637cb6ac8d0835ac457))
+
+## [1.34.11](https://github.com/adobe/spacecat-api-service/compare/v1.34.10...v1.34.11) (2024-04-19)
+
+
+### Bug Fixes
+
+* slack format messages ([#248](https://github.com/adobe/spacecat-api-service/issues/248)) ([c595acf](https://github.com/adobe/spacecat-api-service/commit/c595acfa55d62e76d06aa3dbe3abf72f30091936))
+
+## [1.34.10](https://github.com/adobe/spacecat-api-service/compare/v1.34.9...v1.34.10) (2024-04-18)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#279](https://github.com/adobe/spacecat-api-service/issues/279)) ([43907c2](https://github.com/adobe/spacecat-api-service/commit/43907c26fa47baa01ca679c0ba25068424df229a))
+
+## [1.34.9](https://github.com/adobe/spacecat-api-service/compare/v1.34.8...v1.34.9) (2024-04-17)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#276](https://github.com/adobe/spacecat-api-service/issues/276)) ([f82da9b](https://github.com/adobe/spacecat-api-service/commit/f82da9b6e9eafa392f14b2456a423c7858ba3b2a))
+
+## [1.34.8](https://github.com/adobe/spacecat-api-service/compare/v1.34.7...v1.34.8) (2024-04-16)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#275](https://github.com/adobe/spacecat-api-service/issues/275)) ([2ec7535](https://github.com/adobe/spacecat-api-service/commit/2ec75354065b53f4204f79ce9974b8613875d33a))
+
+## [1.34.7](https://github.com/adobe/spacecat-api-service/compare/v1.34.6...v1.34.7) (2024-04-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-universal-logger to v3.0.15 ([#274](https://github.com/adobe/spacecat-api-service/issues/274)) ([1658006](https://github.com/adobe/spacecat-api-service/commit/16580060bb2c94b2dcf05ea4eae5167d2a251dec))
+
+## [1.34.6](https://github.com/adobe/spacecat-api-service/compare/v1.34.5...v1.34.6) (2024-04-13)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#272](https://github.com/adobe/spacecat-api-service/issues/272)) ([f82e270](https://github.com/adobe/spacecat-api-service/commit/f82e2700841504746f0aadc5e0c026af0e08e13f))
+
+## [1.34.5](https://github.com/adobe/spacecat-api-service/compare/v1.34.4...v1.34.5) (2024-04-12)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#270](https://github.com/adobe/spacecat-api-service/issues/270)) ([1b63c55](https://github.com/adobe/spacecat-api-service/commit/1b63c55a94482121bb3fe3b8b29f41aae3e74462))
+
+## [1.34.4](https://github.com/adobe/spacecat-api-service/compare/v1.34.3...v1.34.4) (2024-04-11)
+
+
+### Bug Fixes
+
+* Use of .id instead of .getId() results in undefined in logs [#256](https://github.com/adobe/spacecat-api-service/issues/256) ([#268](https://github.com/adobe/spacecat-api-service/issues/268)) ([8ba8fb6](https://github.com/adobe/spacecat-api-service/commit/8ba8fb656b64428eada8caeca7bd81a036fc7c70))
+
+## [1.34.3](https://github.com/adobe/spacecat-api-service/compare/v1.34.2...v1.34.3) (2024-04-10)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#267](https://github.com/adobe/spacecat-api-service/issues/267)) ([fd24200](https://github.com/adobe/spacecat-api-service/commit/fd242007331a367905edc4e248749cca523d9817))
+
+## [1.34.2](https://github.com/adobe/spacecat-api-service/compare/v1.34.1...v1.34.2) (2024-04-09)
+
+
+### Bug Fixes
+
+* Remove experimentation ([#257](https://github.com/adobe/spacecat-api-service/issues/257)) ([816176e](https://github.com/adobe/spacecat-api-service/commit/816176e384de3e5348850e91475f518ef7c942b3))
+
+## [1.34.1](https://github.com/adobe/spacecat-api-service/compare/v1.34.0...v1.34.1) (2024-04-09)
+
+
+### Bug Fixes
+
+* remove lhs trigger handler ([#266](https://github.com/adobe/spacecat-api-service/issues/266)) ([967d127](https://github.com/adobe/spacecat-api-service/commit/967d1275be460b69336a1b581e5cd7b585266459))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-09)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+* docs linting, openapi version upgrade and multiple examples support ([#264](https://github.com/adobe/spacecat-api-service/issues/264)) ([eb9692e](https://github.com/adobe/spacecat-api-service/commit/eb9692e73f789eb37bd3290f618bc20e7e3d03d0))
+* migrate 404 to jobs-dispatcher ([3eb28af](https://github.com/adobe/spacecat-api-service/commit/3eb28affc0d4596e599b50495388bc90704836b1))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-08)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+* migrate 404 to jobs-dispatcher ([3eb28af](https://github.com/adobe/spacecat-api-service/commit/3eb28affc0d4596e599b50495388bc90704836b1))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-08)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+* migrate 404 to jobs-dispatcher ([3eb28af](https://github.com/adobe/spacecat-api-service/commit/3eb28affc0d4596e599b50495388bc90704836b1))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-06)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-06)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#258](https://github.com/adobe/spacecat-api-service/issues/258)) ([473641b](https://github.com/adobe/spacecat-api-service/commit/473641b74827d96d6f06f84de65acbbc354572cf))
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-04)
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+* **site-discovery:** promote previously added non edge delivery sites ([#215](https://github.com/adobe/spacecat-api-service/issues/215)) ([b9a5842](https://github.com/adobe/spacecat-api-service/commit/b9a5842fc8619766dc9005c7e1ca7a2d7ee59139))
+
+# [1.34.0](https://github.com/adobe/spacecat-api-service/compare/v1.33.1...v1.34.0) (2024-04-03)
+
+
+### Features
+
+* **api-spec:** analytics site integration API spec ([#188](https://github.com/adobe/spacecat-api-service/issues/188)) ([18a90b6](https://github.com/adobe/spacecat-api-service/commit/18a90b60de878d2eecabf797f8c3460d27568dce))
+
+## [1.33.1](https://github.com/adobe/spacecat-api-service/compare/v1.33.0...v1.33.1) (2024-04-02)
+
+
+### Bug Fixes
+
+* use abbr audit only for lhs related audits ([#254](https://github.com/adobe/spacecat-api-service/issues/254)) ([b25344d](https://github.com/adobe/spacecat-api-service/commit/b25344d900d54d92cb8108f93af7132a280db7e4))
+
+# [1.33.0](https://github.com/adobe/spacecat-api-service/compare/v1.32.5...v1.33.0) (2024-04-02)
+
+
+### Features
+
+* Endpoint to request an invite to an organization's Slack channel by user ID [#207](https://github.com/adobe/spacecat-api-service/issues/207) ([#249](https://github.com/adobe/spacecat-api-service/issues/249)) ([cae873e](https://github.com/adobe/spacecat-api-service/commit/cae873e651066e27ad887f598483000b5624e940))
+
 ## [1.32.5](https://github.com/adobe/spacecat-api-service/compare/v1.32.4...v1.32.5) (2024-03-26)
 
 

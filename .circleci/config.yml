@@ -7,7 +7,7 @@ executors:
 
 orbs:
   helix-post-deploy: adobe/helix-post-deploy@3.0.2
-  codecov: codecov/codecov@4.0.1
+  codecov: codecov/codecov@4.1.0
 
 commands:
   setup:
@@ -29,6 +29,9 @@ jobs:
       - run:
           name: Lint
           command: npm run lint
+      - run:
+          name: Docs Lint
+          command: npm run docs:lint
       - run:
           name: Getting Code Coverage
           command: npm run test
