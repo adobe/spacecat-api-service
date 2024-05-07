@@ -49,6 +49,14 @@ export const sendAuditMessage = async (
   siteId,
 ) => sqs.sendMessage(queueUrl, { type, url: siteId, auditContext });
 
+export const sendImportMessage = async (
+  sqs,
+  queueUrl,
+  type,
+  importContext,
+  siteId,
+) => sqs.sendMessage(queueUrl, { type, siteId, importContext });
+
 /**
  * Sends audit messages for each URL.
  *
@@ -90,6 +98,24 @@ export const triggerAuditForSite = async (
   lambdaContext.sqs,
   lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
   auditType,
+  {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+  site.getId(),
+);
+
+export const triggerImportForSite = async (
+  site,
+  importType,
+  slackContext,
+  lambdaContext,
+) => sendImportMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.IMPORT_JOBS_QUEUE_URL,
+  importType,
   {
     slackContext: {
       channelId: slackContext.channelId,
