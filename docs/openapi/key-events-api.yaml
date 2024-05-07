@@ -5,9 +5,9 @@ key-events:
     tags:
       - site
       - key event
-    summary: Retrieve historical key events for a given site
+    summary: Retrieve key events for a site
     description: |
-      This endpoint is useful for getting historical key events for a given site
+      This endpoint returns key events for a site chronologically, starting from the most recent and descending to the least recent
     operationId: getKeyEvents
     responses:
       '200':
@@ -32,7 +32,7 @@ key-events:
       - key event
     summary: Create a new key event for a site
     description: |
-      This endpoint is useful for creating a new key event.
+      The endpoint for creating new key events for a site
     operationId: createKeyEvent
     requestBody:
       required: true

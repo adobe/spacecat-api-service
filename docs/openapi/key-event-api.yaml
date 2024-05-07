@@ -8,7 +8,7 @@ key-event:
       - key event
     summary: Delete a key event
     description: |
-      This endpoint is useful for deleting a key event.
+      The endpoint for deleting a key event
     operationId: deleteKeyEvent
     security:
       - api_key: [ ]

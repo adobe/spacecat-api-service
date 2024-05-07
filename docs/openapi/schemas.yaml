@@ -828,9 +828,6 @@ KeyEvent:
     id:
       description: The key event ID in uuid format
       $ref: '#/Id'
-    siteId:
-      description: The ID of the site this key event belongs to
-      $ref: '#/Id'
     name:
       description: Name of the key event
       type: string
@@ -841,7 +838,6 @@ KeyEvent:
       $ref: '#/DateTime'
   example:
     id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    siteId: 'caskdla4-e5f6-7g8h-9i0j-maksn32i920'
     name: 'Multiple 404s detected'
     type: 'seo'
     time: '2023-12-15T09:30:00Z'
