@@ -1,3 +1,10 @@
+## [1.35.1](https://github.com/adobe/spacecat-api-service/compare/v1.35.0...v1.35.1) (2024-05-07)
+
+
+### Bug Fixes
+
+* release api-docs ([9162c3e](https://github.com/adobe/spacecat-api-service/commit/9162c3e6ac89a5edf2a427bb9678b4fb0b9a2690))
+
 # [1.35.0](https://github.com/adobe/spacecat-api-service/compare/v1.34.21...v1.35.0) (2024-05-07)
 
 
