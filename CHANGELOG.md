@@ -1,3 +1,10 @@
+# [1.35.0](https://github.com/adobe/spacecat-api-service/compare/v1.34.21...v1.35.0) (2024-05-07)
+
+
+### Features
+
+* key events api implementation ([#295](https://github.com/adobe/spacecat-api-service/issues/295)) ([2bdaac4](https://github.com/adobe/spacecat-api-service/commit/2bdaac449ccde2b9a9f2765cc1e9f801d78cef70))
+
 ## [1.34.21](https://github.com/adobe/spacecat-api-service/compare/v1.34.20...v1.34.21) (2024-05-04)
 
 
