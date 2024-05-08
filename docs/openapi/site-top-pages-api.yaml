@@ -1,0 +1,86 @@
+site-top-pages:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site top pages
+    summary: Retrieve top pages for site
+    description: |
+      Not implemented yet.
+      This endpoint is useful for retrieving top pages for a site.
+      The top pages will be ordered in buckets by source and geo,
+      and in descending order by traffic within these buckets.
+    operationId: getSiteTopPages
+    responses:
+      '200':
+        description: A list of site top pages
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteTopPageList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+site-top-pages-by-source:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/source'
+  get:
+    tags:
+      - site top pages
+    summary: Retrieve top pages for site by source
+    description: |
+      Not implemented yet.
+      This endpoint is useful for retrieving top pages for a site.
+      The top pages will be ordered in buckets by geo,
+      and in descending order by traffic within these buckets.
+    operationId: getSiteTopPagesBySource
+    responses:
+      '200':
+        description: A list of site top pages
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteTopPageList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+site-top-pages-by-source-and-geo:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/source'
+    - $ref: './parameters.yaml#/geo'
+  get:
+    tags:
+      - site top pages
+    summary: Retrieve top pages for site by source and geo
+    description: |
+      Not implemented yet.
+      This endpoint is useful for retrieving top pages for a site.
+      The top pages will be ordered in descending order by traffic.
+    operationId: getSiteTopPagesBySourceAndGeo
+    responses:
+      '200':
+        description: A list of site top pages
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteTopPageList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

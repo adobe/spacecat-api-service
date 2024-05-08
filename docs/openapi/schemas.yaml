@@ -859,3 +859,42 @@ KeyEventCreate:
     time:
       description: Time of the key event occurred (optional). Current time is used when the field is missing
       $ref: '#/DateTime'
+SiteTopPage:
+  type: object
+  required:
+    - siteId
+    - url
+    - traffic
+    - source
+    - geo
+    - importedAt
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    url:
+      description: The URL of the top page
+      $ref: '#/URL'
+    traffic:
+      description: The traffic of the top page
+      type: integer
+    source:
+      description: The source of the top page listing
+      type: string
+    geo:
+      description: The geo of the top page listing, or 'global' if not specific to a geo
+      type: string
+    importedAt:
+      description: The date and time when the top page was imported
+      $ref: '#/DateTime'
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    url: 'https://example-site.com/foo/bar'
+    traffic: 360420000
+    source: 'ahrefs'
+    geo: 'au'
+    importedAt: '2024-04-29T15:14:33.653Z'
+SiteTopPageList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/SiteTopPage'
