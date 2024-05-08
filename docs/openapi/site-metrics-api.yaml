@@ -5,8 +5,7 @@ site-metrics-by-source:
     - $ref: './parameters.yaml#/metric'
   get:
     tags:
-      - site
-      - metrics
+      - experimental
     summary: Retrieve site metrics by source
     description: |
       Not implemented yet.
