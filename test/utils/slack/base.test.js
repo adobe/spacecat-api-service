@@ -150,8 +150,9 @@ describe('Base Slack Utils', () => {
           { text: 'World', accessory: { type: 'button', text: 'Click me' } },
         ];
         const additionalBlocks = [{ type: 'divider' }];
+        const options = { unfurl_links: false };
 
-        await sendMessageBlocks(say, textSections, additionalBlocks);
+        await sendMessageBlocks(say, textSections, additionalBlocks, options);
 
         const expectedBlocks = [
           { type: 'section', text: { type: 'mrkdwn', text: 'Hello' } },
@@ -160,7 +161,7 @@ describe('Base Slack Utils', () => {
         ];
 
         expect(say.calledOnce).to.be.true;
-        expect(say.firstCall.args[0]).to.deep.equal({ blocks: expectedBlocks });
+        expect(say.firstCall.args[0]).to.deep.equal({ ...options, blocks: expectedBlocks });
       });
 
       it('sends a message with only the text sections if no additional blocks are provided', async () => {

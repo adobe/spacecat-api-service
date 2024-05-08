@@ -193,7 +193,7 @@ function HooksController(lambdaContext) {
     const { log } = context;
     const { forwardedHost } = context.data;
 
-    log.info(`Processing CDN site candidate. Input: ${forwardedHost}`);
+    log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
     // extract the url from the x-forwarded-host header
     const domain = await extractDomainFromXForwardedHostHeader(forwardedHost);
@@ -209,7 +209,7 @@ function HooksController(lambdaContext) {
     const { log } = context;
     const { domain } = context.data;
 
-    log.info(`Processing RUM site candidate. Input: ${domain}`);
+    log.info(`Processing RUM site candidate. Input: ${JSON.stringify(context.data)}`);
 
     const source = SITE_CANDIDATE_SOURCES.RUM;
     const baseURL = await processSiteCandidate(domain, source);
