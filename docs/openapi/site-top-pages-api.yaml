@@ -3,7 +3,8 @@ site-top-pages:
     - $ref: './parameters.yaml#/siteId'
   get:
     tags:
-      - site top pages
+      - site
+      - top pages
     summary: Retrieve top pages for site
     description: |
       Not implemented yet.
@@ -32,7 +33,8 @@ site-top-pages-by-source:
     - $ref: './parameters.yaml#/source'
   get:
     tags:
-      - site top pages
+      - site
+      - top pages
     summary: Retrieve top pages for site by source
     description: |
       Not implemented yet.
@@ -62,7 +64,8 @@ site-top-pages-by-source-and-geo:
     - $ref: './parameters.yaml#/geo'
   get:
     tags:
-      - site top pages
+      - site
+      - top pages
     summary: Retrieve top pages for site by source and geo
     description: |
       Not implemented yet.

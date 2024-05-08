@@ -97,6 +97,8 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source'
   /sites/{siteId}/top-pages/{source}/{geo}:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
+  /sites/{siteId}/metrics/{metric}/{source}:
+    $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /slack/channels/invite-by-user-id:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
