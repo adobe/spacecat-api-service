@@ -1,3 +1,10 @@
+# [1.36.0](https://github.com/adobe/spacecat-api-service/compare/v1.35.2...v1.36.0) (2024-05-08)
+
+
+### Features
+
+* site top pages API spec (SITES-21274) ([#292](https://github.com/adobe/spacecat-api-service/issues/292)) ([67c9bad](https://github.com/adobe/spacecat-api-service/commit/67c9bad38c3a452a03cd6520085779443c57eb6d))
+
 ## [1.35.2](https://github.com/adobe/spacecat-api-service/compare/v1.35.1...v1.35.2) (2024-05-07)
 
 
