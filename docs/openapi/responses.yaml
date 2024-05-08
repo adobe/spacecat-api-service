@@ -28,6 +28,11 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-no-key-event-id':
+  description: Bad request. Key Event ID is required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '400-empty-config-or-validation-failure':
   description: |
     Bad request. No or empty request body or required Configuration properties missing.
@@ -102,6 +107,11 @@
       $ref: './headers.yaml#/xError'
 '404-site-not-found-with-id':
   description: Site not found with given ID.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'404-key-event-not-found-with-id':
+  description: Key event not found with given ID.
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'

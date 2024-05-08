@@ -12,6 +12,7 @@
 
 import {
   createResponse,
+  created,
   badRequest,
   noContent,
   notFound,
@@ -27,6 +28,7 @@ import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/si
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
+import { KeyEventDto } from '../dto/key-event.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -277,6 +279,65 @@ function SitesController(dataAccess) {
     return badRequest('No updates provided');
   };
 
+  /**
+   * Creates a key event. The key event ID is generated automatically.
+   * @param {object} context - Context of the request.
+   * @return {Promise<Response>} Key event response.
+   */
+  const createKeyEvent = async (context) => {
+    const { siteId } = context.params;
+    const { name, type, time } = context.data;
+
+    const keyEvent = await dataAccess.createKeyEvent({
+      siteId,
+      name,
+      type,
+      time,
+    });
+
+    return created(KeyEventDto.toJSON(keyEvent));
+  };
+
+  /**
+   * Gets key events for a site
+   * @param {object} context - Context of the request.
+   * @returns {Promise<[object]>} Key events.
+   * @throws {Error} If site ID is not provided.
+   */
+  const getKeyEventsBySiteID = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!hasText(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    const keyEvents = await dataAccess.getKeyEventsForSite(site.getId());
+
+    return ok(keyEvents.map((keyEvent) => KeyEventDto.toJSON(keyEvent)));
+  };
+
+  /**
+   * Removes a key event.
+   * @param {object} context - Context of the request.
+   * @return {Promise<Response>} Delete response.
+   */
+  const removeKeyEvent = async (context) => {
+    const { keyEventId } = context.params;
+
+    if (!hasText(keyEventId)) {
+      return badRequest('Key Event ID required');
+    }
+
+    await dataAccess.removeKeyEvent(keyEventId);
+
+    return noContent();
+  };
+
   return {
     createSite,
     getAll,
@@ -289,6 +350,11 @@ function SitesController(dataAccess) {
     getByID,
     removeSite,
     updateSite,
+
+    // key events
+    createKeyEvent,
+    getKeyEventsBySiteID,
+    removeKeyEvent,
   };
 }
 

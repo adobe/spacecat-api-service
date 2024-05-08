@@ -87,6 +87,10 @@ paths:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/latest-audit/{auditType}:
     $ref: './audit-api.yaml#/latest-audit-for-site'
+  /sites/{siteId}/key-events:
+    $ref: './key-events-api.yaml#/key-events'
+  /sites/{siteId}/key-events/{keyEventId}:
+    $ref: './key-event-api.yaml#/key-event'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:

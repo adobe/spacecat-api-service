@@ -77,6 +77,13 @@ hookSecret:
   required: true
   schema:
     type: string
+keyEventId:
+  name: keyEventId
+  description: The key event ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
 source:
   name: source
   description: The source of the top pages

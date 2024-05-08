@@ -1,3 +1,38 @@
+## [1.35.2](https://github.com/adobe/spacecat-api-service/compare/v1.35.1...v1.35.2) (2024-05-07)
+
+
+### Bug Fixes
+
+* new api docs ([131863f](https://github.com/adobe/spacecat-api-service/commit/131863f527a39de45703e9ad408c1c5d42f51a81))
+
+## [1.35.1](https://github.com/adobe/spacecat-api-service/compare/v1.35.0...v1.35.1) (2024-05-07)
+
+
+### Bug Fixes
+
+* release api-docs ([9162c3e](https://github.com/adobe/spacecat-api-service/commit/9162c3e6ac89a5edf2a427bb9678b4fb0b9a2690))
+
+# [1.35.0](https://github.com/adobe/spacecat-api-service/compare/v1.34.21...v1.35.0) (2024-05-07)
+
+
+### Features
+
+* key events api implementation ([#295](https://github.com/adobe/spacecat-api-service/issues/295)) ([2bdaac4](https://github.com/adobe/spacecat-api-service/commit/2bdaac449ccde2b9a9f2765cc1e9f801d78cef70))
+
+## [1.34.21](https://github.com/adobe/spacecat-api-service/compare/v1.34.20...v1.34.21) (2024-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#296](https://github.com/adobe/spacecat-api-service/issues/296)) ([92fc405](https://github.com/adobe/spacecat-api-service/commit/92fc405fab39261a9c2a9602c39f185b897f1cf9))
+
+## [1.34.20](https://github.com/adobe/spacecat-api-service/compare/v1.34.19...v1.34.20) (2024-05-03)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#294](https://github.com/adobe/spacecat-api-service/issues/294)) ([50f13d5](https://github.com/adobe/spacecat-api-service/commit/50f13d506b66b2be04e493e8b7c98cbeb0b733e6))
+
 ## [1.34.19](https://github.com/adobe/spacecat-api-service/compare/v1.34.18...v1.34.19) (2024-04-30)
 
 
