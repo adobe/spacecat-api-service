@@ -18,6 +18,8 @@ site-metrics-by-source:
           application/json:
             schema:
               $ref: './schemas.yaml#/SiteMetricList'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
       '401':
         $ref: './responses.yaml#/401'
       '404':

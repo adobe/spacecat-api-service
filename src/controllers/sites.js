@@ -24,11 +24,13 @@ import {
   isObject,
 } from '@adobe/spacecat-shared-utils';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { S3Client } from '@aws-sdk/client-s3';
 
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
+import { getStoredMetrics } from '../support/metrics-store.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -338,6 +340,34 @@ function SitesController(dataAccess) {
     return noContent();
   };
 
+  const getSiteMetricsBySource = async (context) => {
+    const siteId = context.params?.siteId;
+    const metric = context.params?.metric;
+    const source = context.params?.source;
+
+    if (!hasText(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(metric)) {
+      return badRequest('metric required');
+    }
+
+    if (!hasText(source)) {
+      return badRequest('source required');
+    }
+
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    const s3Client = new S3Client();
+    const metrics = await getStoredMetrics(s3Client, { siteId, metric, source }, context);
+
+    return ok(metrics);
+  };
+
   return {
     createSite,
     getAll,
@@ -355,6 +385,9 @@ function SitesController(dataAccess) {
     createKeyEvent,
     getKeyEventsBySiteID,
     removeKeyEvent,
+
+    // site metrics
+    getSiteMetricsBySource,
   };
 }
 
