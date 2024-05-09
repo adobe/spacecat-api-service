@@ -922,19 +922,12 @@ SiteMetric:
     time:
       description: The date and time when the metric was recorded
       $ref: '#/DateTime'
-    granularity:
-      description: The granularity of the metric (7 for weekly, 30 for monthly, 1 for daily etc.)
-      type: integer
-      enum:
-        - 7
-      example: 7
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     source: 'ahrefs'
     metric: 'organic-traffic'
     time: '2024-04-29T00:00:00.000Z'
     value: 37900
-    granularity: 7
 SiteMetricList:
   type: array
   items:
