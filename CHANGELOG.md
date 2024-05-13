@@ -1,3 +1,10 @@
+# [1.37.0](https://github.com/adobe/spacecat-api-service/compare/v1.36.1...v1.37.0) (2024-05-13)
+
+
+### Features
+
+* **api:** add api spec for exposing site metrics by source and implementation ([#298](https://github.com/adobe/spacecat-api-service/issues/298)) ([d4b7f1b](https://github.com/adobe/spacecat-api-service/commit/d4b7f1bf86334fb42894890a9b1b88146ee38c25))
+
 ## [1.36.1](https://github.com/adobe/spacecat-api-service/compare/v1.36.0...v1.36.1) (2024-05-11)
 
 
