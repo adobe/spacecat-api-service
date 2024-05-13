@@ -8,7 +8,6 @@ site-metrics-by-source:
       - experimental
     summary: Retrieve site metrics by source
     description: |
-      Not implemented yet.
       This endpoint is useful for retrieving site metrics by source.
     operationId: getSiteMetricsBySource
     responses:
