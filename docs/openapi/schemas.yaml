@@ -913,7 +913,7 @@ SiteMetric:
     source:
       description: The source for retrieving the metric value
       type: string
-    metric:
+    name:
       description: The name of the metric
       type: string
     value:
@@ -925,7 +925,7 @@ SiteMetric:
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     source: 'ahrefs'
-    metric: 'organic-traffic'
+    name: 'organic-traffic'
     value: 37900
     time: '2024-04-29T00:00:00.000Z'
 SiteMetricList:
