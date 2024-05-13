@@ -15,6 +15,7 @@
 import chai from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
+import esmock from 'esmock';
 
 import { createKeyEvent, KEY_EVENT_TYPES } from '@adobe/spacecat-shared-data-access/src/models/key-event.js';
 import { hasText } from '@adobe/spacecat-shared-utils';
@@ -98,6 +99,7 @@ describe('Sites Controller', () => {
     'createKeyEvent',
     'getKeyEventsBySiteID',
     'removeKeyEvent',
+    'getSiteMetricsBySource',
   ];
 
   let mockDataAccess;
@@ -548,5 +550,93 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Key Event ID required');
+  });
+
+  it('get site metrics by source returns list of metrics', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+    const storedMetrics = [{
+      siteId: '123',
+      source: 'ahrefs',
+      time: '2023-03-12T00:00:00Z',
+      metric: 'organic-traffic',
+      value: 100,
+    }, {
+      siteId: '123',
+      source: 'ahrefs',
+      time: '2023-03-13T00:00:00Z',
+      metric: 'organic-traffic',
+      value: 200,
+    }];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '../../src/support/metrics-store.js': {
+        getStoredMetrics,
+      },
+    });
+
+    const resp = await (await sitesControllerMock.default(mockDataAccess).getSiteMetricsBySource({
+      params: { siteId, source, metric },
+    })).json();
+
+    expect(resp).to.deep.equal(storedMetrics);
+  });
+
+  it('get site metrics by sources returns bad request when siteId is missing', async () => {
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+
+    const result = await sitesController.getSiteMetricsBySource({
+      params: { source, metric },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('get site metrics by sources returns bad request when source is missing', async () => {
+    const siteId = sites[0].getId();
+    const metric = 'organic-traffic';
+
+    const result = await sitesController.getSiteMetricsBySource({
+      params: { siteId, metric },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'source required');
+  });
+
+  it('get site metrics by sources returns bad request when metric is missing', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+
+    const result = await sitesController.getSiteMetricsBySource({
+      params: { siteId, source },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'metric required');
+  });
+
+  it('get site metrics by source returns not found when site is not found', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+    mockDataAccess.getSiteByID.resolves(null);
+
+    const result = await sitesController.getSiteMetricsBySource({
+      params: { siteId, source, metric },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Site not found');
   });
 });

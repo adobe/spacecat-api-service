@@ -1,0 +1,29 @@
+site-metrics-by-source:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/source'
+    - $ref: './parameters.yaml#/metric'
+  get:
+    tags:
+      - experimental
+    summary: Retrieve site metrics by source
+    description: |
+      This endpoint is useful for retrieving site metrics by source.
+    operationId: getSiteMetricsBySource
+    responses:
+      '200':
+        description: A list of site metrics
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteMetricList'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

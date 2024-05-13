@@ -102,3 +102,13 @@ geo:
   schema:
     type: string
     example: 'au'
+metric:
+  name: metric
+  description: The name of the site metric
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'organic-traffic'
+    example: 'organic-traffic'

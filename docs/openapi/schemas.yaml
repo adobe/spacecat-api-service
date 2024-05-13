@@ -898,3 +898,37 @@ SiteTopPageList:
   type: array
   items:
     $ref: './schemas.yaml#/SiteTopPage'
+SiteMetric:
+  type: object
+  required:
+    - siteId
+    - source
+    - metric
+    - value
+    - time
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    source:
+      description: The source for retrieving the metric value
+      type: string
+    name:
+      description: The name of the metric
+      type: string
+    value:
+      description: The value of the metric
+      type: integer
+    time:
+      description: The date and time when the metric was recorded
+      $ref: '#/DateTime'
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    source: 'ahrefs'
+    name: 'organic-traffic'
+    value: 37900
+    time: '2024-04-29T00:00:00.000Z'
+SiteMetricList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/SiteMetric'
