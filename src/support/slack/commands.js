@@ -12,6 +12,7 @@
 
 import addRepo from './commands/add-repo.js';
 import addSite from './commands/add-site.js';
+import getExpCandidates from './commands/get-exp-candidates.js';
 import getSite from './commands/get-site.js';
 import getSites from './commands/get-sites.js';
 import martechImpact from './commands/martech-impact.js';
@@ -28,6 +29,7 @@ import help from './commands/help.js';
 export default (context) => [
   addRepo(context),
   addSite(context),
+  getExpCandidates(context),
   getSite(context),
   getSites(context),
   martechImpact(context),

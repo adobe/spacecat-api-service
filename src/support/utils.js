@@ -49,6 +49,20 @@ export const sendAuditMessage = async (
   siteId,
 ) => sqs.sendMessage(queueUrl, { type, url: siteId, auditContext });
 
+// todo: prototype - untested
+/* c8 ignore start */
+export const sendExperimentationCandidatesMessage = async (
+  sqs,
+  queueUrl,
+  url,
+  slackContext,
+) => sqs.sendMessage(queueUrl, {
+  processingType: 'experimentation-candidates',
+  url,
+  slackContext,
+});
+/* c8 ignore end */
+
 /**
  * Sends audit messages for each URL.
  *
@@ -98,6 +112,23 @@ export const triggerAuditForSite = async (
   },
   site.getId(),
 );
+
+// todo: prototype - untested
+/* c8 ignore start */
+export const triggerExperimentationCandidates = async (
+  url,
+  slackContext,
+  lambdaContext,
+) => sendExperimentationCandidatesMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.SCRAPING_JOBS_QUEUE_URL,
+  url,
+  {
+    channelId: slackContext.channelId,
+    threadTs: slackContext.threadTs,
+  },
+);
+/* c8 ignore end */
 
 /**
  * Checks if a given URL corresponds to a Helix site.
