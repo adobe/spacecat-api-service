@@ -55,12 +55,10 @@ export const sendExperimentationCandidatesMessage = async (
   sqs,
   queueUrl,
   url,
-  jobId,
   slackContext,
 ) => sqs.sendMessage(queueUrl, {
   processingType: 'experimentation-candidates',
   url,
-  jobId,
   slackContext,
 });
 /* c8 ignore end */
@@ -119,14 +117,12 @@ export const triggerAuditForSite = async (
 /* c8 ignore start */
 export const triggerExperimentationCandidates = async (
   url,
-  jobId,
   slackContext,
   lambdaContext,
 ) => sendExperimentationCandidatesMessage(
   lambdaContext.sqs,
   lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
   url,
-  jobId,
   {
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,
