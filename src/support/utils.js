@@ -121,7 +121,7 @@ export const triggerExperimentationCandidates = async (
   lambdaContext,
 ) => sendExperimentationCandidatesMessage(
   lambdaContext.sqs,
-  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+  lambdaContext.env.SCRAPING_JOBS_QUEUE_URL,
   url,
   {
     channelId: slackContext.channelId,
