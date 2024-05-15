@@ -40,8 +40,7 @@ function GetExperimentationCandidatesCommand(context) {
   const { log } = context;
 
   /**
-   * Validates input, fetches the site
-   * and triggers a new audit for the given site
+   * Validates input and triggers the experimentation candidates for the given URL.
    *
    * @param {string[]} args - The arguments provided to the command ([site]).
    * @param {Object} slackContext - The Slack context object.
