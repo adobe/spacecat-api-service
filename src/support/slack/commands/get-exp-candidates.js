@@ -17,7 +17,7 @@ import BaseCommand from './base.js';
 
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
 
-// import { triggerExperimentationCandidates } from '../../utils.js';
+import { triggerExperimentationCandidates } from '../../utils.js';
 
 const PHRASES = ['get experimentation candidates'];
 
@@ -61,7 +61,7 @@ function GetExperimentationCandidatesCommand(context) {
         return;
       }
 
-      // await triggerExperimentationCandidates(url, slackContext, context);
+      await triggerExperimentationCandidates(url, slackContext, context);
 
       let message = `:white_check_mark: Scraping and determining experimentation candidates for ${url}\n`;
       message += ':adobe-run: Stand by for results. I will post them here when they are ready.';
