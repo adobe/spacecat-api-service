@@ -71,7 +71,7 @@ Currently, only `slackContext` property exist in the `auditContext`:
 {
   "slackContext": {
     "channel": "string",
-    "ts": "string|optional"
+    "thread_ts": "string|optional"
   }
 }
 ```
