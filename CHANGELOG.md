@@ -1,3 +1,10 @@
+# [1.38.0](https://github.com/adobe/spacecat-api-service/compare/v1.37.0...v1.38.0) (2024-05-15)
+
+
+### Features
+
+* exp candidates command (WIP) ([#301](https://github.com/adobe/spacecat-api-service/issues/301)) ([a1171f6](https://github.com/adobe/spacecat-api-service/commit/a1171f6417de01c972c8ffadd4c414d43696d136))
+
 # [1.37.0](https://github.com/adobe/spacecat-api-service/compare/v1.36.1...v1.37.0) (2024-05-13)
 
 
