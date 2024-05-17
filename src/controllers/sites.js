@@ -104,6 +104,50 @@ function SitesController(dataAccess) {
     return ok(sites);
   };
 
+  /** Bulk update audit configuration for multiple sites.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>}  Array of sites response.
+   */
+  const bulkUpdateSitesConfig = async (context) => {
+    const { baseURLs, enableAudits, auditTypes } = context.data;
+
+    if (!Array.isArray(baseURLs) || baseURLs.length === 0) {
+      return badRequest('Base URLs are required');
+    }
+    if (!Array.isArray(auditTypes) || auditTypes.length === 0) {
+      return badRequest('Audit types are required');
+    }
+    if (!isBoolean(enableAudits)) {
+      return badRequest('enableAudits is required');
+    }
+
+    const sites = await Promise.all(baseURLs.map(async (baseURL) => {
+      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const organizationId = site.getOrganizationId();
+      let organization;
+      if (organizationId !== 'default') {
+        organization = await dataAccess.getOrganizationByID(organizationId);
+      }
+
+      auditTypes.forEach((auditType) => {
+        if (organization) {
+          organization.getAuditConfig()
+            .updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
+        }
+        site.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
+      });
+
+      if (organization) {
+        await dataAccess.updateOrganization(organization);
+      }
+      await dataAccess.updateSite(site);
+
+      return site;
+    }));
+
+    return ok(sites);
+  };
+
   /**
    * Gets all sites as an XLS file.
    * @returns {Promise<Response>} XLS file.
@@ -377,6 +421,7 @@ function SitesController(dataAccess) {
     getAuditForSite,
     getByBaseURL,
     getAllByDeliveryType,
+    bulkUpdateSitesConfig,
     getByID,
     removeSite,
     updateSite,

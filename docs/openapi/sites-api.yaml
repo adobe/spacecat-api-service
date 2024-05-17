@@ -125,3 +125,47 @@ sites-for-organization:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+bulk-sites-audit-config:
+    patch:
+      tags:
+          - site
+      summary: Enable audits for multiple sites
+      description: |
+        This endpoint is useful for enabling audit types for multiple sites.
+      operationId: bulkToggleAuditsForSites
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                baseURLs:
+                  type: array
+                  items:
+                    $ref: './schemas.yaml#/URL'
+                auditTypes:
+                  type: array
+                  items:
+                      type: string
+                      examples:
+                          - 404
+                          - broken-backlinks
+                          - organic-traffic
+                enableAudits:
+                  type: boolean
+      responses:
+        '200':
+          description: A list of sites
+          content:
+            application/json:
+              schema:
+                $ref: './schemas.yaml#/SiteList'
+        '401':
+          $ref: './responses.yaml#/401'
+        '500':
+          $ref: './responses.yaml#/500'
+      security:
+          - admin_key: [ ]
+
+
