@@ -1,3 +1,10 @@
+# [1.39.0](https://github.com/adobe/spacecat-api-service/compare/v1.38.3...v1.39.0) (2024-05-23)
+
+
+### Features
+
+* create a key event upon go-live detection ([#307](https://github.com/adobe/spacecat-api-service/issues/307)) ([5589721](https://github.com/adobe/spacecat-api-service/commit/558972183fdb6991d6c6ec327f45e790f7c4780a))
+
 ## [1.38.3](https://github.com/adobe/spacecat-api-service/compare/v1.38.2...v1.38.3) (2024-05-23)
 
 
