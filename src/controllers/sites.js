@@ -121,22 +121,38 @@ function SitesController(dataAccess) {
       return badRequest('enableAudits is required');
     }
 
-    const responses = await Promise.all(baseURLs.map(async (baseURL) => {
+    const organizationsMap = new Map();
+
+    const sites = await Promise.all(baseURLs.map(async (baseURL) => {
       const site = await dataAccess.getSiteByBaseURL(baseURL);
+      if (!site) {
+        return { baseURL, site: null };
+      }
+      const organizationId = site.getOrganizationId();
+
+      if (organizationId !== 'default' && !organizationsMap.has(organizationId)) {
+        const organization = await dataAccess.getOrganizationByID(organizationId);
+        if (!organization) {
+          return { baseURL, response: { message: `Organization with ID: ${organizationId} not found`, status: 404 } };
+        }
+        organizationsMap.set(organizationId, organization);
+      }
+
+      return { baseURL, site };
+    }));
+
+    const responses = await Promise.all(sites.map(async ({ baseURL, site }) => {
       if (!site) {
         return { baseURL, response: { message: `Site with baseURL: ${baseURL} not found`, status: 404 } };
       }
       const organizationId = site.getOrganizationId();
-      let organization;
-      if (organizationId !== 'default') {
-        organization = await dataAccess.getOrganizationByID(organizationId);
-        return { baseURL, response: { message: `Site organization with id: ${organizationId} not found`, status: 404 } };
-      }
+      const organization = organizationsMap.get(organizationId);
 
       auditTypes.forEach((auditType) => {
-        if (organization && enableAudits) {
-          organization.getAuditConfig()
-            .updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
+        if (organization) {
+          organization.getAuditConfig().updateAuditTypeConfig(
+            auditType,
+          );
         }
         site.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
       });
@@ -145,17 +161,18 @@ function SitesController(dataAccess) {
         try {
           await dataAccess.updateOrganization(organization);
         } catch (error) {
-          return { baseURL, message: `Error updating organization with id: ${organizationId}`, status: 500 };
+          return { baseURL: site.getBaseURL(), message: `Error updating organization with id: ${organizationId}`, status: 500 };
         }
       }
       try {
         await dataAccess.updateSite(site);
       } catch (error) {
-        return { baseURL, response: { message: `Error updating site with id: ${site.getId()}`, status: 500 } };
+        return { baseURL: site.getBaseURL(), response: { message: `Error updating site with id: ${site.getId()}`, status: 500 } };
       }
 
-      return { baseURL, response: { body: SiteDto.toJSON(site), status: 200 } };
+      return { baseURL: site.getBaseURL(), response: { body: SiteDto.toJSON(site), status: 200 } };
     }));
+
     return createResponse(responses, 207);
   };
 
