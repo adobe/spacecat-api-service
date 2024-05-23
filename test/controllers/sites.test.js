@@ -89,6 +89,7 @@ describe('Sites Controller', () => {
     'getAll',
     'getAllByDeliveryType',
     'getAllWithLatestAudit',
+    'bulkUpdateSitesConfig',
     'getAllAsCSV',
     'getAllAsXLS',
     'getAuditForSite',
@@ -638,5 +639,70 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Site not found');
+  });
+  describe('bulkUpdateSitesConfig', () => {
+    it('updates multiple sites and returns their responses', async () => {
+      const baseURLs = ['https://site1.com', 'https://site2.com'];
+      const enableAudits = true;
+      const auditTypes = ['type1', 'type2'];
+
+      const site1 = SiteDto.fromJson({ id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' });
+      const site2 = SiteDto.fromJson({ id: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge' });
+
+      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(site1);
+      mockDataAccess.getSiteByBaseURL.withArgs('https://site2.com').resolves(site2);
+
+      const response = await sitesController.bulkUpdateSitesConfig({
+        data: { baseURLs, enableAudits, auditTypes },
+      });
+
+      expect(mockDataAccess.getSiteByBaseURL.calledTwice).to.be.true;
+      expect(mockDataAccess.updateSite.calledTwice).to.be.true;
+      expect(response.status).to.equal(207);
+      const multiResponse = await response.json();
+      expect(multiResponse).to.be.an('array').with.lengthOf(2);
+      expect(multiResponse[0].baseURL).to.equal('https://site1.com');
+      expect(multiResponse[0].response.status).to.equal(200);
+      expect(multiResponse[1].baseURL).to.equal('https://site2.com');
+      expect(multiResponse[1].response.status).to.equal(200);
+    });
+
+    it('returns bad request when baseURLs is not provided', async () => {
+      const response = await sitesController.bulkUpdateSitesConfig({ data: {} });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error).to.have.property('message', 'Base URLs are required');
+    });
+
+    it('returns bad request when auditTypes is not provided', async () => {
+      const response = await sitesController.bulkUpdateSitesConfig({ data: { baseURLs: ['https://site1.com'] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error).to.have.property('message', 'Audit types are required');
+    });
+
+    it('returns bad request when enableAudits is not provided', async () => {
+      const response = await sitesController.bulkUpdateSitesConfig({ data: { baseURLs: ['https://site1.com'], auditTypes: ['type1'] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error).to.have.property('message', 'enableAudits is required');
+    });
+
+    it('returns not found when site is not found', async () => {
+      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(null);
+
+      const response = await sitesController.bulkUpdateSitesConfig({
+        data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
+      });
+      const responses = await response.json();
+
+      expect(responses).to.be.an('array').with.lengthOf(1);
+      expect(responses[0].baseURL).to.equal('https://site1.com');
+      expect(responses[0].response.status).to.equal(404);
+      expect(responses[0].response.message).to.equal('Site with baseURL: https://site1.com not found');
+    });
   });
 });

@@ -121,31 +121,42 @@ function SitesController(dataAccess) {
       return badRequest('enableAudits is required');
     }
 
-    const sites = await Promise.all(baseURLs.map(async (baseURL) => {
+    const responses = await Promise.all(baseURLs.map(async (baseURL) => {
       const site = await dataAccess.getSiteByBaseURL(baseURL);
+      if (!site) {
+        return { baseURL, response: { message: `Site with baseURL: ${baseURL} not found`, status: 404 } };
+      }
       const organizationId = site.getOrganizationId();
       let organization;
       if (organizationId !== 'default') {
         organization = await dataAccess.getOrganizationByID(organizationId);
+        return { baseURL, response: { message: `Site organization with id: ${organizationId} not found`, status: 404 } };
       }
 
       auditTypes.forEach((auditType) => {
-        if (organization) {
+        if (organization && enableAudits) {
           organization.getAuditConfig()
             .updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
         }
         site.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
       });
 
-      if (organization) {
-        await dataAccess.updateOrganization(organization);
+      if (organization && enableAudits) {
+        try {
+          await dataAccess.updateOrganization(organization);
+        } catch (error) {
+          return { baseURL, message: `Error updating organization with id: ${organizationId}`, status: 500 };
+        }
       }
-      await dataAccess.updateSite(site);
+      try {
+        await dataAccess.updateSite(site);
+      } catch (error) {
+        return { baseURL, response: { message: `Error updating site with id: ${site.getId()}`, status: 500 } };
+      }
 
-      return site;
+      return { baseURL, response: { body: SiteDto.toJSON(site), status: 200 } };
     }));
-
-    return ok(sites);
+    return createResponse(responses, 207);
   };
 
   /**

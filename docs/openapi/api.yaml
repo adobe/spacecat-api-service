@@ -76,7 +76,7 @@ paths:
   /sites/with-latest-audit/{auditType}:
     $ref: './sites-api.yaml#/sites-with-latest-audit'
   /sites/bulk-audit-config:
-    $ref: './sites-api.yaml#/bulk-sites-audit-config'
+    $ref: './sites-api.yaml#/bulk-update-sites-audit-config'
   /sites/{siteId}:
     $ref: './site-api.yaml#/site'
   /sites/{siteId}/audits:
