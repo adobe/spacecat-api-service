@@ -108,45 +108,52 @@ function SitesController(dataAccess) {
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>}  Array of sites response.
    */
-  const bulkUpdateSitesConfig = async (context) => {
-    const { baseURLs, enableAudits, auditTypes } = context.data;
+const bulkUpdateSitesConfig = async (context) => {
+  const { baseURLs, enableAudits, auditTypes } = context.data;
 
-    if (!Array.isArray(baseURLs) || baseURLs.length === 0) {
-      return badRequest('Base URLs are required');
+  if (!Array.isArray(baseURLs) || baseURLs.length === 0) {
+    return badRequest('Base URLs are required');
+  }
+  if (!Array.isArray(auditTypes) || auditTypes.length === 0) {
+    return badRequest('Audit types are required');
+  }
+  if (typeof enableAudits !== 'boolean') {
+    return badRequest('enableAudits must be a boolean');
+  }
+
+  const organizationsMap = new Map();
+
+  const sites = await Promise.all(baseURLs.map(async (baseURL) => {
+    const site = await dataAccess.getSiteByBaseURL(baseURL);
+    const organizationId = site.getOrganizationId();
+
+    if (organizationId !== 'default' && !organizationsMap.has(organizationId)) {
+      const organization = await dataAccess.getOrganizationByID(organizationId);
+      organizationsMap.set(organizationId, organization);
     }
-    if (!Array.isArray(auditTypes) || auditTypes.length === 0) {
-      return badRequest('Audit types are required');
-    }
-    if (!isBoolean(enableAudits)) {
-      return badRequest('enableAudits is required');
-    }
 
-    const sites = await Promise.all(baseURLs.map(async (baseURL) => {
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
-      const organizationId = site.getOrganizationId();
-      let organization;
-      if (organizationId !== 'default') {
-        organization = await dataAccess.getOrganizationByID(organizationId);
-      }
+    return site;
+  }));
 
-      auditTypes.forEach((auditType) => {
-        if (organization) {
-          organization.getAuditConfig()
-            .updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
-        }
-        site.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
-      });
+  await Promise.all(sites.map(async (site) => {
+    const organizationId = site.getOrganizationId();
+    const organization = organizationsMap.get(organizationId);
 
+    auditTypes.forEach((auditType) => {
       if (organization) {
-        await dataAccess.updateOrganization(organization);
+        organization.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
       }
-      await dataAccess.updateSite(site);
+      site.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
+    });
 
-      return site;
-    }));
+    if (organization) {
+      await dataAccess.updateOrganization(organization);
+    }
+    await dataAccess.updateSite(site);
+  }));
 
-    return ok(sites);
-  };
+  return ok(sites);
+};
 
   /**
    * Gets all sites as an XLS file.
