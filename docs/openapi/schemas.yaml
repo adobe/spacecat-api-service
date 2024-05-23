@@ -819,9 +819,10 @@ KeyEventType:
     - 'seo'
     - 'content'
     - 'code'
-    - 'third-party'
+    - 'third party'
     - 'experimentation'
     - 'network'
+    - 'status change'
 KeyEvent:
   type: object
   properties:
