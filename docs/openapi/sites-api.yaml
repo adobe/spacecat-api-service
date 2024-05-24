@@ -125,13 +125,13 @@ sites-for-organization:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-bulk-update-sites-audit-config:
+bulk-update-audit-config:
     patch:
       tags:
           - site
-      summary: Enable/Disable audits for multiple sites
+      summary: Enable/Disable audits for multiple sites/organizations
       description: |
-        This endpoint is useful for enabling audit types for multiple sites.
+        This endpoint is useful for enabling audit types for multiple sites and organizations. Or disabling audits for sites
       operationId: bulkUpdateAuditConfigForSites
       requestBody:
         required: true
@@ -156,11 +156,11 @@ bulk-update-sites-audit-config:
                   type: boolean
       responses:
         '207':
-          description: A list of sites
+          description: A list of baseURL, the status of the update and the corresponding site if successful or the error message if failed
           content:
             application/json:
               schema:
-                $ref: './schemas.yaml#/BulkUpdateSitesConfigResponse'
+                $ref: './schemas.yaml#/BulkUpdateAuditConfigResponse'
         '401':
           $ref: './responses.yaml#/401'
         '500':

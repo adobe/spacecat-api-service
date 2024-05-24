@@ -365,7 +365,7 @@ SiteCreate:
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://www.newsite.com'
     deliveryType: 'aem_cs'
-BulkUpdateSitesConfigResponse:
+BulkUpdateAuditConfigResponse:
   type: array
   items:
     type: object
@@ -384,7 +384,7 @@ BulkUpdateSitesConfigResponse:
             type: string
             description: The message of the operation
           site:
-            $ref: './schemas.yaml#/SiteDto'
+            $ref: './schemas.yaml#/Site'
         required:
           - status
 SiteUpdate:
