@@ -1,3 +1,17 @@
+# [1.39.0](https://github.com/adobe/spacecat-api-service/compare/v1.38.3...v1.39.0) (2024-05-23)
+
+
+### Features
+
+* create a key event upon go-live detection ([#307](https://github.com/adobe/spacecat-api-service/issues/307)) ([5589721](https://github.com/adobe/spacecat-api-service/commit/558972183fdb6991d6c6ec327f45e790f7c4780a))
+
+## [1.38.3](https://github.com/adobe/spacecat-api-service/compare/v1.38.2...v1.38.3) (2024-05-23)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.23.4 ([#308](https://github.com/adobe/spacecat-api-service/issues/308)) ([c69eaaf](https://github.com/adobe/spacecat-api-service/commit/c69eaaf5018acf2c023b548cf878d615e6e89a71))
+
 ## [1.38.2](https://github.com/adobe/spacecat-api-service/compare/v1.38.1...v1.38.2) (2024-05-22)
 
 
