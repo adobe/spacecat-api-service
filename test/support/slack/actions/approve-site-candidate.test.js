@@ -49,6 +49,7 @@ describe('approveSiteCandidate', () => {
 
     context = {
       dataAccess: {
+        createKeyEvent: sinon.stub(),
         getSiteCandidateByBaseURL: sinon.stub(),
         getSiteByBaseURL: sinon.stub(),
         addSite: sinon.stub(),
@@ -114,6 +115,11 @@ describe('approveSiteCandidate', () => {
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
     expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
+    expect(context.dataAccess.createKeyEvent).to.have.been.calledWith({
+      name: 'Go Live',
+      siteId: site.getId(),
+      type: 'STATUS CHANGE',
+    });
   });
 
   it('should approve previously added non aem_edge sites then announce the discovery', async () => {
@@ -148,6 +154,11 @@ describe('approveSiteCandidate', () => {
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
     expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
+    expect(context.dataAccess.createKeyEvent).to.have.been.calledWith({
+      name: 'Go Live',
+      siteId: site.getId(),
+      type: 'STATUS CHANGE',
+    });
   });
 
   it('logs and throws the error again if something goes wrong', async () => {
