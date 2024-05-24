@@ -933,3 +933,39 @@ SiteMetricList:
   type: array
   items:
     $ref: './schemas.yaml#/SiteMetric'
+ImportOptions:
+  type: object
+  required:
+    - pageLoadTimeout
+    - enableJavaScript
+    - saveAsDocx
+    - saveAsHtml
+    - saveAsMarkdown
+    - scrollToBottom
+    - customHeaders
+  properties:
+    pageLoadTimeout:
+      description:
+      type: string
+  example:
+
+ImportJobRequest:
+  type: object
+  required:
+    - urls
+    - options
+    - importApiKey
+  properties:
+    urls:
+      description: The URLs to import
+      type: array
+      items:
+        $ref: '#/URL'
+    options:
+      description: The import.js mapping file
+      $ref: '#/ImportOptions'
+  example:
+    urls:
+      - 'https://example-site.com/foo/bar'
+      - 'https://example-site.com/baz/qux'
+    TODO: ''

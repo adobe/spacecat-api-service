@@ -1,0 +1,18 @@
+import:
+  post:
+    tags:
+      - tools
+    summary: Request to start a new import job
+    description: |
+      This endpoint can be used to start an new import job, given a set of URLs and an import.js
+      mapping file. The import job will be processed asynchronously and the status of the job can
+      be queried at the /tools/import/{jobId} endpoint.
+    operationId: queueImportJob
+    security:
+      - api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            $ref: './schemas.yaml#/ImportJobRequest'
