@@ -12,6 +12,7 @@
 
 import BaseCommand from './base.js';
 import { SiteDto } from '../../../dto/site.js';
+import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 
 const PHRASES = ['bulk'];
 function BulkUpdateAuditConfigCommand(context) {
@@ -39,7 +40,8 @@ function BulkUpdateAuditConfigCommand(context) {
       const organizationsMap = new Map();
       await say(baseURLs.toString());
 
-      const sites = await Promise.all(baseURLs.map(async (baseURL) => {
+      const sites = await Promise.all(baseURLs.map(async (baseURLInput) => {
+        const baseURL = extractURLFromSlackInput(baseURLInput);
         const site = await dataAccess.getSiteByBaseURL(baseURL);
         if (!site) {
           return { baseURL, site: null };

@@ -54,8 +54,8 @@ describe('BulkUpdateAuditConfigCommand', () => {
     const command = BulkUpdateAuditConfigCommand(context);
     await command.handleExecution(args, slackContext);
 
-    sinon.assert.calledWith(getSiteByBaseURLStub, 'site1.com');
-    sinon.assert.calledWith(getSiteByBaseURLStub, 'site2.com');
+    sinon.assert.calledWith(getSiteByBaseURLStub, 'https://site1.com');
+    sinon.assert.calledWith(getSiteByBaseURLStub, 'https://site2.com');
     sinon.assert.calledTwice(updateSiteStub);
   });
 
