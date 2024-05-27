@@ -13,11 +13,11 @@
 import BaseCommand from './base.js';
 import { SiteDto } from '../../../dto/site.js';
 
-const PHRASES = ['bulk', 'audit configs'];
+const PHRASES = ['bulk'];
 function BulkUpdateAuditConfigCommand(context) {
   const baseCommand = BaseCommand({
     id: 'bulk--audits',
-    name: 'Bulk Enable Audits',
+    name: 'Bulk Update Audit Configs',
     description: 'Enables or disables audits for multiple sites.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {enable/disable} {site1,site2,...} {auditType1,auditType2,...}`,
