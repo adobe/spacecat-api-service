@@ -93,7 +93,7 @@ function BulkUpdateAuditConfigCommand(context) {
 
       let message = 'Bulk update completed with the following responses:\n';
       responses.forEach((response) => {
-        message += `- ${response.baseURL}: ${response.payload}\n`;
+        message += `- ${response.baseURL}: ${JSON.stringify(response.payload)}\n`;
       });
 
       await say(message);
