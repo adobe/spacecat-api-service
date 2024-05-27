@@ -87,6 +87,7 @@ describe('getRouteHandlers', () => {
       'GET /sites.xlsx',
       'GET /slack/events',
       'POST /slack/events',
+      'PATCH /sites/bulk-audit-config',
       'GET /trigger',
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
