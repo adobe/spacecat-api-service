@@ -935,25 +935,30 @@ SiteMetricList:
     $ref: './schemas.yaml#/SiteMetric'
 ImportOptions:
   type: object
-  required:
-    - pageLoadTimeout
-    - enableJavaScript
-    - saveAsDocx
-    - saveAsHtml
-    - saveAsMarkdown
-    - scrollToBottom
-    - customHeaders
   properties:
-    pageLoadTimeout:
+    pageLoadTimeoutMs:
       description:
-      type: string
+      type: number
+    enableJavaScript:
+      description:
+      type: boolean
+    scrollToBottom:
+      description:
+      type: boolean
+    customHeaders:
+      description:
+      type: object
+      additionalProperties: true
   example:
-
+    pageLoadTimeoutMs: 100
+    enableJavaScript: true
+    scrollToBottom: true
+    customHeaders:
+      example-header-name: 'example-header-value'
 ImportJobRequest:
   type: object
   required:
     - urls
-    - options
     - importApiKey
   properties:
     urls:
@@ -961,11 +966,52 @@ ImportJobRequest:
       type: array
       items:
         $ref: '#/URL'
+    importApiKey:
+      description: The import API key
+      type: string
     options:
-      description: The import.js mapping file
+      description: Optional configuration params, defined as a JSON object
       $ref: '#/ImportOptions'
+    importScript:
+      description: The import.js mapping file
+      type: string
+      format: binary
   example:
     urls:
-      - 'https://example-site.com/foo/bar'
-      - 'https://example-site.com/baz/qux'
-    TODO: ''
+      - 'https://example.com/en/page1'
+      - 'https://example.com/fr/page2'
+    importApiKey: '9075ca27-f8ad-46de-9cd3-25c6187ca1fd'
+    options:
+      enableJavaScript: true
+      saveAsDocx: true
+      scrollToBottom: true
+ImportJobStatus:
+  type: object
+  properties:
+    jobId:
+      description: The ID of the import job
+      $ref: '#/Id'
+    status:
+      description: The status of the import job
+      type: string
+      enum:
+        - 'running'
+        - 'complete'
+        - 'failed'
+    startTime:
+      description: The date and time when the import job started
+      $ref: '#/DateTime'
+    endTime:
+      description: The date and time when the import job ended, if finished
+      $ref: '#/DateTime'
+    urlCount:
+      description: The total number of URLs in the job
+      type: integer
+    successCount:
+      description: The number of URLs successfully imported
+      type: integer
+    failedCount:
+      description: The number of URLs that failed to import
+      type: integer
+  example:
+    TODO:

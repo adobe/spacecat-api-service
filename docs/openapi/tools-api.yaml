@@ -4,9 +4,9 @@ import:
       - tools
     summary: Request to start a new import job
     description: |
-      This endpoint can be used to start an new import job, given a set of URLs and an import.js
-      mapping file. The import job will be processed asynchronously and the status of the job can
-      be queried at the /tools/import/{jobId} endpoint.
+      This endpoint can be used to start an new import job, given a set of URLs, import API key,
+      and an optional import.js mapping file. The import job will be processed asynchronously and 
+      the status of the job can be queried at the /tools/import/{jobId} endpoint.
     operationId: queueImportJob
     security:
       - api_key: [ ]
@@ -16,3 +16,37 @@ import:
         multipart/form-data:
           schema:
             $ref: './schemas.yaml#/ImportJobRequest'
+    responses:
+      '202':
+        description: Import job accepted for processing.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+import-job-status:
+  get:
+    tags:
+      - tools
+    summary: Query the status of an import job
+    description: |
+      This endpoint can be used to query the status of an import job, given its jobId.
+    operationId: getImportJobStatus
+    security:
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Successful operation with an import status object returned
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ImportJobStatus'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'

@@ -107,6 +107,8 @@ paths:
     $ref: './trigger-api.yaml#/trigger'
   /tools/import:
     $ref: './tools-api.yaml#/import'
+  /tools/import/{jobId}:
+    $ref: './tools-api.yaml#/import-job-status'
 
 components:
   securitySchemes:
