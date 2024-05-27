@@ -15,7 +15,7 @@
 import sinon from 'sinon';
 import esmock from 'esmock';
 import * as sitesController from '../../../../src/controllers/sites.js';
-import BulkEnableAuditsCommand from '../../../../src/support/slack/commands/bulk-enable-audits.js';
+import BulkEnableAuditsCommand from '../../../../src/support/slack/commands/bulk-update-audits.js';
 
 describe('BulkEnableAuditsCommand', () => {
   let context;
