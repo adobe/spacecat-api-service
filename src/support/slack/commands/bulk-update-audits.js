@@ -37,6 +37,7 @@ function BulkUpdateAuditConfigCommand(context) {
       const enableAudits = enableDisableInput.toLowerCase() === 'enable';
 
       const organizationsMap = new Map();
+      await say(baseURLs.toString());
 
       const sites = await Promise.all(baseURLs.map(async (baseURL) => {
         const site = await dataAccess.getSiteByBaseURL(baseURL);
