@@ -6,8 +6,5 @@
   "check-coverage": true,
   "lines": 90,
   "branches": 90,
-  "statements": 90,
-  "exclude": [
-    "src/**/commands/bulk-enable-audits.js"
-  ]
+  "statements": 90
 }
