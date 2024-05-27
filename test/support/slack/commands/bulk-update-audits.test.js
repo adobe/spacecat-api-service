@@ -13,51 +13,62 @@
 /* eslint-env mocha */
 
 import sinon from 'sinon';
-import esmock from 'esmock';
-import * as sitesController from '../../../../src/controllers/sites.js';
-import BulkEnableAuditsCommand from '../../../../src/support/slack/commands/bulk-update-audits.js';
+import BulkUpdateAuditConfigCommand from '../../../../src/support/slack/commands/bulk-update-audits.js';
 
-describe('BulkEnableAuditsCommand', () => {
+describe('BulkUpdateAuditConfigCommand', () => {
   let context;
   let slackContext;
-  let bulkUpdateSitesConfigStub;
+  let getSiteByBaseURLStub;
+  let updateSiteStub;
 
   beforeEach(async () => {
+    getSiteByBaseURLStub = sinon.stub();
+    updateSiteStub = sinon.stub();
     context = {
       log: {
         error: sinon.stub(),
+      },
+      dataAccess: {
+        getSiteByBaseURL: getSiteByBaseURLStub,
+        updateSite: updateSiteStub,
       },
     };
 
     slackContext = {
       say: sinon.stub(),
     };
-
-    bulkUpdateSitesConfigStub = await esmock(sitesController, {
-      bulkUpdateSitesConfig: async () => {
-        // Mock implementation goes here
-      },
-    });
   });
 
-  afterEach(() => {
-    bulkUpdateSitesConfigStub.restore();
-  });
+  it('should handle successful execution', async () => {
+    const args = ['enable', 'site1.com,site2.com', 'auditType1,auditType2'];
+    const site = {
+      getOrganizationId: () => 'default',
+      getAuditConfig: () => ({
+        updateAuditTypeConfig: sinon.stub(),
+      }),
+    };
 
-  xit('should handle successful execution', async () => {
-    const args = ['site1.com,site2.com', 'auditType1,auditType2'];
-    const responses = [
-      { baseURL: 'site1.com', response: { status: 200 } },
-      { baseURL: 'site2.com', response: { status: 200 } },
-    ];
+    getSiteByBaseURLStub.resolves(site);
+    updateSiteStub.resolves();
 
-    bulkUpdateSitesConfigStub.bulkUpdateSitesConfig = async () => responses;
-
-    const command = BulkEnableAuditsCommand(context);
+    const command = BulkUpdateAuditConfigCommand(context);
     await command.handleExecution(args, slackContext);
 
-    sinon.assert.calledWith(bulkUpdateSitesConfigStub.bulkUpdateSitesConfig, {
-      data: { baseURLs: ['site1.com', 'site2.com'], enableAudits: true, auditTypes: ['auditType1', 'auditType2'] },
-    });
+    sinon.assert.calledWith(getSiteByBaseURLStub, 'site1.com');
+    sinon.assert.calledWith(getSiteByBaseURLStub, 'site2.com');
+    sinon.assert.calledTwice(updateSiteStub);
+  });
+
+  it('should handle error during execution', async () => {
+    const args = ['enable', 'site1.com,site2.com', 'auditType1,auditType2'];
+    const error = new Error('Test error');
+
+    getSiteByBaseURLStub.rejects(error);
+
+    const command = BulkUpdateAuditConfigCommand(context);
+    await command.handleExecution(args, slackContext);
+
+    sinon.assert.calledWith(context.log.error, error);
+    sinon.assert.calledWith(slackContext.say, `Error during bulk update: ${error.message}`);
   });
 });
