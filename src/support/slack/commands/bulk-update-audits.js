@@ -11,7 +11,6 @@
  */
 
 import BaseCommand from './base.js';
-import { SiteDto } from '../../../dto/site.js';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 
 const PHRASES = ['bulk'];
@@ -51,7 +50,7 @@ function BulkUpdateAuditConfigCommand(context) {
         if (organizationId !== 'default' && !organizationsMap.has(organizationId)) {
           const organization = await dataAccess.getOrganizationByID(organizationId);
           if (!organization) {
-            return { baseURL, error: `Error updating site with organization with id: ${organizationId} not found` };
+            return { baseURL, error: `Error updating site with baseURL: ${baseURL} belonging organization with id: ${organizationId} not found` };
           }
           organizationsMap.set(organizationId, organization);
         }
@@ -61,7 +60,7 @@ function BulkUpdateAuditConfigCommand(context) {
 
       const responses = await Promise.all(sites.map(async ({ baseURL, site, error }) => {
         if (!site) {
-          return { baseURL, payload: error || `Cannot update site with baseURL: ${baseURL}` };
+          return { payload: error || `Cannot update site with baseURL: ${baseURL}, site not found` };
         }
         const organizationId = site.getOrganizationId();
         const organization = organizationsMap.get(organizationId);
@@ -79,21 +78,21 @@ function BulkUpdateAuditConfigCommand(context) {
           try {
             await dataAccess.updateOrganization(organization);
           } catch (e) {
-            return { baseURL, payload: `Error updating site with organization with id: ${organizationId}` };
+            return { payload: `Error updating site with baseURL: ${baseURL}, organization with id: ${organizationId} update operation failed` };
           }
         }
         try {
           await dataAccess.updateSite(site);
         } catch (e) {
-          return { baseURL, payload: `Error updating site with id: ${site.getId()}` };
+          return { payload: `Error updating site with with baseURL: ${baseURL}, update site operation failed` };
         }
 
-        return { baseURL, payload: SiteDto.toJSON(site) };
+        return { payload: `Site with base baseURL: ${baseURL} successfully updated` };
       }));
 
       let message = 'Bulk update completed with the following responses:\n';
       responses.forEach((response) => {
-        message += `- ${response.baseURL}: ${JSON.stringify(response.payload)}\n`;
+        message += `${JSON.stringify(response.payload)}\n`;
       });
 
       await say(message);

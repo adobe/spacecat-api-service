@@ -126,14 +126,14 @@ function SitesController(dataAccess) {
     const sites = await Promise.all(baseURLs.map(async (baseURL) => {
       const site = await dataAccess.getSiteByBaseURL(baseURL);
       if (!site) {
-        return { baseURL, site: null };
+        return { baseURL, errorMessage: `Site with baseURL: ${baseURL} not found`, status: 404 };
       }
       const organizationId = site.getOrganizationId();
 
       if (organizationId !== 'default' && !organizationsMap.has(organizationId)) {
         const organization = await dataAccess.getOrganizationByID(organizationId);
         if (!organization) {
-          return { baseURL, response: { message: `Organization with ID: ${organizationId} not found`, status: 404 } };
+          return { baseURL, errorMessage: `Error updating site  with baseURL: ${baseURL}, organization with id: ${organizationId} organization not found`, status: 500 };
         }
         organizationsMap.set(organizationId, organization);
       }
@@ -141,9 +141,11 @@ function SitesController(dataAccess) {
       return { baseURL, site };
     }));
 
-    const responses = await Promise.all(sites.map(async ({ baseURL, site }) => {
+    const responses = await Promise.all(sites.map(async ({
+      baseURL, site, errorMessage, status,
+    }) => {
       if (!site) {
-        return { baseURL, response: { message: `Site with baseURL: ${baseURL} not found`, status: 404 } };
+        return { baseURL, response: { message: errorMessage, status } };
       }
       const organizationId = site.getOrganizationId();
       const organization = organizationsMap.get(organizationId);
@@ -161,13 +163,13 @@ function SitesController(dataAccess) {
         try {
           await dataAccess.updateOrganization(organization);
         } catch (error) {
-          return { baseURL: site.getBaseURL(), message: `Error updating organization with id: ${organizationId}`, status: 500 };
+          return { baseURL: site.getBaseURL(), response: { message: `Error updating site with baseURL: ${baseURL}, update site organization with id: ${organizationId} failed`, status: 500 } };
         }
       }
       try {
         await dataAccess.updateSite(site);
       } catch (error) {
-        return { baseURL: site.getBaseURL(), response: { message: `Error updating site with id: ${site.getId()}`, status: 500 } };
+        return { baseURL: site.getBaseURL(), response: { message: `Error updating site with with baseURL: ${baseURL}, update site operation failed`, status: 500 } };
       }
 
       return { baseURL: site.getBaseURL(), response: { body: SiteDto.toJSON(site), status: 200 } };

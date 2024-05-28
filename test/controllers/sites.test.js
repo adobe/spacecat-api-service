@@ -21,6 +21,7 @@ import { createKeyEvent, KEY_EVENT_TYPES } from '@adobe/spacecat-shared-data-acc
 import { hasText } from '@adobe/spacecat-shared-utils';
 import SitesController from '../../src/controllers/sites.js';
 import { SiteDto } from '../../src/dto/site.js';
+import { OrganizationDto } from '../../src/dto/organization.js';
 
 chai.use(chaiAsPromised);
 
@@ -110,6 +111,7 @@ describe('Sites Controller', () => {
     mockDataAccess = {
       addSite: sandbox.stub().resolves(sites[0]),
       updateSite: sandbox.stub().resolves(sites[0]),
+      updateOrganization: sandbox.stub(),
       removeSite: sandbox.stub().resolves(),
       getSites: sandbox.stub().resolves(sites),
       getSitesByDeliveryType: sandbox.stub().resolves(sites),
@@ -117,6 +119,7 @@ describe('Sites Controller', () => {
       getSiteByBaseURL: sandbox.stub().resolves(sites[0]),
       getSiteByID: sandbox.stub().resolves(sites[0]),
       getAuditForSite: sandbox.stub().resolves(sitesWithLatestAudits[0].getAudits()[0]),
+      getOrganizationByID: sandbox.stub(),
       createKeyEvent: sandbox.stub(),
       getKeyEventsForSite: sandbox.stub(),
       removeKeyEvent: sandbox.stub(),
@@ -703,6 +706,58 @@ describe('Sites Controller', () => {
       expect(responses[0].baseURL).to.equal('https://site1.com');
       expect(responses[0].response.status).to.equal(404);
       expect(responses[0].response.message).to.equal('Site with baseURL: https://site1.com not found');
+    });
+
+    it('returns 500 when org is not found', async () => {
+      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(SiteDto.fromJson({
+        id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge', organizationId: '12345678',
+      }));
+      mockDataAccess.getOrganizationByID.resolves(null);
+
+      const response = await sitesController.bulkUpdateSitesConfig({
+        data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
+      });
+      const responses = await response.json();
+
+      expect(responses).to.be.an('array').with.lengthOf(1);
+      expect(responses[0].baseURL).to.equal('https://site1.com');
+      expect(responses[0].response.status).to.equal(500);
+      expect(responses[0].response.message).to.equal('Error updating site  with baseURL: https://site1.com, organization with id: 12345678 organization not found');
+    });
+
+    it('return 500 when site cannot be updated', async () => {
+      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(SiteDto.fromJson({
+        id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge',
+      }));
+      mockDataAccess.updateSite.rejects(new Error('Update site operation failed'));
+      const response = await sitesController.bulkUpdateSitesConfig({
+        data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
+      });
+
+      const responses = await response.json();
+
+      expect(responses).to.be.an('array').with.lengthOf(1);
+      expect(responses[0].baseURL).to.equal('https://site1.com');
+      expect(responses[0].response.status).to.equal(500);
+      expect(responses[0].response.message).to.equal('Error updating site with with baseURL: https://site1.com, update site operation failed');
+    });
+
+    it('return 500 when site organization cannot be updated', async () => {
+      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(SiteDto.fromJson({
+        id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge', organizationId: '12345678',
+      }));
+      mockDataAccess.getOrganizationByID.resolves(OrganizationDto.fromJson({ name: 'Org1' }));
+      mockDataAccess.updateOrganization.rejects(new Error('Update organization operation failed'));
+      const response = await sitesController.bulkUpdateSitesConfig({
+        data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
+      });
+
+      const responses = await response.json();
+
+      expect(responses).to.be.an('array').with.lengthOf(1);
+      expect(responses[0].baseURL).to.equal('https://site1.com');
+      expect(responses[0].response.status).to.equal(500);
+      expect(responses[0].response.message).to.equal('Error updating site with baseURL: https://site1.com, update site organization with id: 12345678 failed');
     });
   });
 });
