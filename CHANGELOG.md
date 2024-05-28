@@ -1,3 +1,10 @@
+## [1.39.2](https://github.com/adobe/spacecat-api-service/compare/v1.39.1...v1.39.2) (2024-05-28)
+
+
+### Bug Fixes
+
+* message format for exp candidates ([#313](https://github.com/adobe/spacecat-api-service/issues/313)) ([6600d94](https://github.com/adobe/spacecat-api-service/commit/6600d9406baa53dab1d63904da47e00c3ad0ba98))
+
 ## [1.39.1](https://github.com/adobe/spacecat-api-service/compare/v1.39.0...v1.39.1) (2024-05-25)
 
 
