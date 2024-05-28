@@ -58,7 +58,7 @@ export const sendExperimentationCandidatesMessage = async (
   slackContext,
 ) => sqs.sendMessage(queueUrl, {
   processingType: 'experimentation-candidates',
-  url,
+  urls: [{ url }],
   slackContext,
 });
 /* c8 ignore end */
