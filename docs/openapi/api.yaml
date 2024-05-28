@@ -31,6 +31,8 @@ tags:
     description: Site operations
   - name: audit
     description: Audit operations
+  - name: auth
+    description: Init authentication against 3rd party services
   - name: organization
     description: Organization operations
   - name: trigger
@@ -43,6 +45,8 @@ tags:
 paths:
   /audits/latest/{auditType}:
     $ref: './audits-api.yaml#/latest-audits'
+  /auth/google/{siteId}:
+    $ref: './auth-api.yaml#/google-auth'
   /configurations:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
