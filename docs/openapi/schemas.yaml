@@ -938,7 +938,7 @@ ImportOptions:
   properties:
     pageLoadTimeoutMs:
       description:
-      type: number
+      type: integer
     enableJavaScript:
       description:
       type: boolean
@@ -977,7 +977,6 @@ ImportJobRequest:
       - 'https://example.com/fr/page2'
     options:
       enableJavaScript: true
-      saveAsDocx: true
       scrollToBottom: true
 ImportJobStatus:
   type: object

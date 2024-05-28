@@ -11,30 +11,30 @@
  */
 
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
-import { queueImportJob } from '../support/import-supervisor.js';
+import ImportSupervisor from '../support/import-supervisor.js';
 
-function ImportController(context) {
-  const { log } = context;
+function ImportController(services) {
+  const { log } = services;
+  const importSupervisor = ImportSupervisor(services);
 
   async function createImportJob(requestContext) {
-    // const { urls, options, importApiKey } = requestContext.data.formData;
-    // Read import.js file from the form body
-
-    // Attempt to queue the job
+    // Attempt to create the new import job
     try {
-      const result = await queueImportJob(requestContext.data);
-      log.info(`Successfully queued import job with ${result.count} URLs.`);
-
-      return createResponse({}, 202);
+      // eslint-disable-next-line no-unused-vars
+      return createResponse(await importSupervisor.startNewJob(requestContext.data), 202);
     } catch (error) {
       log.error(`Failed to queue import job: ${error.message}`);
-      return createResponse({}, 503);
+      return createResponse({}, error.code || 500);
     }
   }
 
   async function getImportJobStatus(requestContext) {
-    log.info(`Get job status for ${requestContext.params.jobId}`);
-    return createResponse({}, 501);
+    try {
+      return createResponse(await importSupervisor.getJobStatus(requestContext.params.jobId), 200);
+    } catch (error) {
+      log.error(`Failed to fetch import job status: ${error.message}`);
+      return createResponse({}, error.code || 500);
+    }
   }
 
   async function getImportJobResult(requestContext) {
@@ -44,14 +44,18 @@ function ImportController(context) {
      * /import-report.xlsx
      */
 
-    log.info(`Get import result ${requestContext.params.jobId}`);
-    return createResponse({}, 501);
+    try {
+      return createResponse(await importSupervisor.getJobArchive(requestContext.params.jobId), 200);
+    } catch (error) {
+      log.error(`Failed to fetch import job result: ${error.message}`);
+      return createResponse({}, error.code || 500);
+    }
   }
 
   return {
     createImportJob,
-    getJobStatus: getImportJobStatus,
-    getImportResult: getImportJobResult,
+    getImportJobStatus,
+    getImportJobResult,
   };
 }
 

@@ -10,33 +10,61 @@
  * governing permissions and limitations under the License.
  */
 
-export async function queueImportJob(/* urls, options */) {
-  // Query data access for all 'running' import jobs
-  // Determine if there is a free import queue
+function ImportSupervisor(services) {
+  const { log } = services;
 
-  // If no queue is available, throw new Error('No import queue is available')
+  // eslint-disable-next-line no-unused-vars
+  async function startNewJob(urls, options) {
+    log.error(`Import requested with ${urls.length} URLs`);
 
-  // If a queue is available, create the import-job record in dataAccess:
-  // - Generate a jobId guid for this job
-  // - Claim one of the free import queues
-  // - Set the import-job metadata
-  // - Set the status to 'running'
+    // Query data access for all 'running' import jobs
+    // Determine if there is a free import queue
 
-  // Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/{jobId}/import.js
+    // If no queue is available, throw new Error('Service Unavailable: No import queue available')
 
-  // Create 1 record per URL in the import-url table
-  // - Generate a urlId guid for this single URL
-  // - Set status to 'pending'
+    // If a queue is available, create the import-job record in dataAccess:
+    // - Generate a jobId guid for this job
+    // - Claim one of the free import queues
+    // - Set the import-job metadata
+    // - Set the status to 'running'
 
-  // Iterate through all URLs and queue a message for each one in the (claimed) import-queue
-  // Each message must contain:
-  // - urlId
-  // - jobId
-  // - url
-  // - options
+    // Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/{jobId}/import.js
+
+    // Create 1 record per URL in the import-url table
+    // - Generate a urlId guid for this single URL
+    // - Set status to 'pending'
+
+    // Iterate through all URLs and queue a message for each one in the (claimed) import-queue
+    // Each message must contain:
+    // - urlId
+    // - jobId
+    // - options
+    // - urls (with the single URL as the only element)
+
+    const error = new Error('Not implemented yet');
+    error.code = 501;
+    throw error;
+  }
+
+  // eslint-disable-next-line no-unused-vars
+  async function getJobStatus(jobId) {
+    const error = new Error('Not implemented yet');
+    error.code = 501;
+    throw error;
+  }
+
+  // eslint-disable-next-line no-unused-vars
+  async function getJobArchive(jobId) {
+    const error = new Error('Not implemented yet');
+    error.code = 501;
+    throw error;
+  }
 
   return {
-    // jobId, // The unique identifier for the import job
-    urlCount: 100, // Number of URLs queued (urls.length)
+    startNewJob,
+    getJobStatus,
+    getJobArchive,
   };
 }
+
+export default ImportSupervisor;

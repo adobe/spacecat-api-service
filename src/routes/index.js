@@ -109,7 +109,7 @@ export default function getRouteHandlers(
     'GET /trigger': triggerHandler,
     'POST /tools/import': importController.createImportJob,
     'GET /tools/import/:jobId': importController.getJobStatus,
-    'GET /tools/import/:jobId/result.zip': importController.getImportResult,
+    'GET /tools/import/:jobId/import-result.zip': importController.getImportJobResult,
   };
 
   // Initialization of static and dynamic routes

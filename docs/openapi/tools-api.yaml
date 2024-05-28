@@ -1,10 +1,10 @@
 import:
   post:
     tags:
-      - tools
+      - import
     summary: Create a new import job
     description: |
-      Note: Not yet implemented.
+      Note: Not implemented yet.
       
       This endpoint can be used to start a new import job with a set of URLs, import API key,
       and an optional import.js mapping file. The import job will be processed asynchronously and 
@@ -31,6 +31,10 @@ import:
     responses:
       '202':
         description: Import job accepted for processing.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ImportJobStatus'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -42,10 +46,10 @@ import:
 import-job-status:
   get:
     tags:
-      - tools
+      - import
     summary: Query the status of an import job
     description: |
-      Note: Not yet implemented.
+      Note: Not implemented yet.
       
       This endpoint can be used to query the status of an import job, given its jobId.
     operationId: getImportJobStatus
@@ -76,10 +80,10 @@ import-job-status:
 import-job-archive:
   get:
     tags:
-      - tools
+      - import
     summary: Download the result of an import job as a .zip archive
     description: |
-      Note: Not yet implemented.
+      Note: Not implemented yet.
       
       This endpoint can be used to download an archive of an import job, which will include
       all the resulting documents that were generated as part of the import. It will also 
@@ -98,9 +102,9 @@ import-job-archive:
       '200':
         description: Successful operation with an import archive delivered to the client.
         content:
-          application/json:
+          application/zip:
             schema:
-              $ref: './schemas.yaml#/ImportJobStatus'
+            type: file
       '400':
         $ref: './responses.yaml#/400'
       '401':
