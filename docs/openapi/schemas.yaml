@@ -937,16 +937,16 @@ ImportOptions:
   type: object
   properties:
     pageLoadTimeoutMs:
-      description:
+      description: The time in milliseconds to wait for the page to load
       type: integer
     enableJavaScript:
-      description:
+      description: Whether to enable JavaScript on the page
       type: boolean
     scrollToBottom:
-      description:
+      description: Whether to scroll to the bottom of the page
       type: boolean
     customHeaders:
-      description:
+      description: Custom headers to send with each HTTP request
       type: object
       additionalProperties: true
   example:
@@ -970,7 +970,8 @@ ImportJobRequest:
       $ref: '#/ImportOptions'
     importScript:
       description: The import.js mapping file
-      type: file
+      type: string
+      format: binary
   example:
     urls:
       - 'https://example.com/en/page1'
