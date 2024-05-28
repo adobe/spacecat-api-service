@@ -1,3 +1,10 @@
+# [1.40.0](https://github.com/adobe/spacecat-api-service/compare/v1.39.2...v1.40.0) (2024-05-28)
+
+
+### Features
+
+* introduce google authentication endpoint ([#314](https://github.com/adobe/spacecat-api-service/issues/314)) ([7f1ff68](https://github.com/adobe/spacecat-api-service/commit/7f1ff68e3a52543b2cca3bea58a1c2234b335a2a))
+
 ## [1.39.2](https://github.com/adobe/spacecat-api-service/compare/v1.39.1...v1.39.2) (2024-05-28)
 
 
