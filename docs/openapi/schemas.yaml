@@ -959,28 +959,22 @@ ImportJobRequest:
   type: object
   required:
     - urls
-    - importApiKey
   properties:
     urls:
       description: The URLs to import
       type: array
       items:
         $ref: '#/URL'
-    importApiKey:
-      description: The import API key
-      type: string
     options:
       description: Optional configuration params, defined as a JSON object
       $ref: '#/ImportOptions'
     importScript:
       description: The import.js mapping file
-      type: string
-      format: binary
+      type: file
   example:
     urls:
       - 'https://example.com/en/page1'
       - 'https://example.com/fr/page2'
-    importApiKey: '9075ca27-f8ad-46de-9cd3-25c6187ca1fd'
     options:
       enableJavaScript: true
       saveAsDocx: true
@@ -1014,4 +1008,9 @@ ImportJobStatus:
       description: The number of URLs that failed to import
       type: integer
   example:
-    TODO:
+    jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    status: 'running'
+    startTime: '2024-01-19T14:20:30Z'
+    urlCount: 25
+    successCount: 15
+    failedCount: 0

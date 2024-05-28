@@ -113,6 +113,8 @@ paths:
     $ref: './tools-api.yaml#/import'
   /tools/import/{jobId}:
     $ref: './tools-api.yaml#/import-job-status'
+  /tools/import/{jobId}/import-result.zip:
+    $ref: './tools-api.yaml#/import-job-archive'
 
 components:
   securitySchemes:
