@@ -1,0 +1,24 @@
+google-auth:
+  parameters:
+  - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - auth
+    summary: Authenticate with Google
+    description: |
+      This endpoint is used to authenticate with Google.
+      The user will be redirected to the Google authentication flow.
+    operationId: googleAuth
+    responses:
+      '200':
+        description: Successful operation and token has been saved
+      '302':
+        description: Redirect to Google authentication flow
+      '400':
+        description: Missing or invalid parameters
+      '404':
+        description: Site matching site found in Google Search Console
+      '500':
+        $ref: './responses.yaml#/500'
+    security: []
+

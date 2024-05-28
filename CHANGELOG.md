@@ -1,3 +1,24 @@
+# [1.40.0](https://github.com/adobe/spacecat-api-service/compare/v1.39.2...v1.40.0) (2024-05-28)
+
+
+### Features
+
+* introduce google authentication endpoint ([#314](https://github.com/adobe/spacecat-api-service/issues/314)) ([7f1ff68](https://github.com/adobe/spacecat-api-service/commit/7f1ff68e3a52543b2cca3bea58a1c2234b335a2a))
+
+## [1.39.2](https://github.com/adobe/spacecat-api-service/compare/v1.39.1...v1.39.2) (2024-05-28)
+
+
+### Bug Fixes
+
+* message format for exp candidates ([#313](https://github.com/adobe/spacecat-api-service/issues/313)) ([6600d94](https://github.com/adobe/spacecat-api-service/commit/6600d9406baa53dab1d63904da47e00c3ad0ba98))
+
+## [1.39.1](https://github.com/adobe/spacecat-api-service/compare/v1.39.0...v1.39.1) (2024-05-25)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#311](https://github.com/adobe/spacecat-api-service/issues/311)) ([7e89544](https://github.com/adobe/spacecat-api-service/commit/7e89544d31b6c5bc4b734d75656ed978b1f8e60f))
+
 # [1.39.0](https://github.com/adobe/spacecat-api-service/compare/v1.38.3...v1.39.0) (2024-05-23)
 
 
