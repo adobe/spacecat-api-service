@@ -20,10 +20,12 @@ describe('BulkUpdateAuditConfigCommand', () => {
   let slackContext;
   let getSiteByBaseURLStub;
   let updateSiteStub;
+  let updateOrganizationStub;
 
   beforeEach(async () => {
     getSiteByBaseURLStub = sinon.stub();
     updateSiteStub = sinon.stub();
+    updateOrganizationStub = sinon.stub();
     context = {
       log: {
         error: sinon.stub(),
@@ -32,6 +34,7 @@ describe('BulkUpdateAuditConfigCommand', () => {
         getSiteByBaseURL: getSiteByBaseURLStub,
         getOrganizationByID: sinon.stub(),
         updateSite: updateSiteStub,
+        updateOrganization: updateOrganizationStub,
       },
     };
 
@@ -39,8 +42,11 @@ describe('BulkUpdateAuditConfigCommand', () => {
       say: sinon.stub(),
     };
   });
+  afterEach(() => {
+    sinon.restore();
+  });
 
-  it('should handle successful execution', async () => {
+  it('should handle successful execution  with multiple sites with default organization', async () => {
     const args = ['enable', 'site1.com,site2.com', 'auditType1,auditType2'];
     const site = {
       getOrganizationId: () => 'default',
@@ -60,6 +66,36 @@ describe('BulkUpdateAuditConfigCommand', () => {
     sinon.assert.calledTwice(updateSiteStub);
   });
 
+  it('should handle successful execution with multiple sites belonging to organization', async () => {
+    const args = ['enable', 'site1.com,site2.com', 'auditType1'];
+    const site1 = {
+      getOrganizationId: () => 'organizationId',
+      getAuditConfig: () => ({
+        updateAuditTypeConfig: sinon.stub(),
+      }),
+    };
+    const site2 = {
+      getOrganizationId: () => 'organizationId',
+      getAuditConfig: () => ({
+        updateAuditTypeConfig: sinon.stub(),
+      }),
+    };
+    const organization = {
+      getAuditConfig: () => ({
+        updateAuditTypeConfig: sinon.stub(),
+      }),
+    };
+    getSiteByBaseURLStub.withArgs('https://site1.com').resolves(site1);
+    getSiteByBaseURLStub.withArgs('https://site2.com').resolves(site2);
+    context.dataAccess.getOrganizationByID.withArgs('organizationId').resolves(organization);
+    updateSiteStub.resolves();
+    updateOrganizationStub.resolves();
+    const command = BulkUpdateAuditConfigCommand(context);
+    await command.handleExecution(args, slackContext);
+    sinon.assert.calledTwice(updateSiteStub);
+    sinon.assert.calledOnce(updateOrganizationStub);
+  });
+
   it('should handle site not found situation', async () => {
     const args = ['enable', 'site1.com', 'auditType1,auditType2'];
 
@@ -70,8 +106,7 @@ describe('BulkUpdateAuditConfigCommand', () => {
 
     sinon.assert.calledWith(getSiteByBaseURLStub, 'https://site1.com');
     sinon.assert.notCalled(updateSiteStub);
-    // TODO sinon.assert.calledWith(slackContext.say,
-    // 'Cannot update site with baseURL: site1.com, site not found');
+    sinon.assert.calledWith(slackContext.say, 'Bulk update completed with the following responses:\nCannot update site with baseURL: https://site1.com, site not found\n');
   });
 
   it('should handle organization not found error', async () => {
@@ -87,9 +122,7 @@ describe('BulkUpdateAuditConfigCommand', () => {
 
     sinon.assert.calledWith(getSiteByBaseURLStub, 'https://site1.com');
     sinon.assert.notCalled(updateSiteStub);
-    // TODO sinon.assert.calledWith(slackContext.say,
-    // 'Error updating site with baseURL: site1.com belonging organization
-    // with id: organizationId not found');
+    sinon.assert.calledWith(slackContext.say, 'Bulk update completed with the following responses:\nError updating site with baseURL: https://site1.com belonging organization with id: organizationId not found\n');
   });
 
   it('should handle error during execution', async () => {

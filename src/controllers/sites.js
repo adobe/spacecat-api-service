@@ -162,6 +162,7 @@ function SitesController(dataAccess) {
       if (organization && enableAudits) {
         try {
           await dataAccess.updateOrganization(organization);
+          organizationsMap.delete(organizationId);
         } catch (error) {
           return { baseURL: site.getBaseURL(), response: { message: `Error updating site with baseURL: ${baseURL}, update site organization with id: ${organizationId} failed`, status: 500 } };
         }

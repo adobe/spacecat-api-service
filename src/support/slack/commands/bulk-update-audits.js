@@ -76,6 +76,7 @@ function BulkUpdateAuditConfigCommand(context) {
         if (organization && enableAudits) {
           try {
             await dataAccess.updateOrganization(organization);
+            organizationsMap.delete(organizationId);
           } catch (e) {
             return { payload: `Error updating site with baseURL: ${baseURL}, organization with id: ${organizationId} update operation failed` };
           }
@@ -90,9 +91,8 @@ function BulkUpdateAuditConfigCommand(context) {
       }));
 
       let message = 'Bulk update completed with the following responses:\n';
-      responses.forEach((response) => {
-        message += `${JSON.stringify(response.payload)}\n`;
-      });
+      message += responses.map((response) => response.payload).join('\n');
+      message += '\n';
 
       await say(message);
     } catch (error) {
