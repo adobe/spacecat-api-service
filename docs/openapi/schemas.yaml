@@ -971,7 +971,7 @@ ImportJobRequest:
     importScript:
       description: The import.js mapping file
       type: string
-      format: binary
+      format: base64
   example:
     urls:
       - 'https://example.com/en/page1'

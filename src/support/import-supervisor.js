@@ -10,12 +10,24 @@
  * governing permissions and limitations under the License.
  */
 
-function ImportSupervisor(services) {
-  const { log } = services;
+import { ErrorWithStatusCode } from './utils.js';
 
+function ImportSupervisor(services) {
+  function validateServices() {
+    const requiredServices = ['log', 'sqsClient', 's3Client'];
+    requiredServices.forEach((service) => {
+      if (!services[service]) {
+        throw new Error(`Invalid services: ${service} is required`);
+      }
+    });
+  }
+
+  validateServices();
   // eslint-disable-next-line no-unused-vars
-  async function startNewJob(urls, options) {
-    log.error(`Import requested with ${urls.length} URLs`);
+  const { log, sqsClient, s3Client } = services;
+
+  async function startNewJob(urls, options, importApiKey) {
+    log.info(`Import requested with ${urls.length} URLs and import API key: ${importApiKey}`);
 
     // Query data access for all 'running' import jobs
     // Determine if there is a free import queue
@@ -41,23 +53,17 @@ function ImportSupervisor(services) {
     // - options
     // - urls (with the single URL as the only element)
 
-    const error = new Error('Not implemented yet');
-    error.code = 501;
-    throw error;
+    throw new ErrorWithStatusCode('Not implemented yet', 501);
   }
 
   // eslint-disable-next-line no-unused-vars
   async function getJobStatus(jobId) {
-    const error = new Error('Not implemented yet');
-    error.code = 501;
-    throw error;
+    throw new ErrorWithStatusCode('Not implemented yet', 501);
   }
 
   // eslint-disable-next-line no-unused-vars
   async function getJobArchive(jobId) {
-    const error = new Error('Not implemented yet');
-    error.code = 501;
-    throw error;
+    throw new ErrorWithStatusCode('Not implemented yet', 501);
   }
 
   return {
