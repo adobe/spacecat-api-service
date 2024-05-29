@@ -37,7 +37,6 @@ function BulkUpdateAuditConfigCommand(context) {
       const enableAudits = enableDisableInput.toLowerCase() === 'enable';
 
       const organizationsMap = new Map();
-      await say(baseURLs.toString());
 
       const sites = await Promise.all(baseURLs.map(async (baseURLInput) => {
         const baseURL = extractURLFromSlackInput(baseURLInput);
@@ -87,7 +86,7 @@ function BulkUpdateAuditConfigCommand(context) {
           return { payload: `Error updating site with with baseURL: ${baseURL}, update site operation failed` };
         }
 
-        return { payload: `Site with base baseURL: ${baseURL} successfully updated` };
+        return { payload: `${baseURL}: successfully updated` };
       }));
 
       let message = 'Bulk update completed with the following responses:\n';
