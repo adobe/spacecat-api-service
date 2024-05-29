@@ -62,7 +62,7 @@ function GetExperimentationCandidatesCommand(context) {
 
       await triggerExperimentationCandidates(url, slackContext, context);
 
-      let message = `:white_check_mark: Scraping and determining experimentation candidates for ${url}\n`;
+      let message = `:white_check_mark: Scraping and determining desktop experimentation candidates for ${url}\n`;
       message += ':adobe-run: Stand by for results. I will post them here when they are ready.';
 
       await say(message);
