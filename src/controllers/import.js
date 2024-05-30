@@ -78,8 +78,10 @@ function ImportController(context) {
   }
 
   async function getImportJobStatus(requestContext) {
+    const { params: { jobId } } = requestContext;
     try {
-      return createResponse(await importSupervisor.getJobStatus(requestContext.params.jobId), 200);
+      const statusResponse = await importSupervisor.getJobStatus(jobId);
+      return createResponse(statusResponse, 200);
     } catch (error) {
       log.error(`Failed to fetch import job status: ${error.message}`);
       return createResponse({}, error.status || 500);
