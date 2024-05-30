@@ -92,9 +92,10 @@ function ImportController(context) {
      *   /documents/../page.docx
      *   /import-report.xlsx
      */
-
+    const { params: { jobId } } = requestContext;
     try {
-      return createResponse(await importSupervisor.getJobArchive(requestContext.params.jobId), 200);
+      const resultResponse = await importSupervisor.getJobArchive(jobId);
+      return createResponse(resultResponse, 200);
     } catch (error) {
       log.error(`Failed to fetch import job result: ${error.message}`);
       return createResponse({}, error.status || 500);
