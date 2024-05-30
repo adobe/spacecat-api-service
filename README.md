@@ -110,3 +110,11 @@ IMS_CLIENT_SECRET=client secret for the IMS API
 SLACK_TOKEN_WORKSPACE_EXTERNAL_ELEVATED=Slack token for the external workspace, elevated permissions
 SLACK_OPS_CHANNEL_WORKSPACE_EXTERNAL=channel ID to use for operations messages in the external workspace
 ```
+
+Import controller requires the following env variables:
+
+```plaintext
+ALLOWED_IMPORT_API_KEYS=comma separated list of allowed api keys, used to authenticate import requests
+IMPORT_QUEUES=comma separated list of queues to use for import jobs. If a queue is removed from this list, it will no longer be available for new import jobs
+IMPORT_S3_BUCKET=the S3 bucket to store import job artifacts
+```

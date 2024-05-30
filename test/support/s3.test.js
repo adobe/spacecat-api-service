@@ -30,6 +30,9 @@ describe('S3 client wrapper tests', () => {
     mockRequest = {};
     mockContext = {
       log: console,
+      runtime: {
+        region: 'us-east-1',
+      },
     };
 
     exampleHandler = sinon.spy(async (message, context) => {

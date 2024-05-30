@@ -26,18 +26,20 @@ describe('Import Supervisor', () => {
 
   beforeEach(() => {
     importSupervisor = new ImportSupervisor({
-      log: console,
-      sqsClient: sinon.stub(),
+      dataAccess: sinon.stub(),
+      sqs: sinon.stub(),
       s3Client: sinon.stub(),
+      env: {},
+      log: console,
     });
   });
 
   it('should throw when missing required services', async () => {
-    expect(() => new ImportSupervisor({})).to.throw('Invalid services: log is required');
+    expect(() => new ImportSupervisor({})).to.throw('Invalid services: dataAccess is required');
 
     expect(() => new ImportSupervisor({
-      log: sinon.stub(),
-    })).to.throw('Invalid services: sqsClient is required');
+      dataAccess: sinon.stub(),
+    })).to.throw('Invalid services: sqs is required');
   });
 
   describe('startNewJob tests', () => {

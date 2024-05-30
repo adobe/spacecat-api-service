@@ -10,9 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
+import { ErrorWithStatusCode } from './utils.js';
+
 function ImportSupervisor(services) {
   function validateServices() {
-    const requiredServices = ['log', 'sqsClient', 's3Client'];
+    const requiredServices = ['dataAccess', 'sqs', 's3Client', 'env', 'log'];
     requiredServices.forEach((service) => {
       if (!services[service]) {
         throw new Error(`Invalid services: ${service} is required`);
@@ -21,38 +23,83 @@ function ImportSupervisor(services) {
   }
 
   validateServices();
-  // eslint-disable-next-line no-unused-vars
-  const { log, sqsClient, s3Client } = services;
+  const {
+    dataAccess, sqs, s3Client, log, env,
+  } = services;
+  const {
+    IMPORT_QUEUES, // Comma separated list of import queues
+    IMPORT_S3_BUCKET,
+  } = env;
+  const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
-  // eslint-disable-next-line no-unused-vars
-  async function startNewJob(urls, importApiKey, options) {
-    log.info(`Import requested with ${urls.length} URLs and import API key: ${importApiKey}`);
+  function getAvailableImportQueue() {
+    const runningImportJobs = dataAccess.getAllRunningImportJobs();
+    const importQueues = IMPORT_QUEUES.split(',');
 
-    // Query data access for all 'running' import jobs
-    // Determine if there is a free import queue
+    // Find an import queue that is not in use
+    for (const queue of importQueues) {
+      if (!runningImportJobs.includes(queue)) {
+        return queue;
+      }
+    }
+    throw new ErrorWithStatusCode('Service Unavailable: No import queue available', 503);
+  }
 
-    // If no queue is available, throw new Error('Service Unavailable: No import queue available')
-
-    // If a queue is available, create the import-job record in dataAccess:
-    // - Generate a jobId guid for this job
+  async function createNewImportJob(urls, importQueue, importApiKey, options) {
     // - Claim one of the free import queues
     // - Set the import-job metadata
     // - Set the status to 'running'
+    const newJob = {
+      urls,
+      importQueue,
+      importApiKey,
+      options,
+      status: 'running',
+    };
+    return dataAccess.createImportJob(newJob);
+  }
 
-    // Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/{jobId}/import.js
-
-    // Create 1 record per URL in the import-url table
+  async function persistUrls(jobId, urls) {
     // - Generate a urlId guid for this single URL
     // - Set status to 'pending'
+    for (const url of urls) {
+      const urlRecord = {
+        jobId,
+        url,
+        status: 'pending',
+      };
+      // eslint-disable-next-line no-await-in-loop
+      await dataAccess.createImportUrl(urlRecord);
+    }
+  }
+
+  async function startNewJob(urls, importApiKey, options) {
+    log.info(`Import requested for ${urls.length} URLs, import API key: ${importApiKey}`);
+
+    // Determine if there is a free import queue
+    const importQueue = await getAvailableImportQueue();
+
+    // If a queue is available, create the import-job record in dataAccess:
+    const newImportJob = await createNewImportJob(urls, importQueue, importApiKey, options);
+
+    // TODO: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/{jobId}/import.js
+    // TODO: Custom import.js scripts are not initially supported.
+
+    // Create 1 record per URL in the import-url table
+    const urlRecords = await persistUrls(newImportJob.jobId, urls);
 
     // Iterate through all URLs and queue a message for each one in the (claimed) import-queue
-    // Each message must contain:
-    // - urlId
-    // - jobId
-    // - options
-    // - urls (with the single URL as the only element)
+    for (const urlRecord of urlRecords) {
+      const message = {
+        jobId: newImportJob.jobId,
+        urlId: urlRecord.urlId,
+        url: urlRecord.url,
+      };
+      // eslint-disable-next-line no-await-in-loop
+      await sqs.sendMessage(importQueue, message);
+    }
 
-    return {};
+    return newImportJob;
   }
 
   // eslint-disable-next-line no-unused-vars
@@ -61,14 +108,23 @@ function ImportSupervisor(services) {
   }
 
   // eslint-disable-next-line no-unused-vars
-  async function getJobArchive(jobId) {
-    return {};
+  async function getJobArchiveStream(jobId, importApiKey) {
+    // Read a file from s3 then return it
+    try {
+      // TODO: read the import job record first to confirm that the import API key matches
+
+      const key = `${jobId}/${IMPORT_RESULT_ARCHIVE_NAME}`;
+      return s3Client.getObject({ Bucket: IMPORT_S3_BUCKET, Key: key }).createReadStream();
+    } catch (err) {
+      log.error('getJobArchive request failed.', err);
+      throw new ErrorWithStatusCode('Error occurred reading job archive file from S3', 500);
+    }
   }
 
   return {
     startNewJob,
     getJobStatus,
-    getJobArchive,
+    getJobArchiveStream,
   };
 }
 

@@ -13,36 +13,39 @@
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
 import { isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../support/utils.js';
+import ImportSupervisor from '../support/import-supervisor.js';
 
 function ImportController(context) {
   const {
-    log, env, sqsClient, s3Client,
+    log, env, sqs, s3Client,
   } = context;
-  // eslint-disable-next-line no-unused-vars
   const services = {
     log,
-    sqsClient,
+    sqs,
     s3Client,
   };
+  const importSupervisor = new ImportSupervisor(services);
+
+  const STATUS_BAD_REQUEST = 400;
+  const STATUS_ACCEPTED = 202;
 
   function validateRequestData(data) {
-    const BAD_REQUEST = 400;
     if (!isObject(data)) {
-      throw new ErrorWithStatusCode('Invalid request: request body data is required', BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: request body data is required', STATUS_BAD_REQUEST);
     }
 
     if (!Array.isArray(data.urls)) {
-      throw new ErrorWithStatusCode('Invalid request: urls must be provided as an array', BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: urls must be provided as an array', STATUS_BAD_REQUEST);
     }
 
     data.urls.forEach((url) => {
       if (!isValidUrl(url)) {
-        throw new ErrorWithStatusCode(`Invalid request: ${url} is not a valid URL`, BAD_REQUEST);
+        throw new ErrorWithStatusCode(`Invalid request: ${url} is not a valid URL`, STATUS_BAD_REQUEST);
       }
     });
 
     if (data.options && !isObject(data.options)) {
-      throw new ErrorWithStatusCode('Invalid request: options must be an object', BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
     }
   }
 
@@ -67,12 +70,13 @@ function ImportController(context) {
       validateRequestData(data);
       validateImportApiKey(importApiKey);
 
-      // const { urls, options } = data;
-      // const jobResponse = await importSupervisor.startNewJob(urls, options, importApiKey);
-      return createResponse({}, 501);
+      const { urls, options } = data;
+      const job = await importSupervisor.startNewJob(urls, options, importApiKey);
+
+      return createResponse(job, STATUS_ACCEPTED);
     } catch (error) {
       log.error(`Failed to queue import job: ${error.message}`);
-      return createResponse({}, error.status);
+      return createResponse({}, error.status || 500);
     }
   }
 
@@ -88,7 +92,25 @@ function ImportController(context) {
      *   /documents/../page.docx
      *   /import-report.xlsx
      */
-    return createResponse({}, 501);
+    try {
+      const { pathInfo: { headers }, params: { jobId } } = requestContext;
+      const importApiKey = headers['x-import-api-key'];
+      const s3Stream = importSupervisor.getJobArchiveStream(jobId, importApiKey);
+
+      s3Stream.on('error', (err) => {
+        // TODO: improve error handling
+        throw err;
+      });
+
+      // Pipe the s3 stream to the HTTP response
+      const response = createResponse({}, 200);
+      // TODO: need to verify this approach will work as expected, esp. with larger files
+      s3Stream.pipe(response);
+      return response;
+    } catch (error) {
+      log.error(`Failed to get import job result: ${error.message}`);
+      return createResponse({}, error.status || 500);
+    }
   }
 
   return {

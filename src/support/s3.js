@@ -23,7 +23,8 @@ export function s3ClientWrapper(fn) {
   return async (request, context) => {
     if (!context.s3Client) {
       // Create an S3 client and add it to the context
-      context.s3Client = new S3Client();
+      const { region } = context.runtime;
+      context.s3Client = new S3Client({ region });
     }
     return fn(request, context);
   };

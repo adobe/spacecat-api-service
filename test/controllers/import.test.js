@@ -49,7 +49,7 @@ describe('ImportController tests', () => {
       env: {
         ALLOWED_IMPORT_API_KEYS: 'b9ebcfb5-80c9-4236-91ba-d50e361db71d,7828b114-e20f-4234-bc4e-5b438b861edd',
       },
-      sqsClient: {
+      sqs: {
         sendMessage: sinon.stub(),
       },
       s3Client: {
