@@ -125,3 +125,8 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'503':
+  description: Service Unavailable.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'

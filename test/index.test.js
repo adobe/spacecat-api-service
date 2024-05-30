@@ -74,6 +74,12 @@ describe('Index Tests', () => {
         getSitesWithLatestAudit: sinon.stub().resolves([]),
         getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),
       },
+      s3Client: {
+        send: sinon.stub(),
+      },
+      sqsClient: {
+        sendMessage: sinon.stub(),
+      },
     };
     request = new Request(baseUrl, {
       headers: {

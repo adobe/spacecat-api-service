@@ -1,0 +1,118 @@
+import:
+  post:
+    tags:
+      - import
+    summary: Create a new import job
+    description: |
+      Note: Not implemented yet.
+      
+      This endpoint can be used to start a new import job with a set of URLs, import API key,
+      and an optional import.js mapping file. The import job will be processed asynchronously and 
+      the status of the job can be queried at the /tools/import/{jobId} endpoint. If there is no 
+      import queue available at the time of the request, a 503 Service Unavailable response will 
+      be returned.
+    operationId: startImportJob
+    security:
+      - api_key: [ ]
+    parameters:
+      - in: header
+        name: x-import-api-key
+        schema:
+          type: string
+        description: |
+          Client-specific import API key. This same key will be required to fetch the job status, 
+          and final .zip result.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/ImportJobRequest'
+    responses:
+      '202':
+        description: Import job accepted for processing.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ImportJobStatus'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+import-job-status:
+  get:
+    tags:
+      - import
+    summary: Query the status of an import job
+    description: |
+      Note: Not implemented yet.
+      
+      This endpoint can be used to query the status of an import job, given its jobId.
+    operationId: getImportJobStatus
+    security:
+      - api_key: [ ]
+    parameters:
+      - $ref: './parameters.yaml#/jobId'
+      - in: header
+        name: x-import-api-key
+        schema:
+          type: string
+        description: |
+          Client-specific import API key. Must match the key used to start the import job.
+    responses:
+      '200':
+        description: Successful operation with an import status object returned.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ImportJobStatus'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+import-job-archive:
+  get:
+    tags:
+      - import
+    summary: Download the result of an import job as a .zip archive
+    description: |
+      Note: Not implemented yet.
+      
+      This endpoint can be used to download an archive of an import job, which will include
+      all the resulting documents that were generated as part of the import. It will also 
+      include the import-report.xlsx file, which contains a summary of the import job.
+    operationId: getImportJobArchive
+    security:
+      - api_key: [ ]
+    parameters:
+      - $ref: './parameters.yaml#/jobId'
+      - in: header
+        name: x-import-api-key
+        schema:
+          type: string
+        description: |
+          Client-specific import API key. Must match the key used to start the import job.
+    responses:
+      '200':
+        description: Successful operation with an import archive delivered to the client.
+        content:
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'

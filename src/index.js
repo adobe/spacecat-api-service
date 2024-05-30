@@ -43,6 +43,7 @@ import trigger from './controllers/trigger.js';
 import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
+import ImportController from './controllers/import.js';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
@@ -95,6 +96,7 @@ async function run(request, context) {
       SlackController(SlackApp),
       trigger,
       FulfillmentController(context),
+      ImportController(context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

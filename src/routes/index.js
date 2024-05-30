@@ -50,6 +50,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} slackController - The slack controller.
  * @param {Function} triggerHandler - The trigger handler function.
  * @param {Object} fulfillmentController - The fulfillment controller.
+ * @param {Object} importController - The import controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -61,6 +62,7 @@ export default function getRouteHandlers(
   slackController,
   triggerHandler,
   fulfillmentController,
+  importController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -105,6 +107,9 @@ export default function getRouteHandlers(
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
+    'POST /tools/import': importController.createImportJob,
+    'GET /tools/import/:jobId': importController.getJobStatus,
+    'GET /tools/import/:jobId/import-result.zip': importController.getImportJobResult,
   };
 
   // Initialization of static and dynamic routes

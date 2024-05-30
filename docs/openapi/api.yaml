@@ -41,6 +41,8 @@ tags:
     description: Webhooks for receiving events
   - name: slack
     description: Slack channel management
+  - name: import
+    description: APIs for importing content to Edge Delivery Services
 
 paths:
   /audits/latest/{auditType}:
@@ -107,6 +109,12 @@ paths:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'
+  /tools/import:
+    $ref: './tools-api.yaml#/import'
+  /tools/import/{jobId}:
+    $ref: './tools-api.yaml#/import-job-status'
+  /tools/import/{jobId}/import-result.zip:
+    $ref: './tools-api.yaml#/import-job-archive'
 
 components:
   securitySchemes:

@@ -63,6 +63,12 @@ describe('getRouteHandlers', () => {
     processFulfillmentEvents: sinon.stub(),
   };
 
+  const mockImportController = {
+    createImportJob: sinon.stub(),
+    getImportJobStatus: sinon.stub(),
+    getImportJobResult: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -73,6 +79,7 @@ describe('getRouteHandlers', () => {
       mockSlackController,
       mockTrigger,
       mockFulfillmentController,
+      mockImportController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -90,6 +97,7 @@ describe('getRouteHandlers', () => {
       'GET /trigger',
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
+      'POST /tools/import',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -129,6 +137,8 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/key-events',
       'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
+      'GET /tools/import/:jobId',
+      'GET /tools/import/:jobId/import-result.zip',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

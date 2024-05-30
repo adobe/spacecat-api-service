@@ -112,3 +112,10 @@ metric:
     enum:
       - 'organic-traffic'
     example: 'organic-traffic'
+jobId:
+  name: jobId
+  description: The job ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'

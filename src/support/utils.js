@@ -229,3 +229,14 @@ export async function findDeliveryType(url) {
 
   return DELIVERY_TYPES.OTHER;
 }
+
+/**
+ * Error class with a status code property.
+ * @extends Error
+ */
+export class ErrorWithStatusCode extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
