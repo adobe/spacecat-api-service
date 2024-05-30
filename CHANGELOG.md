@@ -1,3 +1,10 @@
+## [1.41.1](https://github.com/adobe/spacecat-api-service/compare/v1.41.0...v1.41.1) (2024-05-30)
+
+
+### Bug Fixes
+
+* remove ImportSupervisor call ([#318](https://github.com/adobe/spacecat-api-service/issues/318)) ([8cc53c7](https://github.com/adobe/spacecat-api-service/commit/8cc53c772474e71ae578a7582e8631feb3266cd4))
+
 # [1.41.0](https://github.com/adobe/spacecat-api-service/compare/v1.40.1...v1.41.0) (2024-05-30)
 
 
