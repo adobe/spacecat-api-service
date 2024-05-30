@@ -69,7 +69,8 @@ function ImportController(context) {
       validateImportApiKey(importApiKey);
 
       const { urls, options } = data;
-      return createResponse(await importSupervisor.startNewJob(urls, options, importApiKey), 202);
+      const jobResponse = await importSupervisor.startNewJob(urls, options, importApiKey);
+      return createResponse(jobResponse, 202);
     } catch (error) {
       log.error(`Failed to queue import job: ${error.message}`);
       return createResponse({}, error.status || 500);
