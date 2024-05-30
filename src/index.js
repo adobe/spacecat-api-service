@@ -44,6 +44,7 @@ import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import ImportController from './controllers/import.js';
+import { s3ClientWrapper } from './support/s3.js';
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
@@ -126,6 +127,7 @@ export const main = wrap(run)
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
+  .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(secrets, { name: resolveSecretsName })
