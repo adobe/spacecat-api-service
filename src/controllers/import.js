@@ -12,21 +12,18 @@
 
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
 import { isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
-import ImportSupervisor from '../support/import-supervisor.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
 function ImportController(context) {
   const {
     log, env, sqsClient, s3Client,
   } = context;
+  // eslint-disable-next-line no-unused-vars
   const services = {
     log,
     sqsClient,
     s3Client,
   };
-
-  // eslint-disable-next-line no-unused-vars
-  const importSupervisor = ImportSupervisor(services);
 
   function validateRequestData(data) {
     const BAD_REQUEST = 400;
