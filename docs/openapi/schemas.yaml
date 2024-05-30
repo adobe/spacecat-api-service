@@ -969,7 +969,7 @@ ImportJobRequest:
       description: Optional configuration params, defined as a JSON object
       $ref: '#/ImportOptions'
     importScript:
-      description: The import.js mapping file
+      description: Optional import.js mapping file
       type: string
       format: base64
   example:
