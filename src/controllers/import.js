@@ -58,7 +58,7 @@ function ImportController(context) {
   }
 
   /**
-   *
+   * Create a new import job.
    * @param requestContext
    * @returns {Promise<*>}
    */
