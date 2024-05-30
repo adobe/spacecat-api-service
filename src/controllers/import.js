@@ -11,7 +11,7 @@
  */
 
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
-import { isObject } from '@adobe/spacecat-shared-utils';
+import { isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
@@ -24,6 +24,8 @@ function ImportController(context) {
     sqsClient,
     s3Client,
   };
+
+  // eslint-disable-next-line no-unused-vars
   const importSupervisor = ImportSupervisor(services);
 
   function validateRequestData(data) {
@@ -35,7 +37,7 @@ function ImportController(context) {
     if (!Array.isArray(data.urls)) {
       throw new ErrorWithStatusCode('Invalid request: urls must be provided as an array', BAD_REQUEST);
     }
-    
+
     data.urls.forEach((url) => {
       if (!isValidUrl(url)) {
         throw new ErrorWithStatusCode(`Invalid request: ${url} is not a valid URL`, BAD_REQUEST);
@@ -68,40 +70,28 @@ function ImportController(context) {
       validateRequestData(data);
       validateImportApiKey(importApiKey);
 
-      const { urls, options } = data;
-      const jobResponse = await importSupervisor.startNewJob(urls, options, importApiKey);
-      return createResponse(jobResponse, 202);
+      // const { urls, options } = data;
+      // const jobResponse = await importSupervisor.startNewJob(urls, options, importApiKey);
+      return createResponse({}, 501);
     } catch (error) {
       log.error(`Failed to queue import job: ${error.message}`);
-      return createResponse({}, error.status || 500);
+      return createResponse({}, error.status);
     }
   }
 
+  // eslint-disable-next-line no-unused-vars
   async function getImportJobStatus(requestContext) {
-    const { params: { jobId } } = requestContext;
-    try {
-      const statusResponse = await importSupervisor.getJobStatus(jobId);
-      return createResponse(statusResponse, 200);
-    } catch (error) {
-      log.error(`Failed to fetch import job status: ${error.message}`);
-      return createResponse({}, error.status || 500);
-    }
+    return createResponse({}, 501);
   }
 
+  // eslint-disable-next-line no-unused-vars
   async function getImportJobResult(requestContext) {
     /**
      * Structure of the resulting .zip file.
      *   /documents/../page.docx
      *   /import-report.xlsx
      */
-    const { params: { jobId } } = requestContext;
-    try {
-      const resultResponse = await importSupervisor.getJobArchive(jobId);
-      return createResponse(resultResponse, 200);
-    } catch (error) {
-      log.error(`Failed to fetch import job result: ${error.message}`);
-      return createResponse({}, error.status || 500);
-    }
+    return createResponse({}, 501);
   }
 
   return {

@@ -24,7 +24,7 @@ import ImportController from '../../src/controllers/import.js';
 chai.use(sinonChai);
 chai.use(chaiAsPromised);
 
-describe('ImportController', () => {
+describe('ImportController tests', () => {
   let importController;
   let context;
   let requestContext = {};
@@ -97,7 +97,19 @@ describe('ImportController', () => {
       expect(response.status).to.equal(401); // Unauthorized
     });
 
-    it('should start a new import job', async () => {
+    it('should reject when invalid URLs are passed in', async () => {
+      requestContext.data.urls = ['https://example.com/page1', 'not-a-valid-url'];
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('should reject when an invalid options object is passed in', async () => {
+      requestContext.data.options = 'options object should be an object, not a string';
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(400);
+    });
+
+    it('should start a new import job (not yet implemented)', async () => {
       const response = await importController.createImportJob(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(501);
@@ -105,7 +117,7 @@ describe('ImportController', () => {
   });
 
   describe('getImportJobStatus', () => {
-    it('should query for an import job\'s status', async () => {
+    it('should query for an import job\'s status (not yet implemented)', async () => {
       const response = await importController.getImportJobStatus(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(501);
@@ -113,7 +125,7 @@ describe('ImportController', () => {
   });
 
   describe('getImportJobResult', () => {
-    it('should fetch the import job\'s result', async () => {
+    it('should fetch the import job\'s result (not yet implemented)', async () => {
       const response = await importController.getImportJobResult(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(501);

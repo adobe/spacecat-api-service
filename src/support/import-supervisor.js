@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-import { ErrorWithStatusCode } from './utils.js';
-
 function ImportSupervisor(services) {
   function validateServices() {
     const requiredServices = ['log', 'sqsClient', 's3Client'];
@@ -26,7 +24,8 @@ function ImportSupervisor(services) {
   // eslint-disable-next-line no-unused-vars
   const { log, sqsClient, s3Client } = services;
 
-  async function startNewJob(urls, options, importApiKey) {
+  // eslint-disable-next-line no-unused-vars
+  async function startNewJob(urls, importApiKey, options) {
     log.info(`Import requested with ${urls.length} URLs and import API key: ${importApiKey}`);
 
     // Query data access for all 'running' import jobs
@@ -53,17 +52,17 @@ function ImportSupervisor(services) {
     // - options
     // - urls (with the single URL as the only element)
 
-    throw new ErrorWithStatusCode('Not implemented yet', 501);
+    return {};
   }
 
   // eslint-disable-next-line no-unused-vars
   async function getJobStatus(jobId) {
-    throw new ErrorWithStatusCode('Not implemented yet', 501);
+    return {};
   }
 
   // eslint-disable-next-line no-unused-vars
   async function getJobArchive(jobId) {
-    throw new ErrorWithStatusCode('Not implemented yet', 501);
+    return {};
   }
 
   return {

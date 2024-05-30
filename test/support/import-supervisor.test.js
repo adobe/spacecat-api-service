@@ -21,11 +21,40 @@ chai.use(chaiAsPromised);
 const { expect } = chai;
 
 describe('Import Supervisor', () => {
+  let importSupervisor;
+  const urls = ['https://example.com/1', 'https://example.com/2'];
+
+  beforeEach(() => {
+    importSupervisor = new ImportSupervisor({
+      log: console,
+      sqsClient: sinon.stub(),
+      s3Client: sinon.stub(),
+    });
+  });
+
   it('should throw when missing required services', async () => {
     expect(() => new ImportSupervisor({})).to.throw('Invalid services: log is required');
 
     expect(() => new ImportSupervisor({
       log: sinon.stub(),
     })).to.throw('Invalid services: sqsClient is required');
+  });
+
+  describe('startNewJob tests', () => {
+    it('should initially return an empty job object', async () => {
+      expect(await importSupervisor.startNewJob(urls)).to.deep.equal({});
+    });
+  });
+
+  describe('getJobStatus tests', () => {
+    it('should initially return an empty job object', async () => {
+      expect(await importSupervisor.getJobStatus('jobId')).to.deep.equal({});
+    });
+  });
+
+  describe('getJobArchive tests', () => {
+    it('should initially return an empty object', async () => {
+      expect(await importSupervisor.getJobArchive('jobId')).to.deep.equal({});
+    });
   });
 });
