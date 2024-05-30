@@ -35,6 +35,16 @@ function ImportController(context) {
     if (!Array.isArray(data.urls)) {
       throw new ErrorWithStatusCode('Invalid request: urls must be provided as an array', BAD_REQUEST);
     }
+    
+    data.urls.forEach((url) => {
+      if (!isValidUrl(url)) {
+        throw new ErrorWithStatusCode(`Invalid request: ${url} is not a valid URL`, BAD_REQUEST);
+      }
+    });
+
+    if (data.options && !isObject(data.options)) {
+      throw new ErrorWithStatusCode('Invalid request: options must be an object', BAD_REQUEST);
+    }
   }
 
   function validateImportApiKey(importApiKey) {
