@@ -1,3 +1,10 @@
+## [1.41.2](https://github.com/adobe/spacecat-api-service/compare/v1.41.1...v1.41.2) (2024-05-31)
+
+
+### Bug Fixes
+
+* simplify is-helix check ([#319](https://github.com/adobe/spacecat-api-service/issues/319)) ([fb68e11](https://github.com/adobe/spacecat-api-service/commit/fb68e11c576c7c8b7d5b910aabc66b80aabce5e9))
+
 ## [1.41.1](https://github.com/adobe/spacecat-api-service/compare/v1.41.0...v1.41.1) (2024-05-30)
 
 
