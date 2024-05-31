@@ -137,10 +137,10 @@ export const triggerExperimentationCandidates = async (
  * containing the result of the Helix site check and an optional reason if it's not a Helix site.
  */
 export async function isHelixSite(url) {
-  let finalUrl;
+  let dom;
   try {
     const resp = await fetch(url);
-    finalUrl = resp.url;
+    dom = await resp.text();
   } catch (e) {
     return {
       isHelix: false,
@@ -148,34 +148,12 @@ export async function isHelixSite(url) {
     };
   }
 
-  finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
-  let finalResp;
+  const containsHelixDom = /<header><\/header>\s*<main>\s*<div>/.test(dom);
 
-  try {
-    // redirects are disabled because .plain.html should return 200
-    finalResp = await fetch(finalUrl, { redirect: 'manual' });
-  } catch (e) {
+  if (!containsHelixDom) {
     return {
       isHelix: false,
-      reason: '.plain.html is unreachable',
-    };
-  }
-
-  // reject if .plain.html does not return 2XX
-  if (!finalResp.ok) {
-    return {
-      isHelix: false,
-      reason: `.plain.html does not return 2XX, returns ${finalResp.status}`,
-    };
-  }
-
-  const respText = await finalResp.text();
-
-  // reject if .plain.html contains <head>
-  if (respText.includes('<head>')) {
-    return {
-      isHelix: false,
-      reason: '.plain.html should not contain <head>',
+      reason: 'DOM is not in helix format',
     };
   }
 
