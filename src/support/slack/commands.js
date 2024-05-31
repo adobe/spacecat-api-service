@@ -19,6 +19,7 @@ import martechImpact from './commands/martech-impact.js';
 import runAudit from './commands/run-audit.js';
 import setLiveStatus from './commands/set-live-status.js';
 import help from './commands/help.js';
+import bulkUpdateAuditConfigs from './commands/bulk-update-audits.js';
 
 /**
  * Returns all commands.
@@ -35,5 +36,6 @@ export default (context) => [
   martechImpact(context),
   runAudit(context),
   setLiveStatus(context),
+  bulkUpdateAuditConfigs(context),
   help(context),
 ];

@@ -104,6 +104,81 @@ function SitesController(dataAccess) {
     return ok(sites);
   };
 
+  /** Bulk update audit configuration for multiple sites.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>}  Array of sites response.
+   */
+  const bulkUpdateSitesConfig = async (context) => {
+    const { baseURLs, enableAudits, auditTypes } = context.data;
+
+    if (!Array.isArray(baseURLs) || baseURLs.length === 0) {
+      return badRequest('Base URLs are required');
+    }
+    if (!Array.isArray(auditTypes) || auditTypes.length === 0) {
+      return badRequest('Audit types are required');
+    }
+    if (!isBoolean(enableAudits)) {
+      return badRequest('enableAudits is required');
+    }
+
+    const organizationsMap = new Map();
+
+    const sites = await Promise.all(baseURLs.map(async (baseURL) => {
+      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      if (!site) {
+        return { baseURL, errorMessage: `Site with baseURL: ${baseURL} not found`, status: 404 };
+      }
+      const organizationId = site.getOrganizationId();
+
+      if (organizationId !== 'default' && !organizationsMap.has(organizationId)) {
+        const organization = await dataAccess.getOrganizationByID(organizationId);
+        if (!organization) {
+          return { baseURL, errorMessage: `Error updating site  with baseURL: ${baseURL}, organization with id: ${organizationId} organization not found`, status: 500 };
+        }
+        organizationsMap.set(organizationId, organization);
+      }
+
+      return { baseURL, site };
+    }));
+
+    const responses = await Promise.all(sites.map(async ({
+      baseURL, site, errorMessage, status,
+    }) => {
+      if (!site) {
+        return { baseURL, response: { message: errorMessage, status } };
+      }
+      const organizationId = site.getOrganizationId();
+      const organization = organizationsMap.get(organizationId);
+
+      auditTypes.forEach((auditType) => {
+        if (organization) {
+          organization.getAuditConfig().updateAuditTypeConfig(
+            auditType,
+          );
+        }
+        site.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
+      });
+
+      if (organization && enableAudits) {
+        try {
+          await dataAccess.updateOrganization(organization);
+          organizationsMap.delete(organizationId);
+        } catch (error) {
+          return { baseURL: site.getBaseURL(), response: { message: `Error updating site with baseURL: ${baseURL}, update site organization with id: ${organizationId} failed`, status: 500 } };
+        }
+      }
+      try {
+        await dataAccess.updateSite(site);
+      } catch (error) {
+        return { baseURL: site.getBaseURL(), response: { message: `Error updating site with with baseURL: ${baseURL}, update site operation failed`, status: 500 } };
+      }
+
+      return { baseURL: site.getBaseURL(), response: { body: SiteDto.toJSON(site), status: 200 } };
+    }));
+
+    return createResponse(responses, 207);
+  };
+
   /**
    * Gets all sites as an XLS file.
    * @returns {Promise<Response>} XLS file.
@@ -377,6 +452,7 @@ function SitesController(dataAccess) {
     getAuditForSite,
     getByBaseURL,
     getAllByDeliveryType,
+    bulkUpdateSitesConfig,
     getByID,
     removeSite,
     updateSite,
