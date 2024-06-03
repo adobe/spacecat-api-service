@@ -25,11 +25,19 @@ chai.use(sinonChai);
 chai.use(chaiAsPromised);
 
 describe('ImportController tests', () => {
+  let sandbox;
   let importController;
   let context;
   let requestContext = {};
+  let mockSqsClient;
 
   beforeEach(() => {
+    sandbox = sinon.createSandbox();
+
+    mockSqsClient = {
+      sendMessage: sandbox.stub(),
+    };
+
     requestContext = {
       data: {
         urls: [],
@@ -48,16 +56,31 @@ describe('ImportController tests', () => {
       log: console,
       env: {
         ALLOWED_IMPORT_API_KEYS: 'b9ebcfb5-80c9-4236-91ba-d50e361db71d,7828b114-e20f-4234-bc4e-5b438b861edd',
+        IMPORT_QUEUE_URL_PREFIX: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
+        IMPORT_QUEUES: 'spacecat-import-queue-1,spacecat-import-queue-2',
       },
-      sqs: {
-        sendMessage: sinon.stub(),
-      },
+      sqs: mockSqsClient,
       s3Client: {
-        send: sinon.stub(),
+        send: sandbox.stub(),
+        getObject: sandbox.stub(),
+      },
+      dataAccess: {
+        getImportJobsByStatus: sandbox.stub().resolves([]), // Simulate no running jobs
+        createNewImportJob: sandbox.stub().resolves({
+          getId: () => 'c9188df2-a183-4592-93f5-2f1c5f956f91',
+        }),
+        createNewImportUrl: (urlRecord) => ({
+          ...urlRecord,
+          id: crypto.randomUUID(),
+        }),
       },
     };
 
     importController = ImportController(context);
+  });
+
+  afterEach(() => {
+    sandbox.restore();
   });
 
   describe('createImportJob', () => {
@@ -109,10 +132,41 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('should start a new import job (not yet implemented)', async () => {
+    it('should start a new import job', async () => {
       const response = await importController.createImportJob(requestContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(501);
+      expect(response.status).to.equal(202);
+
+      // Verify how many messages were sent to SQS
+      expect(mockSqsClient.sendMessage).to.have.been.calledThrice;
+    });
+
+    it('should pick another import queue when the first one is in use', async () => {
+      context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
+        'spacecat-import-queue-1',
+      ]);
+      importController = ImportController(context);
+      const response = await importController.createImportJob(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(202);
+
+      // Verify how many messages were sent to SQS
+      expect(mockSqsClient.sendMessage).to.have.been.calledThrice;
+
+      // Should be using the 2nd import queue
+      const firstCall = mockSqsClient.sendMessage.getCall(0);
+      expect(firstCall.args[0]).to.equal('spacecat-import-queue-2');
+    });
+
+    it('should fail when both available queues are in use', async () => {
+      context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
+        'spacecat-import-queue-1',
+        'spacecat-import-queue-2',
+      ]);
+      importController = ImportController(context);
+      const response = await importController.createImportJob(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(503); // Service unavailable
     });
   });
 

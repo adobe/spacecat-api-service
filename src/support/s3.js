@@ -11,20 +11,25 @@
  */
 
 import { S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
- * Wrapper function to create an S3 client and add it to the context.
- * When wrapped with this function, the client is available as context.s3Client.
+ * Wrapper function to enable access to S3 capabilities via the context.
+ * When wrapped with this function, the client is available as context.s3.s3Client
  *
  * @param {UniversalAction} fn
  * @returns {function(object, UniversalContext): Promise<Response>}
  */
 export function s3ClientWrapper(fn) {
   return async (request, context) => {
-    if (!context.s3Client) {
+    if (!context.s3) {
+      context.s3 = {};
       // Create an S3 client and add it to the context
       const { region } = context.runtime;
-      context.s3Client = new S3Client({ region });
+      context.s3.s3Client = new S3Client({ region });
+
+      // Add the getSignedUrl function to the context
+      context.s3.getSignedUrl = getSignedUrl;
     }
     return fn(request, context);
   };

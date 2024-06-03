@@ -12,6 +12,8 @@
 
 import { ErrorWithStatusCode } from './utils.js';
 
+const JOB_STATUS_RUNNING = 'RUNNING';
+
 function ImportSupervisor(services) {
   function validateServices() {
     const requiredServices = ['dataAccess', 'sqs', 's3Client', 'env', 'log'];
@@ -27,13 +29,14 @@ function ImportSupervisor(services) {
     dataAccess, sqs, s3Client, log, env,
   } = services;
   const {
+    IMPORT_QUEUE_URL_PREFIX,
     IMPORT_QUEUES, // Comma separated list of import queues
     IMPORT_S3_BUCKET,
   } = env;
   const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
-  function getAvailableImportQueue() {
-    const runningImportJobs = dataAccess.getAllRunningImportJobs();
+  async function getAvailableImportQueue() {
+    const runningImportJobs = await dataAccess.getImportJobsByStatus(JOB_STATUS_RUNNING);
     const importQueues = IMPORT_QUEUES.split(',');
 
     // Find an import queue that is not in use
@@ -56,12 +59,13 @@ function ImportSupervisor(services) {
       options,
       status: 'running',
     };
-    return dataAccess.createImportJob(newJob);
+    return dataAccess.createNewImportJob(newJob);
   }
 
   async function persistUrls(jobId, urls) {
     // - Generate a urlId guid for this single URL
     // - Set status to 'pending'
+    const urlRecords = [];
     for (const url of urls) {
       const urlRecord = {
         jobId,
@@ -69,8 +73,9 @@ function ImportSupervisor(services) {
         status: 'pending',
       };
       // eslint-disable-next-line no-await-in-loop
-      await dataAccess.createImportUrl(urlRecord);
+      urlRecords.push(await dataAccess.createNewImportUrl(urlRecord));
     }
+    return urlRecords;
   }
 
   async function startNewJob(urls, importApiKey, options) {
@@ -82,11 +87,11 @@ function ImportSupervisor(services) {
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(urls, importQueue, importApiKey, options);
 
-    // TODO: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/{jobId}/import.js
-    // TODO: Custom import.js scripts are not initially supported.
+    // Custom import.js scripts are not initially supported.
+    // Future: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/{jobId}/import.js
 
     // Create 1 record per URL in the import-url table
-    const urlRecords = await persistUrls(newImportJob.jobId, urls);
+    const urlRecords = await persistUrls(newImportJob.getId(), urls);
 
     // Iterate through all URLs and queue a message for each one in the (claimed) import-queue
     for (const urlRecord of urlRecords) {
@@ -96,7 +101,7 @@ function ImportSupervisor(services) {
         url: urlRecord.url,
       };
       // eslint-disable-next-line no-await-in-loop
-      await sqs.sendMessage(importQueue, message);
+      await sqs.sendMessage(IMPORT_QUEUE_URL_PREFIX + importQueue, message);
     }
 
     return newImportJob;
@@ -108,8 +113,7 @@ function ImportSupervisor(services) {
   }
 
   // eslint-disable-next-line no-unused-vars
-  async function getJobArchiveStream(jobId, importApiKey) {
-    // Read a file from s3 then return it
+  async function getJobArchiveSignedUrl(jobId, importApiKey) {
     try {
       // TODO: read the import job record first to confirm that the import API key matches
 
@@ -124,7 +128,7 @@ function ImportSupervisor(services) {
   return {
     startNewJob,
     getJobStatus,
-    getJobArchiveStream,
+    getJobArchiveSignedUrl,
   };
 }
 

@@ -115,6 +115,7 @@ Import controller requires the following env variables:
 
 ```plaintext
 ALLOWED_IMPORT_API_KEYS=comma separated list of allowed api keys, used to authenticate import requests
-IMPORT_QUEUES=comma separated list of queues to use for import jobs. If a queue is removed from this list, it will no longer be available for new import jobs
+IMPORT_QUEUES=comma separated list of queue names to use for import jobs. If a queue name is removed from this list, it will no longer be available for new import jobs
+IMPORT_QUEUE_URL_PREFIX=prefix for import queue URLs (eg. https://sqs.us-east-1.amazonaws.com/1234567890/), used to create the complete queue URL for import jobs
 IMPORT_S3_BUCKET=the S3 bucket to store import job artifacts
 ```

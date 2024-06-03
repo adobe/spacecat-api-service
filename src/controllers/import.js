@@ -17,12 +17,14 @@ import ImportSupervisor from '../support/import-supervisor.js';
 
 function ImportController(context) {
   const {
-    log, env, sqs, s3Client,
+    dataAccess, sqs, s3Client, log, env,
   } = context;
   const services = {
-    log,
+    dataAccess,
     sqs,
     s3Client,
+    log,
+    env,
   };
   const importSupervisor = new ImportSupervisor(services);
 
@@ -71,7 +73,7 @@ function ImportController(context) {
       validateImportApiKey(importApiKey);
 
       const { urls, options } = data;
-      const job = await importSupervisor.startNewJob(urls, options, importApiKey);
+      const job = await importSupervisor.startNewJob(urls, importApiKey, options);
 
       return createResponse(job, STATUS_ACCEPTED);
     } catch (error) {
@@ -85,9 +87,10 @@ function ImportController(context) {
     return createResponse({}, 501);
   }
 
-  // eslint-disable-next-line no-unused-vars
   async function getImportJobResult(requestContext) {
-    /**
+    // Generate a pre-signed URL for the S3 object and return that URL to the client
+
+    /*
      * Structure of the resulting .zip file.
      *   /documents/../page.docx
      *   /import-report.xlsx

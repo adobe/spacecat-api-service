@@ -26,7 +26,9 @@ describe('Import Supervisor', () => {
 
   beforeEach(() => {
     importSupervisor = new ImportSupervisor({
-      dataAccess: sinon.stub(),
+      dataAccess: {
+        getImportJobsByStatus: sinon.stub().resolves([]),
+      },
       sqs: sinon.stub(),
       s3Client: sinon.stub(),
       env: {},
@@ -56,7 +58,7 @@ describe('Import Supervisor', () => {
 
   describe('getJobArchive tests', () => {
     it('should initially return an empty object', async () => {
-      expect(await importSupervisor.getJobArchive('jobId')).to.deep.equal({});
+      expect(await importSupervisor.getJobArchiveSignedUrl('jobId')).to.deep.equal({});
     });
   });
 });
