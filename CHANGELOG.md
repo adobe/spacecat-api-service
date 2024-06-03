@@ -1,3 +1,24 @@
+## [1.41.4](https://github.com/adobe/spacecat-api-service/compare/v1.41.3...v1.41.4) (2024-06-02)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#322](https://github.com/adobe/spacecat-api-service/issues/322)) ([7fe2bf5](https://github.com/adobe/spacecat-api-service/commit/7fe2bf5fd2de53f4a81195e4cb3a41f4023dc34f))
+
+## [1.41.3](https://github.com/adobe/spacecat-api-service/compare/v1.41.2...v1.41.3) (2024-06-01)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#321](https://github.com/adobe/spacecat-api-service/issues/321)) ([a32828b](https://github.com/adobe/spacecat-api-service/commit/a32828ba5e724b9455f1f0ccaa586f77fd09b9b4))
+
+## [1.41.2](https://github.com/adobe/spacecat-api-service/compare/v1.41.1...v1.41.2) (2024-05-31)
+
+
+### Bug Fixes
+
+* simplify is-helix check ([#319](https://github.com/adobe/spacecat-api-service/issues/319)) ([fb68e11](https://github.com/adobe/spacecat-api-service/commit/fb68e11c576c7c8b7d5b910aabc66b80aabce5e9))
+
 ## [1.41.1](https://github.com/adobe/spacecat-api-service/compare/v1.41.0...v1.41.1) (2024-05-30)
 
 
