@@ -10,9 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-module.exports = {
-  root: true,
-  extends: '@adobe/helix',
+import adobeHelixConfig from "@adobe/eslint-config-helix";
+
+export default [
+  adobeHelixConfig,
+  {
+  // extends: '@adobe/helix',
+  ignores: [".vscode/*", 'coverage/*'],
   overrides: [
     {
       files: ['*.test.js'],
@@ -21,4 +25,4 @@ module.exports = {
       },
     },
   ],
-};
+}];
