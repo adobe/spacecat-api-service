@@ -73,6 +73,8 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /rum/{query}:
+    $ref: './rum-api.yaml#/rum'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:
@@ -126,6 +128,10 @@ components:
       type: apiKey
       in: header
       name: x-api-key
+    domainkey:
+      type: apiKey
+      in: query
+      name: domainkey
   schemas:
     $ref: './schemas.yaml'
   examples:
