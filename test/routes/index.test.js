@@ -69,6 +69,10 @@ describe('getRouteHandlers', () => {
     getImportJobResult: sinon.stub(),
   };
 
+  const mockRUMController = {
+    queryRUM: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -80,6 +84,7 @@ describe('getRouteHandlers', () => {
       mockTrigger,
       mockFulfillmentController,
       mockImportController,
+      mockRUMController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -122,6 +127,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'PATCH /organizations/:organizationId',
       'DELETE /organizations/:organizationId',
+      'GET /rum/:query',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'DELETE /sites/:siteId',

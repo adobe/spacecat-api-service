@@ -45,6 +45,7 @@ import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import ImportController from './controllers/import.js';
+import RUMController from './controllers/rum.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -102,6 +103,7 @@ async function run(request, context) {
       trigger,
       FulfillmentController(context),
       ImportController(context),
+      RUMController(context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
