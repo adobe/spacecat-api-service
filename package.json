@@ -71,7 +71,6 @@
     "@aws-sdk/client-s3": "3.588.0",
     "@aws-sdk/client-sqs": "3.588.0",
     "@slack/bolt": "3.18.0",
-    "is-valid-uuid-v4": "1.2.3",
     "slack-block-builder": "2.8.0"
   },
   "devDependencies": {

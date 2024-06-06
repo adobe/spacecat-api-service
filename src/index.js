@@ -28,7 +28,6 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
-import { isValidUUIDV4 } from 'is-valid-uuid-v4';
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
@@ -46,6 +45,10 @@ import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import ImportController from './controllers/import.js';
+
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
