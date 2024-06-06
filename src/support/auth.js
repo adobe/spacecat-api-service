@@ -36,6 +36,7 @@ export default function authWrapper(fn) {
 
     if (ANONYMOUS_ENDPOINTS.includes(route)
       || route.startsWith('POST /hooks/site-detection/')
+      || route.startsWith('GET /rum/')
       || method.toUpperCase() === 'OPTIONS') {
       return fn(request, context);
     }

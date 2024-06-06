@@ -51,6 +51,7 @@ function isStaticRoute(routePattern) {
  * @param {Function} triggerHandler - The trigger handler function.
  * @param {Object} fulfillmentController - The fulfillment controller.
  * @param {Object} importController - The import controller.
+ * @param {Object} rumController - The rum controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -63,6 +64,7 @@ export default function getRouteHandlers(
   triggerHandler,
   fulfillmentController,
   importController,
+  rumController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -84,6 +86,7 @@ export default function getRouteHandlers(
     'PATCH /organizations/:organizationId': organizationsController.updateOrganization,
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
+    'GET /rum/:query': rumController.queryRUM,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
