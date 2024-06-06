@@ -22,13 +22,14 @@ import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 
 function RUMController() {
   const queryRUM = async (context) => {
+    const { query } = context.params;
+
     const {
-      query,
       domain,
       domainkey,
       interval,
       granularity,
-    } = context.params;
+    } = context.data;
 
     if (!hasText(domain) || !hasText(domainkey)) {
       return badRequest('Parameters domain and domainkey are required');
