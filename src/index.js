@@ -16,6 +16,7 @@ import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import dataAccess from '@adobe/spacecat-shared-data-access';
 import {
+  badRequest,
   internalServerError,
   noContent,
   notFound,
@@ -27,6 +28,7 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
+import { isValidUUIDV4 } from 'is-valid-uuid-v4';
 import auth from './support/auth.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
@@ -103,6 +105,13 @@ async function run(request, context) {
 
     if (routeMatch) {
       const { handler, params } = routeMatch;
+      //
+      if (params.siteId && !isValidUUIDV4(params.siteId)) {
+        return badRequest('Site Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.organizationId && !isValidUUIDV4(params.organizationId)) {
+        return badRequest('Organization Id is invalid. Please provide a valid UUID.');
+      }
       context.params = params;
 
       return await handler(context);
