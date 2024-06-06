@@ -4,6 +4,14 @@
 ### Bug Fixes
 
 * allow only uuidv4 ids ([1b5d159](https://github.com/adobe/spacecat-api-service/commit/1b5d1593abb7a929c022f6a8c300e2101fb98530))
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.24.0 ([#328](https://github.com/adobe/spacecat-api-service/issues/328)) ([21bbf59](https://github.com/adobe/spacecat-api-service/commit/21bbf59fdd13ca02e5627c9f1630f0bb46c7651b))
+
+## [1.41.5](https://github.com/adobe/spacecat-api-service/compare/v1.41.4...v1.41.5) (2024-06-06)
+
+
+### Bug Fixes
+
+* allow only uuidv4 ids ([1b5d159](https://github.com/adobe/spacecat-api-service/commit/1b5d1593abb7a929c022f6a8c300e2101fb98530))
 
 ## [1.41.4](https://github.com/adobe/spacecat-api-service/compare/v1.41.3...v1.41.4) (2024-06-02)
 
