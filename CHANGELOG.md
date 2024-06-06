@@ -1,3 +1,10 @@
+## [1.41.5](https://github.com/adobe/spacecat-api-service/compare/v1.41.4...v1.41.5) (2024-06-06)
+
+
+### Bug Fixes
+
+* allow only uuidv4 ids ([1b5d159](https://github.com/adobe/spacecat-api-service/commit/1b5d1593abb7a929c022f6a8c300e2101fb98530))
+
 ## [1.41.4](https://github.com/adobe/spacecat-api-service/compare/v1.41.3...v1.41.4) (2024-06-02)
 
 
