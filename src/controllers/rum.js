@@ -37,7 +37,7 @@ function RUMController() {
 
     const rumapiClient = RUMAPIClient.createFrom(context);
 
-    const result = rumapiClient.query(query, {
+    const result = await rumapiClient.query(query, {
       domain,
       domainkey,
       interval,
