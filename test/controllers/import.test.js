@@ -55,7 +55,7 @@ describe('ImportController tests', () => {
     context = {
       log: console,
       env: {
-        ALLOWED_IMPORT_API_KEYS: 'b9ebcfb5-80c9-4236-91ba-d50e361db71d,7828b114-e20f-4234-bc4e-5b438b861edd',
+        IMPORT_ALLOWED_API_KEYS: 'b9ebcfb5-80c9-4236-91ba-d50e361db71d,7828b114-e20f-4234-bc4e-5b438b861edd',
         IMPORT_QUEUE_URL_PREFIX: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
         IMPORT_QUEUES: 'spacecat-import-queue-1,spacecat-import-queue-2',
       },
@@ -114,7 +114,7 @@ describe('ImportController tests', () => {
 
     it('should reject when no allowed API keys are defined', async () => {
       const contextNoApiKeys = { ...context };
-      delete contextNoApiKeys.env.ALLOWED_IMPORT_API_KEYS;
+      delete contextNoApiKeys.env.IMPORT_ALLOWED_API_KEYS;
       const importControllerNoApiKeys = new ImportController(contextNoApiKeys);
       const response = await importControllerNoApiKeys.createImportJob(requestContext);
       expect(response.status).to.equal(401); // Unauthorized
@@ -155,7 +155,7 @@ describe('ImportController tests', () => {
 
       // Should be using the 2nd import queue
       const firstCall = mockSqsClient.sendMessage.getCall(0);
-      expect(firstCall.args[0]).to.equal('spacecat-import-queue-2');
+      expect(firstCall.args[0]).to.equal('https://sqs.us-east-1.amazonaws.com/1234567890/spacecat-import-queue-2');
     });
 
     it('should fail when both available queues are in use', async () => {

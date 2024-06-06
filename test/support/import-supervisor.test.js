@@ -15,6 +15,7 @@
 import chai from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
+import { createImportJob } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
 import ImportSupervisor from '../../src/support/import-supervisor.js';
 
 chai.use(chaiAsPromised);
@@ -22,16 +23,19 @@ const { expect } = chai;
 
 describe('Import Supervisor', () => {
   let importSupervisor;
-  const urls = ['https://example.com/1', 'https://example.com/2'];
+  // const urls = ['https://example.com/1', 'https://example.com/2'];
 
   beforeEach(() => {
     importSupervisor = new ImportSupervisor({
       dataAccess: {
         getImportJobsByStatus: sinon.stub().resolves([]),
+        createNewImportJob: (newJob) => createImportJob(newJob),
       },
       sqs: sinon.stub(),
       s3Client: sinon.stub(),
-      env: {},
+      env: {
+        IMPORT_QUEUES: 'spacecat-import-queue-1,spacecat-import-queue-2',
+      },
       log: console,
     });
   });
@@ -44,21 +48,9 @@ describe('Import Supervisor', () => {
     })).to.throw('Invalid services: sqs is required');
   });
 
-  describe('startNewJob tests', () => {
-    it('should initially return an empty job object', async () => {
-      expect(await importSupervisor.startNewJob(urls)).to.deep.equal({});
-    });
-  });
-
   describe('getJobStatus tests', () => {
     it('should initially return an empty job object', async () => {
       expect(await importSupervisor.getJobStatus('jobId')).to.deep.equal({});
-    });
-  });
-
-  describe('getJobArchive tests', () => {
-    it('should initially return an empty object', async () => {
-      expect(await importSupervisor.getJobArchiveSignedUrl('jobId')).to.deep.equal({});
     });
   });
 });

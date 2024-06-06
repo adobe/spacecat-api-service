@@ -36,8 +36,8 @@ function ImportController(context) {
       throw new ErrorWithStatusCode('Invalid request: request body data is required', STATUS_BAD_REQUEST);
     }
 
-    if (!Array.isArray(data.urls)) {
-      throw new ErrorWithStatusCode('Invalid request: urls must be provided as an array', STATUS_BAD_REQUEST);
+    if (!Array.isArray(data.urls) || !data.urls.length > 0) {
+      throw new ErrorWithStatusCode('Invalid request: urls must be provided as a non-empty array', STATUS_BAD_REQUEST);
     }
 
     data.urls.forEach((url) => {
@@ -53,7 +53,7 @@ function ImportController(context) {
 
   function validateImportApiKey(importApiKey) {
     // Parse the allowed import keys from the environment
-    const allowedImportApiKeys = env.ALLOWED_IMPORT_API_KEYS?.split(',') || [];
+    const allowedImportApiKeys = env.IMPORT_ALLOWED_API_KEYS?.split(',') || [];
     if (!allowedImportApiKeys.includes(importApiKey)) {
       throw new ErrorWithStatusCode('Invalid import API key', 401);
     }
@@ -66,11 +66,11 @@ function ImportController(context) {
    */
   async function createImportJob(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
-    const importApiKey = headers['x-import-api-key'];
+    const { 'x-import-api-key': importApiKey } = headers;
 
     try {
-      validateRequestData(data);
       validateImportApiKey(importApiKey);
+      validateRequestData(data);
 
       const { urls, options } = data;
       const job = await importSupervisor.startNewJob(urls, importApiKey, options);
@@ -97,19 +97,11 @@ function ImportController(context) {
      */
     try {
       const { pathInfo: { headers }, params: { jobId } } = requestContext;
-      const importApiKey = headers['x-import-api-key'];
-      const s3Stream = importSupervisor.getJobArchiveStream(jobId, importApiKey);
+      const { 'x-import-api-key': importApiKey } = headers;
 
-      s3Stream.on('error', (err) => {
-        // TODO: improve error handling
-        throw err;
-      });
-
-      // Pipe the s3 stream to the HTTP response
-      const response = createResponse({}, 200);
-      // TODO: need to verify this approach will work as expected, esp. with larger files
-      s3Stream.pipe(response);
-      return response;
+      return createResponse({
+        downloadUrl: `TODO: get presigned URL for ${jobId} ${importApiKey}`,
+      }, 501);
     } catch (error) {
       log.error(`Failed to get import job result: ${error.message}`);
       return createResponse({}, error.status || 500);

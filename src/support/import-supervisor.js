@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { IMPORT_JOB_STATUS } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
 import { ErrorWithStatusCode } from './utils.js';
 
 const JOB_STATUS_RUNNING = 'RUNNING';
@@ -48,16 +49,29 @@ function ImportSupervisor(services) {
     throw new ErrorWithStatusCode('Service Unavailable: No import queue available', 503);
   }
 
-  async function createNewImportJob(urls, importQueue, importApiKey, options) {
-    // - Claim one of the free import queues
-    // - Set the import-job metadata
-    // - Set the status to 'running'
+  function determineBaseURL(urls) {
+    // Initially, we will just use the domain of the first URL
+    const url = new URL(urls[0]);
+    return `${url.protocol}//${url.hostname}`;
+  }
+
+  /**
+   * Create a new import job by claiming one of the free import queues, persisting the import job
+   * metadata, and setting the job status to 'running'.
+   * @param {Array<string>} urls the list of URLs to import
+   * @param {string} importQueueId the name of the queue to use for this import job
+   * @param {string} apiKey the API key used to authenticate the import request
+   * @param {object} options client provided options for the import job
+   * @returns {Promise<*>}
+   */
+  async function createNewImportJob(urls, importQueueId, apiKey, options) {
     const newJob = {
-      urls,
-      importQueue,
-      importApiKey,
+      id: crypto.randomUUID(),
+      importQueueId,
+      apiKey,
       options,
-      status: 'running',
+      baseURL: determineBaseURL(urls),
+      status: IMPORT_JOB_STATUS.RUNNING,
     };
     return dataAccess.createNewImportJob(newJob);
   }
@@ -82,10 +96,10 @@ function ImportSupervisor(services) {
     log.info(`Import requested for ${urls.length} URLs, import API key: ${importApiKey}`);
 
     // Determine if there is a free import queue
-    const importQueue = await getAvailableImportQueue();
+    const importQueueId = await getAvailableImportQueue();
 
     // If a queue is available, create the import-job record in dataAccess:
-    const newImportJob = await createNewImportJob(urls, importQueue, importApiKey, options);
+    const newImportJob = await createNewImportJob(urls, importQueueId, importApiKey, options);
 
     // Custom import.js scripts are not initially supported.
     // Future: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/{jobId}/import.js
@@ -101,7 +115,7 @@ function ImportSupervisor(services) {
         url: urlRecord.url,
       };
       // eslint-disable-next-line no-await-in-loop
-      await sqs.sendMessage(IMPORT_QUEUE_URL_PREFIX + importQueue, message);
+      await sqs.sendMessage(IMPORT_QUEUE_URL_PREFIX + importQueueId, message);
     }
 
     return newImportJob;
