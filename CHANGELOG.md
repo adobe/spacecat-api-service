@@ -1,3 +1,10 @@
+## [1.41.7](https://github.com/adobe/spacecat-api-service/compare/v1.41.6...v1.41.7) (2024-06-07)
+
+
+### Bug Fixes
+
+* allow default organization ([30b9e43](https://github.com/adobe/spacecat-api-service/commit/30b9e434b78443364bb91f6bc7c6647cbdd8d5e8))
+
 ## [1.41.6](https://github.com/adobe/spacecat-api-service/compare/v1.41.5...v1.41.6) (2024-06-07)
 
 
