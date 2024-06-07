@@ -112,11 +112,77 @@ function AuditsController(dataAccess) {
     return ok(AuditDto.toJSON(audit));
   };
 
+  /**
+   * Update configuration for a site's audit
+   * @returns {Promise<Response>} the site's updated audit config
+   */
+  const patchAuditForSite = async (context) => {
+    const siteId = context.params?.siteId;
+    const auditType = context.params?.auditType;
+
+    if (!hasText(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(auditType)) {
+      return badRequest('Audit type required');
+    }
+
+    // get audit type config
+    const site = await dataAccess.getSiteByID(siteId);
+    const auditConfig = await site.getAuditConfig();
+    const auditTypeConfig = await auditConfig.getAuditTypeConfig(auditType);
+
+    const { targetUrls, status } = context.data;
+    let updates = false;
+
+    if (status === 'skipped') {
+      updates = true;
+
+      if (updates) {
+        // todo add protection if targetUrls is undefined or null => no update possible
+
+        let newState = {
+          ...auditTypeConfig,
+          // todo check if the name should be skippedUrls instead of targetUrls
+          targetUrls: [
+            // todo define targetUrls: string[] in auditTypeConfig model in https://github.com/adobe/spacecat-shared/blob/main/packages/spacecat-shared-data-access/src/models/site/audit-config.js#L50
+            ...auditTypeConfig.targetUrls?.filter((v) => targetUrls.indexOf(v) < 0) ?? [],
+            targetUrls,
+          ],
+        };
+
+        if (!targetUrls?.length) {
+          // remove all opt-outs
+          newState = {
+            ...auditTypeConfig,
+            targetUrls: [],
+          };
+        }
+
+        // todo find out why these methods are unavailable
+        // https://github.com/adobe/spacecat-shared/blob/main/packages/spacecat-shared-data-access/src/models/site/audit-config.js#L60
+        auditConfig.updateAuditTypeConfig(auditType, newState);
+
+        // eslint-disable-next-line max-len
+        // todo find if both auditConfig.updateAuditTypeConfig and site.updateAuditTypeConfig are needed or only site.updateAuditTypeConfig
+        // https://github.com/adobe/spacecat-shared/blob/main/packages/spacecat-shared-data-access/src/models/site.js#L90C8-L90C29
+        await site.updateAuditTypeConfig(auditType, newState);
+        await dataAccess.updateSite(site);
+
+        return ok(newState);
+      }
+    }
+
+    return badRequest('No updates provided');
+  };
+
   return {
     getAllForSite,
     getAllLatest,
     getAllLatestForSite,
     getLatestForSite,
+    patchAuditForSite,
   };
 }
 
