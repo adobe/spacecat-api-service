@@ -11,13 +11,18 @@
  */
 
 import { IMPORT_JOB_STATUS } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from './utils.js';
 
 const JOB_STATUS_RUNNING = 'RUNNING';
 
+/**
+ * Import Supervisor provides functionality to start and manage import jobs.
+ * @param {object} services - The services required by the handler.
+ */
 function ImportSupervisor(services) {
   function validateServices() {
-    const requiredServices = ['dataAccess', 'sqs', 's3Client', 'env', 'log'];
+    const requiredServices = ['dataAccess', 'sqs', 's3', 'env', 'log'];
     requiredServices.forEach((service) => {
       if (!services[service]) {
         throw new Error(`Invalid services: ${service} is required`);
@@ -67,24 +72,31 @@ function ImportSupervisor(services) {
   async function createNewImportJob(urls, importQueueId, apiKey, options) {
     const newJob = {
       id: crypto.randomUUID(),
+      baseURL: determineBaseURL(urls),
       importQueueId,
       apiKey,
       options,
-      baseURL: determineBaseURL(urls),
       status: IMPORT_JOB_STATUS.RUNNING,
     };
     return dataAccess.createNewImportJob(newJob);
   }
 
+  /**
+   * Persist the list of URLs to import in the data layer.
+   * @param {string} jobId
+   * @param {Array<string>} urls
+   * @returns {Promise[object]}
+   */
   async function persistUrls(jobId, urls) {
     // - Generate a urlId guid for this single URL
     // - Set status to 'pending'
     const urlRecords = [];
     for (const url of urls) {
       const urlRecord = {
+        id: crypto.randomUUID(),
         jobId,
         url,
-        status: 'pending',
+        status: 'PENDING',
       };
       // eslint-disable-next-line no-await-in-loop
       urlRecords.push(await dataAccess.createNewImportUrl(urlRecord));
@@ -92,8 +104,35 @@ function ImportSupervisor(services) {
     return urlRecords;
   }
 
+  /**
+   * Queue each URL for import in the queue which has been claimed for the job. Each URL will be
+   * queued as a single self-contained message along with the job details and import options.
+   * @param {Array<object>} urlRecords
+   * @param {object} importJob
+   * @param {string} importQueueId
+   */
+  async function queueUrlsForImport(urlRecords, importJob, importQueueId) {
+    // Iterate through all URLs and queue a message for each one in the (claimed) import-queue
+    for (const urlRecord of urlRecords) {
+      const message = {
+        processingType: 'import',
+        jobId: importJob.getId(),
+        options: importJob.getOptions(),
+        urls: [
+          {
+            urlId: urlRecord.getId(),
+            url: urlRecord.getUrl(),
+            status: urlRecord.getStatus(),
+          },
+        ],
+      };
+      // eslint-disable-next-line no-await-in-loop
+      await sqs.sendMessage(IMPORT_QUEUE_URL_PREFIX + importQueueId, message);
+    }
+  }
+
   async function startNewJob(urls, importApiKey, options) {
-    log.info(`Import requested for ${urls.length} URLs, import API key: ${importApiKey}`);
+    log.info(`Import requested for ${urls.length} URLs, using import API key: ${importApiKey}`);
 
     // Determine if there is a free import queue
     const importQueueId = await getAvailableImportQueue();
@@ -107,31 +146,38 @@ function ImportSupervisor(services) {
     // Create 1 record per URL in the import-url table
     const urlRecords = await persistUrls(newImportJob.getId(), urls);
 
-    // Iterate through all URLs and queue a message for each one in the (claimed) import-queue
-    for (const urlRecord of urlRecords) {
-      const message = {
-        jobId: newImportJob.jobId,
-        urlId: urlRecord.urlId,
-        url: urlRecord.url,
-      };
-      // eslint-disable-next-line no-await-in-loop
-      await sqs.sendMessage(IMPORT_QUEUE_URL_PREFIX + importQueueId, message);
-    }
+    // Queue all URLs for import
+    await queueUrlsForImport(urlRecords, newImportJob, importQueueId);
 
     return newImportJob;
   }
 
-  // eslint-disable-next-line no-unused-vars
-  async function getJobStatus(jobId) {
-    return {};
+  /**
+   * Get an import job from the data layer. Verifies the API key to ensure it matches the one
+   * used to start the job.
+   * @param {string} jobId - The ID of the job.
+   * @param {string} importApiKey - API key that was provided to start the job.
+   * @returns {Promise<ImportJobDto>}
+   */
+  async function getImportJob(jobId, importApiKey) {
+    if (!hasText(jobId)) {
+      throw new ErrorWithStatusCode('Job ID is required', 400);
+    }
+
+    const job = await dataAccess.getImportJobByID(jobId);
+    // Job must exist, and the import API key must match the one provided
+    if (!job || job.getApiKey() !== importApiKey) {
+      throw new ErrorWithStatusCode('Job not found', 404);
+    }
+
+    return job;
   }
 
   // eslint-disable-next-line no-unused-vars
   async function getJobArchiveSignedUrl(jobId, importApiKey) {
     try {
-      // TODO: read the import job record first to confirm that the import API key matches
-
-      const key = `${jobId}/${IMPORT_RESULT_ARCHIVE_NAME}`;
+      const job = await getImportJob(jobId, importApiKey);
+      const key = `${job.getId()}/${IMPORT_RESULT_ARCHIVE_NAME}`;
       return s3Client.getObject({ Bucket: IMPORT_S3_BUCKET, Key: key }).createReadStream();
     } catch (err) {
       log.error('getJobArchive request failed.', err);
@@ -141,7 +187,7 @@ function ImportSupervisor(services) {
 
   return {
     startNewJob,
-    getJobStatus,
+    getImportJob,
     getJobArchiveSignedUrl,
   };
 }

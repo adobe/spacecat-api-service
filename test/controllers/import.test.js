@@ -19,6 +19,8 @@ import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
+import { createImportJob } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
+import { createImportUrl } from '@adobe/spacecat-shared-data-access/src/models/importer/import-url.js';
 import ImportController from '../../src/controllers/import.js';
 
 chai.use(sinonChai);
@@ -60,19 +62,16 @@ describe('ImportController tests', () => {
         IMPORT_QUEUES: 'spacecat-import-queue-1,spacecat-import-queue-2',
       },
       sqs: mockSqsClient,
-      s3Client: {
-        send: sandbox.stub(),
-        getObject: sandbox.stub(),
+      s3: {
+        s3Client: {
+          send: sandbox.stub(),
+          getObject: sandbox.stub(),
+        },
       },
       dataAccess: {
         getImportJobsByStatus: sandbox.stub().resolves([]), // Simulate no running jobs
-        createNewImportJob: sandbox.stub().resolves({
-          getId: () => 'c9188df2-a183-4592-93f5-2f1c5f956f91',
-        }),
-        createNewImportUrl: (urlRecord) => ({
-          ...urlRecord,
-          id: crypto.randomUUID(),
-        }),
+        createNewImportJob: (data) => createImportJob(data),
+        createNewImportUrl: (data) => createImportUrl(data),
       },
     };
 
