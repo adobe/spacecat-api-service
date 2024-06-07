@@ -112,7 +112,7 @@ async function run(request, context) {
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
-      if (params.organizationId && !isValidUUIDV4(params.organizationId)) {
+      if (params.organizationId && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
