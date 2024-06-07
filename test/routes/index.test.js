@@ -68,7 +68,7 @@ describe('getRouteHandlers', () => {
     getImportJobResult: sinon.stub(),
   };
 
-  it.skip('segregates static and dynamic routes', () => {
+  it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
       mockConfigurationController,
@@ -130,6 +130,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/audits',
       'GET /sites/:siteId/audits/:auditType',
       'GET /sites/:siteId/audits/:auditType/:auditedAt',
+      'PATCH /sites/:siteId/:auditType',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
       'GET /sites/:siteId/key-events',

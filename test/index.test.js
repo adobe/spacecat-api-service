@@ -176,7 +176,7 @@ describe('Index Tests', () => {
     expect(context.dataAccess.getSitesWithLatestAudit.calledOnce).to.be.true;
   });
 
-  it.skip('handles dynamic route with three params', async () => {
+  it('handles dynamic route with three params', async () => {
     context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/audits/lhs-mobile/2023-12-17T00:50:39.470Z';
 
     request = new Request(`${baseUrl}/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/audits/lhs-mobile/2023-12-17T00:50:39.470Z`, { headers: { 'x-api-key': apiKey } });
