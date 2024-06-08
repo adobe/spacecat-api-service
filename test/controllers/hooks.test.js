@@ -238,7 +238,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}, Source: CDN, Candidate: https://some-domain.com');
     });
   });
 
