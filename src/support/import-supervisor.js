@@ -14,7 +14,7 @@ import { IMPORT_JOB_STATUS } from '@adobe/spacecat-shared-data-access/src/models
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from './utils.js';
 
-const JOB_STATUS_RUNNING = 'RUNNING';
+const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
 
 /**
  * Import Supervisor provides functionality to start and manage import jobs.
@@ -32,7 +32,7 @@ function ImportSupervisor(services) {
 
   validateServices();
   const {
-    dataAccess, sqs, s3Client, log, env,
+    dataAccess, sqs, s3: { s3Client, GetObjectCommand, getSignedUrl }, log, env,
   } = services;
   const {
     IMPORT_QUEUE_URL_PREFIX,
@@ -42,7 +42,7 @@ function ImportSupervisor(services) {
   const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
   async function getAvailableImportQueue() {
-    const runningImportJobs = await dataAccess.getImportJobsByStatus(JOB_STATUS_RUNNING);
+    const runningImportJobs = await dataAccess.getImportJobsByStatus(IMPORT_JOB_STATUS.RUNNING);
     const importQueues = IMPORT_QUEUES.split(',');
 
     // Find an import queue that is not in use
@@ -173,14 +173,23 @@ function ImportSupervisor(services) {
     return job;
   }
 
-  // eslint-disable-next-line no-unused-vars
-  async function getJobArchiveSignedUrl(jobId, importApiKey) {
+  /**
+   * Get a presigned URL for the import job archive file in S3.
+   * @param job
+   * @returns {Promise<*>}
+   */
+  async function getJobArchiveSignedUrl(job) {
+    if (job.getStatus() !== IMPORT_JOB_STATUS.COMPLETE) {
+      throw new ErrorWithStatusCode('Archive not available, job is still running', 404);
+    }
+
     try {
-      const job = await getImportJob(jobId, importApiKey);
-      const key = `${job.getId()}/${IMPORT_RESULT_ARCHIVE_NAME}`;
-      return s3Client.getObject({ Bucket: IMPORT_S3_BUCKET, Key: key }).createReadStream();
+      const key = `import/${job.getId()}/${IMPORT_RESULT_ARCHIVE_NAME}`;
+      const command = new GetObjectCommand({ Bucket: IMPORT_S3_BUCKET, Key: key });
+
+      return getSignedUrl(s3Client, command, { expiresIn: PRE_SIGNED_URL_TTL_SECONDS });
     } catch (err) {
-      log.error('getJobArchive request failed.', err);
+      log.error(`Failed to generate presigned S3 URL for jobId: ${job.getId()}`, err);
       throw new ErrorWithStatusCode('Error occurred reading job archive file from S3', 500);
     }
   }

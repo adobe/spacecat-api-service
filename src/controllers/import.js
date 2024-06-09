@@ -115,12 +115,12 @@ function ImportController(context) {
    */
   async function getImportJobStatus(requestContext) {
     const {
-      params: { jobID },
+      params: { jobId },
       pathInfo: { headers: { 'x-import-api-key': importApiKey } },
     } = requestContext;
 
     try {
-      const job = await importSupervisor.getImportJob(jobID, importApiKey);
+      const job = await importSupervisor.getImportJob(jobId, importApiKey);
       return ok(ImportJobDto.toJSON(job));
     } catch (error) {
       log.error(`Failed to fetch import job status: ${error.message}`);
@@ -137,12 +137,12 @@ function ImportController(context) {
    */
   async function getImportJobResult(requestContext) {
     const {
-      params: { jobID },
+      params: { jobId },
       pathInfo: { headers: { 'x-import-api-key': importApiKey } },
     } = requestContext;
 
     try {
-      const job = await importSupervisor.getImportJobResult(jobID, importApiKey);
+      const job = await importSupervisor.getImportJob(jobId, importApiKey);
       const downloadUrl = await importSupervisor.getJobArchiveSignedUrl(job);
       return ok({
         id: job.getId(),

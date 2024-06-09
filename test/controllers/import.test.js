@@ -22,6 +22,7 @@ import sinon from 'sinon';
 import { createImportJob } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
 import { createImportUrl } from '@adobe/spacecat-shared-data-access/src/models/importer/import-url.js';
 import ImportController from '../../src/controllers/import.js';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 chai.use(sinonChai);
 chai.use(chaiAsPromised);
@@ -32,6 +33,18 @@ describe('ImportController tests', () => {
   let context;
   let requestContext = {};
   let mockSqsClient;
+  let mockDataAccess;
+  let mockS3;
+
+  const validApiKey = 'valid-api-key';
+  const exampleJob = {
+    id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
+    status: 'RUNNING',
+    options: {},
+    baseURL: 'https://www.example.com',
+    apiKey: 'valid-api-key',
+    importQueueId: 'spacecat-import-queue-1',
+  };
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
@@ -45,7 +58,6 @@ describe('ImportController tests', () => {
         urls: [],
       },
       params: {
-        jobId: '88fdb3c0-bbc1-4a13-ad5e-959f712cee0e',
       },
       pathInfo: {
         headers: {
@@ -53,6 +65,31 @@ describe('ImportController tests', () => {
         },
       },
     };
+
+    mockDataAccess = {
+      getImportJobsByStatus: sandbox.stub().resolves([]), // Simulate no running jobs
+      createNewImportJob: (data) => createImportJob(data),
+      createNewImportUrl: (data) => createImportUrl(data),
+      getImportJobByID: sandbox.stub(),
+    };
+
+    mockDataAccess.getImportJobByID.callsFake(async (jobId) => {
+      if (jobId !== exampleJob.id) {
+        throw new ErrorWithStatusCode('Not found', 404);
+      }
+      return createImportJob(exampleJob);
+    });
+
+    mockS3 = {
+      s3Client: {
+        send: sandbox.stub(),
+        getObject: sandbox.stub(),
+      },
+      GetObjectCommand: sandbox.stub(),
+      getSignedUrl: sandbox.stub(),
+    };
+
+    mockS3.getSignedUrl.callsFake(async () => 'https://example-bucket.s3.amazonaws.com/file-key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=EXAMPLE_ACCESS_KEY_ID%2F20240603%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240603T123456Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=abcdef1234567890');
 
     context = {
       log: console,
@@ -62,17 +99,8 @@ describe('ImportController tests', () => {
         IMPORT_QUEUES: 'spacecat-import-queue-1,spacecat-import-queue-2',
       },
       sqs: mockSqsClient,
-      s3: {
-        s3Client: {
-          send: sandbox.stub(),
-          getObject: sandbox.stub(),
-        },
-      },
-      dataAccess: {
-        getImportJobsByStatus: sandbox.stub().resolves([]), // Simulate no running jobs
-        createNewImportJob: (data) => createImportJob(data),
-        createNewImportUrl: (data) => createImportUrl(data),
-      },
+      s3: mockS3,
+      dataAccess: mockDataAccess,
     };
 
     importController = ImportController(context);
@@ -170,18 +198,87 @@ describe('ImportController tests', () => {
   });
 
   describe('getImportJobStatus', () => {
-    it('should query for an import job\'s status (not yet implemented)', async () => {
+    it('should fail when jobId is not provided', async () => {
       const response = await importController.getImportJobStatus(requestContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(501);
+      expect(response.status).to.equal(400);
+    });
+
+    it('should return 404 when the jobID cannot be found', async () => {
+      requestContext.pathInfo.headers['x-import-api-key'] = validApiKey;
+      requestContext.params.jobId = 'unknown-job-id';
+      const response = await importController.getImportJobStatus(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(404);
+    });
+
+    it('should return 404 when the api key is not valid', async () => {
+      requestContext.pathInfo.headers['x-import-api-key'] = 'not-a-valid-api-key';
+      requestContext.params.jobId = exampleJob.id;
+      const response = await importController.getImportJobStatus(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(404);
+    });
+
+    it('should return job details for a valid jobId', async () => {
+      requestContext.pathInfo.headers['x-import-api-key'] = validApiKey;
+      requestContext.params.jobId = exampleJob.id;
+      const response = await importController.getImportJobStatus(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const jobStatus = await response.json();
+      expect(jobStatus.id).to.equal('f91afda0-afc8-467e-bfa3-fdbeba3037e8');
+      expect(jobStatus.apiKey).to.equal('valid-api-key');
+      expect(jobStatus.baseURL).to.equal('https://www.example.com');
+      expect(jobStatus.importQueueId).to.equal('spacecat-import-queue-1');
+      expect(jobStatus.status).to.equal('RUNNING');
+      expect(jobStatus.options).to.deep.equal({});
     });
   });
 
   describe('getImportJobResult', () => {
-    it('should fetch the import job\'s result (not yet implemented)', async () => {
+    beforeEach(() => {
+      requestContext.pathInfo.headers['x-import-api-key'] = validApiKey;
+      requestContext.params.jobId = exampleJob.id;
+    });
+
+    it('should fail to fetch the import result for a running job', async () => {
+      // exampleJob is RUNNING
       const response = await importController.getImportJobResult(requestContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(501);
+      expect(response.status).to.equal(404);
+      expect(response.headers.get('x-error')).to.equal('Archive not available, job is still running');
+    });
+
+    it('should handle an AWS presigner error', async () => {
+      mockS3.getSignedUrl.throws(new Error('Presigner error'));
+      exampleJob.status = 'COMPLETE';
+
+      const response = await importController.getImportJobResult(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Error occurred reading job archive file from S3');
+    });
+
+    it('should generate a presigned URL for a COMPLETE job', async () => {
+      exampleJob.status = 'COMPLETE';
+
+      const response = await importController.getImportJobResult(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.deep.equal({
+        downloadUrl: 'https://example-bucket.s3.amazonaws.com/file-key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=EXAMPLE_ACCESS_KEY_ID%2F20240603%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240603T123456Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=abcdef1234567890',
+        id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
+      });
+    });
+
+    it('should handle an unexpected promise rejection from the AWS presigner', async () => {
+      mockS3.getSignedUrl.rejects(new Error('Presigner error'));
+      exampleJob.status = 'COMPLETE';
+
+      const response = await importController.getImportJobResult(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
     });
   });
 });

@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { S3Client } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
@@ -23,13 +23,13 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 export function s3ClientWrapper(fn) {
   return async (request, context) => {
     if (!context.s3) {
-      context.s3 = {};
       // Create an S3 client and add it to the context
       const { region } = context.runtime;
-      context.s3.s3Client = new S3Client({ region });
-
-      // Add the getSignedUrl function to the context
-      context.s3.getSignedUrl = getSignedUrl;
+      context.s3 = {
+        s3Client: new S3Client({ region }),
+        getSignedUrl,
+        GetObjectCommand,
+      };
     }
     return fn(request, context);
   };
