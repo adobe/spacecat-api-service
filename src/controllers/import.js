@@ -23,7 +23,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  * Import controller. Provides methods to create, read, and fetch the result of import jobs.
  * @param {DataAccess} context.dataAccess - Data access.
  * @param {object} context.sqs - AWS Simple Queue Service client.
- * @param {object} context.s3 - AWS S3 client.
+ * @param {object} context.s3 - AWS S3 client and related helpers.
  * @param {object} context.env - Environment details.
  * @param {object} context.log - Logger.
  * @returns {object} Import controller.
@@ -107,18 +107,22 @@ function ImportController(context) {
     }
   }
 
+  function parseRequestContext(requestContext) {
+    return {
+      jobId: requestContext.params.jobId,
+      importApiKey: requestContext.pathInfo.headers['x-import-api-key'],
+    };
+  }
+
   /**
    * Get the status of an import job.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
    * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
-   * @returns {Promise<Response>} Responds with a JSON representation of the import job.
+   * @returns {Promise<Response>} 200 OK with a JSON representation of the import job.
    */
   async function getImportJobStatus(requestContext) {
-    const {
-      params: { jobId },
-      pathInfo: { headers: { 'x-import-api-key': importApiKey } },
-    } = requestContext;
+    const { jobId, importApiKey } = parseRequestContext(requestContext);
 
     try {
       validateImportApiKey(importApiKey);
@@ -131,17 +135,14 @@ function ImportController(context) {
   }
 
   /**
-   * Get the result of an import job.
+   * Get the result of an import job, as a pre-signed download URL to S3.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
    * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
-   * @returns {Promise<Response>} Responds with a pre-signed URL to download the job result.
+   * @returns {Promise<Response>} 200 OK with a pre-signed URL to download the job result.
    */
   async function getImportJobResult(requestContext) {
-    const {
-      params: { jobId },
-      pathInfo: { headers: { 'x-import-api-key': importApiKey } },
-    } = requestContext;
+    const { jobId, importApiKey } = parseRequestContext(requestContext);
 
     try {
       validateImportApiKey(importApiKey);

@@ -254,7 +254,7 @@ describe('ImportController tests', () => {
       const response = await importController.getImportJobResult(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
-      expect(response.headers.get('x-error')).to.equal('Error occurred reading job archive file from S3');
+      expect(response.headers.get('x-error')).to.equal('Error occurred generating a pre-signed job result URL');
     });
 
     it('should generate a presigned URL for a COMPLETE job', async () => {

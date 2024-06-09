@@ -19,6 +19,12 @@ const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
 /**
  * Import Supervisor provides functionality to start and manage import jobs.
  * @param {object} services - The services required by the handler.
+ * @param {DataAccess} services.dataAccess - Data access.
+ * @param {object} services.sqs - AWS Simple Queue Service client.
+ * @param {object} services.s3 - AWS S3 client and related helpers.
+ * @param {object} services.env - Environment details.
+ * @param {object} services.log - Logger.
+ * @returns {object} Import Supervisor.
  */
 function ImportSupervisor(services) {
   function validateServices() {
@@ -41,6 +47,10 @@ function ImportSupervisor(services) {
   } = env;
   const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
+  /**
+   * Get an available import queue name that is not currently in use. Throws an error if no queue
+   * is currently available.
+   */
   async function getAvailableImportQueue() {
     const runningImportJobs = await dataAccess.getImportJobsByStatus(IMPORT_JOB_STATUS.RUNNING);
     const importQueues = IMPORT_QUEUES.split(',');
@@ -62,12 +72,12 @@ function ImportSupervisor(services) {
 
   /**
    * Create a new import job by claiming one of the free import queues, persisting the import job
-   * metadata, and setting the job status to 'running'.
-   * @param {Array<string>} urls the list of URLs to import
-   * @param {string} importQueueId the name of the queue to use for this import job
-   * @param {string} apiKey the API key used to authenticate the import request
-   * @param {object} options client provided options for the import job
-   * @returns {Promise<*>}
+   * metadata, and setting the job status to 'RUNNING'.
+   * @param {Array<string>} urls - The list of URLs to import.
+   * @param {string} importQueueId - Name of the queue to use for this import job.
+   * @param {string} apiKey - API key used to authenticate the import job request.
+   * @param {object} options - Client provided options for the import job.
+   * @returns {Promise<ImportJob>}
    */
   async function createNewImportJob(urls, importQueueId, apiKey, options) {
     const newJob = {
@@ -82,10 +92,7 @@ function ImportSupervisor(services) {
   }
 
   /**
-   * Persist the list of URLs to import in the data layer.
-   * @param {string} jobId
-   * @param {Array<string>} urls
-   * @returns {Promise[object]}
+   * Persist the URLs to import in the data layer, each as an import URL record.
    */
   async function persistUrls(jobId, urls) {
     // - Generate a urlId guid for this single URL
@@ -107,12 +114,12 @@ function ImportSupervisor(services) {
   /**
    * Queue each URL for import in the queue which has been claimed for the job. Each URL will be
    * queued as a single self-contained message along with the job details and import options.
-   * @param {Array<object>} urlRecords
-   * @param {object} importJob
-   * @param {string} importQueueId
+   * @param {Array<object>} urlRecords - Array of URL records to queue.
+   * @param {object} importJob - The import job record.
+   * @param {string} importQueueId - The ID of the claimed import queue to use.
    */
   async function queueUrlsForImport(urlRecords, importJob, importQueueId) {
-    // Iterate through all URLs and queue a message for each one in the (claimed) import-queue
+    // Iterate through all URLs and queue a message for each one in the (claimed) import queue
     for (const urlRecord of urlRecords) {
       const message = {
         processingType: 'import',
@@ -131,6 +138,13 @@ function ImportSupervisor(services) {
     }
   }
 
+  /**
+   * Starts a new import job.
+   * @param {Array<string>} urls - The URLs to import.
+   * @param {string} importApiKey - The API key to use for the import job.
+   * @param {object} options - Optional configuration params for the import job.
+   * @returns {Promise<ImportJob>}
+   */
   async function startNewJob(urls, importApiKey, options) {
     log.info(`Import requested for ${urls.length} URLs, using import API key: ${importApiKey}`);
 
@@ -141,7 +155,7 @@ function ImportSupervisor(services) {
     const newImportJob = await createNewImportJob(urls, importQueueId, importApiKey, options);
 
     // Custom import.js scripts are not initially supported.
-    // Future: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/{jobId}/import.js
+    // Future: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/import/{jobId}/import.js
 
     // Create 1 record per URL in the import-url table
     const urlRecords = await persistUrls(newImportJob.getId(), urls);
@@ -174,9 +188,9 @@ function ImportSupervisor(services) {
   }
 
   /**
-   * Get a presigned URL for the import job archive file in S3.
-   * @param job
-   * @returns {Promise<*>}
+   * For COMPLETE jobs, get a pre-signed URL for the import archive file stored in S3.
+   * @param {ImportJob} job - The import job.
+   * @returns {Promise<string>}
    */
   async function getJobArchiveSignedUrl(job) {
     if (job.getStatus() !== IMPORT_JOB_STATUS.COMPLETE) {
@@ -189,8 +203,8 @@ function ImportSupervisor(services) {
 
       return getSignedUrl(s3Client, command, { expiresIn: PRE_SIGNED_URL_TTL_SECONDS });
     } catch (err) {
-      log.error(`Failed to generate presigned S3 URL for jobId: ${job.getId()}`, err);
-      throw new ErrorWithStatusCode('Error occurred reading job archive file from S3', 500);
+      log.error(`Failed to generate pre-signed S3 URL for jobId: ${job.getId()}`, err);
+      throw new ErrorWithStatusCode('Error occurred generating a pre-signed job result URL', 500);
     }
   }
 
