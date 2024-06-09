@@ -72,6 +72,19 @@ describe('Index Tests', () => {
       },
       dataAccess: {
         getSitesWithLatestAudit: sinon.stub().resolves([]),
+        getOrganizationByID: sinon.stub().resolves({
+          getId: () => 'default',
+          getName: () => 'default',
+          getImsOrgId: () => 'default',
+          getCreatedAt: () => '2023-12-16T09:21:09.000Z',
+          getUpdatedAt: () => '2023-12-16T09:21:09.000Z',
+          getConfig: () => ({
+            audits: {
+              auditsDisabled: () => false,
+              getAuditTypeConfigs: () => ({ 404: { disabled: () => false } }),
+            },
+          }),
+        }),
         getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),
       },
       s3Client: {
@@ -132,10 +145,43 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger cwv audit for all');
   });
 
-  it('handles dynamic route errors', async () => {
-    context.pathInfo.suffix = '/sites/123';
+  it('handles siteId not correctly formated error', async () => {
+    context.pathInfo.suffix = '/sites/"e730ec12-4325-4bdd-ac71-0f4aa5b18cff"';
 
-    request = new Request(`${baseUrl}/sites/123`, { headers: { 'x-api-key': apiKey } });
+    request = new Request(`${baseUrl}/sites/"e730ec12-4325-4bdd-ac71-0f4aa5b18cff"`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Site Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles organizationId not correctly formated error', async () => {
+    context.pathInfo.suffix = '/organizations/1234';
+
+    request = new Request(`${baseUrl}/organizations/1234`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles organizationId is default', async () => {
+    context.pathInfo.suffix = '/organizations/default';
+
+    request = new Request(`${baseUrl}/organizations/default`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(200);
+    expect(context.dataAccess.getOrganizationByID.calledOnce).to.be.true;
+  });
+
+  it('handles dynamic route errors', async () => {
+    context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
+
+    request = new Request(`${baseUrl}/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff`, { headers: { 'x-api-key': apiKey } });
 
     const resp = await main(request, context);
 
@@ -155,9 +201,9 @@ describe('Index Tests', () => {
   });
 
   it('handles dynamic route with three params', async () => {
-    context.pathInfo.suffix = '/sites/1-2-3-4/audits/lhs-mobile/2023-12-17T00:50:39.470Z';
+    context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/audits/lhs-mobile/2023-12-17T00:50:39.470Z';
 
-    request = new Request(`${baseUrl}/sites/1-2-3-4/audits/lhs-mobile/2023-12-17T00:50:39.470Z`, { headers: { 'x-api-key': apiKey } });
+    request = new Request(`${baseUrl}/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff/audits/lhs-mobile/2023-12-17T00:50:39.470Z`, { headers: { 'x-api-key': apiKey } });
 
     const resp = await main(request, context);
 

@@ -16,6 +16,7 @@ import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import dataAccess from '@adobe/spacecat-shared-data-access';
 import {
+  badRequest,
   internalServerError,
   noContent,
   notFound,
@@ -45,6 +46,10 @@ import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
+
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
 
 export function enrichPathInfo(fn) { // export for testing
   return async (request, context) => {
@@ -104,6 +109,13 @@ async function run(request, context) {
 
     if (routeMatch) {
       const { handler, params } = routeMatch;
+      //
+      if (params.siteId && !isValidUUIDV4(params.siteId)) {
+        return badRequest('Site Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.organizationId && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
+        return badRequest('Organization Id is invalid. Please provide a valid UUID.');
+      }
       context.params = params;
 
       return await handler(context);
