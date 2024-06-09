@@ -40,6 +40,7 @@ function ImportController(context) {
     log,
     env,
   };
+  const { IMPORT_ALLOWED_API_KEYS } = env;
   const importSupervisor = new ImportSupervisor(services);
 
   const HEADER_ERROR = 'x-error';
@@ -68,7 +69,7 @@ function ImportController(context) {
 
   function validateImportApiKey(importApiKey) {
     // Parse the allowed import keys from the environment
-    const allowedImportApiKeys = env.IMPORT_ALLOWED_API_KEYS?.split(',') || [];
+    const allowedImportApiKeys = IMPORT_ALLOWED_API_KEYS?.split(',') || [];
     if (!allowedImportApiKeys.includes(importApiKey)) {
       throw new ErrorWithStatusCode('Invalid import API key', 401);
     }
@@ -120,6 +121,7 @@ function ImportController(context) {
     } = requestContext;
 
     try {
+      validateImportApiKey(importApiKey);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       return ok(ImportJobDto.toJSON(job));
     } catch (error) {
@@ -142,6 +144,7 @@ function ImportController(context) {
     } = requestContext;
 
     try {
+      validateImportApiKey(importApiKey);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       const downloadUrl = await importSupervisor.getJobArchiveSignedUrl(job);
       return ok({

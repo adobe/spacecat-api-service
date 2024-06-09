@@ -36,13 +36,12 @@ describe('ImportController tests', () => {
   let mockDataAccess;
   let mockS3;
 
-  const validApiKey = 'valid-api-key';
   const exampleJob = {
     id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
     status: 'RUNNING',
     options: {},
     baseURL: 'https://www.example.com',
-    apiKey: 'valid-api-key',
+    apiKey: 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
     importQueueId: 'spacecat-import-queue-1',
   };
 
@@ -205,15 +204,14 @@ describe('ImportController tests', () => {
     });
 
     it('should return 404 when the jobID cannot be found', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = validApiKey;
       requestContext.params.jobId = 'unknown-job-id';
       const response = await importController.getImportJobStatus(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
     });
 
-    it('should return 404 when the api key is not valid', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = 'not-a-valid-api-key';
+    it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
+      requestContext.pathInfo.headers['x-import-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
       requestContext.params.jobId = exampleJob.id;
       const response = await importController.getImportJobStatus(requestContext);
       expect(response).to.be.an.instanceOf(Response);
@@ -221,14 +219,13 @@ describe('ImportController tests', () => {
     });
 
     it('should return job details for a valid jobId', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = validApiKey;
       requestContext.params.jobId = exampleJob.id;
       const response = await importController.getImportJobStatus(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       const jobStatus = await response.json();
       expect(jobStatus.id).to.equal('f91afda0-afc8-467e-bfa3-fdbeba3037e8');
-      expect(jobStatus.apiKey).to.equal('valid-api-key');
+      expect(jobStatus.apiKey).to.equal('b9ebcfb5-80c9-4236-91ba-d50e361db71d');
       expect(jobStatus.baseURL).to.equal('https://www.example.com');
       expect(jobStatus.importQueueId).to.equal('spacecat-import-queue-1');
       expect(jobStatus.status).to.equal('RUNNING');
@@ -238,7 +235,7 @@ describe('ImportController tests', () => {
 
   describe('getImportJobResult', () => {
     beforeEach(() => {
-      requestContext.pathInfo.headers['x-import-api-key'] = validApiKey;
+      requestContext.pathInfo.headers['x-import-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
       requestContext.params.jobId = exampleJob.id;
     });
 
