@@ -105,6 +105,8 @@ describe('Audits Controller', () => {
     getLatestAuditsForSite: sandbox.stub(),
     getLatestAuditForSite: sandbox.stub(),
     patchAuditForSite: sandbox.stub(),
+    getSiteByID: sandbox.stub(),
+    updateSite: sandbox.stub(),
   };
 
   let auditsController;
@@ -265,17 +267,15 @@ describe('Audits Controller', () => {
   describe('patchAuditForSite', () => {
     it('returns bad request if site ID is missing', async () => {
       const result = await auditsController.patchAuditForSite({ params: { auditType: 'lhs-mobile' } });
-
       expect(result.status).to.equal(400);
     });
 
     it('returns bad request if audit type is missing', async () => {
       const result = await auditsController.patchAuditForSite({ params: { siteId: 'site1' } });
-
       expect(result.status).to.equal(400);
     });
 
-    it.skip('updates audit type config if status is skipped and targetUrls is provided', async () => {
+    it('updates audit type config if status is skipped and targetUrls is provided', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const targetUrls = ['url1', 'url2'];
@@ -286,6 +286,17 @@ describe('Audits Controller', () => {
         data: { targetUrls, status },
       };
 
+      const auditTypeConfig = { targetUrls: [] };
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          updateAuditTypeConfig: sinon.stub(),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
@@ -293,7 +304,7 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(200);
     });
 
-    it.skip('removes all opt-outs if targetUrls is empty', async () => {
+    it('removes all opt-outs if targetUrls is empty', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const targetUrls = [];
@@ -304,6 +315,17 @@ describe('Audits Controller', () => {
         data: { targetUrls, status },
       };
 
+      const auditTypeConfig = { targetUrls: ['url1', 'url2'] };
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          updateAuditTypeConfig: sinon.stub(),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
@@ -311,19 +333,62 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(200);
     });
 
-    it.skip('returns bad request if no updates are provided', async () => {
+    it('adds new targetUrls to existing ones', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const status = 'not-skipped';
+      const targetUrls = ['url3', 'url4'];
+      const status = 'skipped';
 
       const context = {
         params: { siteId, auditType },
-        data: { status },
+        data: { targetUrls, status },
       };
 
-      const result = await auditsController.patchAuditForSite(context);
+      const auditTypeConfig = { targetUrls: ['url1', 'url2'] };
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          updateAuditTypeConfig: sinon.stub(),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
 
-      expect(result.status).to.equal(400);
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+      const newState = await result.json();
+
+      expect(newState.targetUrls).to.deep.equal(['url1', 'url2', 'url3', 'url4']);
+      expect(result.status).to.equal(200);
+    });
+
+    it('does not add duplicate targetUrls', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const targetUrls = ['url1', 'url2'];
+      const status = 'skipped';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { targetUrls, status },
+      };
+
+      const auditTypeConfig = { targetUrls: ['url1', 'url2'] };
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          updateAuditTypeConfig: sinon.stub(),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+      const newState = await result.json();
+
+      expect(newState.targetUrls).to.deep.equal(['url1', 'url2']);
+      expect(result.status).to.equal(200);
     });
   });
 });

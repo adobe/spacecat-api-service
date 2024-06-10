@@ -148,7 +148,7 @@ function AuditsController(dataAccess) {
           targetUrls: [
             // todo define targetUrls: string[] in auditTypeConfig model in https://github.com/adobe/spacecat-shared/blob/main/packages/spacecat-shared-data-access/src/models/site/audit-config.js#L50
             ...auditTypeConfig.targetUrls?.filter((v) => targetUrls.indexOf(v) < 0) ?? [],
-            targetUrls,
+            ...targetUrls,
           ],
         };
 
