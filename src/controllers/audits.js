@@ -130,8 +130,8 @@ function AuditsController(dataAccess) {
 
     // get audit type config
     const site = await dataAccess.getSiteByID(siteId);
-    const auditConfig = await site.getAuditConfig();
-    const auditTypeConfig = await auditConfig.getAuditTypeConfig(auditType);
+    const auditConfig = site.getAuditConfig();
+    const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
 
     const { targetUrls, status } = context.data;
     let updates = false;

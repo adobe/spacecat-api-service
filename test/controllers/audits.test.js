@@ -104,6 +104,7 @@ describe('Audits Controller', () => {
     getLatestAudits: sandbox.stub(),
     getLatestAuditsForSite: sandbox.stub(),
     getLatestAuditForSite: sandbox.stub(),
+    patchAuditForSite: sandbox.stub(),
   };
 
   let auditsController;
@@ -258,6 +259,18 @@ describe('Audits Controller', () => {
       const result = await auditsController.getLatestForSite({ params: { siteId: 'site1', auditType: 'lhs-mobile' } });
 
       expect(result.status).to.equal(404);
+    });
+
+    it('returns bad request if site ID is missing', async () => {
+      const result = await auditsController.patchAuditForSite({ params: { auditType: 'broken-backlinks' } });
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns bad request if audit type is missing', async () => {
+      const result = await auditsController.patchAuditForSite({ params: { siteId: 'site1' } });
+
+      expect(result.status).to.equal(400);
     });
   });
 });
