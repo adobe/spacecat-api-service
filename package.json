@@ -70,6 +70,7 @@
     "@adobe/spacecat-shared-utils": "1.15.8",
     "@aws-sdk/client-s3": "3.592.0",
     "@aws-sdk/client-sqs": "3.592.0",
+    "@aws-sdk/s3-request-presigner": "3.592.0",
     "@slack/bolt": "3.18.0",
     "slack-block-builder": "2.8.0"
   },

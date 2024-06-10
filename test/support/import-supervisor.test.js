@@ -9,52 +9,26 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-
 /* eslint-env mocha */
-
 import chai from 'chai';
-import chaiAsPromised from 'chai-as-promised';
-import sinon from 'sinon';
 import ImportSupervisor from '../../src/support/import-supervisor.js';
 
-chai.use(chaiAsPromised);
 const { expect } = chai;
 
 describe('Import Supervisor', () => {
-  let importSupervisor;
-  const urls = ['https://example.com/1', 'https://example.com/2'];
-
-  beforeEach(() => {
-    importSupervisor = new ImportSupervisor({
+  it('should fail to create an import supervisor when required services are missing', () => {
+    const services = {
+      dataAccess: {},
+      sqs: {},
+      // Missing the s3 service
+      env: {},
       log: console,
-      sqsClient: sinon.stub(),
-      s3Client: sinon.stub(),
-    });
-  });
+    };
+    expect(() => new ImportSupervisor(services, {})).to.throw('Invalid services: s3 is required');
 
-  it('should throw when missing required services', async () => {
-    expect(() => new ImportSupervisor({})).to.throw('Invalid services: log is required');
-
-    expect(() => new ImportSupervisor({
-      log: sinon.stub(),
-    })).to.throw('Invalid services: sqsClient is required');
-  });
-
-  describe('startNewJob tests', () => {
-    it('should initially return an empty job object', async () => {
-      expect(await importSupervisor.startNewJob(urls)).to.deep.equal({});
-    });
-  });
-
-  describe('getJobStatus tests', () => {
-    it('should initially return an empty job object', async () => {
-      expect(await importSupervisor.getJobStatus('jobId')).to.deep.equal({});
-    });
-  });
-
-  describe('getJobArchive tests', () => {
-    it('should initially return an empty object', async () => {
-      expect(await importSupervisor.getJobArchive('jobId')).to.deep.equal({});
-    });
+    services.s3 = {};
+    delete services.dataAccess;
+    // Now missing the dataAccess service
+    expect(() => new ImportSupervisor(services, {})).to.throw('Invalid services: dataAccess is required');
   });
 });
