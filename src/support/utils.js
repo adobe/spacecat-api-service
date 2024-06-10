@@ -137,10 +137,9 @@ export const triggerExperimentationCandidates = async (
  * containing the result of the Helix site check and an optional reason if it's not a Helix site.
  */
 export async function isHelixSite(url) {
-  let dom;
+  let resp;
   try {
-    const resp = await fetch(url);
-    dom = await resp.text();
+    resp = await fetch(url);
   } catch (e) {
     return {
       isHelix: false,
@@ -148,12 +147,18 @@ export async function isHelixSite(url) {
     };
   }
 
+  const dom = await resp.text();
+  const { status } = resp;
+  const headers = resp.headers.plain();
+
   const containsHelixDom = /<header><\/header>\s*<main>\s*<div>/.test(dom);
 
   if (!containsHelixDom) {
     return {
       isHelix: false,
-      reason: 'DOM is not in helix format',
+      // if the DOM is not in helix format, log the response status, headers and first 100 chars
+      // of <body> for debugging purposes
+      reason: `DOM is not in helix format. Status: ${status}. Response headers: ${JSON.stringify(headers)}. Body: ${dom.includes('<body>') ? dom.substring(dom.indexOf('<body>'), dom.indexOf('<body>') + 100) : ''}`,
     };
   }
 
