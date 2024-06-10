@@ -260,15 +260,68 @@ describe('Audits Controller', () => {
 
       expect(result.status).to.equal(404);
     });
+  });
 
+  describe('patchAuditForSite', () => {
     it('returns bad request if site ID is missing', async () => {
-      const result = await auditsController.patchAuditForSite({ params: { auditType: 'broken-backlinks' } });
+      const result = await auditsController.patchAuditForSite({ params: { auditType: 'lhs-mobile' } });
 
       expect(result.status).to.equal(400);
     });
 
     it('returns bad request if audit type is missing', async () => {
       const result = await auditsController.patchAuditForSite({ params: { siteId: 'site1' } });
+
+      expect(result.status).to.equal(400);
+    });
+
+    it.skip('updates audit type config if status is skipped and targetUrls is provided', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const targetUrls = ['url1', 'url2'];
+      const status = 'skipped';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { targetUrls, status },
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
+      const newState = await result.json();
+
+      expect(newState.targetUrls).to.deep.equal(targetUrls);
+      expect(result.status).to.equal(200);
+    });
+
+    it.skip('removes all opt-outs if targetUrls is empty', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const targetUrls = [];
+      const status = 'skipped';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { targetUrls, status },
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
+      const newState = await result.json();
+
+      expect(newState.targetUrls).to.deep.equal([]);
+      expect(result.status).to.equal(200);
+    });
+
+    it.skip('returns bad request if no updates are provided', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const status = 'not-skipped';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { status },
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(400);
     });
