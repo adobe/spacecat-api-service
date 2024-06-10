@@ -1,3 +1,10 @@
+## [1.41.9](https://github.com/adobe/spacecat-api-service/compare/v1.41.8...v1.41.9) (2024-06-10)
+
+
+### Bug Fixes
+
+* improved logging site detection ([#337](https://github.com/adobe/spacecat-api-service/issues/337)) ([fd716c3](https://github.com/adobe/spacecat-api-service/commit/fd716c3a749e5ef1582b0ac2ce0dc796eddd07ae))
+
 ## [1.41.8](https://github.com/adobe/spacecat-api-service/compare/v1.41.7...v1.41.8) (2024-06-08)
 
 
