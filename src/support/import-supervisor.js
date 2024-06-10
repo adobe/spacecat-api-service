@@ -121,7 +121,7 @@ function ImportSupervisor(services, config) {
    * @param {string} importQueueId - The ID of the claimed import queue to use.
    */
   async function queueUrlsForImport(urlRecords, importJob, importQueueId) {
-    log.info(`Queuing ${urlRecords.length} URLs for import in queue: ${importQueueId} (jobId: ${importJob.getId()})`);
+    log.info(`Queuing ${urlRecords.length} URLs for import in queue: ${importQueueId} (jobId: ${importJob.getId()}, baseUrl: ${importJob.getBaseURL()})`);
     // Iterate through all URLs and queue a message for each one in the (claimed) import queue
     for (const urlRecord of urlRecords) {
       const message = {
@@ -156,6 +156,8 @@ function ImportSupervisor(services, config) {
 
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(urls, importQueueId, importApiKey, options);
+
+    log.info(`New import job created for API key: ${importApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
 
     // Custom import.js scripts are not initially supported.
     // Future: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/import/{jobId}/import.js
