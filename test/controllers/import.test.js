@@ -187,6 +187,14 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Invalid request: options must be an object');
     });
 
+    it('should fail if sqs fails to send a message', async () => {
+      context.sqs.sendMessage = sandbox.stub().throws(new Error('Queue error'));
+      importController = ImportController(context);
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Queue error');
+    });
+
     it('should start a new import job', async () => {
       const response = await importController.createImportJob(requestContext);
       expect(response).to.be.an.instanceOf(Response);

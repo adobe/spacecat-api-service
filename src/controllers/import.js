@@ -110,7 +110,7 @@ function ImportController(context) {
 
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {
-      log.error(`Failed to queue import job: ${error.message}`);
+      log.error(`Failed to create a new import job: ${error.message}`);
       return createErrorResponse(error);
     }
   }
@@ -137,7 +137,7 @@ function ImportController(context) {
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       return ok(ImportJobDto.toJSON(job));
     } catch (error) {
-      log.error(`Failed to fetch import job status: ${error.message}`);
+      log.error(`Failed to fetch import job status for jobId: ${jobId}, message: ${error.message}`);
       return createErrorResponse(error);
     }
   }

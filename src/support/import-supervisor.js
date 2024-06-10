@@ -121,6 +121,7 @@ function ImportSupervisor(services, config) {
    * @param {string} importQueueId - The ID of the claimed import queue to use.
    */
   async function queueUrlsForImport(urlRecords, importJob, importQueueId) {
+    log.info(`Queuing ${urlRecords.length} URLs for import in queue: ${importQueueId} (jobId: ${importJob.getId()})`);
     // Iterate through all URLs and queue a message for each one in the (claimed) import queue
     for (const urlRecord of urlRecords) {
       const message = {
