@@ -1,3 +1,10 @@
+# [1.42.0](https://github.com/adobe/spacecat-api-service/compare/v1.41.9...v1.42.0) (2024-06-10)
+
+
+### Features
+
+* Import as a Service API implementation ([#341](https://github.com/adobe/spacecat-api-service/issues/341)) ([08e2260](https://github.com/adobe/spacecat-api-service/commit/08e2260af0187175077bb18ea3b877424abb138f))
+
 ## [1.41.9](https://github.com/adobe/spacecat-api-service/compare/v1.41.8...v1.41.9) (2024-06-10)
 
 
