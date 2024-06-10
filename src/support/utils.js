@@ -156,7 +156,9 @@ export async function isHelixSite(url) {
   if (!containsHelixDom) {
     return {
       isHelix: false,
-      reason: `DOM is not in helix format. Status: ${status}. Response headers: ${JSON.stringify(headers)}`,
+      // if the DOM is not in helix format, log the response status, headers and first 100 chars
+      // of <body> for debugging purposes
+      reason: `DOM is not in helix format. Status: ${status}. Response headers: ${JSON.stringify(headers)}. Body: ${dom.includes('<body>') ? dom.substring(dom.indexOf('<body>'), dom.indexOf('<body>') + 100) : ''}`,
     };
   }
 
