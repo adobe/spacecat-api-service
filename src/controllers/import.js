@@ -25,6 +25,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  * @param {object} context.sqs - AWS Simple Queue Service client.
  * @param {object} context.s3 - AWS S3 client and related helpers.
  * @param {object} context.env - Environment details.
+ * @param {string} context.env.IMPORT_CONFIGURATION - Import configuration params, as a JSON string.
  * @param {object} context.log - Logger.
  * @returns {object} Import controller.
  * @constructor
@@ -40,8 +41,16 @@ function ImportController(context) {
     log,
     env,
   };
-  const { IMPORT_ALLOWED_API_KEYS } = env;
-  const importSupervisor = new ImportSupervisor(services);
+
+  let importConfiguration = {};
+  try {
+    importConfiguration = JSON.parse(env.IMPORT_CONFIGURATION);
+  } catch (error) {
+    log.error(`Failed to parse import configuration: ${error.message}`);
+  }
+
+  const importSupervisor = new ImportSupervisor(services, importConfiguration);
+  const { allowedApiKeys = [] } = importConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
@@ -69,8 +78,7 @@ function ImportController(context) {
 
   function validateImportApiKey(importApiKey) {
     // Parse the allowed import keys from the environment
-    const allowedImportApiKeys = IMPORT_ALLOWED_API_KEYS?.split(',') || [];
-    if (!allowedImportApiKeys.includes(importApiKey)) {
+    if (!allowedApiKeys.includes(importApiKey)) {
       throw new ErrorWithStatusCode('Invalid import API key', 401);
     }
   }

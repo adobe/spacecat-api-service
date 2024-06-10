@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { IMPORT_JOB_STATUS } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
+import { ImportJobStatus } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from './utils.js';
 
@@ -22,13 +22,16 @@ const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
  * @param {DataAccess} services.dataAccess - Data access.
  * @param {object} services.sqs - AWS Simple Queue Service client.
  * @param {object} services.s3 - AWS S3 client and related helpers.
- * @param {object} services.env - Environment details.
  * @param {object} services.log - Logger.
+ * @param {object} config - Import configuration details.
+ * @param {Array<string>} config.queues - Array of available import queues.
+ * @param {string} config.queueUrlPrefix - URL prefix for the import queues.
+ * @param {string} config.s3Bucket - S3 bucket name where import artifacts will be stored.
  * @returns {object} Import Supervisor.
  */
-function ImportSupervisor(services) {
+function ImportSupervisor(services, config) {
   function validateServices() {
-    const requiredServices = ['dataAccess', 'sqs', 's3', 'env', 'log'];
+    const requiredServices = ['dataAccess', 'sqs', 's3', 'log'];
     requiredServices.forEach((service) => {
       if (!services[service]) {
         throw new Error(`Invalid services: ${service} is required`);
@@ -38,13 +41,13 @@ function ImportSupervisor(services) {
 
   validateServices();
   const {
-    dataAccess, sqs, s3: { s3Client, GetObjectCommand, getSignedUrl }, log, env,
+    dataAccess, sqs, s3: { s3Client, GetObjectCommand, getSignedUrl }, log,
   } = services;
   const {
-    IMPORT_QUEUE_URL_PREFIX,
-    IMPORT_QUEUES, // Comma separated list of import queues
-    IMPORT_S3_BUCKET,
-  } = env;
+    queues = [], // Array of import queues
+    queueUrlPrefix,
+    s3Bucket,
+  } = config;
   const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
   /**
@@ -52,11 +55,10 @@ function ImportSupervisor(services) {
    * is currently available.
    */
   async function getAvailableImportQueue() {
-    const runningImportJobs = await dataAccess.getImportJobsByStatus(IMPORT_JOB_STATUS.RUNNING);
-    const importQueues = IMPORT_QUEUES.split(',');
+    const runningImportJobs = await dataAccess.getImportJobsByStatus(ImportJobStatus.RUNNING);
 
     // Find an import queue that is not in use
-    for (const queue of importQueues) {
+    for (const queue of queues) {
       if (!runningImportJobs.includes(queue)) {
         return queue;
       }
@@ -86,7 +88,7 @@ function ImportSupervisor(services) {
       importQueueId,
       apiKey,
       options,
-      status: IMPORT_JOB_STATUS.RUNNING,
+      status: ImportJobStatus.RUNNING,
     };
     return dataAccess.createNewImportJob(newJob);
   }
@@ -134,7 +136,7 @@ function ImportSupervisor(services) {
         ],
       };
       // eslint-disable-next-line no-await-in-loop
-      await sqs.sendMessage(IMPORT_QUEUE_URL_PREFIX + importQueueId, message);
+      await sqs.sendMessage(queueUrlPrefix + importQueueId, message);
     }
   }
 
@@ -181,7 +183,7 @@ function ImportSupervisor(services) {
     const job = await dataAccess.getImportJobByID(jobId);
     // Job must exist, and the import API key must match the one provided
     if (!job || job.getApiKey() !== importApiKey) {
-      throw new ErrorWithStatusCode('Job not found', 404);
+      throw new ErrorWithStatusCode('Not found', 404);
     }
 
     return job;
@@ -193,13 +195,13 @@ function ImportSupervisor(services) {
    * @returns {Promise<string>}
    */
   async function getJobArchiveSignedUrl(job) {
-    if (job.getStatus() !== IMPORT_JOB_STATUS.COMPLETE) {
+    if (job.getStatus() !== ImportJobStatus.COMPLETE) {
       throw new ErrorWithStatusCode('Archive not available, job is still running', 404);
     }
 
     try {
       const key = `import/${job.getId()}/${IMPORT_RESULT_ARCHIVE_NAME}`;
-      const command = new GetObjectCommand({ Bucket: IMPORT_S3_BUCKET, Key: key });
+      const command = new GetObjectCommand({ Bucket: s3Bucket, Key: key });
 
       return getSignedUrl(s3Client, command, { expiresIn: PRE_SIGNED_URL_TTL_SECONDS });
     } catch (err) {

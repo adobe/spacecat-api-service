@@ -24,11 +24,11 @@ describe('Import Supervisor', () => {
       env: {},
       log: console,
     };
-    expect(() => new ImportSupervisor(services)).to.throw('Invalid services: s3 is required');
+    expect(() => new ImportSupervisor(services, {})).to.throw('Invalid services: s3 is required');
 
     services.s3 = {};
     delete services.dataAccess;
     // Now missing the dataAccess service
-    expect(() => new ImportSupervisor(services)).to.throw('Invalid services: dataAccess is required');
+    expect(() => new ImportSupervisor(services, {})).to.throw('Invalid services: dataAccess is required');
   });
 });

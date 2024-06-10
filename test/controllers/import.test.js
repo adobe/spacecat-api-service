@@ -35,6 +35,7 @@ describe('ImportController tests', () => {
   let mockSqsClient;
   let mockDataAccess;
   let mockS3;
+  let importConfiguration;
 
   const exampleJob = {
     id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
@@ -90,12 +91,16 @@ describe('ImportController tests', () => {
 
     mockS3.getSignedUrl.callsFake(async () => 'https://example-bucket.s3.amazonaws.com/file-key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=EXAMPLE_ACCESS_KEY_ID%2F20240603%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240603T123456Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=abcdef1234567890');
 
+    importConfiguration = {
+      allowedApiKeys: ['b9ebcfb5-80c9-4236-91ba-d50e361db71d', '7828b114-e20f-4234-bc4e-5b438b861edd'],
+      queues: ['spacecat-import-queue-1', 'spacecat-import-queue-2'],
+      queueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
+    };
+
     context = {
       log: console,
       env: {
-        IMPORT_ALLOWED_API_KEYS: 'b9ebcfb5-80c9-4236-91ba-d50e361db71d,7828b114-e20f-4234-bc4e-5b438b861edd',
-        IMPORT_QUEUE_URL_PREFIX: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
-        IMPORT_QUEUES: 'spacecat-import-queue-1,spacecat-import-queue-2',
+        IMPORT_CONFIGURATION: JSON.stringify(importConfiguration),
       },
       sqs: mockSqsClient,
       s3: mockS3,
@@ -123,39 +128,63 @@ describe('ImportController tests', () => {
     it('should respond with an error code when the request is missing data', async () => {
       delete requestContext.data;
       const response = await importController.createImportJob(requestContext);
+
       expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: request body data is required');
     });
 
     it('should respond with an error code when the data format is incorrect', async () => {
       requestContext.data.urls = 'https://example.com/must/be/an/array';
       const response = await importController.createImportJob(requestContext);
+
       expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
 
     it('should reject an invalid import API key', async () => {
       requestContext.pathInfo.headers['x-import-api-key'] = 'unknown-api-key';
       const response = await importController.createImportJob(requestContext);
+
       expect(response.status).to.equal(401); // Unauthorized
+      expect(response.headers.get('x-error')).to.equal('Invalid import API key');
     });
 
     it('should reject when no allowed API keys are defined', async () => {
       const contextNoApiKeys = { ...context };
-      delete contextNoApiKeys.env.IMPORT_ALLOWED_API_KEYS;
+      delete importConfiguration.allowedApiKeys;
+      contextNoApiKeys.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+
       const importControllerNoApiKeys = new ImportController(contextNoApiKeys);
       const response = await importControllerNoApiKeys.createImportJob(requestContext);
       expect(response.status).to.equal(401); // Unauthorized
+      expect(response.headers.get('x-error')).to.equal('Invalid import API key');
+    });
+
+    it('should reject when no import queues are defined', async () => {
+      const contextNoQueues = { ...context };
+      delete importConfiguration.queues;
+      contextNoQueues.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+
+      const importControllerNoQueues = new ImportController(contextNoQueues);
+      const response = await importControllerNoQueues.createImportJob(requestContext);
+      expect(response.status).to.equal(503);
+      expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
     });
 
     it('should reject when invalid URLs are passed in', async () => {
       requestContext.data.urls = ['https://example.com/page1', 'not-a-valid-url'];
       const response = await importController.createImportJob(requestContext);
+
       expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: not-a-valid-url is not a valid URL');
     });
 
     it('should reject when an invalid options object is passed in', async () => {
       requestContext.data.options = 'options object should be an object, not a string';
       const response = await importController.createImportJob(requestContext);
+
       expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: options must be an object');
     });
 
     it('should start a new import job', async () => {
@@ -191,31 +220,39 @@ describe('ImportController tests', () => {
       ]);
       importController = ImportController(context);
       const response = await importController.createImportJob(requestContext);
+
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(503); // Service unavailable
+      expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
     });
   });
 
   describe('getImportJobStatus', () => {
     it('should fail when jobId is not provided', async () => {
       const response = await importController.getImportJobStatus(requestContext);
+
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Job ID is required');
     });
 
     it('should return 404 when the jobID cannot be found', async () => {
       requestContext.params.jobId = 'unknown-job-id';
       const response = await importController.getImportJobStatus(requestContext);
+
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
+      expect(response.headers.get('x-error')).to.equal('Not found');
     });
 
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
       requestContext.pathInfo.headers['x-import-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
       requestContext.params.jobId = exampleJob.id;
       const response = await importController.getImportJobStatus(requestContext);
+
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
+      expect(response.headers.get('x-error')).to.equal('Not found');
     });
 
     it('should return job details for a valid jobId', async () => {
@@ -276,6 +313,7 @@ describe('ImportController tests', () => {
       const response = await importController.getImportJobResult(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Presigner error');
     });
   });
 });
