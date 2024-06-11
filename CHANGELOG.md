@@ -1,3 +1,10 @@
+## [1.42.4](https://github.com/adobe/spacecat-api-service/compare/v1.42.3...v1.42.4) (2024-06-11)
+
+
+### Bug Fixes
+
+* undefined import status route hander ([#346](https://github.com/adobe/spacecat-api-service/issues/346)) ([e328795](https://github.com/adobe/spacecat-api-service/commit/e32879551a20526e48d72842c198b4f35cd27d52))
+
 ## [1.42.3](https://github.com/adobe/spacecat-api-service/compare/v1.42.2...v1.42.3) (2024-06-11)
 
 
