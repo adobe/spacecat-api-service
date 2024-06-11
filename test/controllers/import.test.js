@@ -206,7 +206,7 @@ describe('ImportController tests', () => {
 
     it('should pick another import queue when the first one is in use', async () => {
       context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
-        'spacecat-import-queue-1',
+        createImportJob(exampleJob),
       ]);
       importController = ImportController(context);
       const response = await importController.createImportJob(requestContext);
@@ -221,10 +221,16 @@ describe('ImportController tests', () => {
       expect(firstCall.args[0]).to.equal('https://sqs.us-east-1.amazonaws.com/1234567890/spacecat-import-queue-2');
     });
 
-    it('should fail when both available queues are in use', async () => {
+    it('should fail when all (both) available queues are in use', async () => {
       context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
-        'spacecat-import-queue-1',
-        'spacecat-import-queue-2',
+        createImportJob({
+          ...exampleJob,
+          importQueueId: 'spacecat-import-queue-1',
+        }),
+        createImportJob({
+          ...exampleJob,
+          importQueueId: 'spacecat-import-queue-2',
+        }),
       ]);
       importController = ImportController(context);
       const response = await importController.createImportJob(requestContext);

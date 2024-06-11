@@ -56,11 +56,12 @@ function ImportSupervisor(services, config) {
    */
   async function getAvailableImportQueue() {
     const runningImportJobs = await dataAccess.getImportJobsByStatus(ImportJobStatus.RUNNING);
+    const activeQueues = runningImportJobs.map((job) => job.getImportQueueId());
 
     // Find an import queue that is not in use
-    for (const queue of queues) {
-      if (!runningImportJobs.includes(queue)) {
-        return queue;
+    for (const candidateQueue of queues) {
+      if (!activeQueues.includes(candidateQueue)) {
+        return candidateQueue;
       }
     }
     throw new ErrorWithStatusCode('Service Unavailable: No import queue available', 503);
