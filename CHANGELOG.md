@@ -1,3 +1,10 @@
+## [1.42.5](https://github.com/adobe/spacecat-api-service/compare/v1.42.4...v1.42.5) (2024-06-11)
+
+
+### Bug Fixes
+
+* Remove API key from import job status response ([#348](https://github.com/adobe/spacecat-api-service/issues/348)) ([03f5582](https://github.com/adobe/spacecat-api-service/commit/03f55825bd003220d9f10650f8760dd6de149b86))
+
 ## [1.42.4](https://github.com/adobe/spacecat-api-service/compare/v1.42.3...v1.42.4) (2024-06-11)
 
 
