@@ -1,3 +1,10 @@
+## [1.42.3](https://github.com/adobe/spacecat-api-service/compare/v1.42.2...v1.42.3) (2024-06-11)
+
+
+### Bug Fixes
+
+* Update createImportJob implementation based on dev endpoint testing ([#343](https://github.com/adobe/spacecat-api-service/issues/343)) ([c72d6a9](https://github.com/adobe/spacecat-api-service/commit/c72d6a9655bc9ee458503398d3de320ef3615e38))
+
 ## [1.42.2](https://github.com/adobe/spacecat-api-service/compare/v1.42.1...v1.42.2) (2024-06-11)
 
 
