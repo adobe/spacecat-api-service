@@ -20,7 +20,6 @@ export const ImportJobDto = {
   toJSON: (importJob) => ({
     id: importJob.getId(),
     baseURL: importJob.getBaseURL(),
-    apiKey: importJob.getApiKey(),
     options: importJob.getOptions(),
     startTime: importJob.getStartTime(),
     endTime: importJob.getEndTime(),
