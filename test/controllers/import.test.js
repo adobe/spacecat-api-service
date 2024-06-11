@@ -276,7 +276,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(200);
       const jobStatus = await response.json();
       expect(jobStatus.id).to.equal('f91afda0-afc8-467e-bfa3-fdbeba3037e8');
-      expect(jobStatus.apiKey).to.equal('b9ebcfb5-80c9-4236-91ba-d50e361db71d');
+      expect(jobStatus.apiKey).to.be.undefined;
       expect(jobStatus.baseURL).to.equal('https://www.example.com');
       expect(jobStatus.importQueueId).to.equal('spacecat-import-queue-1');
       expect(jobStatus.status).to.equal('RUNNING');
