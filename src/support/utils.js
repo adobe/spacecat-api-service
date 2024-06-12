@@ -70,10 +70,14 @@ export const sendRunImportMessage = async (
   queueUrl,
   importType,
   siteId,
+  startDate,
+  endDate,
   slackContext,
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   siteId,
+  startDate,
+  endDate,
   slackContext,
 });
 /* c8 ignore end */
