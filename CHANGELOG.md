@@ -1,3 +1,10 @@
+# [1.43.0](https://github.com/adobe/spacecat-api-service/compare/v1.42.5...v1.43.0) (2024-06-12)
+
+
+### Features
+
+* add run import slack command ([#349](https://github.com/adobe/spacecat-api-service/issues/349)) ([4adb70a](https://github.com/adobe/spacecat-api-service/commit/4adb70a34d2b60d2dae19f2f72125a4fec5f0496))
+
 ## [1.42.5](https://github.com/adobe/spacecat-api-service/compare/v1.42.4...v1.42.5) (2024-06-11)
 
 
