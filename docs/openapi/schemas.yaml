@@ -394,8 +394,32 @@ AuditConfigType:
     disabled:
       description: Whether audits are disabled for the given audit type
       type: boolean
+    excludedUrls:
+      description: (Optional) Set of urls to exclude. If empty, will remove previously excluded URLs. It's an array of strings
+      type: array
+      items:
+        type: string
   example:
     disabled: true
+    excludedUrls:
+      - 'https://www.adobe.com/some-page'
+      - 'https://www.adobe.com/another-page'
+UpdateAuditConfigType:
+  type: object
+  properties:
+    status:
+      description: Set the update operation type
+      type: string
+    excludedUrls:
+      description: Set of urls to exclude. If empty, will remove previously excluded URLs.
+      type: array
+      items:
+        type: string
+  example:
+    status: skipped
+    excludedUrls:
+      - 'https://www.adobe.com/some-page'
+      - 'https://www.adobe.com/another-page'
 AuditConfig:
   type: object
   properties:

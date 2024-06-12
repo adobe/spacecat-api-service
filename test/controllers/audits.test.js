@@ -266,7 +266,7 @@ describe('Audits Controller', () => {
 
   describe('patchAuditForSite', () => {
     it('returns bad request if site ID is missing', async () => {
-      const result = await auditsController.patchAuditForSite({ params: { auditType: 'lhs-mobile' } });
+      const result = await auditsController.patchAuditForSite({ params: { auditType: 'broken-backlinks' } });
       expect(result.status).to.equal(400);
     });
 
@@ -275,18 +275,53 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('updates audit type config if status is skipped and targetUrls is provided', async () => {
+    it('updates audit type config if status is skipped and excludedUrls is provided', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const targetUrls = ['url1', 'url2'];
+      const excludedUrls = ['url1', 'url2'];
       const status = 'skipped';
 
       const context = {
         params: { siteId, auditType },
-        data: { targetUrls, status },
+        data: { excludedUrls, status },
       };
 
-      const auditTypeConfig = { targetUrls: [] };
+      const auditTypeConfig = { excludedUrls: [] };
+      const siteUpdateAuditTypeConfig = sinon.stub();
+      const updateAuditTypeConfig = sinon.stub();
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          updateAuditTypeConfig,
+        }),
+        updateAuditTypeConfig: siteUpdateAuditTypeConfig,
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+      const newState = await result.json();
+
+      expect(newState.excludedUrls).to.deep.equal(excludedUrls);
+      expect(result.status).to.equal(200);
+
+      expect(siteUpdateAuditTypeConfig.calledWith(auditType, { excludedUrls })).to.be.true;
+      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+    });
+
+    it('updates audit type config if status is skipped and excludedUrls is provided but old status doesn\'t contain excludedUrls', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const excludedUrls = ['url1', 'url2'];
+      const status = 'skipped';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedUrls, status },
+      };
+
+      const auditTypeConfig = { };
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -300,22 +335,22 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.targetUrls).to.deep.equal(targetUrls);
+      expect(newState.excludedUrls).to.deep.equal(excludedUrls);
       expect(result.status).to.equal(200);
     });
 
-    it('removes all opt-outs if targetUrls is empty', async () => {
+    it('removes all opt-outs if excludedUrls is empty', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const targetUrls = [];
+      const excludedUrls = [];
       const status = 'skipped';
 
       const context = {
         params: { siteId, auditType },
-        data: { targetUrls, status },
+        data: { excludedUrls, status },
       };
 
-      const auditTypeConfig = { targetUrls: ['url1', 'url2'] };
+      const auditTypeConfig = { excludedUrls: ['url1', 'url2'] };
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -329,22 +364,22 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.targetUrls).to.deep.equal([]);
+      expect(newState.excludedUrls).to.deep.equal([]);
       expect(result.status).to.equal(200);
     });
 
-    it('adds new targetUrls to existing ones', async () => {
+    it('adds new excludedUrls to existing ones', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const targetUrls = ['url3', 'url4'];
+      const excludedUrls = ['url3', 'url4'];
       const status = 'skipped';
 
       const context = {
         params: { siteId, auditType },
-        data: { targetUrls, status },
+        data: { excludedUrls, status },
       };
 
-      const auditTypeConfig = { targetUrls: ['url1', 'url2'] };
+      const auditTypeConfig = { excludedUrls: ['url1', 'url2'] };
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -358,22 +393,22 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.targetUrls).to.deep.equal(['url1', 'url2', 'url3', 'url4']);
+      expect(newState.excludedUrls).to.deep.equal(['url1', 'url2', 'url3', 'url4']);
       expect(result.status).to.equal(200);
     });
 
-    it('does not add duplicate targetUrls', async () => {
+    it('does not add duplicate excludedUrls', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const targetUrls = ['url1', 'url2'];
+      const excludedUrls = ['url1', 'url2'];
       const status = 'skipped';
 
       const context = {
         params: { siteId, auditType },
-        data: { targetUrls, status },
+        data: { excludedUrls, status },
       };
 
-      const auditTypeConfig = { targetUrls: ['url1', 'url2'] };
+      const auditTypeConfig = { excludedUrls: ['url1', 'url2'] };
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -387,8 +422,61 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.targetUrls).to.deep.equal(['url1', 'url2']);
+      expect(newState.excludedUrls).to.deep.equal(['url1', 'url2']);
       expect(result.status).to.equal(200);
+    });
+
+    it('returns bad request if no updates are provided', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+
+      const context = {
+        params: { siteId, auditType },
+        data: {},
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => ({}),
+          updateAuditTypeConfig: sinon.stub(),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'No updates provided');
+    });
+
+    it('returns bad request if status is not skipped', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const status = 'not-skipped';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { status },
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => ({}),
+          updateAuditTypeConfig: sinon.stub(),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'No updates provided');
     });
   });
 });
