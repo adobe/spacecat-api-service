@@ -45,6 +45,7 @@ import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import ImportController from './controllers/import.js';
+import { s3ClientWrapper } from './support/s3.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -112,7 +113,7 @@ async function run(request, context) {
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
-      if (params.organizationId && !isValidUUIDV4(params.organizationId)) {
+      if (params.organizationId && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
@@ -138,6 +139,7 @@ export const main = wrap(run)
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
+  .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(secrets, { name: resolveSecretsName })

@@ -109,7 +109,7 @@ export default function getRouteHandlers(
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
     'POST /tools/import': importController.createImportJob,
-    'GET /tools/import/:jobId': importController.getJobStatus,
+    'GET /tools/import/:jobId': importController.getImportJobStatus,
     'GET /tools/import/:jobId/import-result.zip': importController.getImportJobResult,
   };
 

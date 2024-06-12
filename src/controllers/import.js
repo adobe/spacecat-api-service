@@ -10,85 +10,160 @@
  * governing permissions and limitations under the License.
  */
 
-import { createResponse } from '@adobe/spacecat-shared-http-utils';
+import {
+  createResponse,
+  ok,
+} from '@adobe/spacecat-shared-http-utils';
 import { isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../support/utils.js';
+import ImportSupervisor from '../support/import-supervisor.js';
+import { ImportJobDto } from '../dto/import-job.js';
 
+/**
+ * Import controller. Provides methods to create, read, and fetch the result of import jobs.
+ * @param {DataAccess} context.dataAccess - Data access.
+ * @param {object} context.sqs - AWS Simple Queue Service client.
+ * @param {object} context.s3 - AWS S3 client and related helpers.
+ * @param {object} context.env - Environment details.
+ * @param {string} context.env.IMPORT_CONFIGURATION - Import configuration params, as a JSON string.
+ * @param {object} context.log - Logger.
+ * @returns {object} Import controller.
+ * @constructor
+ */
 function ImportController(context) {
   const {
-    log, env, sqsClient, s3Client,
+    dataAccess, sqs, s3, log, env,
   } = context;
-  // eslint-disable-next-line no-unused-vars
   const services = {
+    dataAccess,
+    sqs,
+    s3,
     log,
-    sqsClient,
-    s3Client,
+    env,
   };
 
+  let importConfiguration = {};
+  try {
+    importConfiguration = JSON.parse(env.IMPORT_CONFIGURATION);
+  } catch (error) {
+    log.error(`Failed to parse import configuration: ${error.message}`);
+  }
+
+  const importSupervisor = new ImportSupervisor(services, importConfiguration);
+  const { allowedApiKeys = [] } = importConfiguration;
+
+  const HEADER_ERROR = 'x-error';
+  const STATUS_BAD_REQUEST = 400;
+  const STATUS_ACCEPTED = 202;
+
   function validateRequestData(data) {
-    const BAD_REQUEST = 400;
     if (!isObject(data)) {
-      throw new ErrorWithStatusCode('Invalid request: request body data is required', BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: request body data is required', STATUS_BAD_REQUEST);
     }
 
-    if (!Array.isArray(data.urls)) {
-      throw new ErrorWithStatusCode('Invalid request: urls must be provided as an array', BAD_REQUEST);
+    if (!Array.isArray(data.urls) || !data.urls.length > 0) {
+      throw new ErrorWithStatusCode('Invalid request: urls must be provided as a non-empty array', STATUS_BAD_REQUEST);
     }
 
     data.urls.forEach((url) => {
       if (!isValidUrl(url)) {
-        throw new ErrorWithStatusCode(`Invalid request: ${url} is not a valid URL`, BAD_REQUEST);
+        throw new ErrorWithStatusCode(`Invalid request: ${url} is not a valid URL`, STATUS_BAD_REQUEST);
       }
     });
 
     if (data.options && !isObject(data.options)) {
-      throw new ErrorWithStatusCode('Invalid request: options must be an object', BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
     }
   }
 
   function validateImportApiKey(importApiKey) {
     // Parse the allowed import keys from the environment
-    const allowedImportApiKeys = env.ALLOWED_IMPORT_API_KEYS?.split(',') || [];
-    if (!allowedImportApiKeys.includes(importApiKey)) {
+    if (!allowedApiKeys.includes(importApiKey)) {
       throw new ErrorWithStatusCode('Invalid import API key', 401);
     }
   }
 
+  function createErrorResponse(error) {
+    return createResponse({}, error.status || 500, {
+      [HEADER_ERROR]: error.message,
+    });
+  }
+
   /**
-   * Create a new import job.
-   * @param requestContext
-   * @returns {Promise<*>}
+   * Create and start a new import job.
+   * @param {object} requestContext - Context of the request.
+   * @param {Array<string>} requestContext.data.urls - Array of URLs to import.
+   * @param {object} requestContext.data.options - Optional import configuration parameters.
+   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key to use for the job.
+   * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
-    const importApiKey = headers['x-import-api-key'];
+    const { 'x-import-api-key': importApiKey } = headers;
 
     try {
-      validateRequestData(data);
       validateImportApiKey(importApiKey);
+      validateRequestData(data);
 
-      // const { urls, options } = data;
-      // const jobResponse = await importSupervisor.startNewJob(urls, options, importApiKey);
-      return createResponse({}, 501);
+      const { urls, options } = data;
+      const job = await importSupervisor.startNewJob(urls, importApiKey, options);
+
+      return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {
-      log.error(`Failed to queue import job: ${error.message}`);
-      return createResponse({}, error.status);
+      log.error(`Failed to create a new import job: ${error.message}`);
+      return createErrorResponse(error);
     }
   }
 
-  // eslint-disable-next-line no-unused-vars
-  async function getImportJobStatus(requestContext) {
-    return createResponse({}, 501);
+  function parseRequestContext(requestContext) {
+    return {
+      jobId: requestContext.params.jobId,
+      importApiKey: requestContext.pathInfo.headers['x-import-api-key'],
+    };
   }
 
-  // eslint-disable-next-line no-unused-vars
+  /**
+   * Get the status of an import job.
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.jobId - The ID of the job to fetch.
+   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
+   * @returns {Promise<Response>} 200 OK with a JSON representation of the import job.
+   */
+  async function getImportJobStatus(requestContext) {
+    const { jobId, importApiKey } = parseRequestContext(requestContext);
+
+    try {
+      validateImportApiKey(importApiKey);
+      const job = await importSupervisor.getImportJob(jobId, importApiKey);
+      return ok(ImportJobDto.toJSON(job));
+    } catch (error) {
+      log.error(`Failed to fetch import job status for jobId: ${jobId}, message: ${error.message}`);
+      return createErrorResponse(error);
+    }
+  }
+
+  /**
+   * Get the result of an import job, as a pre-signed download URL to S3.
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.jobId - The ID of the job to fetch.
+   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
+   * @returns {Promise<Response>} 200 OK with a pre-signed URL to download the job result.
+   */
   async function getImportJobResult(requestContext) {
-    /**
-     * Structure of the resulting .zip file.
-     *   /documents/../page.docx
-     *   /import-report.xlsx
-     */
-    return createResponse({}, 501);
+    const { jobId, importApiKey } = parseRequestContext(requestContext);
+
+    try {
+      validateImportApiKey(importApiKey);
+      const job = await importSupervisor.getImportJob(jobId, importApiKey);
+      const downloadUrl = await importSupervisor.getJobArchiveSignedUrl(job);
+      return ok({
+        id: job.getId(),
+        downloadUrl,
+      });
+    } catch (error) {
+      log.error(`Failed to fetch the import job result: ${error.message}`);
+      return createErrorResponse(error);
+    }
   }
 
   return {

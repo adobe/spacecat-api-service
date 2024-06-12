@@ -72,6 +72,19 @@ describe('Index Tests', () => {
       },
       dataAccess: {
         getSitesWithLatestAudit: sinon.stub().resolves([]),
+        getOrganizationByID: sinon.stub().resolves({
+          getId: () => 'default',
+          getName: () => 'default',
+          getImsOrgId: () => 'default',
+          getCreatedAt: () => '2023-12-16T09:21:09.000Z',
+          getUpdatedAt: () => '2023-12-16T09:21:09.000Z',
+          getConfig: () => ({
+            audits: {
+              auditsDisabled: () => false,
+              getAuditTypeConfigs: () => ({ 404: { disabled: () => false } }),
+            },
+          }),
+        }),
         getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),
       },
       s3Client: {
@@ -152,6 +165,17 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('handles organizationId is default', async () => {
+    context.pathInfo.suffix = '/organizations/default';
+
+    request = new Request(`${baseUrl}/organizations/default`, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(200);
+    expect(context.dataAccess.getOrganizationByID.calledOnce).to.be.true;
   });
 
   it('handles dynamic route errors', async () => {
