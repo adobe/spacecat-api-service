@@ -1,3 +1,10 @@
+# [1.44.0](https://github.com/adobe/spacecat-api-service/compare/v1.43.0...v1.44.0) (2024-06-12)
+
+
+### Features
+
+* opt-out broken-backlinks api ([#336](https://github.com/adobe/spacecat-api-service/issues/336)) ([623d506](https://github.com/adobe/spacecat-api-service/commit/623d506d62fd457714253fa3f7d3426e0f316e8c))
+
 # [1.43.0](https://github.com/adobe/spacecat-api-service/compare/v1.42.5...v1.43.0) (2024-06-12)
 
 
