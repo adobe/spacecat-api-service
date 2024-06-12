@@ -1,3 +1,10 @@
+## [1.44.1](https://github.com/adobe/spacecat-api-service/compare/v1.44.0...v1.44.1) (2024-06-12)
+
+
+### Bug Fixes
+
+* correct controller for the audit patching ([#352](https://github.com/adobe/spacecat-api-service/issues/352)) ([42f3982](https://github.com/adobe/spacecat-api-service/commit/42f3982a08ddfc5c81ac235ce5cc8f38f98f0bca))
+
 # [1.44.0](https://github.com/adobe/spacecat-api-service/compare/v1.43.0...v1.44.0) (2024-06-12)
 
 
