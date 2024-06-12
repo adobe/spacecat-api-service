@@ -112,11 +112,61 @@ function AuditsController(dataAccess) {
     return ok(AuditDto.toJSON(audit));
   };
 
+  /**
+   * Update configuration for a site's audit
+   * @returns {Promise<Response>} the site's updated audit config
+   */
+  const patchAuditForSite = async (context) => {
+    const siteId = context.params?.siteId;
+    const auditType = context.params?.auditType;
+
+    if (!hasText(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(auditType)) {
+      return badRequest('Audit type required');
+    }
+
+    // get audit type config
+    const site = await dataAccess.getSiteByID(siteId);
+    const auditConfig = site.getAuditConfig();
+    const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
+
+    const { excludedURLs } = context.data;
+
+    if (Array.isArray(excludedURLs)) {
+      let newState = {
+        ...auditTypeConfig,
+        excludedURLs: [
+          ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
+          ...excludedURLs,
+        ],
+      };
+
+      if (!excludedURLs.length) {
+        // remove all opt-outs
+        newState = {
+          ...auditTypeConfig,
+          excludedURLs: [],
+        };
+      }
+
+      await site.updateAuditTypeConfig(auditType, newState);
+      await dataAccess.updateSite(site);
+
+      return ok(newState);
+    }
+
+    return badRequest('No updates provided');
+  };
+
   return {
     getAllForSite,
     getAllLatest,
     getAllLatestForSite,
     getLatestForSite,
+    patchAuditForSite,
   };
 }
 
