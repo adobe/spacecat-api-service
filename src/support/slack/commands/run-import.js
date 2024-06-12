@@ -16,9 +16,12 @@
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
-
-import { postErrorMessage } from '../../../utils/slack/base.js';
 import { triggerImportRun } from '../../utils.js';
+import {
+  extractURLFromSlackInput,
+  postErrorMessage,
+  postSiteNotFoundMessage,
+} from '../../../utils/slack/base.js';
 
 const PHRASES = ['run import'];
 
@@ -52,14 +55,15 @@ function RunImportCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [importType, siteId] = args;
+      const [importType, baseURLInput] = args;
+      const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!hasText(importType)) {
         await say(':warning: Please provide a valid import type.');
         return;
       }
 
-      if (!hasText(siteId)) {
+      if (!hasText(baseURL)) {
         await say(':warning: Please provide a valid site ID.');
         return;
       }
@@ -73,10 +77,16 @@ function RunImportCommand(context) {
         return;
       }
 
-      await triggerImportRun(config, importType, slackContext, context);
+      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      if (!isObject(site)) {
+        await postSiteNotFoundMessage(say, baseURL);
+        return;
+      }
 
-      let message = `:adobe-run: Triggered import run of type ${importType} for site ${siteId}\n`;
-      message += 'Stand by for results. I will post them here when they are ready.';
+      await triggerImportRun(config, importType, site.getId(), slackContext, context);
+
+      const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`\n`;
+      // message += 'Stand by for results. I will post them here when they are ready.';
 
       await say(message);
     } catch (error) {
