@@ -38,13 +38,13 @@ function RunImportCommand(context) {
     name: 'Run Import',
     description: 'Runs the specified import type for the site identified with its id.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType} {siteId}`,
+    usageText: `${PHRASES[0]} {importType} {baseURL}`,
   });
 
   const { dataAccess, log } = context;
 
   /**
-   * Validates input and triggers the experimentation candidates for the given URL.
+   * Validates input and triggers a new import run for the given site.
    *
    * @param {string[]} args - The arguments provided to the command ([site]).
    * @param {Object} slackContext - The Slack context object.
@@ -58,20 +58,15 @@ function RunImportCommand(context) {
       const [importType, baseURLInput] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
-      if (!hasText(importType)) {
-        await say(':warning: Please provide a valid import type.');
-        return;
-      }
-
-      if (!hasText(baseURL)) {
-        await say(':warning: Please provide a valid site ID.');
+      if (!hasText(importType) || !hasText(baseURL)) {
+        await say(baseCommand.usage());
         return;
       }
 
       const config = await dataAccess.getConfiguration();
       const jobConfig = config.getJobs().filter((job) => job.group === 'imports' && job.type === importType);
 
-      if (!isObject(jobConfig)) {
+      if (!Array.isArray(jobConfig) || jobConfig.length === 0) {
         const validImportTypes = config.getJobs().filter((job) => job.group === 'imports').map((job) => job.type);
         await say(`:warning: Import type ${importType} does not exist. Valid import types are: ${validImportTypes.join(', ')}`);
         return;
