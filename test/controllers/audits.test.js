@@ -278,15 +278,14 @@ describe('Audits Controller', () => {
     it('updates audit type config if status is skipped and excludedUrls is provided', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const excludedUrls = ['url1', 'url2'];
-      const status = 'skipped';
+      const excludedURLs = ['url1', 'url2'];
 
       const context = {
         params: { siteId, auditType },
-        data: { excludedUrls, status },
+        data: { excludedURLs },
       };
 
-      const auditTypeConfig = { excludedUrls: [] };
+      const auditTypeConfig = { excludedURLs: [] };
       const siteUpdateAuditTypeConfig = sinon.stub();
       const updateAuditTypeConfig = sinon.stub();
 
@@ -303,22 +302,21 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.excludedUrls).to.deep.equal(excludedUrls);
+      expect(newState.excludedURLs).to.deep.equal(excludedURLs);
       expect(result.status).to.equal(200);
 
-      expect(siteUpdateAuditTypeConfig.calledWith(auditType, { excludedUrls })).to.be.true;
+      expect(siteUpdateAuditTypeConfig.calledWith(auditType, { excludedURLs })).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
     it('updates audit type config if status is skipped and excludedUrls is provided but old status does not contain excludedUrls', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const excludedUrls = ['url1', 'url2'];
-      const status = 'skipped';
+      const excludedURLs = ['url1', 'url2'];
 
       const context = {
         params: { siteId, auditType },
-        data: { excludedUrls, status },
+        data: { excludedURLs },
       };
 
       const auditTypeConfig = { };
@@ -335,22 +333,21 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.excludedUrls).to.deep.equal(excludedUrls);
+      expect(newState.excludedURLs).to.deep.equal(excludedURLs);
       expect(result.status).to.equal(200);
     });
 
     it('removes all opt-outs if excludedUrls is empty', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const excludedUrls = [];
-      const status = 'skipped';
+      const excludedURLs = [];
 
       const context = {
         params: { siteId, auditType },
-        data: { excludedUrls, status },
+        data: { excludedURLs },
       };
 
-      const auditTypeConfig = { excludedUrls: ['url1', 'url2'] };
+      const auditTypeConfig = { excludedURLs: ['url1', 'url2'] };
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -364,22 +361,21 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.excludedUrls).to.deep.equal([]);
+      expect(newState.excludedURLs).to.deep.equal([]);
       expect(result.status).to.equal(200);
     });
 
     it('adds new excludedUrls to existing ones', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const excludedUrls = ['url3', 'url4'];
-      const status = 'skipped';
+      const excludedURLs = ['url3', 'url4'];
 
       const context = {
         params: { siteId, auditType },
-        data: { excludedUrls, status },
+        data: { excludedURLs },
       };
 
-      const auditTypeConfig = { excludedUrls: ['url1', 'url2'] };
+      const auditTypeConfig = { excludedURLs: ['url1', 'url2'] };
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -393,22 +389,21 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.excludedUrls).to.deep.equal(['url1', 'url2', 'url3', 'url4']);
+      expect(newState.excludedURLs).to.deep.equal(['url1', 'url2', 'url3', 'url4']);
       expect(result.status).to.equal(200);
     });
 
     it('does not add duplicate excludedUrls', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const excludedUrls = ['url1', 'url2'];
-      const status = 'skipped';
+      const excludedURLs = ['url1', 'url2'];
 
       const context = {
         params: { siteId, auditType },
-        data: { excludedUrls, status },
+        data: { excludedURLs },
       };
 
-      const auditTypeConfig = { excludedUrls: ['url1', 'url2'] };
+      const auditTypeConfig = { excludedURLs: ['url1', 'url2'] };
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -422,7 +417,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
       const newState = await result.json();
 
-      expect(newState.excludedUrls).to.deep.equal(['url1', 'url2']);
+      expect(newState.excludedURLs).to.deep.equal(['url1', 'url2']);
       expect(result.status).to.equal(200);
     });
 
@@ -452,14 +447,13 @@ describe('Audits Controller', () => {
       expect(error).to.have.property('message', 'No updates provided');
     });
 
-    it('returns bad request if status is not skipped', async () => {
+    it('returns bad request if the payload does not include excludeURLS', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const status = 'not-skipped';
 
       const context = {
         params: { siteId, auditType },
-        data: { status },
+        data: {},
       };
 
       const site = {

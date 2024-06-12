@@ -133,22 +133,22 @@ function AuditsController(dataAccess) {
     const auditConfig = site.getAuditConfig();
     const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
 
-    const { excludedUrls, status } = context.data;
+    const { excludedURLs } = context.data;
 
-    if (status === 'skipped' && excludedUrls !== undefined) {
+    if (Array.isArray(excludedURLs)) {
       let newState = {
         ...auditTypeConfig,
-        excludedUrls: [
-          ...auditTypeConfig.excludedUrls?.filter((v) => excludedUrls.indexOf(v) < 0) ?? [],
-          ...excludedUrls,
+        excludedURLs: [
+          ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
+          ...excludedURLs,
         ],
       };
 
-      if (!excludedUrls?.length) {
+      if (!excludedURLs.length) {
         // remove all opt-outs
         newState = {
           ...auditTypeConfig,
-          excludedUrls: [],
+          excludedURLs: [],
         };
       }
 

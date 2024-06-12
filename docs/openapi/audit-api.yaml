@@ -66,6 +66,7 @@ update-audit-config-for-site:
   patch:
     tags:
       - audit
+      - site
     summary: Update the configuration for an audit
     description: |
         This endpoint is useful for updating the configuration for an audit, 
