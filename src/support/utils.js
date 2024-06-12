@@ -63,6 +63,21 @@ export const sendExperimentationCandidatesMessage = async (
 });
 /* c8 ignore end */
 
+// todo: prototype - untested
+/* c8 ignore start */
+export const sendRunImportMessage = async (
+  sqs,
+  queueUrl,
+  importType,
+  siteId,
+  slackContext,
+) => sqs.sendMessage(queueUrl, {
+  type: importType,
+  siteId,
+  slackContext,
+});
+/* c8 ignore end */
+
 /**
  * Sends audit messages for each URL.
  *
@@ -123,6 +138,25 @@ export const triggerExperimentationCandidates = async (
   lambdaContext.sqs,
   lambdaContext.env.SCRAPING_JOBS_QUEUE_URL,
   url,
+  {
+    channelId: slackContext.channelId,
+    threadTs: slackContext.threadTs,
+  },
+);
+/* c8 ignore end */
+
+// todo: prototype - untested
+/* c8 ignore start */
+export const triggerImportRun = async (
+  importType,
+  siteId,
+  slackContext,
+  lambdaContext,
+) => sendRunImportMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.IMPORT_JOBS_QUEUE_URL,
+  importType,
+  siteId,
   {
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,

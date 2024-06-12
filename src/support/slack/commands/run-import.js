@@ -32,12 +32,12 @@ function RunImportCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-import',
     name: 'Run Import',
-    description: 'Runs the specified import.',
+    description: 'Runs the specified import type for the site identified with its id.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType}`,
+    usageText: `${PHRASES[0]} {importType} {siteId}`,
   });
 
-  const { log } = context;
+  const { dataAccess, log } = context;
 
   /**
    * Validates input and triggers the experimentation candidates for the given URL.
@@ -51,17 +51,25 @@ function RunImportCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [importType] = args;
+      const [importType, siteId] = args;
 
       if (!hasText(importType)) {
         await say(':warning: Please provide a valid import type.');
         return;
       }
 
-      // await triggerImportRun(importType, slackContext, context);
+      if (!hasText(siteId)) {
+        await say(':warning: Please provide a valid import type.');
+        return;
+      }
 
-      let message = `:adobe-run: Triggered import run of type ${importType}\n`;
-      message += 'Stand by for results. I will post them here when they are ready.';
+      const config = await dataAccess.getConfiguration();
+      const queueName = config.getQueues().imports;
+
+      // await triggerImportRun(config, importType, slackContext, context);
+
+      let message = `:adobe-run: Triggered import run of type ${importType} for site ${siteId}\n`;
+      message += `Stand by for results. I will post them here when they are ready. (${queueName})`;
 
       await say(message);
     } catch (error) {
