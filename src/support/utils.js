@@ -151,6 +151,8 @@ export const triggerImportRun = async (
   config,
   importType,
   siteId,
+  startDate,
+  endDate,
   slackContext,
   lambdaContext,
 ) => sendRunImportMessage(
@@ -158,6 +160,8 @@ export const triggerImportRun = async (
   config.getQueues().imports,
   importType,
   siteId,
+  startDate,
+  endDate,
   {
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,

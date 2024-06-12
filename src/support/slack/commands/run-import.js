@@ -13,7 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isIsoDate, isObject } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { triggerImportRun } from '../../utils.js';
@@ -36,9 +36,10 @@ function RunImportCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-import',
     name: 'Run Import',
-    description: 'Runs the specified import type for the site identified with its id.',
+    description: 'Runs the specified import type for the site identified with its id, and optionally for a date range specified by'
+      + ' ISO date strings in Zulu (UTC) timezone',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType} {baseURL}`,
+    usageText: `${PHRASES[0]} {importType} {baseURL} {startDate} {endDate}`,
   });
 
   const { dataAccess, log } = context;
@@ -55,10 +56,20 @@ function RunImportCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [importType, baseURLInput] = args;
+      const [importType, baseURLInput, startDate, endDate] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!hasText(importType) || !hasText(baseURL)) {
+        await say(baseCommand.usage());
+        return;
+      }
+
+      if (startDate && !isIsoDate(startDate)) {
+        await say(baseCommand.usage());
+        return;
+      }
+
+      if (endDate && !isIsoDate(endDate)) {
         await say(baseCommand.usage());
         return;
       }
@@ -78,9 +89,17 @@ function RunImportCommand(context) {
         return;
       }
 
-      await triggerImportRun(config, importType, site.getId(), slackContext, context);
+      await triggerImportRun(
+        config,
+        importType,
+        site.getId(),
+        startDate,
+        endDate,
+        slackContext,
+        context,
+      );
 
-      const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`\n`;
+      const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
       // message += 'Stand by for results. I will post them here when they are ready.';
 
       await say(message);
