@@ -148,13 +148,14 @@ export const triggerExperimentationCandidates = async (
 // todo: prototype - untested
 /* c8 ignore start */
 export const triggerImportRun = async (
+  config,
   importType,
   siteId,
   slackContext,
   lambdaContext,
 ) => sendRunImportMessage(
   lambdaContext.sqs,
-  lambdaContext.env.IMPORT_JOBS_QUEUE_URL,
+  config.getQueues().imports,
   importType,
   siteId,
   {

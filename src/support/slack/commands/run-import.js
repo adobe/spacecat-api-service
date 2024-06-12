@@ -13,11 +13,12 @@
 // todo: prototype - untested
 /* c8 ignore start */
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 
 import { postErrorMessage } from '../../../utils/slack/base.js';
+import { triggerImportRun } from '../../utils.js';
 
 const PHRASES = ['run import'];
 
@@ -59,17 +60,23 @@ function RunImportCommand(context) {
       }
 
       if (!hasText(siteId)) {
-        await say(':warning: Please provide a valid import type.');
+        await say(':warning: Please provide a valid site ID.');
         return;
       }
 
       const config = await dataAccess.getConfiguration();
-      const queueName = config.getQueues().imports;
+      const jobConfig = config.getJobs().filter((job) => job.group === 'imports' && job.type === importType);
 
-      // await triggerImportRun(config, importType, slackContext, context);
+      if (!isObject(jobConfig)) {
+        const validImportTypes = config.getJobs().filter((job) => job.group === 'imports').map((job) => job.type);
+        await say(`:warning: Import type ${importType} does not exist. Valid import types are: ${validImportTypes.join(', ')}`);
+        return;
+      }
+
+      await triggerImportRun(config, importType, slackContext, context);
 
       let message = `:adobe-run: Triggered import run of type ${importType} for site ${siteId}\n`;
-      message += `Stand by for results. I will post them here when they are ready. (${queueName})`;
+      message += 'Stand by for results. I will post them here when they are ready.';
 
       await say(message);
     } catch (error) {
