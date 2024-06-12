@@ -407,7 +407,7 @@ AuditConfigType:
 UpdateAuditConfigType:
   type: object
   properties:
-    excludedUrls:
+    excludedURLs:
       description: Set of urls to exclude. If empty, will remove previously excluded URLs.
       type: array
       items:
