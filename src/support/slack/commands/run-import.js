@@ -13,7 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 
-import { hasText, isIsoDate, isObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { triggerImportRun } from '../../utils.js';
@@ -36,8 +36,7 @@ function RunImportCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-import',
     name: 'Run Import',
-    description: 'Runs the specified import type for the site identified with its id, and optionally for a date range specified by'
-      + ' ISO date strings in Zulu (UTC) timezone',
+    description: 'Runs the specified import type for the site identified with its id, and optionally for a date range',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {importType} {baseURL} {startDate} {endDate}`,
   });
@@ -60,16 +59,6 @@ function RunImportCommand(context) {
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!hasText(importType) || !hasText(baseURL)) {
-        await say(baseCommand.usage());
-        return;
-      }
-
-      if (startDate && !isIsoDate(startDate)) {
-        await say(baseCommand.usage());
-        return;
-      }
-
-      if (endDate && !isIsoDate(endDate)) {
         await say(baseCommand.usage());
         return;
       }
