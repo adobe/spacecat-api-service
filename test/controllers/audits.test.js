@@ -275,7 +275,7 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('updates audit type config if status is skipped and excludedUrls is provided', async () => {
+    it('updates audit type config when excludedURLs is provided', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const excludedURLs = ['url1', 'url2'];
@@ -309,7 +309,7 @@ describe('Audits Controller', () => {
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
-    it('updates audit type config if status is skipped and excludedUrls is provided but old status does not contain excludedUrls', async () => {
+    it('updates audit type config if excludedURLs is provided but old status does not contain excludedURLs', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const excludedURLs = ['url1', 'url2'];
@@ -337,7 +337,7 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('removes all opt-outs if excludedUrls is empty', async () => {
+    it('removes all opt-outs if excludedURLs is empty', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const excludedURLs = [];
@@ -365,7 +365,7 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('adds new excludedUrls to existing ones', async () => {
+    it('adds new excludedURLs to existing ones', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const excludedURLs = ['url3', 'url4'];
@@ -393,7 +393,7 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('does not add duplicate excludedUrls', async () => {
+    it('does not add duplicate excludedURLs', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const excludedURLs = ['url1', 'url2'];
