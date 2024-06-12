@@ -310,7 +310,7 @@ describe('Audits Controller', () => {
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
-    it('updates audit type config if status is skipped and excludedUrls is provided but old status doesn\'t contain excludedUrls', async () => {
+    it('updates audit type config if status is skipped and excludedUrls is provided but old status does not contain excludedUrls', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const excludedUrls = ['url1', 'url2'];
