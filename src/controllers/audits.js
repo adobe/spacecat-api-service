@@ -143,8 +143,8 @@ function AuditsController(dataAccess) {
           ...excludedURLs,
         ];
 
-      await auditTypeConfig.updateExcludedURLs(newExcludedURLs);
-      await site.updateAuditTypeConfig(auditType, auditTypeConfig);
+      auditTypeConfig.updateExcludedURLs(newExcludedURLs);
+      site.updateAuditTypeConfig(auditType, auditTypeConfig);
       await dataAccess.updateSite(site);
 
       return ok({ ...auditTypeConfig, excludedUrls: newExcludedURLs });
