@@ -147,7 +147,7 @@ function AuditsController(dataAccess) {
       await site.updateAuditTypeConfig(auditType, auditTypeConfig);
       await dataAccess.updateSite(site);
 
-      return ok(auditTypeConfig);
+      return ok({ ...auditTypeConfig, excludedUrls: newExcludedURLs });
     }
 
     return badRequest('No updates provided');
