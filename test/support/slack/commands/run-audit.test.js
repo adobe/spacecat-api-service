@@ -44,7 +44,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site');
+      expect(command.description).to.equal('Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided.');
     });
   });
 
@@ -64,7 +64,7 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Audit check is triggered for https://validsite.com');
+      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: lhs-mobile audit check is triggered for https://validsite.com');
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
