@@ -145,6 +145,7 @@ function AuditsController(dataAccess) {
         ];
 
       auditTypeConfig.updateExcludedURLs(newExcludedURLs);
+      auditConfig.updateAuditTypeConfig(auditType, auditTypeConfig);
       site.updateAuditTypeConfig(auditType, auditTypeConfig);
       await dataAccess.updateSite(site);
 
