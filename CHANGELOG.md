@@ -1,3 +1,10 @@
+## [1.44.2](https://github.com/adobe/spacecat-api-service/compare/v1.44.1...v1.44.2) (2024-06-13)
+
+
+### Bug Fixes
+
+* extend run audit command ([#355](https://github.com/adobe/spacecat-api-service/issues/355)) ([99a263b](https://github.com/adobe/spacecat-api-service/commit/99a263b1d98d6859d84ec8d6e6759d1bdec3fb4f))
+
 ## [1.44.1](https://github.com/adobe/spacecat-api-service/compare/v1.44.0...v1.44.1) (2024-06-12)
 
 
