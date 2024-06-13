@@ -146,7 +146,8 @@ function AuditsController(dataAccess) {
         ];
 
       auditTypeConfig.updateExcludedURLs(newExcludedURLs);
-      site.updateAuditTypeConfig(auditType, AuditConfigType(auditTypeConfig));
+      // site.updateAuditTypeConfig(auditType, AuditConfigType(auditTypeConfig));
+      site.updateAuditTypeConfig(auditType, AuditConfigType.toDynamoItem(auditTypeConfig));
       await dataAccess.updateSite(site);
 
       return ok(AuditConfig.toDynamoItem(site.getAuditConfig()));
