@@ -148,12 +148,7 @@ function AuditsController(dataAccess) {
       site.updateAuditTypeConfig(auditType, auditTypeConfig);
       await dataAccess.updateSite(site);
 
-      const responseData = {
-        ...AuditConfigType.toDynamoItem(auditTypeConfig),
-        excludedUrls: newExcludedURLs,
-      };
-
-      return ok(responseData);
+      return ok(AuditConfigType.toDynamoItem(auditTypeConfig));
     }
 
     return badRequest('No updates provided');
