@@ -81,7 +81,12 @@ describe('Index Tests', () => {
           getConfig: () => ({
             audits: {
               auditsDisabled: () => false,
-              getAuditTypeConfigs: () => ({ 404: { disabled: () => false } }),
+              getAuditTypeConfigs: () => ({
+                404: {
+                  disabled: () => false,
+                  getExcludedURLs: () => [],
+                },
+              }),
             },
           }),
         }),
@@ -167,7 +172,7 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
   });
 
-  it.skip('handles organizationId is default', async () => {
+  it('handles organizationId is default', async () => {
     context.pathInfo.suffix = '/organizations/default';
 
     request = new Request(`${baseUrl}/organizations/default`, { headers: { 'x-api-key': apiKey } });
