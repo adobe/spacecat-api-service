@@ -18,6 +18,7 @@ import {
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import { AuditDto } from '../dto/audit.js';
+import { SiteDto } from '../dto/site.js';
 
 /**
  * Audits controller.
@@ -147,7 +148,7 @@ function AuditsController(dataAccess) {
       site.updateAuditTypeConfig(auditType, auditTypeConfig);
       await dataAccess.updateSite(site);
 
-      return ok({ ...auditTypeConfig, excludedUrls: newExcludedURLs });
+      return ok(SiteDto.toJSON(site));
     }
 
     return badRequest('No updates provided');
