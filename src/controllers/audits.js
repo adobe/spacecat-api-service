@@ -145,8 +145,9 @@ function AuditsController(dataAccess) {
       //     ...excludedURLs,
       //   ];
 
-      const existingExcludedURLs = auditTypeConfig.getExcludedURLs() || [];
-      const newExcludedURLs = Array.from(new Set([...existingExcludedURLs, ...excludedURLs]));
+      const newExcludedURLs = excludedURLs.length === 0
+        ? []
+        : Array.from(new Set([...(auditTypeConfig.getExcludedURLs() || []), ...excludedURLs]));
 
       auditTypeConfig.updateExcludedURLs(newExcludedURLs);
       // site.updateAuditTypeConfig(auditType, AuditConfigType(auditTypeConfig));
