@@ -17,7 +17,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 import AuditConfig from '@adobe/spacecat-shared-data-access/src/models/site/audit-config.js';
-import { AuditConfigType } from '@adobe/spacecat-shared-data-access/src/models/site/audit-config-type.js';
+import AuditConfigType from '@adobe/spacecat-shared-data-access/src/models/site/audit-config-type.js';
 
 import { AuditDto } from '../dto/audit.js';
 
