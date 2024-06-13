@@ -128,34 +128,26 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    // get audit type config
-    const site = await dataAccess.getSiteByID(siteId);
-    const auditConfig = site.getAuditConfig();
-    const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
-
     const { excludedURLs } = context.data;
 
     if (Array.isArray(excludedURLs)) {
-      let newState = {
-        ...auditTypeConfig,
-        excludedURLs: [
+      // get audit type config
+      const site = await dataAccess.getSiteByID(siteId);
+      const auditConfig = site.getAuditConfig();
+      const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
+
+      const newExcludedURLs = !excludedURLs.length
+        ? []
+        : [
           ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
           ...excludedURLs,
-        ],
-      };
+        ];
 
-      if (!excludedURLs.length) {
-        // remove all opt-outs
-        newState = {
-          ...auditTypeConfig,
-          excludedURLs: [],
-        };
-      }
-
-      await site.updateAuditTypeConfig(auditType, newState);
+      await auditTypeConfig.updateExcludedURLs(newExcludedURLs);
+      await site.updateAuditTypeConfig(auditType, auditTypeConfig);
       await dataAccess.updateSite(site);
 
-      return ok(newState);
+      return ok(auditTypeConfig);
     }
 
     return badRequest('No updates provided');

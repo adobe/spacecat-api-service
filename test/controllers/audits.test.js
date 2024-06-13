@@ -285,7 +285,12 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
-      const auditTypeConfig = { excludedURLs: [] };
+      const mockUpdateExcludedURLs = sinon.stub();
+
+      const auditTypeConfig = { excludedURLs: [], updateExcludedURLs: mockUpdateExcludedURLs };
+      mockUpdateExcludedURLs.callsFake(() => {
+        auditTypeConfig.excludedURLs = ['url1', 'url2'];
+      });
       const siteUpdateAuditTypeConfig = sinon.stub();
       const updateAuditTypeConfig = sinon.stub();
 
@@ -305,7 +310,8 @@ describe('Audits Controller', () => {
       expect(newState.excludedURLs).to.deep.equal(excludedURLs);
       expect(result.status).to.equal(200);
 
-      expect(siteUpdateAuditTypeConfig.calledWith(auditType, { excludedURLs })).to.be.true;
+      // eslint-disable-next-line max-len
+      expect(siteUpdateAuditTypeConfig.calledWith(auditType, { excludedURLs, updateExcludedURLs: mockUpdateExcludedURLs })).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
@@ -319,7 +325,12 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
-      const auditTypeConfig = { };
+      const mockUpdateExcludedURLs = sinon.stub();
+      const auditTypeConfig = { updateExcludedURLs: mockUpdateExcludedURLs };
+      mockUpdateExcludedURLs.callsFake(() => {
+        auditTypeConfig.excludedURLs = ['url1', 'url2'];
+      });
+
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -347,7 +358,12 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
-      const auditTypeConfig = { excludedURLs: ['url1', 'url2'] };
+      const mockUpdateExcludedURLs = sinon.stub();
+      const auditTypeConfig = { excludedURLs: ['url1', 'url2'], updateExcludedURLs: mockUpdateExcludedURLs };
+      mockUpdateExcludedURLs.callsFake(() => {
+        auditTypeConfig.excludedURLs = [];
+      });
+
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
@@ -375,10 +391,21 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
-      const auditTypeConfig = { excludedURLs: ['url1', 'url2'] };
+      const mockUpdateExcludedURLs = sinon.mock();
+
+      const auditTypeConfig = { excludedURLs: ['url1', 'url2'], updateExcludedURLs: mockUpdateExcludedURLs };
+
+      const mockGetAuditTypeConfig = sinon.mock();
+      mockGetAuditTypeConfig.exactly(1);
+      mockGetAuditTypeConfig.returns(auditTypeConfig);
+
+      mockUpdateExcludedURLs.callsFake(() => {
+        auditTypeConfig.excludedURLs = ['url1', 'url2', 'url3', 'url4'];
+      });
+
       const site = {
         getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
+          getAuditTypeConfig: mockGetAuditTypeConfig,
           updateAuditTypeConfig: sinon.stub(),
         }),
         updateAuditTypeConfig: sinon.stub(),
@@ -403,7 +430,11 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
-      const auditTypeConfig = { excludedURLs: ['url1', 'url2'] };
+      const mockUpdateExcludedURLs = sinon.stub();
+      const auditTypeConfig = { excludedURLs: ['url1', 'url2'], updateExcludedURLs: mockUpdateExcludedURLs };
+      mockUpdateExcludedURLs.callsFake(() => {
+        auditTypeConfig.excludedURLs = ['url1', 'url2'];
+      });
       const site = {
         getAuditConfig: () => ({
           getAuditTypeConfig: () => auditTypeConfig,
