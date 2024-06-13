@@ -17,6 +17,7 @@ import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack
 import { triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
+const LHS_MOBILE = 'lhs-mobile';
 
 /**
  * Factory function to create the RunAuditCommand object.
@@ -29,9 +30,9 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site',
+    description: 'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site}`,
+    usageText: `${PHRASES[0]} {site} [auditType (optional)]`,
   });
 
   const { dataAccess, log } = context;
@@ -49,7 +50,7 @@ function RunAuditCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [baseURLInput] = args;
+      const [baseURLInput, auditTypeInput] = args;
 
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -65,7 +66,7 @@ function RunAuditCommand(context) {
         return;
       }
 
-      const auditType = 'lhs-mobile';
+      const auditType = auditTypeInput || LHS_MOBILE;
       const auditConfig = site.getAuditConfig();
 
       if (auditConfig.auditsDisabled()) {
@@ -80,8 +81,10 @@ function RunAuditCommand(context) {
 
       await triggerAuditForSite(site, auditType, slackContext, context);
 
-      let message = `:white_check_mark: Audit check is triggered for ${baseURL}\n`;
-      message += `:adobe-run: In a minute, you can run @spacecat get site ${baseURL}`;
+      let message = `:white_check_mark: ${auditType} audit check is triggered for ${baseURL}\n`;
+      if (auditType === LHS_MOBILE) {
+        message += `:adobe-run: In a minute, you can run @spacecat get site ${baseURL}`;
+      }
 
       await say(message);
     } catch (error) {
