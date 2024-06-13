@@ -138,12 +138,15 @@ function AuditsController(dataAccess) {
       const auditConfig = site.getAuditConfig();
       const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
 
-      const newExcludedURLs = !excludedURLs.length
-        ? []
-        : [
-          ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
-          ...excludedURLs,
-        ];
+      // const newExcludedURLs = !excludedURLs.length
+      //   ? []
+      //   : [
+      //     ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
+      //     ...excludedURLs,
+      //   ];
+
+      const existingExcludedURLs = auditTypeConfig.getExcludedURLs() || [];
+      const newExcludedURLs = Array.from(new Set([...existingExcludedURLs, ...excludedURLs]));
 
       auditTypeConfig.updateExcludedURLs(newExcludedURLs);
       // site.updateAuditTypeConfig(auditType, AuditConfigType(auditTypeConfig));
