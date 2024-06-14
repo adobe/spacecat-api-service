@@ -59,3 +59,39 @@ latest-audit-for-site:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+update-audit-config-for-site:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/auditType'
+  patch:
+    tags:
+      - audit
+      - site
+    summary: Update the configuration for an audit
+    description: |
+        This endpoint is useful for updating the configuration for an audit, 
+        for example to set which URLs to skip from the audit.
+    operationId: patchAuditForSite
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/UpdateAuditConfigType'
+    responses:
+      '200':
+        description: A site object
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400-patch-audit-for-site'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-audit-not-found'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

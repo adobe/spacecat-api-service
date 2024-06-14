@@ -38,6 +38,7 @@ function getExpectedSlackMessage(baseURL, channel, source) {
 }
 
 const validHelixDom = '<!doctype html><html lang="en"><head></head><body><header></header><main><div></div></main></body></html>';
+const invalidHelixDom = '<!doctype html><html lang="en"><head></head><body>some other dome structure</body></html>';
 
 describe('Hooks Controller', () => {
   let slackClient;
@@ -226,10 +227,7 @@ describe('Hooks Controller', () => {
     it('URLs with invalid DOMs are disregarded', async () => {
       nock('https://some-domain.com')
         .get('/')
-        .reply(200);
-      nock('https://some-domain.com')
-        .get('/index.plain.html')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect' });
+        .reply(200, invalidHelixDom);
 
       context.data = {
         forwardedHost: 'some-domain.com, some-fw-domain.com',
@@ -238,7 +236,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}. Body: <body>some other dome structure</body></html>, Source: CDN, Candidate: https://some-domain.com');
     });
   });
 
