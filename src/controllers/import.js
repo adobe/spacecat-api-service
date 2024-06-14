@@ -105,7 +105,11 @@ function ImportController(context) {
       validateImportApiKey(importApiKey);
       validateRequestData(data);
 
-      const { urls, options } = data;
+      const { urls } = data;
+      let { options } = data;
+      if (!options) {
+        options = importConfiguration.options;
+      }
       const job = await importSupervisor.startNewJob(urls, importApiKey, options);
 
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
