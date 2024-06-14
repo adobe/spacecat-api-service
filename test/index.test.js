@@ -81,7 +81,12 @@ describe('Index Tests', () => {
           getConfig: () => ({
             audits: {
               auditsDisabled: () => false,
-              getAuditTypeConfigs: () => ({ 404: { disabled: () => false } }),
+              getAuditTypeConfigs: () => ({
+                404: {
+                  disabled: () => false,
+                  getExcludedURLs: () => [],
+                },
+              }),
             },
           }),
         }),

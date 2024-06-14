@@ -15,7 +15,8 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import AuditConfigType from '@adobe/spacecat-shared-data-access/src/models/site/audit-config-type.js';
 
 import { AuditDto } from '../dto/audit.js';
 
@@ -128,34 +129,35 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    // get audit type config
-    const site = await dataAccess.getSiteByID(siteId);
-    const auditConfig = site.getAuditConfig();
-    const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
-
     const { excludedURLs } = context.data;
 
     if (Array.isArray(excludedURLs)) {
-      let newState = {
-        ...auditTypeConfig,
-        excludedURLs: [
-          ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
-          ...excludedURLs,
-        ],
-      };
-
-      if (!excludedURLs.length) {
-        // remove all opt-outs
-        newState = {
-          ...auditTypeConfig,
-          excludedURLs: [],
-        };
+      for (const url of excludedURLs) {
+        if (!isValidUrl(url)) {
+          return badRequest('Invalid URL format');
+        }
+      }
+      // get audit type config
+      const site = await dataAccess.getSiteByID(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+      const auditConfig = site.getAuditConfig();
+      const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
+      if (!auditTypeConfig) {
+        return notFound('Audit type not found');
       }
 
-      await site.updateAuditTypeConfig(auditType, newState);
+      const newExcludedURLs = excludedURLs.length === 0
+        ? []
+        : Array.from(new Set([...(auditTypeConfig.getExcludedURLs() || []), ...excludedURLs]));
+
+      auditTypeConfig.updateExcludedURLs(newExcludedURLs);
+      const obj = AuditConfigType.toDynamoItem(auditTypeConfig);
+      site.updateAuditTypeConfig(auditType, obj);
       await dataAccess.updateSite(site);
 
-      return ok(newState);
+      return ok(obj);
     }
 
     return badRequest('No updates provided');
