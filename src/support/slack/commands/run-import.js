@@ -73,7 +73,13 @@ function RunImportCommand(context) {
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say } = slackContext;
+    const { say, user } = slackContext;
+
+    const admins = ['W4RRU2BNE', 'U049ELV3SD8'];
+    if (!admins.includes(user)) {
+      await say(':error: Only SpaceCat admins can run imports.');
+      return;
+    }
 
     try {
       const [importType, baseURLInput, startDate, endDate] = args;
