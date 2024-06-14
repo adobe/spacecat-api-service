@@ -1,3 +1,10 @@
+# [1.45.0](https://github.com/adobe/spacecat-api-service/compare/v1.44.2...v1.45.0) (2024-06-14)
+
+
+### Features
+
+* opt-out updateExcludedURLs ([#354](https://github.com/adobe/spacecat-api-service/issues/354)) ([c01e763](https://github.com/adobe/spacecat-api-service/commit/c01e763a541869c51ec7df88fb0a81013fbcfa39))
+
 ## [1.44.2](https://github.com/adobe/spacecat-api-service/compare/v1.44.1...v1.44.2) (2024-06-13)
 
 
