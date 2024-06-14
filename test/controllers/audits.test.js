@@ -487,5 +487,47 @@ describe('Audits Controller', () => {
       expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
+
+    it('returns not found if site is not found', async () => {
+      const siteId = 'nonexistent-site';
+      const auditType = 'broken-backlinks';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs: [] },
+      };
+
+      mockDataAccess.getSiteByID.resolves(null);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(404);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('returns not found if audit type is not found', async () => {
+      const siteId = 'site1';
+      const auditType = 'nonexistent-audit-type';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs: [] },
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => null,
+        }),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(404);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'Audit type not found');
+    });
   });
 });

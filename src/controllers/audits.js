@@ -139,8 +139,14 @@ function AuditsController(dataAccess) {
       }
       // get audit type config
       const site = await dataAccess.getSiteByID(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
       const auditConfig = site.getAuditConfig();
       const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
+      if (!auditTypeConfig) {
+        return notFound('Audit type not found');
+      }
 
       const newExcludedURLs = excludedURLs.length === 0
         ? []
