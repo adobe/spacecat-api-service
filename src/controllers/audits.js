@@ -16,7 +16,6 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
-import AuditConfig from '@adobe/spacecat-shared-data-access/src/models/site/audit-config.js';
 import AuditConfigType from '@adobe/spacecat-shared-data-access/src/models/site/audit-config-type.js';
 
 import { AuditDto } from '../dto/audit.js';
@@ -143,10 +142,11 @@ function AuditsController(dataAccess) {
         : Array.from(new Set([...(auditTypeConfig.getExcludedURLs() || []), ...excludedURLs]));
 
       auditTypeConfig.updateExcludedURLs(newExcludedURLs);
-      site.updateAuditTypeConfig(auditType, AuditConfigType.toDynamoItem(auditTypeConfig));
+      const obj = AuditConfigType.toDynamoItem(auditTypeConfig);
+      site.updateAuditTypeConfig(auditType, obj);
       await dataAccess.updateSite(site);
 
-      return ok(AuditConfig.toDynamoItem(site.getAuditConfig()));
+      return ok(obj);
     }
 
     return badRequest('No updates provided');

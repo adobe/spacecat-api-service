@@ -300,5 +300,197 @@ describe('Audits Controller', () => {
       const error = await result.json();
       expect(error).to.have.property('message', 'No updates provided');
     });
+
+    it('updates excluded URLs when excludedURLs is empty 1', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const excludedURLs = [];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs },
+      };
+
+      const mockDisabledFn = sinon.stub();
+      mockDisabledFn.returns(false);
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns([]),
+        updateExcludedURLs: sinon.stub(),
+        disabled: mockDisabledFn,
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub(false),
+          getAuditTypeConfigs: sinon.stub().returns([]),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(200);
+      expect(auditTypeConfig.updateExcludedURLs.calledWith([])).to.be.true;
+      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+    });
+
+    it('updates excluded URLs when excludedURLs is not empty but the audit type config is undefined', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const excludedURLs = ['url1', 'url2'];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs },
+      };
+
+      const mockDisabledFn = sinon.stub();
+      mockDisabledFn.returns(false);
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns(undefined),
+        updateExcludedURLs: sinon.stub(),
+        disabled: mockDisabledFn,
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub(false),
+          getAuditTypeConfigs: sinon.stub().returns([]),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(200);
+      expect(auditTypeConfig.updateExcludedURLs.calledWith(['url1', 'url2'])).to.be.true;
+      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+    });
+
+    it('updates excluded URLs when excludedURLs has items', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const excludedURLs = ['https://example.com/page1', 'https://example.com/page2'];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs },
+      };
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns(['https://example.com/page3']),
+        updateExcludedURLs: sinon.stub(),
+        disabled: sinon.stub().returns(false),
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub().returns(false),
+          getAuditTypeConfigs: sinon.stub().returns([]),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(200);
+      expect(auditTypeConfig.updateExcludedURLs.calledWith([
+        'https://example.com/page3',
+        'https://example.com/page1',
+        'https://example.com/page2',
+      ])).to.be.true;
+      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+    });
+
+    it('handles duplicates in excludedURLs', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const excludedURLs = ['https://example.com/page1', 'https://example.com/page1'];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs },
+      };
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns(['https://example.com/page2']),
+        updateExcludedURLs: sinon.stub(),
+        disabled: sinon.stub().returns(false),
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub().returns(false),
+          getAuditTypeConfigs: sinon.stub().returns([]),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(200);
+      expect(auditTypeConfig.updateExcludedURLs.calledWith([
+        'https://example.com/page2',
+        'https://example.com/page1',
+      ])).to.be.true;
+      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+    });
+
+    it('updates excluded URLs when excludedURLs is empty', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const excludedURLs = [];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs },
+      };
+
+      const mockDisabledFn = sinon.stub();
+      mockDisabledFn.returns(false);
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns([]),
+        updateExcludedURLs: sinon.stub(),
+        disabled: mockDisabledFn, // Ensure the disabled method is present
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          updateAuditTypeConfig: sinon.stub(),
+          auditsDisabled: sinon.stub().returns(false),
+          getAuditTypeConfigs: sinon.stub().returns([]),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(200);
+      expect(auditTypeConfig.updateExcludedURLs.calledWith([])).to.be.true;
+      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+    });
   });
 });

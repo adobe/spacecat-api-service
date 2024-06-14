@@ -80,11 +80,11 @@ update-audit-config-for-site:
             $ref: './schemas.yaml#/UpdateAuditConfigType'
     responses:
       '200':
-        description: A site object
+        description: The updated audit type config object
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/Site'
+              $ref: './schemas.yaml#/AuditConfigType'
       '400':
         $ref: './responses.yaml#/400-patch-audit-for-site'
       '401':
