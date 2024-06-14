@@ -15,7 +15,7 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import AuditConfigType from '@adobe/spacecat-shared-data-access/src/models/site/audit-config-type.js';
 
 import { AuditDto } from '../dto/audit.js';
@@ -132,6 +132,11 @@ function AuditsController(dataAccess) {
     const { excludedURLs } = context.data;
 
     if (Array.isArray(excludedURLs)) {
+      for (const url of excludedURLs) {
+        if (!isValidUrl(url)) {
+          return badRequest('Invalid URL format');
+        }
+      }
       // get audit type config
       const site = await dataAccess.getSiteByID(siteId);
       const auditConfig = site.getAuditConfig();

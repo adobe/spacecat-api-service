@@ -301,6 +301,40 @@ describe('Audits Controller', () => {
       expect(error).to.have.property('message', 'No updates provided');
     });
 
+    it('returns bad request if excludedURLs is not an array', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const excludedURLs = 'http://valid-url.com';
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs },
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'No updates provided');
+    });
+
+    it('returns bad request if excludedURLs contains invalid URLs', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const excludedURLs = ['invalid-url', 'http://valid-url.com'];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { excludedURLs },
+      };
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'Invalid URL format');
+    });
+
     it('updates excluded URLs when excludedURLs is empty', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
@@ -342,7 +376,7 @@ describe('Audits Controller', () => {
     it('updates excluded URLs when excludedURLs is not empty but the audit type config is undefined', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
-      const excludedURLs = ['url1', 'url2'];
+      const excludedURLs = ['https://foo.com', 'https://bar.com'];
 
       const context = {
         params: { siteId, auditType },
@@ -372,7 +406,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateExcludedURLs.calledWith(['url1', 'url2'])).to.be.true;
+      expect(auditTypeConfig.updateExcludedURLs.calledWith(['https://foo.com', 'https://bar.com'])).to.be.true;
       expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
