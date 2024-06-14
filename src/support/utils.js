@@ -63,6 +63,25 @@ export const sendExperimentationCandidatesMessage = async (
 });
 /* c8 ignore end */
 
+// todo: prototype - untested
+/* c8 ignore start */
+export const sendRunImportMessage = async (
+  sqs,
+  queueUrl,
+  importType,
+  siteId,
+  startDate,
+  endDate,
+  slackContext,
+) => sqs.sendMessage(queueUrl, {
+  type: importType,
+  siteId,
+  startDate,
+  endDate,
+  slackContext,
+});
+/* c8 ignore end */
+
 /**
  * Sends audit messages for each URL.
  *
@@ -130,6 +149,30 @@ export const triggerExperimentationCandidates = async (
 );
 /* c8 ignore end */
 
+// todo: prototype - untested
+/* c8 ignore start */
+export const triggerImportRun = async (
+  config,
+  importType,
+  siteId,
+  startDate,
+  endDate,
+  slackContext,
+  lambdaContext,
+) => sendRunImportMessage(
+  lambdaContext.sqs,
+  config.getQueues().imports,
+  importType,
+  siteId,
+  startDate,
+  endDate,
+  {
+    channelId: slackContext.channelId,
+    threadTs: slackContext.threadTs,
+  },
+);
+/* c8 ignore end */
+
 /**
  * Checks if a given URL corresponds to a Helix site.
  * @param {string} url - The URL to check.
@@ -137,10 +180,9 @@ export const triggerExperimentationCandidates = async (
  * containing the result of the Helix site check and an optional reason if it's not a Helix site.
  */
 export async function isHelixSite(url) {
-  let finalUrl;
+  let resp;
   try {
-    const resp = await fetch(url);
-    finalUrl = resp.url;
+    resp = await fetch(url);
   } catch (e) {
     return {
       isHelix: false,
@@ -148,34 +190,18 @@ export async function isHelixSite(url) {
     };
   }
 
-  finalUrl = finalUrl.endsWith('/') ? `${finalUrl}index.plain.html` : `${finalUrl}.plain.html`;
-  let finalResp;
+  const dom = await resp.text();
+  const { status } = resp;
+  const headers = resp.headers.plain();
 
-  try {
-    // redirects are disabled because .plain.html should return 200
-    finalResp = await fetch(finalUrl, { redirect: 'manual' });
-  } catch (e) {
+  const containsHelixDom = /<header><\/header>\s*<main>\s*<div>/.test(dom);
+
+  if (!containsHelixDom) {
     return {
       isHelix: false,
-      reason: '.plain.html is unreachable',
-    };
-  }
-
-  // reject if .plain.html does not return 2XX
-  if (!finalResp.ok) {
-    return {
-      isHelix: false,
-      reason: `.plain.html does not return 2XX, returns ${finalResp.status}`,
-    };
-  }
-
-  const respText = await finalResp.text();
-
-  // reject if .plain.html contains <head>
-  if (respText.includes('<head>')) {
-    return {
-      isHelix: false,
-      reason: '.plain.html should not contain <head>',
+      // if the DOM is not in helix format, log the response status, headers and first 100 chars
+      // of <body> for debugging purposes
+      reason: `DOM is not in helix format. Status: ${status}. Response headers: ${JSON.stringify(headers)}. Body: ${dom.includes('<body>') ? dom.substring(dom.indexOf('<body>'), dom.indexOf('<body>') + 100) : ''}`,
     };
   }
 
@@ -228,4 +254,15 @@ export async function findDeliveryType(url) {
   }
 
   return DELIVERY_TYPES.OTHER;
+}
+
+/**
+ * Error class with a status code property.
+ * @extends Error
+ */
+export class ErrorWithStatusCode extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
 }

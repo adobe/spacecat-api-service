@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Adobe. All rights reserved.
+ * Copyright 2024 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -14,7 +14,6 @@
 
 import { expect } from 'chai';
 import sinon from 'sinon';
-
 import getRouteHandlers from '../../src/routes/index.js';
 
 describe('getRouteHandlers', () => {
@@ -63,6 +62,12 @@ describe('getRouteHandlers', () => {
     processFulfillmentEvents: sinon.stub(),
   };
 
+  const mockImportController = {
+    createImportJob: sinon.stub(),
+    getImportJobStatus: sinon.stub(),
+    getImportJobResult: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -73,6 +78,7 @@ describe('getRouteHandlers', () => {
       mockSlackController,
       mockTrigger,
       mockFulfillmentController,
+      mockImportController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -91,6 +97,7 @@ describe('getRouteHandlers', () => {
       'GET /trigger',
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
+      'POST /tools/import',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -124,12 +131,15 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/audits',
       'GET /sites/:siteId/audits/:auditType',
       'GET /sites/:siteId/audits/:auditType/:auditedAt',
+      'PATCH /sites/:siteId/:auditType',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
       'GET /sites/:siteId/key-events',
       'POST /sites/:siteId/key-events',
       'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
+      'GET /tools/import/:jobId',
+      'GET /tools/import/:jobId/import-result.zip',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

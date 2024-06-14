@@ -73,6 +73,11 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-patch-audit-for-site':
+  description: No updates provided.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '400-bad-hoolihan-event':
   description: Bad request. Did not match expected Hoolihan message format.
   headers:
@@ -122,6 +127,11 @@
       $ref: './headers.yaml#/xError'
 '500':
   description: Internal server error.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'503':
+  description: Service Unavailable.
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'

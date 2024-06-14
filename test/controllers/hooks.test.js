@@ -37,6 +37,9 @@ function getExpectedSlackMessage(baseURL, channel, source) {
     .buildToObject();
 }
 
+const validHelixDom = '<!doctype html><html lang="en"><head></head><body><header></header><main><div></div></main></body></html>';
+const invalidHelixDom = '<!doctype html><html lang="en"><head></head><body>some other dome structure</body></html>';
+
 describe('Hooks Controller', () => {
   let slackClient;
   let context;
@@ -221,13 +224,10 @@ describe('Hooks Controller', () => {
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Cannot fetch the site due to rainy weather, Source: CDN, Candidate: https://some-domain.com');
     });
 
-    it('URLs without valid plain.htmls are disregarded', async () => {
+    it('URLs with invalid DOMs are disregarded', async () => {
       nock('https://some-domain.com')
         .get('/')
-        .reply(200);
-      nock('https://some-domain.com')
-        .get('/index.plain.html')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect' });
+        .reply(200, invalidHelixDom);
 
       context.data = {
         forwardedHost: 'some-domain.com, some-fw-domain.com',
@@ -236,83 +236,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html is unreachable, Source: CDN, Candidate: https://some-domain.com');
-    });
-
-    it('URLs with non-200 index plain.htmls are disregarded', async () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .reply(200);
-      nock('https://some-domain.com')
-        .get('/index.plain.html')
-        .reply(404);
-
-      context.data = {
-        forwardedHost: 'some-domain.com, some-fw-domain.com',
-      };
-
-      const resp = await (await hooksController.processCDNHook(context)).json();
-      expect(resp).to.equal('CDN site candidate disregarded');
-      expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 404, Source: CDN, Candidate: https://some-domain.com');
-    });
-
-    it('URLs with redirects and returns non-200 plain.htmls are disregarded', async () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .reply(301, undefined, { location: 'https://some-domain.com/en/us' });
-      nock('https://some-domain.com')
-        .get('/en/us')
-        .reply(200);
-
-      nock('https://some-domain.com')
-        .get('/en/us.plain.html')
-        .reply(404);
-
-      context.data = {
-        forwardedHost: 'some-domain.com, some-fw-domain.com',
-      };
-
-      const resp = await (await hooksController.processCDNHook(context)).json();
-      expect(resp).to.equal('CDN site candidate disregarded');
-      expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 404, Source: CDN, Candidate: https://some-domain.com');
-    });
-
-    it('plain.htmls with redirects are disregarded', async () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .reply(200);
-      nock('https://some-domain.com')
-        .get('/index.plain.html')
-        .reply(301, undefined, { location: 'https://some-domain.com/404-page-with-200-result' });
-
-      context.data = {
-        forwardedHost: 'some-domain.com, some-fw-domain.com',
-      };
-
-      const resp = await (await hooksController.processCDNHook(context)).json();
-      expect(resp).to.equal('CDN site candidate disregarded');
-      expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html does not return 2XX, returns 301, Source: CDN, Candidate: https://some-domain.com');
-    });
-
-    it('plain.htmls containing <head> are disregarded', async () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .reply(200);
-      nock('https://some-domain.com')
-        .get('/index.plain.html')
-        .reply(200, '<html><head><title>some title</title></head><body>some body</body></html>');
-
-      context.data = {
-        forwardedHost: 'some-domain.com, some-fw-domain.com',
-      };
-
-      const resp = await (await hooksController.processCDNHook(context)).json();
-      expect(resp).to.equal('CDN site candidate disregarded');
-      expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: .plain.html should not contain <head>, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}. Body: <body>some other dome structure</body></html>, Source: CDN, Candidate: https://some-domain.com');
     });
   });
 
@@ -320,10 +244,7 @@ describe('Hooks Controller', () => {
     beforeEach('set up', () => {
       nock('https://some-domain.com')
         .get('/')
-        .reply(200);
-      nock('https://some-domain.com')
-        .get('/index.plain.html')
-        .reply(200);
+        .reply(200, validHelixDom);
 
       context.data = {
         forwardedHost: 'some-domain.com, some-fw-domain.com',
@@ -359,10 +280,7 @@ describe('Hooks Controller', () => {
     beforeEach('set up', () => {
       nock('https://some-domain.com')
         .get('/')
-        .reply(200);
-      nock('https://some-domain.com')
-        .get('/index.plain.html')
-        .reply(200);
+        .reply(200, validHelixDom);
 
       context.dataAccess.siteCandidateExists.resolves(false);
       context.dataAccess.upsertSiteCandidate.resolves();

@@ -23,6 +23,8 @@ import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
 chai.use(sinonChai);
 const { expect } = chai;
 
+const validHelixDom = '<!doctype html><html lang="en"><head></head><body><header></header><main><div></div></main></body></html>';
+
 describe('AddSiteCommand', () => {
   let context;
   let slackContext;
@@ -191,10 +193,7 @@ describe('AddSiteCommand', () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
-        .reply(200);
-      nock(baseURL)
-        .get('/index.plain.html')
-        .reply(200);
+        .reply(200, validHelixDom);
 
       dataAccessStub.getSiteByBaseURL.resolves(null);
       dataAccessStub.addSite.resolves(createSite({ baseURL, deliveryType: 'aem_edge', isLive: true }));
