@@ -301,7 +301,7 @@ describe('Audits Controller', () => {
       expect(error).to.have.property('message', 'No updates provided');
     });
 
-    it('updates excluded URLs when excludedURLs is empty 1', async () => {
+    it('updates excluded URLs when excludedURLs is empty', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const excludedURLs = [];
@@ -450,45 +450,6 @@ describe('Audits Controller', () => {
         'https://example.com/page2',
         'https://example.com/page1',
       ])).to.be.true;
-      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
-      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
-    });
-
-    it('updates excluded URLs when excludedURLs is empty', async () => {
-      const siteId = 'site1';
-      const auditType = 'broken-backlinks';
-      const excludedURLs = [];
-
-      const context = {
-        params: { siteId, auditType },
-        data: { excludedURLs },
-      };
-
-      const mockDisabledFn = sinon.stub();
-      mockDisabledFn.returns(false);
-
-      const auditTypeConfig = {
-        getExcludedURLs: sinon.stub().returns([]),
-        updateExcludedURLs: sinon.stub(),
-        disabled: mockDisabledFn, // Ensure the disabled method is present
-      };
-
-      const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          updateAuditTypeConfig: sinon.stub(),
-          auditsDisabled: sinon.stub().returns(false),
-          getAuditTypeConfigs: sinon.stub().returns([]),
-        }),
-        updateAuditTypeConfig: sinon.stub(),
-      };
-
-      mockDataAccess.getSiteByID.resolves(site);
-
-      const result = await auditsController.patchAuditForSite(context);
-
-      expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateExcludedURLs.calledWith([])).to.be.true;
       expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
