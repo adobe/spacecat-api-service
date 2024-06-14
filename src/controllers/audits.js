@@ -138,19 +138,11 @@ function AuditsController(dataAccess) {
       const auditConfig = site.getAuditConfig();
       const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
 
-      // const newExcludedURLs = !excludedURLs.length
-      //   ? []
-      //   : [
-      //     ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
-      //     ...excludedURLs,
-      //   ];
-
       const newExcludedURLs = excludedURLs.length === 0
         ? []
         : Array.from(new Set([...(auditTypeConfig.getExcludedURLs() || []), ...excludedURLs]));
 
       auditTypeConfig.updateExcludedURLs(newExcludedURLs);
-      // site.updateAuditTypeConfig(auditType, AuditConfigType(auditTypeConfig));
       site.updateAuditTypeConfig(auditType, AuditConfigType.toDynamoItem(auditTypeConfig));
       await dataAccess.updateSite(site);
 
