@@ -12,8 +12,6 @@
 
 /* eslint-env mocha */
 
-import AuditConfig from '@adobe/spacecat-shared-data-access/src/models/site/audit-config.js';
-
 import { expect } from 'chai';
 import sinon from 'sinon';
 
@@ -97,10 +95,6 @@ describe('Utility Functions', () => {
         getGitHubURL: sinon.stub(),
         isLive: sinon.stub(),
         getIsLiveToggledAt: sinon.stub().returns('2011-10-05T14:48:00.000Z'),
-        getAuditConfig: sinon.stub().returns(AuditConfig.fromDynamoItem({
-          auditsDisabled: false,
-          auditTypeConfigs: {},
-        })),
       };
     });
 
@@ -126,10 +120,6 @@ describe('Utility Functions', () => {
 
     it('prints details for a site with audits disabled', () => {
       mockSite.getBaseURL.returns('https://example.com');
-      mockSite.getAuditConfig = sinon.stub().returns(AuditConfig.fromDynamoItem({
-        auditsDisabled: true,
-        auditTypeConfigs: {},
-      }));
 
       const expectedOutput = `:warning: Audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).
 

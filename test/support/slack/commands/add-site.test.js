@@ -143,7 +143,6 @@ describe('AddSiteCommand', () => {
         .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
       const site = createSite({ baseURL, deliveryType: 'other' });
-      site.setAllAuditsDisabled(true);
       dataAccessStub.addSite.resolves(site);
 
       const args = ['example.com'];
@@ -162,7 +161,6 @@ describe('AddSiteCommand', () => {
         .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
       const site = createSite({ baseURL, deliveryType: 'other' });
-      site.updateAuditTypeConfig('lhs-mobile', { disabled: true });
       dataAccessStub.addSite.resolves(site);
 
       const args = ['example.com'];

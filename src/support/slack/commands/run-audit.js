@@ -67,14 +67,9 @@ function RunAuditCommand(context) {
       }
 
       const auditType = auditTypeInput || LHS_MOBILE;
-      const auditConfig = site.getAuditConfig();
+      const configuration = await dataAccess.getConfiguration();
 
-      if (auditConfig.auditsDisabled()) {
-        await say(`:x: Will not audit site '${baseURL}' because audits are disabled for this site.`);
-        return;
-      }
-
-      if (auditConfig.getAuditTypeConfig(auditType)?.disabled()) {
+      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
         await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
         return;
       }

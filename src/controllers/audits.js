@@ -18,6 +18,7 @@ import {
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import { AuditDto } from '../dto/audit.js';
+import { SiteDto } from '../dto/site.js';
 
 /**
  * Audits controller.
@@ -130,35 +131,27 @@ function AuditsController(dataAccess) {
 
     // get audit type config
     const site = await dataAccess.getSiteByID(siteId);
-    const auditConfig = site.getAuditConfig();
-    const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
+    const siteConfig = site.getConfig();
 
     const { excludedURLs } = context.data;
+    let updatedExcludedUrls;
 
     if (Array.isArray(excludedURLs)) {
-      let newState = {
-        ...auditTypeConfig,
-        excludedURLs: [
-          ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
-          ...excludedURLs,
-        ],
-      };
-
-      if (!excludedURLs.length) {
-        // remove all opt-outs
-        newState = {
-          ...auditTypeConfig,
-          excludedURLs: [],
-        };
-      }
-
-      await site.updateAuditTypeConfig(auditType, newState);
-      await dataAccess.updateSite(site);
-
-      return ok(newState);
+      updatedExcludedUrls = [
+        ...siteConfig.getExcludedURLs()?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
+        ...excludedURLs,
+      ];
     }
 
-    return badRequest('No updates provided');
+    if (!excludedURLs.length) {
+      // remove all opt-outs
+      updatedExcludedUrls = [];
+    }
+    siteConfig.updateAuditExcludedURLs(auditType, updatedExcludedUrls);
+    site.updateConfig(siteConfig);
+    await dataAccess.updateSite(site);
+
+    return ok(SiteDto.toJSON(site));
   };
 
   return {
