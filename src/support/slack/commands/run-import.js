@@ -57,7 +57,10 @@ function RunImportCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-import',
     name: 'Run Import',
-    description: 'Runs the specified import type for the site identified with its id, and optionally for a date range',
+    description: 'Runs the specified import type for the site identified with its id, and optionally for a date range.'
+      + '\nOnly selected SpaceCat fluid team members can run imports.'
+      + '\nCurrently this will run the import for all sources and all destinations configured for the site, hence be aware of costs'
+      + ' (source: ahrefs) when choosing the date range.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {importType} {baseURL} {startDate} {endDate}`,
   });
@@ -78,7 +81,7 @@ function RunImportCommand(context) {
     const admins = JSON.parse(context?.env?.SLACK_IDS_RUN_IMPORT || '[]');
 
     if (!admins.includes(user)) {
-      await say(':error: Only SpaceCat admins can run imports.');
+      await say(':error: Only selected SpaceCat fluid team members can run imports.');
       return;
     }
 
