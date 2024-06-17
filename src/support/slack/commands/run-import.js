@@ -75,7 +75,8 @@ function RunImportCommand(context) {
   const handleExecution = async (args, slackContext) => {
     const { say, user } = slackContext;
 
-    const admins = ['W4RRU2BNE', 'U049ELV3SD8'];
+    const admins = JSON.parse(context?.env?.SLACK_IDS_RUN_IMPORT || '[]');
+
     if (!admins.includes(user)) {
       await say(':error: Only SpaceCat admins can run imports.');
       return;
