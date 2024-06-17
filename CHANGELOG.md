@@ -1,3 +1,10 @@
+# [1.46.0](https://github.com/adobe/spacecat-api-service/compare/v1.45.2...v1.46.0) (2024-06-17)
+
+
+### Features
+
+* auth handlers ([#362](https://github.com/adobe/spacecat-api-service/issues/362)) ([e9da639](https://github.com/adobe/spacecat-api-service/commit/e9da639369236a76485b82abe60060213d8f9c7e))
+
 ## [1.45.2](https://github.com/adobe/spacecat-api-service/compare/v1.45.1...v1.45.2) (2024-06-17)
 
 
