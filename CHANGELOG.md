@@ -1,3 +1,10 @@
+## [1.45.2](https://github.com/adobe/spacecat-api-service/compare/v1.45.1...v1.45.2) (2024-06-17)
+
+
+### Bug Fixes
+
+* restrict run import Slack command to selected users ([#360](https://github.com/adobe/spacecat-api-service/issues/360)) ([70bcf71](https://github.com/adobe/spacecat-api-service/commit/70bcf716bb2723d5ce7e1002c865941d59208f91))
+
 ## [1.45.1](https://github.com/adobe/spacecat-api-service/compare/v1.45.0...v1.45.1) (2024-06-15)
 
 
