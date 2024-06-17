@@ -1,0 +1,63 @@
+rum:
+  parameters:
+    - name: query
+      description: The type of RUM query to execute.
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+          - 'cwv'
+          - '404'
+    - name: domain
+      description: The domain for which to retrieve the RUM data.
+      in: query
+      required: true
+      schema:
+        type: string
+        example: www.aem.live
+    - name: domainkey
+      description: The domain-specific RUM bundler key.
+      in: query
+      required: true
+      schema:
+        type: string
+    - name: interval
+      description: The time interval for which to retrieve data (in days).
+      in: query
+      required: false
+      schema:
+        type: number
+        default: 7
+    - name: granularity
+      description: The granularity of the RUM data retrieval.
+      in: query
+      required: true
+      schema:
+        type: string
+        enum:
+          - daily
+          - hourly
+        default: daily
+  get:
+    tags:
+      - rum
+    summary: Execute the desired RUM query.
+    description: |
+      This endpoint is useful for retrieving a site by its ID.
+    operationId: rum
+    security:
+      - domainkey: [ ]
+    responses:
+      '200':
+        description: Successful operation with a query result returned
+        content:
+          application/json:
+            schema:
+              type: object
+              description: schema of the response changes per query type
+      '400':
+        $ref: './responses.yaml#/400'
+      '500':
+        $ref: './responses.yaml#/500'
+
