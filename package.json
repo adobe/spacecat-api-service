@@ -72,6 +72,7 @@
     "@aws-sdk/client-sqs": "3.598.0",
     "@aws-sdk/s3-request-presigner": "3.598.0",
     "@slack/bolt": "3.18.0",
+    "jose": "5.4.0",
     "slack-block-builder": "2.8.0"
   },
   "devDependencies": {
