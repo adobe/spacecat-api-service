@@ -17,6 +17,7 @@ export default class AuthInfo {
   constructor() {
     Object.assign(this, {
       authenticated: false,
+      profile: null,
     });
   }
 
