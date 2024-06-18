@@ -1,3 +1,24 @@
+# [1.47.0](https://github.com/adobe/spacecat-api-service/compare/v1.46.0...v1.47.0) (2024-06-18)
+
+
+### Features
+
+* ims handler ([#363](https://github.com/adobe/spacecat-api-service/issues/363)) ([62ed531](https://github.com/adobe/spacecat-api-service/commit/62ed5317b5170632843d45d06848b65dc9cce91c))
+
+# [1.46.0](https://github.com/adobe/spacecat-api-service/compare/v1.45.2...v1.46.0) (2024-06-17)
+
+
+### Features
+
+* auth handlers ([#362](https://github.com/adobe/spacecat-api-service/issues/362)) ([e9da639](https://github.com/adobe/spacecat-api-service/commit/e9da639369236a76485b82abe60060213d8f9c7e))
+
+## [1.45.2](https://github.com/adobe/spacecat-api-service/compare/v1.45.1...v1.45.2) (2024-06-17)
+
+
+### Bug Fixes
+
+* restrict run import Slack command to selected users ([#360](https://github.com/adobe/spacecat-api-service/issues/360)) ([70bcf71](https://github.com/adobe/spacecat-api-service/commit/70bcf716bb2723d5ce7e1002c865941d59208f91))
+
 ## [1.45.1](https://github.com/adobe/spacecat-api-service/compare/v1.45.0...v1.45.1) (2024-06-15)
 
 
