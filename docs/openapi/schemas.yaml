@@ -1009,9 +1009,9 @@ ImportJobStatus:
       description: The status of the import job
       type: string
       enum:
-        - 'running'
-        - 'complete'
-        - 'failed'
+        - 'RUNNING'
+        - 'COMPLETE'
+        - 'FAILED'
     startTime:
       description: The date and time when the import job started
       $ref: '#/DateTime'
@@ -1029,8 +1029,20 @@ ImportJobStatus:
       type: integer
   example:
     jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
-    status: 'running'
+    status: 'RUNNING'
     startTime: '2024-01-19T14:20:30Z'
     urlCount: 25
     successCount: 15
     failedCount: 0
+ImportJobArchive:
+  type: object
+  properties:
+    jobId:
+      description: The ID of the import job
+      $ref: '#/Id'
+    downloadUrl:
+      description: The pre-signed URL to download the archive of the import job
+      $ref: '#/URL'
+  example:
+    jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    downloadUrl: 'https://spacecat-example-bucket.s3.example-region.amazonaws.com/import/12d6ac8e-d5e4-4788-90eb-b69e10e745fd/import-result.zip?X-Amz-Algorithm=AWS...'
