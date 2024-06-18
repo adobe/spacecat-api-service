@@ -1,3 +1,10 @@
+# [1.47.0](https://github.com/adobe/spacecat-api-service/compare/v1.46.0...v1.47.0) (2024-06-18)
+
+
+### Features
+
+* ims handler ([#363](https://github.com/adobe/spacecat-api-service/issues/363)) ([62ed531](https://github.com/adobe/spacecat-api-service/commit/62ed5317b5170632843d45d06848b65dc9cce91c))
+
 # [1.46.0](https://github.com/adobe/spacecat-api-service/compare/v1.45.2...v1.46.0) (2024-06-17)
 
 
