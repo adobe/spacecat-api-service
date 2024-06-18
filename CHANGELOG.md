@@ -1,3 +1,10 @@
+## [1.47.1](https://github.com/adobe/spacecat-api-service/compare/v1.47.0...v1.47.1) (2024-06-18)
+
+
+### Bug Fixes
+
+* cannot create a new import job without options ([#356](https://github.com/adobe/spacecat-api-service/issues/356)) ([07038f2](https://github.com/adobe/spacecat-api-service/commit/07038f24ed37e7cc65d9295960fdbd65a15919e9))
+
 # [1.47.0](https://github.com/adobe/spacecat-api-service/compare/v1.46.0...v1.47.0) (2024-06-18)
 
 
