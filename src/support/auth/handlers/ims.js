@@ -33,9 +33,10 @@ const IGNORED_PROFILE_PROPS = [
   'aa_id',
 ];
 
-const loadConfig = (context) => {
+const loadConfig = (context, log) => {
   const funcVersion = context.func?.version;
-  const isDev = /^ci\d+$/i.test(funcVersion);
+  log(`Function version: ${funcVersion}`, 'debug');
+  const isDev = /^ci\d*$/i.test(funcVersion);
   return isDev ? configDev : configProd;
 };
 
@@ -111,7 +112,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     }
 
     try {
-      const config = loadConfig(context);
+      const config = loadConfig(context, this.log);
       const payload = await this.#validateToken(token, config);
       const profile = transformProfile(payload);
 
