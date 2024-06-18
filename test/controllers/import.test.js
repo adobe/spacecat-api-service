@@ -95,6 +95,10 @@ describe('ImportController tests', () => {
       allowedApiKeys: ['b9ebcfb5-80c9-4236-91ba-d50e361db71d', '7828b114-e20f-4234-bc4e-5b438b861edd'],
       queues: ['spacecat-import-queue-1', 'spacecat-import-queue-2'],
       queueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
+      options: {
+        saveAsDocs: true,
+        transformationFileUrl: 'https://example.com/transform.js',
+      },
     };
 
     context = {
@@ -238,6 +242,20 @@ describe('ImportController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(503); // Service unavailable
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
+    });
+
+    it('should pick up the default options when none are provided', async () => {
+      requestContext.data.options = undefined;
+      const response = await importController.createImportJob(requestContext);
+      const importJob = await response.json();
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(202);
+
+      expect(importJob.options).to.deep.equal({
+        saveAsDocs: true,
+        transformationFileUrl: 'https://example.com/transform.js',
+      });
     });
   });
 
