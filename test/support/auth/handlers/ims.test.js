@@ -96,6 +96,7 @@ describe('AdobeImsHandler', () => {
   it('returns null when the token was issued by a different idp', async () => {
     const token = await createToken({ as: 'ims-na1' });
     const context = {
+      log: logStub,
       func: { version: 'ci1234' },
       pathInfo: { headers: { authorization: `Bearer ${token}` } },
     };
@@ -118,7 +119,10 @@ describe('AdobeImsHandler', () => {
 
     it('returns null when created_at is not a number', async () => {
       const token = await createToken({ as: 'ims-na1', created_at: 'not-a-number', expires_in: 3600 });
-      const context = { pathInfo: { headers: { authorization: `Bearer ${token}` } } };
+      const context = {
+        log: logStub,
+        pathInfo: { headers: { authorization: `Bearer ${token}` } },
+      };
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.null;
@@ -127,7 +131,10 @@ describe('AdobeImsHandler', () => {
 
     it('returns null when expires_in is not a number', async () => {
       const token = await createToken({ as: 'ims-na1', created_at: Date.now(), expires_in: 'not-a-number' });
-      const context = { pathInfo: { headers: { authorization: `Bearer ${token}` } } };
+      const context = {
+        log: logStub,
+        pathInfo: { headers: { authorization: `Bearer ${token}` } },
+      };
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.null;
@@ -136,7 +143,10 @@ describe('AdobeImsHandler', () => {
 
     it('returns null when created_at is in the future', async () => {
       const token = await createToken({ as: 'ims-na1', created_at: Date.now() + 1000, expires_in: 3600 });
-      const context = { pathInfo: { headers: { authorization: `Bearer ${token}` } } };
+      const context = {
+        log: logStub,
+        pathInfo: { headers: { authorization: `Bearer ${token}` } },
+      };
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.null;
@@ -145,7 +155,10 @@ describe('AdobeImsHandler', () => {
 
     it('returns null when the token is expired', async () => {
       const token = await createToken({ as: 'ims-na1', created_at: Date.now(), expires_in: 0 });
-      const context = { pathInfo: { headers: { authorization: `Bearer ${token}` } } };
+      const context = {
+        log: logStub,
+        pathInfo: { headers: { authorization: `Bearer ${token}` } },
+      };
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.null;
@@ -157,7 +170,10 @@ describe('AdobeImsHandler', () => {
       const token = await createToken({
         user_id: 'test-user', as: 'ims-na1', created_at: now, expires_in: 3600,
       });
-      const context = { pathInfo: { headers: { authorization: `Bearer ${token}` } } };
+      const context = {
+        log: logStub,
+        pathInfo: { headers: { authorization: `Bearer ${token}` } },
+      };
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.instanceof(AuthInfo);

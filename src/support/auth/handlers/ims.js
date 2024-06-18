@@ -33,10 +33,10 @@ const IGNORED_PROFILE_PROPS = [
   'aa_id',
 ];
 
-const loadConfig = (context, log) => {
+const loadConfig = (context) => {
   const funcVersion = context.func?.version;
-  log(`Function version: ${funcVersion}`, 'debug');
   const isDev = /^ci\d*$/i.test(funcVersion);
+  context.log.debug(`Function version: ${funcVersion} (isDev: ${isDev})`);
   return isDev ? configDev : configProd;
 };
 
