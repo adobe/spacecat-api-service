@@ -1,3 +1,10 @@
+# [1.48.0](https://github.com/adobe/spacecat-api-service/compare/v1.47.4...v1.48.0) (2024-06-19)
+
+
+### Features
+
+* [#365](https://github.com/adobe/spacecat-api-service/issues/365) Align /tools/import endpoints and API spec ([#366](https://github.com/adobe/spacecat-api-service/issues/366)) ([04d8722](https://github.com/adobe/spacecat-api-service/commit/04d87228508c8773e8079862f9ac1075d279765f))
+
 ## [1.47.4](https://github.com/adobe/spacecat-api-service/compare/v1.47.3...v1.47.4) (2024-06-19)
 
 
