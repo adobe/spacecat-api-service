@@ -78,11 +78,11 @@ import-job-status:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
-import-job-archive:
+import-job-result:
   get:
     tags:
       - import
-    summary: Download the result of an import job as a .zip archive
+    summary: Request a pre-signed URL to download the result of an import job as a .zip archive
     description: |
       Note: Not implemented yet.
       
@@ -104,10 +104,9 @@ import-job-archive:
       '200':
         description: Successful operation with an import archive delivered to the client.
         content:
-          application/zip:
+          application/json:
             schema:
-              type: string
-              format: binary
+              $ref: './schemas.yaml#/ImportJobArchive'
       '400':
         $ref: './responses.yaml#/400'
       '401':
