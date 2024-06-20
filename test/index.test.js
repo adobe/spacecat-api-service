@@ -85,6 +85,7 @@ describe('Index Tests', () => {
                 404: {
                   disabled: () => false,
                   getExcludedURLs: () => [],
+                  getManualOverwrites: () => [],
                 },
               }),
             },

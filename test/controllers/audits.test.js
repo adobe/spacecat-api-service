@@ -350,6 +350,7 @@ describe('Audits Controller', () => {
 
       const auditTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
+        getManualOverwrites: sinon.stub().returns([]),
         updateExcludedURLs: sinon.stub(),
         disabled: mockDisabledFn,
       };
@@ -388,6 +389,7 @@ describe('Audits Controller', () => {
 
       const auditTypeConfig = {
         getExcludedURLs: sinon.stub().returns(undefined),
+        getManualOverwrites: sinon.stub().returns(undefined),
         updateExcludedURLs: sinon.stub(),
         disabled: mockDisabledFn,
       };
@@ -423,6 +425,7 @@ describe('Audits Controller', () => {
 
       const auditTypeConfig = {
         getExcludedURLs: sinon.stub().returns(['https://example.com/page3']),
+        getManualOverwrites: sinon.stub().returns([]),
         updateExcludedURLs: sinon.stub(),
         disabled: sinon.stub().returns(false),
       };
@@ -462,6 +465,7 @@ describe('Audits Controller', () => {
 
       const auditTypeConfig = {
         getExcludedURLs: sinon.stub().returns(['https://example.com/page2']),
+        getManualOverwrites: sinon.stub().returns([]),
         updateExcludedURLs: sinon.stub(),
         disabled: sinon.stub().returns(false),
       };
