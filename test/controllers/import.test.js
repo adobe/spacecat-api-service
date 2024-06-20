@@ -247,7 +247,6 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
     });
 
-
     it('should reject when the length of the importScript exceeds the maximum allowed length', async () => {
       requestContext.data.importScript = 'QW5kIGV2ZXJ5d2hlcmUgdGhhdCBNYXJ5IHdlbnQsQW5kIGV2ZXJ5d2hlcmUgdGhhdCBNYXJ5IHdlbnQs';
       const response = await importController.createImportJob(requestContext);
@@ -281,6 +280,7 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob(requestContext);
 
       expect(response.status).to.equal(500);
+    });
 
     it('should pick up the default options when none are provided', async () => {
       requestContext.data.options = undefined;
