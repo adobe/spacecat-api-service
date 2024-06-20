@@ -97,6 +97,10 @@ describe('ImportController tests', () => {
       queues: ['spacecat-import-queue-1', 'spacecat-import-queue-2'],
       queueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
       maxLengthImportScript: 20,
+      options: {
+        saveAsDocs: true,
+        transformationFileUrl: 'https://example.com/transform.js',
+      },
     };
 
     context = {
@@ -243,6 +247,7 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
     });
 
+
     it('should reject when the length of the importScript exceeds the maximum allowed length', async () => {
       requestContext.data.importScript = 'QW5kIGV2ZXJ5d2hlcmUgdGhhdCBNYXJ5IHdlbnQsQW5kIGV2ZXJ5d2hlcmUgdGhhdCBNYXJ5IHdlbnQs';
       const response = await importController.createImportJob(requestContext);
@@ -276,6 +281,19 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob(requestContext);
 
       expect(response.status).to.equal(500);
+
+    it('should pick up the default options when none are provided', async () => {
+      requestContext.data.options = undefined;
+      const response = await importController.createImportJob(requestContext);
+      const importJob = await response.json();
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(202);
+
+      expect(importJob.options).to.deep.equal({
+        saveAsDocs: true,
+        transformationFileUrl: 'https://example.com/transform.js',
+      });
     });
   });
 

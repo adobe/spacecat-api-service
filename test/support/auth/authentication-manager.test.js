@@ -85,7 +85,7 @@ describe('AuthenticationManager', () => {
     const context = {};
 
     await expect(manager.authenticate(request, context)).to.be.rejectedWith(NotAuthenticatedError);
-    expect(logStub.error.calledWith('No authentication handler was able to authenticate the request')).to.be.true;
+    expect(logStub.info.calledWith('No authentication handler was able to authenticate the request')).to.be.true;
   });
 
   it('tries all handlers before failing', async () => {
