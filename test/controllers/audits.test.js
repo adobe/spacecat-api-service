@@ -533,5 +533,84 @@ describe('Audits Controller', () => {
       const error = await result.json();
       expect(error).to.have.property('message', 'Audit type not found');
     });
+
+    it('merges manual overwrites correctly', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const manualOverwrites = [
+        { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
+      ];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { manualOverwrites },
+      };
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns([]),
+        getManualOverwrites: sinon.stub().returns([
+          { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
+        ]),
+        updateManualOverwrites: sinon.stub(),
+        disabled: sinon.stub().returns(false),
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub().returns(false),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(200);
+      expect(auditTypeConfig.updateManualOverwrites.calledWith([
+        { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
+        { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
+      ])).to.be.false;
+      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+    });
+
+    it('does not merge manual overwrites if manualOverwrites is empty', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const manualOverwrites = [];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { manualOverwrites },
+      };
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns([]),
+        getManualOverwrites: sinon.stub().returns([
+          { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
+        ]),
+        updateManualOverwrites: sinon.stub(),
+        disabled: sinon.stub().returns(false),
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub().returns(false),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(200);
+      expect(auditTypeConfig.updateManualOverwrites.calledWith([])).to.be.true;
+      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+    });
   });
 });

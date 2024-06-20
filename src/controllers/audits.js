@@ -176,12 +176,6 @@ function AuditsController(dataAccess) {
     }
 
     if (Array.isArray(manualOverwrites)) {
-      for (const manualOverwrite of manualOverwrites) {
-        if (!isObject(manualOverwrite)) {
-          return badRequest('Manual overwrite must be an object');
-        }
-      }
-
       hasUpdates = true;
 
       const existingOverrides = auditTypeConfig.getManualOverwrites();
