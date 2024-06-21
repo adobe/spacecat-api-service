@@ -176,7 +176,7 @@ function ImportSupervisor(services, config) {
    * @param {Array<string>} urls - The URLs to import.
    * @param {string} importApiKey - The API key to use for the import job.
    * @param {object} options - Optional configuration params for the import job.
-   * @param {string} importScript - Optional custom import script.
+   * @param {string} importScript - Optional custom Base64 encoded import script.
    * @returns {Promise<ImportJob>}
    */
   async function startNewJob(urls, importApiKey, options, importScript) {
