@@ -586,13 +586,11 @@ describe('Audits Controller', () => {
         data: { manualOverwrites },
       };
 
-      const existingManualOverrides = [
-        { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
-      ];
-
       const auditTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns(existingManualOverrides),
+        getManualOverwrites: sinon.stub().returns([
+          { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
+        ]),
         updateManualOverwrites: sinon.stub(),
         disabled: sinon.stub().returns(false),
       };
@@ -610,7 +608,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateManualOverwrites.calledWith(existingManualOverrides)).to.be.true;
+      expect(auditTypeConfig.updateManualOverwrites.calledWith([])).to.be.true;
       expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });

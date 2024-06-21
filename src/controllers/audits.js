@@ -170,7 +170,9 @@ function AuditsController(dataAccess) {
       hasUpdates = true;
 
       const existingOverrides = auditTypeConfig.getManualOverwrites();
-      const newManualOverwrites = mergeOverrides(existingOverrides, manualOverwrites);
+      const newManualOverwrites = manualOverwrites.length === 0
+        ? []
+        : mergeOverrides(existingOverrides, manualOverwrites);
 
       auditTypeConfig.updateManualOverwrites(newManualOverwrites);
     }
