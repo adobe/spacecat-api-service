@@ -335,12 +335,13 @@ function SitesController(dataAccess) {
       return badRequest('Key Event ID required');
     }
 
-    const keyEvent = await dataAccess.removeKeyEvent(keyEventId);
-    if (!keyEvent) {
+    const keyEventRemoved = await dataAccess.removeKeyEvent(keyEventId);
+
+    if (keyEventRemoved) {
+      return noContent();
+    } else {
       return notFound('Key Event ID not found');
     }
-
-    return noContent();
   };
 
   const getSiteMetricsBySource = async (context) => {
