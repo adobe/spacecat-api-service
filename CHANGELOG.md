@@ -1,3 +1,10 @@
+# [1.49.0](https://github.com/adobe/spacecat-api-service/compare/v1.48.0...v1.49.0) (2024-06-21)
+
+
+### Features
+
+* overwrites broken-backlinks ([#368](https://github.com/adobe/spacecat-api-service/issues/368)) ([f6d87b3](https://github.com/adobe/spacecat-api-service/commit/f6d87b341f7022514c60b65d0804ef035c4d5953))
+
 # [1.48.0](https://github.com/adobe/spacecat-api-service/compare/v1.47.4...v1.48.0) (2024-06-19)
 
 
