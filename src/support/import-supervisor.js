@@ -167,7 +167,7 @@ function ImportSupervisor(services, config) {
     try {
       await s3Client.send(command);
     } catch {
-      throw new ErrorWithStatusCode(`Internal Server Error: Failed to write import script to S3 for jobId:${jobId}`, 500);
+      throw new ErrorWithStatusCode(`Internal Server Error: Failed to write import script to S3 for jobId: ${jobId}`, 500);
     }
   }
 
