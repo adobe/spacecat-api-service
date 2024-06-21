@@ -168,6 +168,9 @@ function AuditsController(dataAccess) {
 
     if (Array.isArray(manualOverwrites)) {
       for (const manualOverwrite of manualOverwrites) {
+        if (!isObject(manualOverwrite)) {
+          return badRequest('Manual overwrite must be an object');
+        }
         if (!isValidUrl(manualOverwrite.brokenTargetURL)
             || !isValidUrl(manualOverwrite.targetURL)) {
           return badRequest('Invalid URL format');

@@ -651,5 +651,44 @@ describe('Audits Controller', () => {
       const error = await result.json();
       expect(error).to.have.property('message', 'Invalid URL format');
     });
+
+    it('validates manual overwrites as objects', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const manualOverwrites = [
+        { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
+        'not-an-object', // Invalid manual overwrite
+      ];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { manualOverwrites },
+      };
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns([]),
+        getManualOverwrites: sinon.stub().returns([
+          { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
+        ]),
+        updateManualOverwrites: sinon.stub(),
+        disabled: sinon.stub().returns(false),
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub().returns(false),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'Manual overwrite must be an object');
+    });
   });
 });
