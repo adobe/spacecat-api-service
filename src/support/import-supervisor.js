@@ -41,12 +41,15 @@ function ImportSupervisor(services, config) {
 
   validateServices();
   const {
-    dataAccess, sqs, s3: { s3Client, GetObjectCommand, getSignedUrl }, log,
+    dataAccess, sqs, s3: {
+      s3Client, GetObjectCommand, PutObjectCommand, getSignedUrl,
+    }, log,
   } = services;
   const {
     queues = [], // Array of import queues
     queueUrlPrefix,
     s3Bucket,
+    maxLengthImportScript,
   } = config;
   const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
@@ -142,14 +145,41 @@ function ImportSupervisor(services, config) {
     }
   }
 
+  async function writeImportScriptToS3(jobId, importScript) {
+    if (!hasText(importScript)) {
+      throw new ErrorWithStatusCode('Bad Request: importScript should be a string', 400);
+    }
+
+    // Check for the length of the importScript
+    if (importScript.length > maxLengthImportScript) {
+      throw new ErrorWithStatusCode(`Bad Request: importScript should be less than ${maxLengthImportScript} characters`, 400);
+    }
+
+    let decodedScript;
+    try {
+      decodedScript = Buffer.from(importScript, 'base64').toString('utf-8');
+    } catch {
+      throw new ErrorWithStatusCode('Bad Request: importScript should be a base64 encoded string', 400);
+    }
+
+    const key = `imports/${jobId}/import.js`;
+    const command = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: decodedScript });
+    try {
+      await s3Client.send(command);
+    } catch {
+      throw new ErrorWithStatusCode(`Internal Server Error: Failed to write import script to S3 for jobId: ${jobId}`, 500);
+    }
+  }
+
   /**
    * Starts a new import job.
    * @param {Array<string>} urls - The URLs to import.
    * @param {string} importApiKey - The API key to use for the import job.
    * @param {object} options - Optional configuration params for the import job.
+   * @param {string} importScript - Optional custom Base64 encoded import script.
    * @returns {Promise<ImportJob>}
    */
-  async function startNewJob(urls, importApiKey, options) {
+  async function startNewJob(urls, importApiKey, options, importScript) {
     log.info(`Import requested for ${urls.length} URLs, using import API key: ${importApiKey}`);
 
     // Determine if there is a free import queue
@@ -161,7 +191,9 @@ function ImportSupervisor(services, config) {
     log.info(`New import job created for API key: ${importApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
 
     // Custom import.js scripts are not initially supported.
-    // Future: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/import/{jobId}/import.js
+    if (importScript) {
+      await writeImportScriptToS3(newImportJob.getId(), importScript);
+    }
 
     // Create 1 record per URL in the import-url table
     const urlRecords = await persistUrls(newImportJob.getId(), urls);

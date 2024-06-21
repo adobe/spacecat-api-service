@@ -86,6 +86,7 @@ describe('ImportController tests', () => {
         getObject: sandbox.stub(),
       },
       GetObjectCommand: sandbox.stub(),
+      PutObjectCommand: sandbox.stub(),
       getSignedUrl: sandbox.stub(),
     };
 
@@ -95,6 +96,7 @@ describe('ImportController tests', () => {
       allowedApiKeys: ['b9ebcfb5-80c9-4236-91ba-d50e361db71d', '7828b114-e20f-4234-bc4e-5b438b861edd'],
       queues: ['spacecat-import-queue-1', 'spacecat-import-queue-2'],
       queueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
+      maxLengthImportScript: 20,
       options: {
         saveAsDocs: true,
         transformationFileUrl: 'https://example.com/transform.js',
@@ -126,6 +128,7 @@ describe('ImportController tests', () => {
         options: {
           enableJavaScript: 'true',
         },
+        importScript: 'QW5kIGV2',
       };
     });
 
@@ -242,6 +245,41 @@ describe('ImportController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(503); // Service unavailable
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
+    });
+
+    it('should reject when the length of the importScript exceeds the maximum allowed length', async () => {
+      requestContext.data.importScript = 'QW5kIGV2ZXJ5d2hlcmUgdGhhdCBNYXJ5IHdlbnQsQW5kIGV2ZXJ5d2hlcmUgdGhhdCBNYXJ5IHdlbnQs';
+      const response = await importController.createImportJob(requestContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Bad Request: importScript should be less than 20 characters');
+    });
+
+    it('should reject when importScript is not a string', async () => {
+      requestContext.data.importScript = 123;
+      const response = await importController.createImportJob(requestContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Bad Request: importScript should be a string');
+    });
+
+    it('should reject when importScript is not base64 encoded', async () => {
+      const bufferFromStub = sinon.stub(Buffer, 'from').throws(new Error('Invalid base64 string'));
+      const response = await importController.createImportJob(requestContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Bad Request: importScript should be a base64 encoded string');
+      bufferFromStub.restore();
+    });
+
+    it('should reject when s3Client fails to upload the importScript', async () => {
+      mockS3.s3Client.send.rejects(new Error('Cannot send message error'));
+      const response = await importController.createImportJob(requestContext);
+
+      expect(response.status).to.equal(500);
     });
 
     it('should pick up the default options when none are provided', async () => {
