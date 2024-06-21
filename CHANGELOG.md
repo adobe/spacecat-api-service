@@ -1,3 +1,10 @@
+# [1.50.0](https://github.com/adobe/spacecat-api-service/compare/v1.49.0...v1.50.0) (2024-06-21)
+
+
+### Features
+
+* accept import.js as Base64 encoded string to /tools/import endpoint ([#371](https://github.com/adobe/spacecat-api-service/issues/371)) ([b50ff43](https://github.com/adobe/spacecat-api-service/commit/b50ff438b8de786bff6366b222aef9131d95d5a6))
+
 # [1.49.0](https://github.com/adobe/spacecat-api-service/compare/v1.48.0...v1.49.0) (2024-06-21)
 
 
