@@ -119,20 +119,11 @@ function AuditsController(dataAccess) {
    */
   const patchAuditForSite = async (context) => {
     function mergeOverrides(existingOverrides, manualOverwrites) {
-      const map = new Map();
-
-      // Add existing overrides to the map
-      existingOverrides.forEach((override) => {
-        map.set(override.brokenTargetURL, override);
+      const overrides = {};
+      [...existingOverrides, ...manualOverwrites].forEach((override) => {
+        overrides[override.brokenTargetURL] = override;
       });
-
-      // Add manual overrides to the map(will overwrite existing if the brokenTargetURL is the same)
-      manualOverwrites.forEach((override) => {
-        map.set(override.brokenTargetURL, override);
-      });
-
-      // Convert the map back to an array
-      return Array.from(map.values());
+      return Object.values(overrides);
     }
 
     const siteId = context.params?.siteId;
@@ -179,8 +170,7 @@ function AuditsController(dataAccess) {
       hasUpdates = true;
 
       const existingOverrides = auditTypeConfig.getManualOverwrites();
-      const newManualOverwrites = manualOverwrites.length === 0 ? []
-        : mergeOverrides(existingOverrides, manualOverwrites);
+      const newManualOverwrites = mergeOverrides(existingOverrides, manualOverwrites);
 
       auditTypeConfig.updateManualOverwrites(newManualOverwrites);
     }
