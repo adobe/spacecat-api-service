@@ -176,6 +176,7 @@ function ImportSupervisor(services, config) {
    * @param {Array<string>} urls - The URLs to import.
    * @param {string} importApiKey - The API key to use for the import job.
    * @param {object} options - Optional configuration params for the import job.
+   * @param {string} importScript - Optional custom import script.
    * @returns {Promise<ImportJob>}
    */
   async function startNewJob(urls, importApiKey, options, importScript) {
@@ -190,7 +191,6 @@ function ImportSupervisor(services, config) {
     log.info(`New import job created for API key: ${importApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
 
     // Custom import.js scripts are not initially supported.
-    // Future: Write import.js to the S3 bucket, at {S3_BUCKET_NAME}/import/{jobId}/import.js
     if (importScript) {
       await writeImportScriptToS3(newImportJob.getId(), importScript);
     }
