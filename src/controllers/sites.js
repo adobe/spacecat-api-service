@@ -335,13 +335,9 @@ function SitesController(dataAccess) {
       return badRequest('Key Event ID required');
     }
 
-    const keyEventRemoved = await dataAccess.removeKeyEvent(keyEventId);
+    await dataAccess.removeKeyEvent(keyEventId);
 
-    if (keyEventRemoved) {
-      return noContent();
-    } else {
-      return notFound('Key Event ID not found');
-    }
+    return noContent();
   };
 
   const getSiteMetricsBySource = async (context) => {

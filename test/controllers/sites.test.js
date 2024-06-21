@@ -562,16 +562,6 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Key Event ID required');
   });
 
-  it('remove key events returns not found when keyEventId does not exist', async () => {
-    const result = await sitesController.removeKeyEvent({
-      params: { keyEventId: 'nonExistentKeyEventId' },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Key Event ID not found');
-  });
-
   it('get site metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
     const source = 'ahrefs';
