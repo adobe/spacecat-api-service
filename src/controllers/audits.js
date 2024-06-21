@@ -167,6 +167,13 @@ function AuditsController(dataAccess) {
     }
 
     if (Array.isArray(manualOverwrites)) {
+      for (const manualOverwrite of manualOverwrites) {
+        if (!isValidUrl(manualOverwrite.brokenTargetURL)
+            || !isValidUrl(manualOverwrite.targetURL)) {
+          return badRequest('Invalid URL format');
+        }
+      }
+
       hasUpdates = true;
 
       const existingOverrides = auditTypeConfig.getManualOverwrites();
