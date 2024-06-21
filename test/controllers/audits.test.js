@@ -657,7 +657,7 @@ describe('Audits Controller', () => {
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
-        'not-an-object', // Invalid manual overwrite
+        'not-an-object',
       ];
 
       const context = {
@@ -689,6 +689,84 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(400);
       const error = await result.json();
       expect(error).to.have.property('message', 'Manual overwrite must be an object');
+    });
+
+    it('returns badRequest when manualOverwrites contains an empty object', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const manualOverwrites = [
+        { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
+        {}, // Empty object
+      ];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { manualOverwrites },
+      };
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns([]),
+        getManualOverwrites: sinon.stub().returns([
+          { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
+        ]),
+        updateManualOverwrites: sinon.stub(),
+        disabled: sinon.stub().returns(false),
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub().returns(false),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'Manual overwrite object cannot be empty');
+    });
+
+    it('returns badRequest when manualOverwrites contains an object with missing brokenTargetURL or targetURL', async () => {
+      const siteId = 'site1';
+      const auditType = 'broken-backlinks';
+      const manualOverwrites = [
+        { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
+        { brokenTargetURL: 'https://example.com/page2' }, // Missing targetURL
+      ];
+
+      const context = {
+        params: { siteId, auditType },
+        data: { manualOverwrites },
+      };
+
+      const auditTypeConfig = {
+        getExcludedURLs: sinon.stub().returns([]),
+        getManualOverwrites: sinon.stub().returns([
+          { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
+        ]),
+        updateManualOverwrites: sinon.stub(),
+        disabled: sinon.stub().returns(false),
+      };
+
+      const site = {
+        getAuditConfig: () => ({
+          getAuditTypeConfig: () => auditTypeConfig,
+          auditsDisabled: sinon.stub().returns(false),
+        }),
+        updateAuditTypeConfig: sinon.stub(),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
+      const result = await auditsController.patchAuditForSite(context);
+
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'Manual overwrite must have both brokenTargetURL and targetURL');
     });
   });
 });

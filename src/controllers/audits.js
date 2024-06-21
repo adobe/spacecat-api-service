@@ -171,6 +171,12 @@ function AuditsController(dataAccess) {
         if (!isObject(manualOverwrite)) {
           return badRequest('Manual overwrite must be an object');
         }
+        if (Object.keys(manualOverwrite).length === 0) {
+          return badRequest('Manual overwrite object cannot be empty');
+        }
+        if (!hasText(manualOverwrite.brokenTargetURL) || !hasText(manualOverwrite.targetURL)) {
+          return badRequest('Manual overwrite must have both brokenTargetURL and targetURL');
+        }
         if (!isValidUrl(manualOverwrite.brokenTargetURL)
             || !isValidUrl(manualOverwrite.targetURL)) {
           return badRequest('Invalid URL format');
