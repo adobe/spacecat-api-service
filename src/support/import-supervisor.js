@@ -162,7 +162,7 @@ function ImportSupervisor(services, config) {
       throw new ErrorWithStatusCode('Bad Request: importScript should be a base64 encoded string', 400);
     }
 
-    const key = `import/${jobId}/import.js`;
+    const key = `imports/${jobId}/import.js`;
     const command = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: decodedScript });
     try {
       await s3Client.send(command);
