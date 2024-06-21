@@ -158,7 +158,7 @@ function ImportSupervisor(services, config) {
     let decodedScript;
     try {
       decodedScript = Buffer.from(importScript, 'base64').toString('utf-8');
-    } catch (error) {
+    } catch {
       throw new ErrorWithStatusCode('Bad Request: importScript should be a base64 encoded string', 400);
     }
 
@@ -166,7 +166,7 @@ function ImportSupervisor(services, config) {
     const command = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: decodedScript });
     try {
       await s3Client.send(command);
-    } catch (error) {
+    } catch {
       throw new ErrorWithStatusCode(`Internal Server Error: Failed to write import script to S3 for jobId:${jobId}`, 500);
     }
   }
