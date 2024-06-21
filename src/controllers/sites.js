@@ -335,7 +335,10 @@ function SitesController(dataAccess) {
       return badRequest('Key Event ID required');
     }
 
-    await dataAccess.removeKeyEvent(keyEventId);
+    const keyEvent = await dataAccess.removeKeyEvent(keyEventId);
+    if (!keyEvent) {
+      return notFound('Key Event ID not found');
+    }
 
     return noContent();
   };
