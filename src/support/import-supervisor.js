@@ -236,7 +236,7 @@ function ImportSupervisor(services, config) {
     }
 
     try {
-      const key = `import/${job.getId()}/${IMPORT_RESULT_ARCHIVE_NAME}`;
+      const key = `imports/${job.getId()}/${IMPORT_RESULT_ARCHIVE_NAME}`;
       const command = new GetObjectCommand({ Bucket: s3Bucket, Key: key });
 
       return getSignedUrl(s3Client, command, { expiresIn: PRE_SIGNED_URL_TTL_SECONDS });

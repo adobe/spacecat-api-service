@@ -374,6 +374,10 @@ describe('ImportController tests', () => {
         downloadUrl: 'https://example-bucket.s3.amazonaws.com/file-key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=EXAMPLE_ACCESS_KEY_ID%2F20240603%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240603T123456Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=abcdef1234567890',
         id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
       });
+
+      // Verify that GetObjectCommand was called with the expected key
+      expect(mockS3.GetObjectCommand).to.have.been.calledOnce;
+      expect(mockS3.GetObjectCommand.getCall(0).args[0].Key).to.equal(`imports/${exampleJob.id}/import-result.zip`);
     });
 
     it('should handle an unexpected promise rejection from the AWS presigner', async () => {
