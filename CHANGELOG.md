@@ -1,3 +1,10 @@
+## [1.50.2](https://github.com/adobe/spacecat-api-service/compare/v1.50.1...v1.50.2) (2024-06-27)
+
+
+### Bug Fixes
+
+* use correct 'imports/' prefix when creating a presigned URL to import-result.zip ([#376](https://github.com/adobe/spacecat-api-service/issues/376)) ([a3e84ca](https://github.com/adobe/spacecat-api-service/commit/a3e84ca1e149d7ebce999ae98ea731a8837e5b27))
+
 ## [1.50.1](https://github.com/adobe/spacecat-api-service/compare/v1.50.0...v1.50.1) (2024-06-22)
 
 
