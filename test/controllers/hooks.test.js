@@ -299,7 +299,7 @@ describe('Hooks Controller', () => {
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
-    it('CDN candidate is processed and edge config resolved', async () => {
+    it('CDN candidate is processed and hlx config resolved', async () => {
       const hlx5Config = { cdn: { prod: { host: 'some-cdn-host.com' } } };
       context.data = {
         forwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
@@ -316,7 +316,67 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.info).to.have.been.calledWith('Edge config found for some-owner/some-site');
+      expect(context.log.info).to.have.been.calledWith('HLX config found for some-owner/some-site');
+      expect(resp).to.equal('CDN site candidate is successfully processed');
+    });
+
+    it('CDN candidate is processed even with hlx config 404', async () => {
+      context.data = {
+        forwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(404);
+
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(context.log.info).to.have.been.calledWith('No hlx config found for some-owner/some-site');
+      expect(resp).to.equal('CDN site candidate is successfully processed');
+    });
+
+    it('CDN candidate is processed even with error status for helix config request', async () => {
+      context.data = {
+        forwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(500);
+
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(context.log.error).to.have.been.calledWith('Error fetching hlx config for some-owner/some-site. Status: 500');
+      expect(resp).to.equal('CDN site candidate is successfully processed');
+    });
+
+    it('CDN candidate is processed even when fetch throws for helix config request', async () => {
+      context.data = {
+        forwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(context.log.error).to.have.been.calledWith('Error fetching hlx config for some-owner/some-site');
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 

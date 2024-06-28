@@ -128,49 +128,37 @@ function parseHlxRSO(domain) {
 async function fetchhlxConfig(rso, hlxAdminToken, log) {
   const { owner, site } = rso;
 
-  if (!hasText(owner)) {
-    throw new Error('Owner is required');
-  }
-
-  if (!hasText(site)) {
-    throw new Error('Site is required');
-  }
-
-  if (!hasText(hlxAdminToken)) {
-    throw new Error('HLX Admin Token is required');
-  }
-
   try {
     const response = await fetch(`https://admin.hlx.page/config/${owner}/aggregated/${site}.json`, {
       headers: { authorization: `token ${hlxAdminToken}` },
     });
 
     if (response.status === 200) {
-      log.info(`Edge config found for ${owner}/${site}`);
+      log.info(`HLX config found for ${owner}/${site}`);
       return response.json();
     }
 
     if (response.status === 404) {
-      log.info(`No edge config found for ${owner}/${site}`);
+      log.info(`No hlx config found for ${owner}/${site}`);
       return null;
     }
 
-    log.error(`Error fetching edge config for ${owner}/${site}. Status: ${response.status}`);
+    log.error(`Error fetching hlx config for ${owner}/${site}. Status: ${response.status}`);
   } catch (e) {
-    log.error(`Error fetching edge config for ${owner}/${site}`, e);
+    log.error(`Error fetching hlx config for ${owner}/${site}`, e);
   }
 
   return null;
 }
 
 /**
- * Extracts the edge config from the x-forwarded-host header.
+ * Extracts the hlx config from the x-forwarded-host header.
  * @param {string} forwardedHost - The x-forwarded-host header
  * @param {string} hlxAdminToken - The hlx admin token
  * @param {object} log - The logger object
  * @return {Promise<{cdnProdHost: null, domain: *, hlxVersion: number, rso: {}}>}
  */
-async function extracthlxConfig(forwardedHost, hlxAdminToken, log) {
+async function extractHlxConfig(forwardedHost, hlxAdminToken, log) {
   const domains = forwardedHost.split(',').map((domain) => domain.trim());
   const primaryDomain = domains[0];
 
@@ -303,7 +291,7 @@ function HooksController(lambdaContext) {
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
     // extract the url from the x-forwarded-host header and determine hlx config
-    const hlxConfig = await extracthlxConfig(
+    const hlxConfig = await extractHlxConfig(
       forwardedHost,
       hlxAdminToken,
       log,
