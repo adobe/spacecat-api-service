@@ -1,3 +1,17 @@
+# [1.51.0](https://github.com/adobe/spacecat-api-service/compare/v1.50.4...v1.51.0) (2024-06-28)
+
+
+### Features
+
+* add hlx config to site detection ([#377](https://github.com/adobe/spacecat-api-service/issues/377)) ([7f81a47](https://github.com/adobe/spacecat-api-service/commit/7f81a47d9450a23bd0e9cc75ea87f0af1b96501d))
+
+## [1.50.4](https://github.com/adobe/spacecat-api-service/compare/v1.50.3...v1.50.4) (2024-06-28)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#379](https://github.com/adobe/spacecat-api-service/issues/379)) ([0933b07](https://github.com/adobe/spacecat-api-service/commit/0933b07684e086bbf9459e27dd0267a7811edb31))
+
 ## [1.50.3](https://github.com/adobe/spacecat-api-service/compare/v1.50.2...v1.50.3) (2024-06-28)
 
 

@@ -176,10 +176,19 @@ export const triggerImportRun = async (
 /**
  * Checks if a given URL corresponds to a Helix site.
  * @param {string} url - The URL to check.
+ * @param {Object} [edgeConfig] - The optional edge configuration object.
+ * @param {string} edgeConfig.hlxVersion - The Helix version of the site
+ * @param {string} edgeConfig.cdnProdHostname - The CDN production hostname of the site
+ * @param {string} edgeConfig.rso - The Helix Ref/Site/Owner information
+ * @param {string} edgeConfig.rso.owner - The owner of the site
+ * @param {string} edgeConfig.rso.ref - The ref of the site
+ * @param {string} edgeConfig.rso.site - The name of the site
  * @returns {Promise<{ isHelix: boolean, reason?: string }>} A Promise that resolves to an object
  * containing the result of the Helix site check and an optional reason if it's not a Helix site.
  */
-export async function isHelixSite(url) {
+// todo: leverage the edgeConfig for alternate verification (e.g. due to bot protection)
+// eslint-disable-next-line no-unused-vars
+export async function isHelixSite(url, edgeConfig = {}) {
   let resp;
   try {
     resp = await fetch(url);
