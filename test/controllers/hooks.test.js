@@ -357,7 +357,7 @@ describe('Hooks Controller', () => {
 
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
-        .reply(500);
+        .reply(500, '', { 'x-error': 'test-error' });
 
       nock('https://some-cdn-host.com')
         .get('/')
@@ -365,7 +365,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error).to.have.been.calledWith('Error fetching hlx config for some-owner/some-site. Status: 500');
+      expect(context.log.error).to.have.been.calledWith('Error fetching hlx config for some-owner/some-site. Status: 500. Error: test-error');
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 

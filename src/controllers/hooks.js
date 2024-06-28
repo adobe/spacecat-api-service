@@ -139,10 +139,13 @@ function parseHlxRSO(domain) {
  */
 async function fetchHlxConfig(rso, hlxAdminToken, log) {
   const { owner, site } = rso;
+  const url = `https://admin.hlx.page/config/${owner}/aggregated/${site}.json`;
+
+  log.info(`Fetching hlx config for ${owner}/${site} with url: ${url}`);
 
   try {
-    const response = await fetch(`https://admin.hlx.page/config/${owner}/aggregated/${site}.json`, {
-      headers: { authorization: `token ${hlxAdminToken}` },
+    const response = await fetch(url, {
+      headers: { Authorization: `token ${hlxAdminToken}` },
     });
 
     if (response.status === 200) {
@@ -155,7 +158,7 @@ async function fetchHlxConfig(rso, hlxAdminToken, log) {
       return null;
     }
 
-    log.error(`Error fetching hlx config for ${owner}/${site}. Status: ${response.status}`);
+    log.error(`Error fetching hlx config for ${owner}/${site}. Status: ${response.status}. Error: ${response.headers.get('x-error')}`);
   } catch (e) {
     log.error(`Error fetching hlx config for ${owner}/${site}`, e);
   }
@@ -184,15 +187,17 @@ async function extractHlxConfig(forwardedHost, hlxAdminToken, log) {
   for (const domain of domains.slice(1)) {
     const rso = parseHlxRSO(domain);
     if (isObject(rso)) {
+      hlxConfig.rso = rso;
+      log.info(`Parsed RSO: ${JSON.stringify(rso)} for domain: ${domain}`);
       // eslint-disable-next-line no-await-in-loop
       const config = await fetchHlxConfig(rso, hlxAdminToken, log);
-      hlxConfig.rso = rso;
       if (isObject(config)) {
         const { cdn, code, content } = config;
         hlxConfig.cdnProdHost = cdn?.prod?.host;
         hlxConfig.code = code;
         hlxConfig.content = content;
         hlxConfig.hlxVersion = 5;
+        log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`);
       }
       break;
     }
