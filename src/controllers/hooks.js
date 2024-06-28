@@ -215,7 +215,7 @@ function verifyURLCandidate(baseURL) {
 }
 
 function buildSlackMessage(baseURL, source, hlxConfig, channel) {
-  const config = JSON.stringify(hlxConfig, null, 2);
+  const config = JSON.stringify(hlxConfig);
   return Message()
     .channel(channel)
     .blocks(

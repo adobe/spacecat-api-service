@@ -106,6 +106,7 @@ describe('approveSiteCandidate', () => {
     expect(context.dataAccess.getSiteCandidateByBaseURL.calledOnceWithExactly(baseURL)).to.be.true;
     expect(context.dataAccess.addSite.calledOnceWithExactly({
       baseURL,
+      hlxConfig: {},
       isLive: true,
       organizationId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
     })).to.be.true;

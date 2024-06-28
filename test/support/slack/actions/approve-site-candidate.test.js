@@ -110,7 +110,9 @@ describe('approveSiteCandidate', () => {
 
     expect(ackMock).to.have.been.calledOnce;
     expect(context.dataAccess.getSiteCandidateByBaseURL).to.have.been.calledWith(baseURL);
-    expect(context.dataAccess.addSite).to.have.been.calledWith({ baseURL, isLive: true });
+    expect(context.dataAccess.addSite).to.have.been.calledWith(
+      { baseURL, hlxConfig: {}, isLive: true },
+    );
     expect(context.dataAccess.updateSite).to.have.been.callCount(0);
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);

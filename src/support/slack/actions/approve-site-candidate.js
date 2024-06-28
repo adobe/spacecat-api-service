@@ -59,6 +59,7 @@ export default function approveSiteCandidate(lambdaContext) {
       if (!site) {
         site = await dataAccess.addSite({
           baseURL: siteCandidate.getBaseURL(),
+          hlxConfig: siteCandidate.getHlxConfig(),
           isLive: true,
           ...(orgId && { organizationId: friendsFamilyOrgId }),
         });
@@ -68,6 +69,8 @@ export default function approveSiteCandidate(lambdaContext) {
         if (!site.isLive()) {
           site.toggleLive();
         }
+        // make sure hlx config is set
+        site.updateHlxConfig(siteCandidate.getHlxConfig());
         site.updateDeliveryType(DELIVERY_TYPES.AEM_EDGE);
         site = await dataAccess.updateSite(site);
       }
