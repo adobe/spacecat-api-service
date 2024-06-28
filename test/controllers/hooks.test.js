@@ -23,11 +23,14 @@ import { SiteDto } from '../../src/dto/site.js';
 chai.use(sinonChai);
 const { expect } = chai;
 
-function getExpectedSlackMessage(baseURL, channel, source) {
+function getExpectedSlackMessage(baseURL, channel, source, hlxConfig) {
+  const cdnConfigPart = hlxConfig
+    ? `, _HLX Version_: *5*, _Dev URL_: https://${hlxConfig.rso.ref}--${hlxConfig.rso.site}--${hlxConfig.rso.owner}.aem.live`
+    : '';
   return Message()
     .channel(channel)
     .blocks(
-      Blocks.Section().text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*, _config_: *{}*)`),
+      Blocks.Section().text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*${cdnConfigPart})`),
       Blocks.Actions().elements(
         Elements.Button().text('As Customer').actionId('approveSiteCandidate').primary(),
         Elements.Button().text('As Friends/Family').actionId('approveFriendsFamily').primary(),
@@ -289,17 +292,6 @@ describe('Hooks Controller', () => {
     });
 
     it('CDN candidate is processed and slack message sent', async () => {
-      context.data = {
-        forwardedHost: 'some-domain.com, some-fw-domain.com',
-      };
-      context.params = { hookSecret: 'hook-secret-for-cdn' };
-
-      const resp = await (await hooksController.processCDNHook(context)).json();
-
-      expect(resp).to.equal('CDN site candidate is successfully processed');
-    });
-
-    it('CDN candidate is processed and hlx config resolved', async () => {
       const hlx5Config = { cdn: { prod: { host: 'some-cdn-host.com' } } };
       context.data = {
         forwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
@@ -318,6 +310,23 @@ describe('Hooks Controller', () => {
 
       expect(context.log.info).to.have.been.calledWith('HLX config found for some-owner/some-site');
       expect(resp).to.equal('CDN site candidate is successfully processed');
+      const expectedMessage = getExpectedSlackMessage(
+        'https://some-cdn-host.com',
+        context.env.SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL,
+        'CDN',
+        {
+          rso: {
+            ref: 'main',
+            site: 'some-site',
+            owner: 'some-owner',
+          },
+        },
+      );
+
+      const actualMessage = slackClient.postMessage.firstCall.args[0];
+
+      expect(slackClient.postMessage.calledOnce).to.be.true;
+      expect(actualMessage).to.deep.equal(expectedMessage);
     });
 
     it('CDN candidate is processed even with hlx config 404', async () => {

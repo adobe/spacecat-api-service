@@ -97,6 +97,18 @@ async function verifyHelixSite(url, hlxConfig = {}) {
 }
 
 function parseHlxRSO(domain) {
+  // This regex matches and captures domains of the form <ref>--<site>--<owner>.(hlx.live|aem.live)
+  // ^([\w-]+)--([\w-]+)--([\w-]+)\.(hlx\.live|aem\.live)$
+  // ^                  - asserts the position at the start of the string
+  // ([\w-]+)           - captures one or more word characters
+  //                      (alphanumeric and underscore) or hyphens as <ref>
+  // --                 - matches the literal string "--"
+  // ([\w-]+)           - captures one or more word characters or hyphens as <site>
+  // --                 - matches the literal string "--"
+  // ([\w-]+)           - captures one or more word characters or hyphens as <owner>
+  // \.                 - matches the literal dot character
+  // (hlx\.live|aem\.live) - captures either "hlx.live" or "aem.live" as the top-level domain
+  // $                  - asserts the position at the end of the string
   const regex = /^([\w-]+)--([\w-]+)--([\w-]+)\.(hlx\.live|aem\.live)$/;
   const match = domain.match(regex);
 
@@ -125,7 +137,7 @@ function parseHlxRSO(domain) {
  * @param log
  * @return {Promise<unknown>}
  */
-async function fetchhlxConfig(rso, hlxAdminToken, log) {
+async function fetchHlxConfig(rso, hlxAdminToken, log) {
   const { owner, site } = rso;
 
   try {
@@ -173,14 +185,14 @@ async function extractHlxConfig(forwardedHost, hlxAdminToken, log) {
     const rso = parseHlxRSO(domain);
     if (isObject(rso)) {
       // eslint-disable-next-line no-await-in-loop
-      const config = await fetchhlxConfig(rso, hlxAdminToken, log);
+      const config = await fetchHlxConfig(rso, hlxAdminToken, log);
+      hlxConfig.rso = rso;
       if (isObject(config)) {
         const { cdn, code, content } = config;
         hlxConfig.cdnProdHost = cdn?.prod?.host;
         hlxConfig.code = code;
         hlxConfig.content = content;
         hlxConfig.hlxVersion = 5;
-        hlxConfig.rso = rso;
       }
       break;
     }
@@ -215,12 +227,15 @@ function verifyURLCandidate(baseURL) {
 }
 
 function buildSlackMessage(baseURL, source, hlxConfig, channel) {
-  const config = JSON.stringify(hlxConfig);
+  const { rso, hlxVersion } = hlxConfig;
+  const hlxConfigMessagePart = source === SITE_CANDIDATE_SOURCES.CDN
+    ? `, _HLX Version_: *${hlxVersion}*, _Dev URL_: https://${rso.ref}--${rso.site}--${rso.owner}.aem.live`
+    : '';
   return Message()
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*, _config_: *${config}*)`),
+        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*${hlxConfigMessagePart})`),
       Blocks.Actions()
         .elements(
           Elements.Button()
