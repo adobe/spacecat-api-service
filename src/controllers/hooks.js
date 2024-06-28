@@ -86,8 +86,8 @@ function containsPathOrSearchParams(url) {
   return url.pathname !== '/' || url.search !== '';
 }
 
-async function verifyHelixSite(url) {
-  const { isHelix, reason } = await isHelixSite(url);
+async function verifyHelixSite(url, hlxConfig = {}) {
+  const { isHelix, reason } = await isHelixSite(url, hlxConfig);
 
   if (!isHelix) {
     throw new InvalidSiteCandidate(reason, url);
@@ -97,7 +97,7 @@ async function verifyHelixSite(url) {
 }
 
 function parseHlxRSO(domain) {
-  const regex = /^([^--]+)--([^--]+)--([^--]+)\.(hlx\.live|aem\.live)$/;
+  const regex = /^([\w-]+)--([\w-]+)--([\w-]+)\.(hlx\.live|aem\.live)$/;
   const match = domain.match(regex);
 
   if (!match) {
@@ -112,10 +112,37 @@ function parseHlxRSO(domain) {
   };
 }
 
-async function fetchEdgeConfig(owner, site, token, log) {
+/**
+ * Fetches the edge config for the given site. If the config is not found, returns null.
+ * @param {object} rso - The rso object
+ * @param {string} rso.owner - The owner of the site
+ * @param {string} rso.site - The site name
+ * @param {string} [rso.ref] - The ref of the site, if any
+ * @param {string} [rso.tld] - The tld of the site, if any
+ * @param {string} hlxAdminToken - The hlx admin token
+ * @param {object} log - The logger object
+ * @param hlxAdminToken
+ * @param log
+ * @return {Promise<unknown>}
+ */
+async function fetchhlxConfig(rso, hlxAdminToken, log) {
+  const { owner, site } = rso;
+
+  if (!hasText(owner)) {
+    throw new Error('Owner is required');
+  }
+
+  if (!hasText(site)) {
+    throw new Error('Site is required');
+  }
+
+  if (!hasText(hlxAdminToken)) {
+    throw new Error('HLX Admin Token is required');
+  }
+
   try {
     const response = await fetch(`https://admin.hlx.page/config/${owner}/aggregated/${site}.json`, {
-      headers: { authorization: `token ${token}` },
+      headers: { authorization: `token ${hlxAdminToken}` },
     });
 
     if (response.status === 200) {
@@ -132,36 +159,46 @@ async function fetchEdgeConfig(owner, site, token, log) {
   } catch (e) {
     log.error(`Error fetching edge config for ${owner}/${site}`, e);
   }
+
   return null;
 }
 
-async function extractEdgeConfig(forwardedHost, hlxAdminToken, log) {
+/**
+ * Extracts the edge config from the x-forwarded-host header.
+ * @param {string} forwardedHost - The x-forwarded-host header
+ * @param {string} hlxAdminToken - The hlx admin token
+ * @param {object} log - The logger object
+ * @return {Promise<{cdnProdHost: null, domain: *, hlxVersion: number, rso: {}}>}
+ */
+async function extracthlxConfig(forwardedHost, hlxAdminToken, log) {
   const domains = forwardedHost.split(',').map((domain) => domain.trim());
   const primaryDomain = domains[0];
 
-  let cdnProdHost;
-  let hlxVersion = 4;
-  let rso = {};
+  const hlxConfig = {
+    cdnProdHost: undefined,
+    domain: primaryDomain,
+    hlxVersion: 4,
+    rso: {},
+  };
 
   for (const domain of domains.slice(1)) {
-    rso = parseHlxRSO(domain);
+    const rso = parseHlxRSO(domain);
     if (isObject(rso)) {
       // eslint-disable-next-line no-await-in-loop
-      const config = await fetchEdgeConfig(rso.owner, rso.site, hlxAdminToken, log);
-      if (isObject(config) && hasText(config.cdn?.prod?.host)) {
-        cdnProdHost = config.cdn.prod.host;
-        hlxVersion = 5;
+      const config = await fetchhlxConfig(rso, hlxAdminToken, log);
+      if (isObject(config)) {
+        const { cdn, code, content } = config;
+        hlxConfig.cdnProdHost = cdn?.prod?.host;
+        hlxConfig.code = code;
+        hlxConfig.content = content;
+        hlxConfig.hlxVersion = 5;
+        hlxConfig.rso = rso;
       }
       break;
     }
   }
 
-  return {
-    cdnProdHost,
-    hlxVersion,
-    domain: primaryDomain,
-    rso,
-  };
+  return hlxConfig;
 }
 
 function verifyURLCandidate(baseURL) {
@@ -189,13 +226,13 @@ function verifyURLCandidate(baseURL) {
   }
 }
 
-function buildSlackMessage(baseURL, source, edgeConfig, channel) {
-  const config = JSON.stringify(edgeConfig, null, 2);
+function buildSlackMessage(baseURL, source, hlxConfig, channel) {
+  const config = JSON.stringify(hlxConfig, null, 2);
   return Message()
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*, _config_: *${config}*`),
+        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*, _config_: *${config}*)`),
       Blocks.Actions()
         .elements(
           Elements.Button()
@@ -223,16 +260,16 @@ function buildSlackMessage(baseURL, source, edgeConfig, channel) {
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
 
-  async function processSiteCandidate(domain, source, edgeConfig) {
+  async function processSiteCandidate(domain, source, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(baseURL);
-    await verifyHelixSite(baseURL);
+    await verifyHelixSite(baseURL, hlxConfig);
 
     const siteCandidate = {
       baseURL,
       source,
       status: SITE_CANDIDATE_STATUS.PENDING,
-      edgeConfig,
+      hlxConfig,
     };
 
     const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
@@ -252,10 +289,10 @@ function HooksController(lambdaContext) {
     return baseURL;
   }
 
-  async function sendDiscoveryMessage(baseURL, source, edgeConfig = {}) {
+  async function sendDiscoveryMessage(baseURL, source, hlxConfig = {}) {
     const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
-    return slackClient.postMessage(buildSlackMessage(baseURL, source, edgeConfig, channel));
+    return slackClient.postMessage(buildSlackMessage(baseURL, source, hlxConfig, channel));
   }
 
   async function processCDNHook(context) {
@@ -266,16 +303,16 @@ function HooksController(lambdaContext) {
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
     // extract the url from the x-forwarded-host header and determine hlx config
-    const edgeConfig = await extractEdgeConfig(
+    const hlxConfig = await extracthlxConfig(
       forwardedHost,
       hlxAdminToken,
       log,
     );
 
-    const domain = edgeConfig.cdnProdHost || edgeConfig.domain;
+    const domain = hlxConfig.cdnProdHost || hlxConfig.domain;
     const source = SITE_CANDIDATE_SOURCES.CDN;
-    const baseURL = await processSiteCandidate(domain, source, edgeConfig);
-    await sendDiscoveryMessage(baseURL, source, edgeConfig);
+    const baseURL = await processSiteCandidate(domain, source, hlxConfig);
+    await sendDiscoveryMessage(baseURL, source, hlxConfig);
 
     return ok('CDN site candidate is successfully processed');
   }
