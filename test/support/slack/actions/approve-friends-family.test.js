@@ -27,6 +27,14 @@ const { expect } = chai;
 
 describe('approveSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';
+  const hlxConfig = {
+    hlxVersion: 4,
+    rso: {
+      owner: 'some-owner',
+      site: 'some-site',
+      ref: 'main',
+    },
+  };
   let context;
   let slackClient;
   let ackMock;
@@ -70,6 +78,7 @@ describe('approveSiteCandidate', () => {
 
     siteCandidate = createSiteCandidate({
       baseURL,
+      hlxConfig,
       source: SITE_CANDIDATE_SOURCES.CDN,
       status: SITE_CANDIDATE_STATUS.PENDING,
     });
@@ -90,6 +99,7 @@ describe('approveSiteCandidate', () => {
       status: SITE_CANDIDATE_STATUS.APPROVED,
       updatedBy: 'approvers-username',
       siteId: site.getId(),
+      hlxConfig,
     });
 
     context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
@@ -106,7 +116,7 @@ describe('approveSiteCandidate', () => {
     expect(context.dataAccess.getSiteCandidateByBaseURL.calledOnceWithExactly(baseURL)).to.be.true;
     expect(context.dataAccess.addSite.calledOnceWithExactly({
       baseURL,
-      hlxConfig: {},
+      hlxConfig,
       isLive: true,
       organizationId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
     })).to.be.true;

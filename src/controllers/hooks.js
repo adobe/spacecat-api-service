@@ -22,6 +22,7 @@ import {
 } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { fetch, isHelixSite } from '../support/utils.js';
+import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
 const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
@@ -232,10 +233,7 @@ function verifyURLCandidate(baseURL) {
 }
 
 function buildSlackMessage(baseURL, source, hlxConfig, channel) {
-  const { rso, hlxVersion } = hlxConfig;
-  const hlxConfigMessagePart = source === SITE_CANDIDATE_SOURCES.CDN
-    ? `, _HLX Version_: *${hlxVersion}*, _Dev URL_: https://${rso.ref}--${rso.site}--${rso.owner}.aem.live`
-    : '';
+  const hlxConfigMessagePart = getHlxConfigMessagePart(source, hlxConfig);
   return Message()
     .channel(channel)
     .blocks(

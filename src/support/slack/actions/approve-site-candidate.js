@@ -17,15 +17,17 @@ import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-cli
 import { Blocks, Message } from 'slack-block-builder';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
+import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
 
-async function announceSiteDiscovery(context, baseURL, source) {
+async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
   const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
   const slackClient = BaseSlackClient.createFrom(context, SLACK_TARGETS.WORKSPACE_INTERNAL);
+  const hlxConfigMessagePart = getHlxConfigMessagePart(source, hlxConfig);
   const announcementMessage = Message()
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`A new site, *<${baseURL}|${baseURL}>*, has gone *live* on Edge Delivery Services and has been added to the Star Catalogue :rocket: (_source:_ *${source}*)`),
+        .text(`A new site, *<${baseURL}|${baseURL}>*, has gone *live* on Edge Delivery Services and has been added to the Star Catalogue :rocket: (_source:_ *${source}*${hlxConfigMessagePart})`),
     )
     .buildToObject();
   return slackClient.postMessage(announcementMessage);
@@ -98,7 +100,12 @@ export default function approveSiteCandidate(lambdaContext) {
 
       await respond(reply);
 
-      await announceSiteDiscovery(lambdaContext, baseURL, siteCandidate.getSource());
+      await announceSiteDiscovery(
+        lambdaContext,
+        baseURL,
+        siteCandidate.getSource(),
+        siteCandidate.getHlxConfig(),
+      );
     } catch (e) {
       log.error('Error occurred while acknowledging site candidate approval', e);
       throw e;
