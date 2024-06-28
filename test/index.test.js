@@ -86,6 +86,7 @@ describe('Index Tests', () => {
                   disabled: () => false,
                   getExcludedURLs: () => [],
                   getManualOverwrites: () => [],
+                  getFixedURLs: () => [],
                 },
               }),
             },
