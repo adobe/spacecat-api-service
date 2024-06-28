@@ -11,14 +11,17 @@
  */
 
 import wrap from '@adobe/helix-shared-wrap';
-import { Message, Blocks, Elements } from 'slack-block-builder';
+import { Blocks, Elements, Message } from 'slack-block-builder';
 import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
-import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
+import { composeBaseURL, hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
-import { SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import {
+  SITE_CANDIDATE_SOURCES,
+  SITE_CANDIDATE_STATUS,
+} from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { isHelixSite } from '../support/utils.js';
+import { fetch, isHelixSite } from '../support/utils.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
 const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
@@ -93,8 +96,72 @@ async function verifyHelixSite(url) {
   return true;
 }
 
-async function extractDomainFromXForwardedHostHeader(forwardedHost) {
-  return forwardedHost.split(',')[0]?.trim(); // get the domain from x-fw-host header
+function parseHlxRSO(domain) {
+  const regex = /^([^--]+)--([^--]+)--([^--]+)\.(hlx\.live|aem\.live)$/;
+  const match = domain.match(regex);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    ref: match[1],
+    site: match[2],
+    owner: match[3],
+    tld: match[4],
+  };
+}
+
+async function fetchEdgeConfig(owner, site, token, log) {
+  try {
+    const response = await fetch(`https://admin.hlx.page/config/${owner}/aggregated/${site}.json`, {
+      headers: { authorization: `token ${token}` },
+    });
+
+    if (response.status === 200) {
+      log.info(`Edge config found for ${owner}/${site}`);
+      return response.json();
+    }
+
+    if (response.status === 404) {
+      log.info(`No edge config found for ${owner}/${site}`);
+      return null;
+    }
+
+    log.error(`Error fetching edge config for ${owner}/${site}. Status: ${response.status}`);
+  } catch (e) {
+    log.error(`Error fetching edge config for ${owner}/${site}`, e);
+  }
+  return null;
+}
+
+async function extractEdgeConfig(forwardedHost, hlxAdminToken, log) {
+  const domains = forwardedHost.split(',').map((domain) => domain.trim());
+  const primaryDomain = domains[0];
+
+  let cdnProdHost;
+  let hlxVersion = 4;
+  let rso = {};
+
+  for (const domain of domains.slice(1)) {
+    rso = parseHlxRSO(domain);
+    if (isObject(rso)) {
+      // eslint-disable-next-line no-await-in-loop
+      const config = await fetchEdgeConfig(rso.owner, rso.site, hlxAdminToken, log);
+      if (isObject(config) && hasText(config.cdn?.prod?.host)) {
+        cdnProdHost = config.cdn.prod.host;
+        hlxVersion = 5;
+      }
+      break;
+    }
+  }
+
+  return {
+    cdnProdHost,
+    hlxVersion,
+    domain: primaryDomain,
+    rso,
+  };
 }
 
 function verifyURLCandidate(baseURL) {
@@ -122,12 +189,13 @@ function verifyURLCandidate(baseURL) {
   }
 }
 
-function buildSlackMessage(baseURL, source, channel) {
+function buildSlackMessage(baseURL, source, edgeConfig, channel) {
+  const config = JSON.stringify(edgeConfig, null, 2);
   return Message()
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*)`),
+        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*, _config_: *${config}*`),
       Blocks.Actions()
         .elements(
           Elements.Button()
@@ -155,7 +223,7 @@ function buildSlackMessage(baseURL, source, channel) {
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
 
-  async function processSiteCandidate(domain, source) {
+  async function processSiteCandidate(domain, source, edgeConfig) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(baseURL);
     await verifyHelixSite(baseURL);
@@ -164,6 +232,7 @@ function HooksController(lambdaContext) {
       baseURL,
       source,
       status: SITE_CANDIDATE_STATUS.PENDING,
+      edgeConfig,
     };
 
     const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
@@ -183,24 +252,30 @@ function HooksController(lambdaContext) {
     return baseURL;
   }
 
-  async function sendDiscoveryMessage(baseURL, source) {
+  async function sendDiscoveryMessage(baseURL, source, edgeConfig = {}) {
     const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
-    return slackClient.postMessage(buildSlackMessage(baseURL, source, channel));
+    return slackClient.postMessage(buildSlackMessage(baseURL, source, edgeConfig, channel));
   }
 
   async function processCDNHook(context) {
     const { log } = context;
     const { forwardedHost } = context.data;
+    const { HLX_ADMIN_TOKEN: hlxAdminToken } = context.env;
 
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
-    // extract the url from the x-forwarded-host header
-    const domain = await extractDomainFromXForwardedHostHeader(forwardedHost);
+    // extract the url from the x-forwarded-host header and determine hlx config
+    const edgeConfig = await extractEdgeConfig(
+      forwardedHost,
+      hlxAdminToken,
+      log,
+    );
 
+    const domain = edgeConfig.cdnProdHost || edgeConfig.domain;
     const source = SITE_CANDIDATE_SOURCES.CDN;
-    const baseURL = await processSiteCandidate(domain, source);
-    await sendDiscoveryMessage(baseURL, source);
+    const baseURL = await processSiteCandidate(domain, source, edgeConfig);
+    await sendDiscoveryMessage(baseURL, source, edgeConfig);
 
     return ok('CDN site candidate is successfully processed');
   }
