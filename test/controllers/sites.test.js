@@ -542,6 +542,16 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.removeKeyEvent.calledWith(keyEventId)).to.be.true;
   });
 
+  it('removes a key event successfully', async () => {
+    const keyEventId = 'someKeyEventId';
+
+    mockDataAccess.removeKeyEvent.withArgs(keyEventId).resolves(true);
+
+    const response = await sitesController.removeKeyEvent({ params: { keyEventId } });
+
+    expect(response.status).to.equal(204);
+  });
+
   it('remove key events returns bad request when keyEventId is missing', async () => {
     const result = await sitesController.removeKeyEvent({
       params: {},

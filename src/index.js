@@ -48,6 +48,7 @@ import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
+import exceptionHandler from './support/exception-handler.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -136,6 +137,7 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
+  .with(exceptionHandler)
   .with(dataAccess)
   .with(auth, { authHandlers: [LegacyApiKeyHandler, AdobeImsHandler] })
   .with(enrichPathInfo)
