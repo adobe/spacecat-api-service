@@ -26,6 +26,7 @@ describe('RunAuditCommand', () => {
   beforeEach(() => {
     dataAccessStub = {
       getSiteByBaseURL: sinon.stub(),
+      getConfiguration: sinon.stub(),
     };
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
@@ -52,12 +53,9 @@ describe('RunAuditCommand', () => {
     it('triggers an audit for a valid site', async () => {
       dataAccessStub.getSiteByBaseURL.resolves({
         getId: () => '123',
-        getAuditConfig: sinon.stub().returns({
-          auditsDisabled: sinon.stub().returns(false),
-          getAuditTypeConfig: sinon.stub().returns({
-            disabled: sinon.stub().returns(false),
-          }),
-        }),
+      });
+      dataAccessStub.getConfiguration.resolves({
+        isHandlerEnabledForSite: () => true,
       });
       const command = RunAuditCommand(context);
 
@@ -68,34 +66,13 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
-    it('does not trigger an audit when audits are disabled for site', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({
-        getId: () => '123',
-        getAuditConfig: sinon.stub().returns({
-          auditsDisabled: sinon.stub().returns(true),
-          getAuditTypeConfig: sinon.stub().returns({
-            disabled: sinon.stub().returns(false),
-          }),
-        }),
-      });
-      const command = RunAuditCommand(context);
-
-      await command.handleExecution(['validsite.com'], slackContext);
-
-      expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':x: Will not audit site \'https://validsite.com\' because audits are disabled for this site.');
-      expect(sqsStub.sendMessage.called).to.be.false;
-    });
-
     it('does not trigger an audit when audit for type is disabled', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({
+      const site = {
         getId: () => '123',
-        getAuditConfig: sinon.stub().returns({
-          auditsDisabled: sinon.stub().returns(false),
-          getAuditTypeConfig: sinon.stub().returns({
-            disabled: sinon.stub().returns(true),
-          }),
-        }),
+      };
+      dataAccessStub.getSiteByBaseURL.resolves(site);
+      dataAccessStub.getConfiguration.resolves({
+        isHandlerEnabledForSite: sinon.stub().returns(false),
       });
       const command = RunAuditCommand(context);
 

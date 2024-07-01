@@ -47,9 +47,14 @@ describe('AddRepoCommand', () => {
       }),
     };
 
+    const configuration = {
+      isHandlerEnabledForSite: sinon.stub().returns(true),
+    };
+
     dataAccessStub = {
       getSiteByBaseURL: sinon.stub().resolves(siteStub),
       updateSite: sinon.stub(),
+      getConfiguration: sinon.stub().resolves(configuration),
     };
 
     context = {

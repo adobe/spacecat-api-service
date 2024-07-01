@@ -9,8 +9,6 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-
-import { isAuditsDisabled } from '@adobe/spacecat-shared-utils';
 import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
 import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from '../../../support/utils.js';
@@ -43,7 +41,7 @@ async function getOrganizations(dataAccess) {
  * @returns {Promise<Array<Site>>} The sites to audit.
  * @throws {Error} Throws an error if the site is not found.
  */
-async function getSitesToAudit(dataAccess, url, deliveryType, orgs) {
+async function getSitesToAudit(dataAccess, url, deliveryType) {
   let sitesToAudit;
   if (isAuditForAllUrls(url)) {
     sitesToAudit = isAuditForAllDeliveryTypes(deliveryType)
@@ -53,7 +51,7 @@ async function getSitesToAudit(dataAccess, url, deliveryType, orgs) {
     const site = await dataAccess.getSiteByBaseURL(url);
     sitesToAudit = site ? [site] : [];
   }
-  return sitesToAudit.filter((site) => !isAuditsDisabled(site, orgs[site.getOrganizationId()]));
+  return sitesToAudit;
 }
 /**
  * Triggers audit processes for websites based on the provided URL.
@@ -70,6 +68,7 @@ export async function triggerFromData(context, config, auditContext = {}) {
   const { url, auditTypes, deliveryType } = config;
 
   const orgs = await getOrganizations(dataAccess);
+  const configuration = await dataAccess.getConfiguration();
 
   const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType, orgs);
   if (!sitesToAudit.length) {
@@ -80,7 +79,7 @@ export async function triggerFromData(context, config, auditContext = {}) {
 
   for (const auditType of auditTypes) {
     const sitesToAuditForType = sitesToAudit.filter(
-      (site) => !isAuditsDisabled(site, orgs[site.getOrganizationId()], auditType),
+      (site) => configuration.isHandlerEnabledForSite(auditType, site),
     );
 
     if (!sitesToAuditForType.length) {

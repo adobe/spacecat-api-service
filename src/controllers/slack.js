@@ -174,7 +174,7 @@ function SlackController(SlackApp) {
       return notFound('Error reading organization: not found.');
     }
 
-    const orgSlackChannelId = spaceCatOrg.getConfig().slack?.channel;
+    const orgSlackChannelId = spaceCatOrg.getConfig().getSlackConfig()?.channel;
 
     if (!hasText(orgSlackChannelId)) {
       log.error(`No Slack channel found for the IMS org ID: ${imsOrgId} in its organization configuration.`);

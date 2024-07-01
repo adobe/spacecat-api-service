@@ -80,16 +80,16 @@ function AddSiteCommand(context) {
       }
 
       const auditType = 'lhs-mobile';
-      const auditConfig = newSite.getAuditConfig();
 
       let message = `:white_check_mark: *Successfully added new site <${baseURL}|${baseURL}>*.\n`;
       message += `:delivrer: *Delivery type:* ${deliveryType}.\n`;
       if (newSite.isLive()) {
         message += ':rocket: Site is set to *live* by default\n';
       }
+      const configuration = await dataAccess.getConfiguration();
 
       // we still check for auditConfig.auditsDisabled() here as the default audit config may change
-      if (!auditConfig.auditsDisabled() && !auditConfig.getAuditTypeConfig(auditType)?.disabled()) {
+      if (configuration.isHandlerEnabledForSite(auditType, newSite)) {
         await triggerAuditForSite(newSite, auditType, slackContext, context);
         message += 'First PSI check is triggered! :adobe-run:\'\n';
         message += `In a minute, you can run _@spacecat get site ${baseURL}_`;
