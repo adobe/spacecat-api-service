@@ -12,6 +12,9 @@
 
 import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
+import {
+  SITE_CANDIDATE_SOURCES,
+} from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 
 import { URL } from 'url';
 
@@ -271,6 +274,13 @@ const wrapSayForThread = (say, threadTs) => {
   return wrappedFunction;
 };
 
+const getHlxConfigMessagePart = (source, hlxConfig) => {
+  const { rso, hlxVersion } = hlxConfig;
+  return source === SITE_CANDIDATE_SOURCES.CDN
+    ? `, _HLX Version_: *${hlxVersion}*, _Dev URL_: https://${rso.ref}--${rso.site}--${rso.owner}.aem.live`
+    : '';
+};
+
 export {
   extractURLFromSlackInput,
   getQueryParams,
@@ -280,6 +290,7 @@ export {
   sendMessageBlocks,
   sendFile,
   getThreadTimestamp,
+  getHlxConfigMessagePart,
   getMessageFromEvent,
   wrapSayForThread,
 };

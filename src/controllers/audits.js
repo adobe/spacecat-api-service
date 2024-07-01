@@ -15,10 +15,10 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import Config from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
-import { SiteDto } from '../dto/site.js';
 
 /**
  * Audits controller.
@@ -118,6 +118,14 @@ function AuditsController(dataAccess) {
    * @returns {Promise<Response>} the site's updated audit config
    */
   const patchAuditForSite = async (context) => {
+    function mergeOverrides(existingOverrides, manualOverwrites) {
+      const overrides = {};
+      [...existingOverrides, ...manualOverwrites].forEach((override) => {
+        overrides[override.brokenTargetURL] = override;
+      });
+      return Object.values(overrides);
+    }
+
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
@@ -129,29 +137,69 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    // get audit type config
+    const { excludedURLs, manualOverwrites } = context.data;
+    let hasUpdates = false;
+
     const site = await dataAccess.getSiteByID(siteId);
-    const siteConfig = site.getConfig();
+    if (!site) {
+      return notFound('Site not found');
+    }
 
-    const { excludedURLs } = context.data;
-    let updatedExcludedUrls;
-
+    const config = site.getConfig();
+    const handlerConfig = config.getHandlerConfig(auditType);
+    if (!handlerConfig) {
+      return notFound('Audit type not found');
+    }
     if (Array.isArray(excludedURLs)) {
-      updatedExcludedUrls = [
-        ...siteConfig.getExcludedURLs()?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
-        ...excludedURLs,
-      ];
+      for (const url of excludedURLs) {
+        if (!isValidUrl(url)) {
+          return badRequest('Invalid URL format');
+        }
+      }
+
+      hasUpdates = true;
+
+      const newExcludedURLs = excludedURLs.length === 0
+        ? []
+        : Array.from(new Set([...(config.getExcludedURLs(auditType) || []), ...excludedURLs]));
+
+      config.updateExcludedURLs(auditType, newExcludedURLs);
     }
 
-    if (!excludedURLs.length) {
-      // remove all opt-outs
-      updatedExcludedUrls = [];
-    }
-    siteConfig.updateAuditExcludedURLs(auditType, updatedExcludedUrls);
-    site.updateConfig(siteConfig);
-    await dataAccess.updateSite(site);
+    if (Array.isArray(manualOverwrites)) {
+      for (const manualOverwrite of manualOverwrites) {
+        if (!isObject(manualOverwrite)) {
+          return badRequest('Manual overwrite must be an object');
+        }
+        if (Object.keys(manualOverwrite).length === 0) {
+          return badRequest('Manual overwrite object cannot be empty');
+        }
+        if (!hasText(manualOverwrite.brokenTargetURL) || !hasText(manualOverwrite.targetURL)) {
+          return badRequest('Manual overwrite must have both brokenTargetURL and targetURL');
+        }
+        if (!isValidUrl(manualOverwrite.brokenTargetURL)
+            || !isValidUrl(manualOverwrite.targetURL)) {
+          return badRequest('Invalid URL format');
+        }
+      }
 
-    return ok(SiteDto.toJSON(site));
+      hasUpdates = true;
+
+      const existingOverrides = config.getManualOverwrites(auditType);
+      const newManualOverwrites = manualOverwrites.length === 0
+        ? []
+        : mergeOverrides(existingOverrides, manualOverwrites);
+
+      config.updateManualOverwrites(auditType, newManualOverwrites);
+    }
+    if (hasUpdates) {
+      const obj = Config.toDynamoItem(config);
+      site.updateConfig(config);
+      await dataAccess.updateSite(site);
+
+      return ok(obj);
+    }
+    return badRequest('No updates provided');
   };
 
   return {
