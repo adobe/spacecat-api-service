@@ -16,7 +16,7 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
-import Config from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
 

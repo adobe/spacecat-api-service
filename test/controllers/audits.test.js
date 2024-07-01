@@ -285,8 +285,8 @@ describe('Audits Controller', () => {
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => ({}),
+        getConfig: () => ({
+          getHandlerConfig: () => ({}),
           updateAuditTypeConfig: sinon.stub(),
         }),
         updateAuditTypeConfig: sinon.stub(),
@@ -328,6 +328,14 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
+      const site = {
+        getConfig: () => ({
+          getHandlerConfig: () => ({}),
+        }),
+      };
+
+      mockDataAccess.getSiteByID.resolves(site);
+
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(400);
@@ -344,25 +352,21 @@ describe('Audits Controller', () => {
         params: { siteId, auditType },
         data: { excludedURLs },
       };
-
-      const mockDisabledFn = sinon.stub();
-      mockDisabledFn.returns(false);
-
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([]),
         updateExcludedURLs: sinon.stub(),
-        disabled: mockDisabledFn,
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub(false),
-          getAuditTypeConfigs: sinon.stub().returns([]),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: {} }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);
@@ -370,12 +374,12 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateExcludedURLs.calledWith([])).to.be.true;
-      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(site.getConfig().updateExcludedURLs.calledWith(auditType, [])).to.be.true;
+      expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
-    it('updates excluded URLs when excludedURLs is not empty but the audit type config is undefined', async () => {
+    it('updates excluded URLs when excludedURLs is undefined', async () => {
       const siteId = 'site1';
       const auditType = 'broken-backlinks';
       const excludedURLs = ['https://foo.com', 'https://bar.com'];
@@ -385,24 +389,21 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
-      const mockDisabledFn = sinon.stub();
-      mockDisabledFn.returns(false);
-
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns(undefined),
         getFixedURLs: sinon.stub().returns(undefined),
         getManualOverwrites: sinon.stub().returns(undefined),
         updateExcludedURLs: sinon.stub(),
-        disabled: mockDisabledFn,
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub(false),
-          getAuditTypeConfigs: sinon.stub().returns([]),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);
@@ -410,8 +411,8 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateExcludedURLs.calledWith(['https://foo.com', 'https://bar.com'])).to.be.true;
-      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(site.getConfig().updateExcludedURLs.calledWith(auditType, ['https://foo.com', 'https://bar.com'])).to.be.true;
+      expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
@@ -425,7 +426,7 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns(['https://example.com/page3']),
         getManualOverwrites: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
@@ -434,12 +435,13 @@ describe('Audits Controller', () => {
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub().returns(false),
-          getAuditTypeConfigs: sinon.stub().returns([]),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);
@@ -447,12 +449,12 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateExcludedURLs.calledWith([
+      expect(site.getConfig().updateExcludedURLs.calledWith(auditType, [
         'https://example.com/page3',
         'https://example.com/page1',
         'https://example.com/page2',
       ])).to.be.true;
-      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
@@ -466,21 +468,21 @@ describe('Audits Controller', () => {
         data: { excludedURLs },
       };
 
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns(['https://example.com/page2']),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([]),
         updateExcludedURLs: sinon.stub(),
-        disabled: sinon.stub().returns(false),
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub().returns(false),
-          getAuditTypeConfigs: sinon.stub().returns([]),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);
@@ -488,11 +490,11 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateExcludedURLs.calledWith([
+      expect(site.getConfig().updateExcludedURLs.calledWith(auditType, [
         'https://example.com/page2',
         'https://example.com/page1',
       ])).to.be.true;
-      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
@@ -524,8 +526,8 @@ describe('Audits Controller', () => {
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => null,
+        getConfig: () => ({
+          getHandlerConfig: () => null,
         }),
       };
 
@@ -550,22 +552,23 @@ describe('Audits Controller', () => {
         data: { manualOverwrites },
       };
 
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
         updateManualOverwrites: sinon.stub(),
-        disabled: sinon.stub().returns(false),
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub().returns(false),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);
@@ -573,11 +576,11 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateManualOverwrites.calledWith([
+      expect(site.getConfig().updateManualOverwrites.calledWith(auditType, [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
         { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
       ])).to.be.false;
-      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
@@ -591,22 +594,23 @@ describe('Audits Controller', () => {
         data: { manualOverwrites },
       };
 
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
         updateManualOverwrites: sinon.stub(),
-        disabled: sinon.stub().returns(false),
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub().returns(false),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);
@@ -614,8 +618,8 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(auditTypeConfig.updateManualOverwrites.calledWith([])).to.be.true;
-      expect(site.updateAuditTypeConfig.calledWith(auditType, sinon.match.any)).to.be.true;
+      expect(site.getConfig().updateManualOverwrites.calledWith(auditType, [])).to.be.true;
+      expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
 
@@ -632,24 +636,24 @@ describe('Audits Controller', () => {
         data: { manualOverwrites },
       };
 
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
         updateManualOverwrites: sinon.stub(),
-        disabled: sinon.stub().returns(false),
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub().returns(false),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
-
       mockDataAccess.getSiteByID.resolves(site);
 
       const result = await auditsController.patchAuditForSite(context);
@@ -672,22 +676,23 @@ describe('Audits Controller', () => {
         data: { manualOverwrites },
       };
 
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
         updateManualOverwrites: sinon.stub(),
-        disabled: sinon.stub().returns(false),
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub().returns(false),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);
@@ -712,22 +717,23 @@ describe('Audits Controller', () => {
         data: { manualOverwrites },
       };
 
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
         updateManualOverwrites: sinon.stub(),
-        disabled: sinon.stub().returns(false),
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub().returns(false),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);
@@ -752,7 +758,7 @@ describe('Audits Controller', () => {
         data: { manualOverwrites },
       };
 
-      const auditTypeConfig = {
+      const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([
@@ -763,11 +769,13 @@ describe('Audits Controller', () => {
       };
 
       const site = {
-        getAuditConfig: () => ({
-          getAuditTypeConfig: () => auditTypeConfig,
-          auditsDisabled: sinon.stub().returns(false),
+        getConfig: () => ({
+          ...handlerTypeConfig,
+          getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
+          getSlackConfig: () => {},
+          getHandlers: () => (({ [auditType]: {} })),
         }),
-        updateAuditTypeConfig: sinon.stub(),
+        updateConfig: sinon.stub(),
       };
 
       mockDataAccess.getSiteByID.resolves(site);

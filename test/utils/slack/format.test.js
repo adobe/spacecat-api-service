@@ -115,7 +115,7 @@ describe('Utility Functions', () => {
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, 'mobile')).to.equal(expectedOutput);
+      expect(printSiteDetails(mockSite, true, 'mobile')).to.equal(expectedOutput);
     });
 
     it('prints details for a site with audits disabled', () => {
@@ -130,7 +130,7 @@ describe('Utility Functions', () => {
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, 'mobile')).to.equal(expectedOutput);
+      expect(printSiteDetails(mockSite, false, 'mobile')).to.equal(expectedOutput);
     });
 
     it('prints details for a site with latest audit error', () => {
@@ -151,7 +151,7 @@ describe('Utility Functions', () => {
       :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, 'mobile', mockAudit)).to.equal(expectedOutput);
+      expect(printSiteDetails(mockSite, true, 'mobile', mockAudit)).to.equal(expectedOutput);
     });
 
     it('prints details for a site with latest audit', () => {
@@ -172,7 +172,7 @@ describe('Utility Functions', () => {
       :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, 'mobile', mockAudit)).to.equal(expectedOutput);
+      expect(printSiteDetails(mockSite, true, 'mobile', mockAudit)).to.equal(expectedOutput);
     });
 
     it('prints details for a non-live site without GitHub URL', () => {

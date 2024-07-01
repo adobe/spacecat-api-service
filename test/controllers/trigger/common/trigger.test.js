@@ -34,6 +34,10 @@ describe('Trigger from data access', () => {
   beforeEach(() => {
     sandbox = sinon.createSandbox();
 
+    const configuration = {
+      isHandlerEnabledForOrg: sandbox.stub(),
+      isHandlerEnabledForSite: sandbox.stub(),
+    };
     sites = [
       createSite({
         id: 'site1',
@@ -85,6 +89,24 @@ describe('Trigger from data access', () => {
           },
         },
       })];
+    configuration.isHandlerEnabledForOrg.withArgs('auditType', orgs[0]).returns(false);
+    configuration.isHandlerEnabledForOrg.withArgs('type1', orgs[0]).returns(false);
+    configuration.isHandlerEnabledForOrg.withArgs('type2', orgs[0]).returns(false);
+    configuration.isHandlerEnabledForOrg.withArgs('auditType', orgs[2]).returns(false);
+    configuration.isHandlerEnabledForOrg.withArgs('type1', orgs[2]).returns(false);
+    configuration.isHandlerEnabledForOrg.withArgs('type2', orgs[2]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('auditType', sites[0]).returns(true);
+    configuration.isHandlerEnabledForSite.withArgs('auditType', sites[1]).returns(true);
+    configuration.isHandlerEnabledForSite.withArgs('auditType', sites[2]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('auditType', sites[3]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('type1', sites[0]).returns(true);
+    configuration.isHandlerEnabledForSite.withArgs('type1', sites[1]).returns(true);
+    configuration.isHandlerEnabledForSite.withArgs('type1', sites[2]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('type1', sites[3]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('type2', sites[0]).returns(true);
+    configuration.isHandlerEnabledForSite.withArgs('type2', sites[1]).returns(true);
+    configuration.isHandlerEnabledForSite.withArgs('type2', sites[2]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('type2', sites[3]).returns(false);
 
     dataAccessMock = {
       getOrganizations: sandbox.stub().resolves(orgs),
@@ -92,6 +114,7 @@ describe('Trigger from data access', () => {
       getSitesByDeliveryType: sandbox.stub(),
       getSiteByBaseURL: sandbox.stub(),
       getSiteByID: sandbox.stub(),
+      getConfiguration: sandbox.stub().resolves(configuration),
     };
 
     sqsMock = {
@@ -237,21 +260,25 @@ describe('Trigger from data access', () => {
       auditTypes: [context.data.type],
       deliveryType: 'all',
     };
-
-    dataAccessMock.getSites.resolves([
+    const configuration = {
+      isHandlerEnabledForSite: sandbox.stub(),
+    };
+    const sites2 = [
       createSite({
         id: 'site1',
         baseURL: 'http://site1.com',
         organizationId: 'org123',
-        auditConfig: { auditsDisabled: true },
       }),
       createSite({
         id: 'site2',
         baseURL: 'http://site2.com',
         organizationId: 'org123',
-        auditConfig: { auditsDisabled: false },
       }),
-    ]);
+    ];
+    dataAccessMock.getSites.resolves(sites2);
+    configuration.isHandlerEnabledForSite.withArgs('auditType', sites2[0]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('auditType', sites2[1]).returns(true);
+    dataAccessMock.getConfiguration.resolves(configuration);
 
     const response = await triggerFromData(context, config);
 
@@ -278,7 +305,6 @@ describe('Trigger from data access', () => {
         id: 'site1',
         baseURL: 'http://site1.com',
         organizationId: 'org123',
-        auditConfig: { auditsDisabled: false, auditTypeConfigs: { auditType: { disabled: true } } },
       }),
     ]);
 
@@ -303,21 +329,25 @@ describe('Trigger from data access', () => {
       auditTypes: [context.data.type],
       deliveryType: 'all',
     };
-
-    dataAccessMock.getSites.resolves([
+    const configuration = {
+      isHandlerEnabledForSite: sandbox.stub(),
+    };
+    const sites2 = [
       createSite({
         id: 'site1',
         baseURL: 'http://site1.com',
         organizationId: 'org123',
-        auditConfig: { auditsDisabled: false, auditTypeConfigs: { auditType: { disabled: true } } },
       }),
       createSite({
         id: 'site2',
         baseURL: 'http://site2.com',
         organizationId: 'org123',
-        auditConfig: { auditsDisabled: false },
       }),
-    ]);
+    ];
+    dataAccessMock.getSites.resolves(sites2);
+    configuration.isHandlerEnabledForSite.withArgs('auditType', sites2[0]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('auditType', sites2[1]).returns(true);
+    dataAccessMock.getConfiguration.resolves(configuration);
 
     const response = await triggerFromData(context, config);
 
