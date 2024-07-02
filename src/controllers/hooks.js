@@ -266,8 +266,7 @@ function buildSlackMessage(baseURL, source, hlxConfig, channel) {
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
 
-  // todo: temporary to back fill hlx config for existing sites
-  /* c8 ignore start */
+  // todo: remove after back fill of hlx config for existing sites is complete
   async function sendHlxConfigUpdatedMessage(baseURL, hlxConfig) {
     const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
@@ -281,7 +280,6 @@ function HooksController(lambdaContext) {
       .buildToObject();
     return slackClient.postMessage(message);
   }
-  /* c8 ignore end */
 
   async function processSiteCandidate(domain, source, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
@@ -300,8 +298,7 @@ function HooksController(lambdaContext) {
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
     if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
       // for existing site with empty hlxConfig, update it now
-      // todo: temporary to backfill hlx config for existing sites
-      /* c8 ignore start */
+      // todo: remove after back fill of hlx config for existing sites is complete
       if (
         source === SITE_CANDIDATE_SOURCES.CDN
         && isObject(hlxConfig) && Object.keys(hlxConfig).length > 0
@@ -311,7 +308,6 @@ function HooksController(lambdaContext) {
         await dataAccess.updateSite(site);
         await sendHlxConfigUpdatedMessage(baseURL, hlxConfig);
       }
-      /* c8 ignore end */
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
 

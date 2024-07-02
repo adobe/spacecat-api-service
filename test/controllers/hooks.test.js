@@ -279,6 +279,46 @@ describe('Hooks Controller', () => {
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
+
+    it('while candidate is disregarded, hlx config is updated if not present', async () => {
+      context.dataAccess.siteCandidateExists.resolves(false);
+      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
+        baseURL: 'https://some-domain.com',
+        isLive: true,
+        deliveryType: 'aem_edge',
+        hlxConfig: {
+          hlxVersion: 4,
+          rso: {
+            ref: 'main',
+            site: 'some-site',
+            owner: 'some-owner',
+          },
+        },
+      }));
+
+      const expectedMessage = {
+        channel: 'channel-id',
+        blocks: [
+          {
+            text: {
+              type: 'mrkdwn',
+              text: 'HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: https://undefined--undefined--undefined.aem.live',
+            },
+            type: 'section',
+          },
+        ],
+      };
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+      expect(resp).to.equal('CDN site candidate disregarded');
+      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
+      expect(context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.calledOnce).to.be.true;
+      expect(
+        context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.firstCall.args[0],
+      ).to.deep.equal(expectedMessage);
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+    });
   });
 
   describe('Site candidate processed', () => {
