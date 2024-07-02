@@ -57,6 +57,7 @@ describe('Hooks Controller', () => {
       dataAccess: {
         getSiteCandidateByBaseURL: sinon.stub(),
         addSite: sinon.stub(),
+        updateSite: sinon.stub(),
         upsertSiteCandidate: sinon.stub(),
         getSiteByBaseURL: sinon.stub(),
         siteCandidateExists: sinon.stub(),
