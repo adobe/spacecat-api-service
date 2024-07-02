@@ -13,7 +13,12 @@
 import wrap from '@adobe/helix-shared-wrap';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
-import { composeBaseURL, hasText, isObject } from '@adobe/spacecat-shared-utils';
+import {
+  composeBaseURL,
+  hasText,
+  isNonEmptyObject,
+  isObject,
+} from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import {
@@ -266,6 +271,21 @@ function buildSlackMessage(baseURL, source, hlxConfig, channel) {
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
 
+  // todo: remove after back fill of hlx config for existing sites is complete
+  async function sendHlxConfigUpdatedMessage(baseURL, hlxConfig) {
+    const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
+    const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
+    const hlxConfigMessagePart = getHlxConfigMessagePart(SITE_CANDIDATE_SOURCES.CDN, hlxConfig);
+    const message = Message()
+      .channel(channel)
+      .blocks(
+        Blocks.Section()
+          .text(`HLX config updated for existing site: *<${baseURL}|${baseURL}>*${hlxConfigMessagePart}`),
+      )
+      .buildToObject();
+    return slackClient.postMessage(message);
+  }
+
   async function processSiteCandidate(domain, source, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(baseURL);
@@ -282,6 +302,17 @@ function HooksController(lambdaContext) {
 
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
     if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
+      // for existing site with empty hlxConfig, update it now
+      // todo: remove after back fill of hlx config for existing sites is complete
+      if (
+        source === SITE_CANDIDATE_SOURCES.CDN
+        && isNonEmptyObject(hlxConfig)
+        && !isNonEmptyObject(site.getHlxConfig())
+      ) {
+        site.updateHlxConfig(siteCandidate.hlxConfig);
+        await dataAccess.updateSite(site);
+        await sendHlxConfigUpdatedMessage(baseURL, hlxConfig);
+      }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
 
