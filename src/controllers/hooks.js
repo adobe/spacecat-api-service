@@ -13,7 +13,12 @@
 import wrap from '@adobe/helix-shared-wrap';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
-import { composeBaseURL, hasText, isObject } from '@adobe/spacecat-shared-utils';
+import {
+  composeBaseURL,
+  hasText,
+  isNonEmptyObject,
+  isObject,
+} from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import {
@@ -301,8 +306,8 @@ function HooksController(lambdaContext) {
       // todo: remove after back fill of hlx config for existing sites is complete
       if (
         source === SITE_CANDIDATE_SOURCES.CDN
-        && isObject(hlxConfig) && Object.keys(hlxConfig).length > 0
-        && (!isObject(site.getHlxConfig()) || Object.keys(site.getHlxConfig()).length === 0)
+        && isNonEmptyObject(hlxConfig)
+        && !isNonEmptyObject(site.getHlxConfig())
       ) {
         site.updateHlxConfig(siteCandidate.hlxConfig);
         await dataAccess.updateSite(site);

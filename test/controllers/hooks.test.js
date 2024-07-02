@@ -283,18 +283,18 @@ describe('Hooks Controller', () => {
     it('while candidate is disregarded, hlx config is updated if not present', async () => {
       context.dataAccess.siteCandidateExists.resolves(false);
       context.dataAccess.upsertSiteCandidate.resolves();
+
+      const expectedConfig = {
+        cdnProdHost: undefined,
+        domain: 'some-domain.com',
+        hlxVersion: 4,
+        rso: {},
+      };
+
       context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
         baseURL: 'https://some-domain.com',
         isLive: true,
         deliveryType: 'aem_edge',
-        hlxConfig: {
-          hlxVersion: 4,
-          rso: {
-            ref: 'main',
-            site: 'some-site',
-            owner: 'some-owner',
-          },
-        },
       }));
 
       const expectedMessage = {
@@ -313,6 +313,9 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(context.dataAccess.updateSite.calledOnce).to.be.true;
+      expect(
+        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
+      ).to.deep.equal(expectedConfig);
       expect(context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.calledOnce).to.be.true;
       expect(
         context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.firstCall.args[0],
