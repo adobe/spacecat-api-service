@@ -86,6 +86,7 @@ describe('Index Tests', () => {
                   disabled: () => false,
                   getExcludedURLs: () => [],
                   getManualOverwrites: () => [],
+                  getFixedURLs: () => [],
                 },
               }),
             },
@@ -125,7 +126,7 @@ describe('Index Tests', () => {
     expect(resp.status).to.equal(204);
     expect(resp.headers.plain()).to.eql({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, origin, x-requested-with, content-type, accept',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
       'content-type': 'application/json; charset=utf-8',

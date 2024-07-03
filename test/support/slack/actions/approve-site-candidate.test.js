@@ -32,6 +32,14 @@ const { expect } = chai;
 
 describe('approveSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';
+  const hlxConfig = {
+    hlxVersion: 4,
+    rso: {
+      owner: 'some-owner',
+      site: 'some-site',
+      ref: 'main',
+    },
+  };
   let context;
   let slackClient;
   let ackMock;
@@ -78,6 +86,7 @@ describe('approveSiteCandidate', () => {
       baseURL,
       source: SITE_CANDIDATE_SOURCES.CDN,
       status: SITE_CANDIDATE_STATUS.PENDING,
+      hlxConfig,
     });
 
     ackMock = sinon.stub().resolves();
@@ -96,6 +105,7 @@ describe('approveSiteCandidate', () => {
       status: SITE_CANDIDATE_STATUS.APPROVED,
       updatedBy: 'approvers-username',
       siteId: site.getId(),
+      hlxConfig,
     });
 
     context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
@@ -110,7 +120,9 @@ describe('approveSiteCandidate', () => {
 
     expect(ackMock).to.have.been.calledOnce;
     expect(context.dataAccess.getSiteCandidateByBaseURL).to.have.been.calledWith(baseURL);
-    expect(context.dataAccess.addSite).to.have.been.calledWith({ baseURL, isLive: true });
+    expect(context.dataAccess.addSite).to.have.been.calledWith(
+      { baseURL, hlxConfig, isLive: true },
+    );
     expect(context.dataAccess.updateSite).to.have.been.callCount(0);
     expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
@@ -129,6 +141,7 @@ describe('approveSiteCandidate', () => {
       status: SITE_CANDIDATE_STATUS.APPROVED,
       updatedBy: 'approvers-username',
       siteId: site.getId(),
+      hlxConfig,
     });
     site.toggleLive();
     site.updateDeliveryType('aem_cs');
