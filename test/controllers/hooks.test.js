@@ -57,6 +57,7 @@ describe('Hooks Controller', () => {
       dataAccess: {
         getSiteCandidateByBaseURL: sinon.stub(),
         addSite: sinon.stub(),
+        updateSite: sinon.stub(),
         upsertSiteCandidate: sinon.stub(),
         getSiteByBaseURL: sinon.stub(),
         siteCandidateExists: sinon.stub(),
@@ -276,6 +277,49 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+    });
+
+    it('while candidate is disregarded, hlx config is updated if not present', async () => {
+      context.dataAccess.siteCandidateExists.resolves(false);
+      context.dataAccess.upsertSiteCandidate.resolves();
+
+      const expectedConfig = {
+        cdnProdHost: undefined,
+        domain: 'some-domain.com',
+        hlxVersion: 4,
+        rso: {},
+      };
+
+      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
+        baseURL: 'https://some-domain.com',
+        isLive: true,
+        deliveryType: 'aem_edge',
+      }));
+
+      const expectedMessage = {
+        channel: 'channel-id',
+        blocks: [
+          {
+            text: {
+              type: 'mrkdwn',
+              text: 'HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: https://undefined--undefined--undefined.aem.live',
+            },
+            type: 'section',
+          },
+        ],
+      };
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+      expect(resp).to.equal('CDN site candidate disregarded');
+      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
+      expect(
+        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
+      ).to.deep.equal(expectedConfig);
+      expect(context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.calledOnce).to.be.true;
+      expect(
+        context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.firstCall.args[0],
+      ).to.deep.equal(expectedMessage);
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
   });
