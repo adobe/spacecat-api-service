@@ -1,3 +1,10 @@
+## [1.51.4](https://github.com/adobe/spacecat-api-service/compare/v1.51.3...v1.51.4) (2024-07-03)
+
+
+### Bug Fixes
+
+* allow authorization header ([#384](https://github.com/adobe/spacecat-api-service/issues/384)) ([3859499](https://github.com/adobe/spacecat-api-service/commit/38594996e83ba8b7b979d657a922c6d251c84ccc))
+
 ## [1.51.3](https://github.com/adobe/spacecat-api-service/compare/v1.51.2...v1.51.3) (2024-07-03)
 
 
