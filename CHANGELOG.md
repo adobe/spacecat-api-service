@@ -1,3 +1,24 @@
+## [1.51.4](https://github.com/adobe/spacecat-api-service/compare/v1.51.3...v1.51.4) (2024-07-03)
+
+
+### Bug Fixes
+
+* allow authorization header ([#384](https://github.com/adobe/spacecat-api-service/issues/384)) ([3859499](https://github.com/adobe/spacecat-api-service/commit/38594996e83ba8b7b979d657a922c6d251c84ccc))
+
+## [1.51.3](https://github.com/adobe/spacecat-api-service/compare/v1.51.2...v1.51.3) (2024-07-03)
+
+
+### Bug Fixes
+
+* temporary back fill of hlx config ([#382](https://github.com/adobe/spacecat-api-service/issues/382)) ([56bb012](https://github.com/adobe/spacecat-api-service/commit/56bb012790d434f63dc2af35f1715403ec6585b7))
+
+## [1.51.2](https://github.com/adobe/spacecat-api-service/compare/v1.51.1...v1.51.2) (2024-07-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.17.1 ([#383](https://github.com/adobe/spacecat-api-service/issues/383)) ([00ca260](https://github.com/adobe/spacecat-api-service/commit/00ca260a5dc885a6c9387750feda88962626a461))
+
 ## [1.51.1](https://github.com/adobe/spacecat-api-service/compare/v1.51.0...v1.51.1) (2024-06-29)
 
 
