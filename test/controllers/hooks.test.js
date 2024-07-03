@@ -24,13 +24,16 @@ chai.use(sinonChai);
 const { expect } = chai;
 
 function getExpectedSlackMessage(baseURL, channel, source, hlxConfig) {
-  const cdnConfigPart = hlxConfig
-    ? `, _HLX Version_: *5*, _Dev URL_: https://${hlxConfig.rso.ref}--${hlxConfig.rso.site}--${hlxConfig.rso.owner}.aem.live`
-    : '';
+  let cdnConfigPart = '';
+  if (hlxConfig) {
+    const devUrl = `https://${hlxConfig.rso.ref}--${hlxConfig.rso.site}--${hlxConfig.rso.owner}.aem.live`;
+    cdnConfigPart = `, _HLX Version_: *5*, _Dev URL_: <!${devUrl}|${devUrl}>`;
+  }
+
   return Message()
     .channel(channel)
     .blocks(
-      Blocks.Section().text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*${cdnConfigPart})`),
+      Blocks.Section().text(`I discovered a new site on Edge Delivery Services: *<!${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*${cdnConfigPart})`),
       Blocks.Actions().elements(
         Elements.Button().text('As Customer').actionId('approveSiteCandidate').primary(),
         Elements.Button().text('As Friends/Family').actionId('approveFriendsFamily').primary(),
@@ -303,7 +306,7 @@ describe('Hooks Controller', () => {
           {
             text: {
               type: 'mrkdwn',
-              text: 'HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: https://undefined--undefined--undefined.aem.live',
+              text: 'HLX config updated for existing site: *<!https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: <!https://undefined--undefined--undefined.aem.live|https://undefined--undefined--undefined.aem.live>',
             },
             type: 'section',
           },

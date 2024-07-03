@@ -243,7 +243,7 @@ function buildSlackMessage(baseURL, source, hlxConfig, channel) {
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*${hlxConfigMessagePart})`),
+        .text(`I discovered a new site on Edge Delivery Services: *<!${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*${hlxConfigMessagePart})`),
       Blocks.Actions()
         .elements(
           Elements.Button()
@@ -280,7 +280,7 @@ function HooksController(lambdaContext) {
       .channel(channel)
       .blocks(
         Blocks.Section()
-          .text(`HLX config updated for existing site: *<${baseURL}|${baseURL}>*${hlxConfigMessagePart}`),
+          .text(`HLX config updated for existing site: *<!${baseURL}|${baseURL}>*${hlxConfigMessagePart}`),
       )
       .buildToObject();
     return slackClient.postMessage(message);
