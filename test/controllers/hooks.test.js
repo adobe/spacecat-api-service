@@ -304,12 +304,108 @@ describe('Hooks Controller', () => {
           {
             text: {
               type: 'mrkdwn',
-              text: 'HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: `https://undefined--undefined--undefined.aem.live`',
+              text: 'HLX config added for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: `https://undefined--undefined--undefined.aem.live`',
             },
             type: 'section',
           },
         ],
       };
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+      expect(resp).to.equal('CDN site candidate disregarded');
+      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
+      expect(
+        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
+      ).to.deep.equal(expectedConfig);
+      expect(context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.calledOnce).to.be.true;
+      expect(
+        context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.firstCall.args[0],
+      ).to.deep.equal(expectedMessage);
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+    });
+
+    it('while candidate is disregarded, hlx config is updated if different from site', async () => {
+      context.dataAccess.siteCandidateExists.resolves(false);
+      context.dataAccess.upsertSiteCandidate.resolves();
+      context.data = {
+        forwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
+      };
+
+      const hlxConfig = {
+        cdn: {
+          prod: {
+            host: 'some-domain.com',
+          },
+        },
+        domain: 'some-domain.com',
+        content: {
+          title: 'helix-website',
+          contentBusId: 'another-id',
+          source: {
+            type: 'google',
+            url: 'https://drive.google.com/drive/u/3/folders/abcd1234',
+            id: '5678',
+          },
+        },
+        hlxVersion: 5,
+      };
+
+      const expectedConfig = {
+        ...hlxConfig,
+        code: undefined,
+        rso: {
+          ref: 'main',
+          site: 'some-site',
+          owner: 'some-owner',
+          tld: 'hlx.live',
+        },
+      };
+
+      delete expectedConfig.cdn;
+      expectedConfig.cdnProdHost = 'some-domain.com';
+
+      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
+        baseURL: 'https://some-domain.com',
+        isLive: true,
+        deliveryType: 'aem_edge',
+        hlxConfig: {
+          cdnProdHost: 'some-cdn-host.com',
+          domain: 'some-domain.com',
+          content: {
+            title: 'helix-website',
+            contentBusId: 'fooid',
+            source: {
+              type: 'google',
+              url: 'https://drive.google.com/drive/u/3/folders/16251625162516',
+              id: '1234',
+            },
+          },
+          hlxVersion: 5,
+          rso: {
+            ref: 'main',
+            site: 'some-site',
+            owner: 'some-owner',
+          },
+        },
+      }));
+
+      const expectedMessage = {
+        channel: 'channel-id',
+        unfurl_links: false,
+        blocks: [
+          {
+            text: {
+              type: 'mrkdwn',
+              text: 'HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`',
+            },
+            type: 'section',
+          },
+        ],
+      };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(200, hlxConfig);
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
