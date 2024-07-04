@@ -25,7 +25,7 @@ const { expect } = chai;
 
 function getExpectedSlackMessage(baseURL, channel, source, hlxConfig) {
   const cdnConfigPart = hlxConfig
-    ? `, _HLX Version_: *5*, _Dev URL_: https://${hlxConfig.rso.ref}--${hlxConfig.rso.site}--${hlxConfig.rso.owner}.aem.live`
+    ? `, _HLX Version_: *5*, _Dev URL_: \`https://${hlxConfig.rso.ref}--${hlxConfig.rso.site}--${hlxConfig.rso.owner}.aem.live\``
     : '';
   return Message()
     .channel(channel)
@@ -304,7 +304,7 @@ describe('Hooks Controller', () => {
           {
             text: {
               type: 'mrkdwn',
-              text: 'HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: https://undefined--undefined--undefined.aem.live',
+              text: 'HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: `https://undefined--undefined--undefined.aem.live`',
             },
             type: 'section',
           },
