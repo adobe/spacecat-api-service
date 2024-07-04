@@ -299,6 +299,7 @@ describe('Hooks Controller', () => {
 
       const expectedMessage = {
         channel: 'channel-id',
+        unfurl_links: false,
         blocks: [
           {
             text: {
