@@ -1,3 +1,10 @@
+## [1.51.5](https://github.com/adobe/spacecat-api-service/compare/v1.51.4...v1.51.5) (2024-07-04)
+
+
+### Bug Fixes
+
+* prevent unfurl for hlx config ([#385](https://github.com/adobe/spacecat-api-service/issues/385)) ([fde8990](https://github.com/adobe/spacecat-api-service/commit/fde89903eaa370daed1bf04618cfeed94eaf21ff))
+
 ## [1.51.4](https://github.com/adobe/spacecat-api-service/compare/v1.51.3...v1.51.4) (2024-07-03)
 
 
