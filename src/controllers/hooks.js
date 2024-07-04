@@ -283,7 +283,8 @@ function HooksController(lambdaContext) {
           .text(`HLX config updated for existing site: *<${baseURL}|${baseURL}>*${hlxConfigMessagePart}`),
       )
       .buildToObject();
-    return slackClient.postMessage(message);
+
+    return slackClient.postMessage({ ...message, unfurl_links: false });
   }
 
   async function processSiteCandidate(domain, source, hlxConfig = {}) {
