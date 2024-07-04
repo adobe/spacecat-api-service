@@ -399,11 +399,23 @@ AuditConfigType:
       type: array
       items:
         type: string
+    manualOverwrites:
+      description: Set of urls to exclude. If empty, will remove all manualOverwrites.
+      type: array
+      items:
+        type: object
+        properties:
+          brokenTargetURL:
+            description: The broken backlink URL
+            type: string
+          targetURL:
+            description: The correct target  for the broken backlink
+            type: string
   example:
     disabled: true
     excludedURLs:
-      - 'https://www.adobe.com/some-page'
-      - 'https://www.adobe.com/another-page'
+      - 'https://example-site.com/some-page'
+      - 'https://example-site.com/another-page'
 UpdateAuditConfigType:
   type: object
   properties:
@@ -412,10 +424,22 @@ UpdateAuditConfigType:
       type: array
       items:
         type: string
+    manualOverwrites:
+      description: Set of urls to exclude. If empty, will remove previously excluded URLs.
+      type: array
+      items:
+        type: object
+        properties:
+          brokenTargetURL:
+            description: Whether audits are disabled for this site
+            type: string
+          targetURL:
+            description: Whether audits are disabled for this site
+            type: string
   example:
     excludedURLs:
-      - 'https://www.adobe.com/some-page'
-      - 'https://www.adobe.com/another-page'
+      - 'https://example-site.com/some-page'
+      - 'https://example-site.com/another-page'
 AuditConfig:
   type: object
   properties:
