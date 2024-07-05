@@ -285,8 +285,9 @@ describe('Hooks Controller', () => {
       context.dataAccess.upsertSiteCandidate.resolves();
 
       const expectedConfig = {
-        cdnProdHost: undefined,
-        domain: 'some-domain.com',
+        cdn: {},
+        code: {},
+        content: {},
         hlxVersion: 4,
         rso: {},
       };
@@ -332,12 +333,8 @@ describe('Hooks Controller', () => {
       };
 
       const hlxConfig = {
-        cdn: {
-          prod: {
-            host: 'some-domain.com',
-          },
-        },
-        domain: 'some-domain.com',
+        cdn: { prod: { host: 'some-domain.com' } },
+        code: {},
         content: {
           title: 'helix-website',
           contentBusId: 'another-id',
@@ -352,7 +349,6 @@ describe('Hooks Controller', () => {
 
       const expectedConfig = {
         ...hlxConfig,
-        code: undefined,
         rso: {
           ref: 'main',
           site: 'some-site',
@@ -361,16 +357,12 @@ describe('Hooks Controller', () => {
         },
       };
 
-      delete expectedConfig.cdn;
-      expectedConfig.cdnProdHost = 'some-domain.com';
-
       context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
         baseURL: 'https://some-domain.com',
         isLive: true,
         deliveryType: 'aem_edge',
         hlxConfig: {
-          cdnProdHost: 'some-cdn-host.com',
-          domain: 'some-domain.com',
+          cdn: { prod: { host: 'some-cdn-host.com' } },
           content: {
             title: 'helix-website',
             contentBusId: 'fooid',
