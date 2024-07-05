@@ -182,9 +182,6 @@ async function fetchHlxConfig(rso, hlxAdminToken, log) {
  */
 async function extractHlxConfig(domains, hlxAdminToken, log) {
   const hlxConfig = {
-    cdn: {},
-    code: {},
-    content: {},
     hlxVersion: 4,
     rso: {},
   };
