@@ -1,3 +1,10 @@
+## [1.51.8](https://github.com/adobe/spacecat-api-service/compare/v1.51.7...v1.51.8) (2024-07-05)
+
+
+### Bug Fixes
+
+* reduce hlx 4 config ([#390](https://github.com/adobe/spacecat-api-service/issues/390)) ([ec04998](https://github.com/adobe/spacecat-api-service/commit/ec04998b1e8fd6c8636ae2ca5a3fff7f66138d30))
+
 ## [1.51.7](https://github.com/adobe/spacecat-api-service/compare/v1.51.6...v1.51.7) (2024-07-05)
 
 
