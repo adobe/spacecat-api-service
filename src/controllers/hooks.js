@@ -174,19 +174,17 @@ async function fetchHlxConfig(rso, hlxAdminToken, log) {
 }
 
 /**
- * Extracts the hlx config from the x-forwarded-host header.
- * @param {string} forwardedHost - The x-forwarded-host header
+ * Extracts the hlx config from the given list of domains.
+ * @param {string[]} domains - The list of domains (as extracted from the x-forwarded-host header)
  * @param {string} hlxAdminToken - The hlx admin token
  * @param {object} log - The logger object
- * @return {Promise<{cdnProdHost: null, domain: *, hlxVersion: number, rso: {}}>}
+ * @return {Promise<{cdn: object, code: object, content: object, hlxVersion: number, rso: {}}>}
  */
-async function extractHlxConfig(forwardedHost, hlxAdminToken, log) {
-  const domains = forwardedHost.split(',').map((domain) => domain.trim());
-  const primaryDomain = domains[0];
-
+async function extractHlxConfig(domains, hlxAdminToken, log) {
   const hlxConfig = {
-    cdnProdHost: undefined,
-    domain: primaryDomain,
+    cdn: {},
+    code: {},
+    content: {},
     hlxVersion: 4,
     rso: {},
   };
@@ -200,7 +198,7 @@ async function extractHlxConfig(forwardedHost, hlxAdminToken, log) {
       const config = await fetchHlxConfig(rso, hlxAdminToken, log);
       if (isObject(config)) {
         const { cdn, code, content } = config;
-        hlxConfig.cdnProdHost = cdn?.prod?.host;
+        hlxConfig.cdn = cdn;
         hlxConfig.code = code;
         hlxConfig.content = content;
         hlxConfig.hlxVersion = 5;
@@ -346,17 +344,15 @@ function HooksController(lambdaContext) {
     const { log } = context;
     const { forwardedHost } = context.data;
     const { HLX_ADMIN_TOKEN: hlxAdminToken } = context.env;
+    const domains = forwardedHost.split(',').map((domain) => domain.trim());
+    const primaryDomain = domains[0];
 
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
     // extract the url from the x-forwarded-host header and determine hlx config
-    const hlxConfig = await extractHlxConfig(
-      forwardedHost,
-      hlxAdminToken,
-      log,
-    );
+    const hlxConfig = await extractHlxConfig(domains, hlxAdminToken, log);
 
-    const domain = hlxConfig.cdnProdHost || hlxConfig.domain;
+    const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
     const source = SITE_CANDIDATE_SOURCES.CDN;
     const baseURL = await processSiteCandidate(domain, source, hlxConfig);
     await sendDiscoveryMessage(baseURL, source, hlxConfig);
