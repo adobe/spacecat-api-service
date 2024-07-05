@@ -285,9 +285,6 @@ describe('Hooks Controller', () => {
       context.dataAccess.upsertSiteCandidate.resolves();
 
       const expectedConfig = {
-        cdn: {},
-        code: {},
-        content: {},
         hlxVersion: 4,
         rso: {},
       };
