@@ -267,24 +267,7 @@ function buildSlackMessage(baseURL, source, hlxConfig, channel) {
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
 
-  // todo: remove after back fill of hlx config for existing sites is complete
-  async function sendHlxConfigUpdatedMessage(baseURL, hlxConfig, hlxConfigChanged) {
-    const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
-    const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
-    const hlxConfigMessagePart = getHlxConfigMessagePart(SITE_CANDIDATE_SOURCES.CDN, hlxConfig);
-    const action = hlxConfigChanged ? 'updated' : 'added';
-    const message = Message()
-      .channel(channel)
-      .blocks(
-        Blocks.Section()
-          .text(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${hlxConfigMessagePart}`),
-      )
-      .buildToObject();
-
-    return slackClient.postMessage({ ...message, unfurl_links: false });
-  }
-
-  async function processSiteCandidate(domain, source, hlxConfig = {}) {
+  async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(baseURL);
     await verifyHelixSite(baseURL, hlxConfig);
@@ -311,11 +294,9 @@ function HooksController(lambdaContext) {
         if (hlxConfigChanged) {
           site.updateHlxConfig(siteCandidate.hlxConfig);
           await dataAccess.updateSite(site);
-          await sendHlxConfigUpdatedMessage(
-            baseURL,
-            hlxConfig,
-            siteHasHlxConfig && hlxConfigChanged,
-          );
+
+          const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
+          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(SITE_CANDIDATE_SOURCES.CDN, hlxConfig)}`);
         }
       }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
@@ -351,7 +332,7 @@ function HooksController(lambdaContext) {
 
     const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
     const source = SITE_CANDIDATE_SOURCES.CDN;
-    const baseURL = await processSiteCandidate(domain, source, hlxConfig);
+    const baseURL = await processSiteCandidate(domain, source, log, hlxConfig);
     await sendDiscoveryMessage(baseURL, source, hlxConfig);
 
     return ok('CDN site candidate is successfully processed');
@@ -364,7 +345,7 @@ function HooksController(lambdaContext) {
     log.info(`Processing RUM site candidate. Input: ${JSON.stringify(context.data)}`);
 
     const source = SITE_CANDIDATE_SOURCES.RUM;
-    const baseURL = await processSiteCandidate(domain, source);
+    const baseURL = await processSiteCandidate(domain, source, log);
     await sendDiscoveryMessage(baseURL, source);
 
     return ok('RUM site candidate is successfully processed');

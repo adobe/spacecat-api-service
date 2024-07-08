@@ -295,30 +295,13 @@ describe('Hooks Controller', () => {
         deliveryType: 'aem_edge',
       }));
 
-      const expectedMessage = {
-        channel: 'channel-id',
-        unfurl_links: false,
-        blocks: [
-          {
-            text: {
-              type: 'mrkdwn',
-              text: 'HLX config added for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: `https://undefined--undefined--undefined.aem.live`',
-            },
-            type: 'section',
-          },
-        ],
-      };
-
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(context.dataAccess.updateSite.calledOnce).to.be.true;
       expect(
         context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
       ).to.deep.equal(expectedConfig);
-      expect(context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.calledOnce).to.be.true;
-      expect(
-        context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.firstCall.args[0],
-      ).to.deep.equal(expectedMessage);
+      expect(context.log.info).to.have.been.calledWith('HLX config added for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: `https://undefined--undefined--undefined.aem.live`');
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
 
@@ -378,20 +361,6 @@ describe('Hooks Controller', () => {
         },
       }));
 
-      const expectedMessage = {
-        channel: 'channel-id',
-        unfurl_links: false,
-        blocks: [
-          {
-            text: {
-              type: 'mrkdwn',
-              text: 'HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`',
-            },
-            type: 'section',
-          },
-        ],
-      };
-
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(200, hlxConfig);
@@ -402,10 +371,7 @@ describe('Hooks Controller', () => {
       expect(
         context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
       ).to.deep.equal(expectedConfig);
-      expect(context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.calledOnce).to.be.true;
-      expect(
-        context.slackClients.WORKSPACE_INTERNAL_STANDARD.postMessage.firstCall.args[0],
-      ).to.deep.equal(expectedMessage);
+      expect(context.log.info).to.have.been.calledWith('HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`');
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
   });
