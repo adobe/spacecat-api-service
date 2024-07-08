@@ -15,6 +15,7 @@ import { Blocks, Elements, Message } from 'slack-block-builder';
 import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
+  deepEqual,
   hasText,
   isNonEmptyObject,
   isObject,
@@ -173,19 +174,14 @@ async function fetchHlxConfig(rso, hlxAdminToken, log) {
 }
 
 /**
- * Extracts the hlx config from the x-forwarded-host header.
- * @param {string} forwardedHost - The x-forwarded-host header
+ * Extracts the hlx config from the given list of domains.
+ * @param {string[]} domains - The list of domains (as extracted from the x-forwarded-host header)
  * @param {string} hlxAdminToken - The hlx admin token
  * @param {object} log - The logger object
- * @return {Promise<{cdnProdHost: null, domain: *, hlxVersion: number, rso: {}}>}
+ * @return {Promise<{cdn: object, code: object, content: object, hlxVersion: number, rso: {}}>}
  */
-async function extractHlxConfig(forwardedHost, hlxAdminToken, log) {
-  const domains = forwardedHost.split(',').map((domain) => domain.trim());
-  const primaryDomain = domains[0];
-
+async function extractHlxConfig(domains, hlxAdminToken, log) {
   const hlxConfig = {
-    cdnProdHost: undefined,
-    domain: primaryDomain,
     hlxVersion: 4,
     rso: {},
   };
@@ -199,7 +195,7 @@ async function extractHlxConfig(forwardedHost, hlxAdminToken, log) {
       const config = await fetchHlxConfig(rso, hlxAdminToken, log);
       if (isObject(config)) {
         const { cdn, code, content } = config;
-        hlxConfig.cdnProdHost = cdn?.prod?.host;
+        hlxConfig.cdn = cdn;
         hlxConfig.code = code;
         hlxConfig.content = content;
         hlxConfig.hlxVersion = 5;
@@ -272,18 +268,20 @@ function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
 
   // todo: remove after back fill of hlx config for existing sites is complete
-  async function sendHlxConfigUpdatedMessage(baseURL, hlxConfig) {
+  async function sendHlxConfigUpdatedMessage(baseURL, hlxConfig, hlxConfigChanged) {
     const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
     const hlxConfigMessagePart = getHlxConfigMessagePart(SITE_CANDIDATE_SOURCES.CDN, hlxConfig);
+    const action = hlxConfigChanged ? 'updated' : 'added';
     const message = Message()
       .channel(channel)
       .blocks(
         Blocks.Section()
-          .text(`HLX config updated for existing site: *<${baseURL}|${baseURL}>*${hlxConfigMessagePart}`),
+          .text(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${hlxConfigMessagePart}`),
       )
       .buildToObject();
-    return slackClient.postMessage(message);
+
+    return slackClient.postMessage({ ...message, unfurl_links: false });
   }
 
   async function processSiteCandidate(domain, source, hlxConfig = {}) {
@@ -302,16 +300,23 @@ function HooksController(lambdaContext) {
 
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
     if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
-      // for existing site with empty hlxConfig, update it now
+      // for existing site with empty hlxConfig or non-equal hlxConfig, update it now
       // todo: remove after back fill of hlx config for existing sites is complete
-      if (
-        source === SITE_CANDIDATE_SOURCES.CDN
-        && isNonEmptyObject(hlxConfig)
-        && !isNonEmptyObject(site.getHlxConfig())
-      ) {
-        site.updateHlxConfig(siteCandidate.hlxConfig);
-        await dataAccess.updateSite(site);
-        await sendHlxConfigUpdatedMessage(baseURL, hlxConfig);
+      if (source === SITE_CANDIDATE_SOURCES.CDN && isNonEmptyObject(hlxConfig)) {
+        const siteHlxConfig = site.getHlxConfig();
+        const siteHasHlxConfig = isNonEmptyObject(siteHlxConfig);
+        const candidateHlxConfig = siteCandidate.hlxConfig;
+        const hlxConfigChanged = !deepEqual(siteHlxConfig, candidateHlxConfig);
+
+        if (hlxConfigChanged) {
+          site.updateHlxConfig(siteCandidate.hlxConfig);
+          await dataAccess.updateSite(site);
+          await sendHlxConfigUpdatedMessage(
+            baseURL,
+            hlxConfig,
+            siteHasHlxConfig && hlxConfigChanged,
+          );
+        }
       }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
@@ -336,17 +341,15 @@ function HooksController(lambdaContext) {
     const { log } = context;
     const { forwardedHost } = context.data;
     const { HLX_ADMIN_TOKEN: hlxAdminToken } = context.env;
+    const domains = forwardedHost.split(',').map((domain) => domain.trim());
+    const primaryDomain = domains[0];
 
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
     // extract the url from the x-forwarded-host header and determine hlx config
-    const hlxConfig = await extractHlxConfig(
-      forwardedHost,
-      hlxAdminToken,
-      log,
-    );
+    const hlxConfig = await extractHlxConfig(domains, hlxAdminToken, log);
 
-    const domain = hlxConfig.cdnProdHost || hlxConfig.domain;
+    const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
     const source = SITE_CANDIDATE_SOURCES.CDN;
     const baseURL = await processSiteCandidate(domain, source, hlxConfig);
     await sendDiscoveryMessage(baseURL, source, hlxConfig);

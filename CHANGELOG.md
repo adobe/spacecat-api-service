@@ -1,3 +1,38 @@
+## [1.51.9](https://github.com/adobe/spacecat-api-service/compare/v1.51.8...v1.51.9) (2024-07-06)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#391](https://github.com/adobe/spacecat-api-service/issues/391)) ([802bf32](https://github.com/adobe/spacecat-api-service/commit/802bf320d398daecf49d8ae4b5f7f39967acfa9f))
+
+## [1.51.8](https://github.com/adobe/spacecat-api-service/compare/v1.51.7...v1.51.8) (2024-07-05)
+
+
+### Bug Fixes
+
+* reduce hlx 4 config ([#390](https://github.com/adobe/spacecat-api-service/issues/390)) ([ec04998](https://github.com/adobe/spacecat-api-service/commit/ec04998b1e8fd6c8636ae2ca5a3fff7f66138d30))
+
+## [1.51.7](https://github.com/adobe/spacecat-api-service/compare/v1.51.6...v1.51.7) (2024-07-05)
+
+
+### Bug Fixes
+
+* hlx config updates too much ([#389](https://github.com/adobe/spacecat-api-service/issues/389)) ([2024670](https://github.com/adobe/spacecat-api-service/commit/2024670dd1a2f8453330fbcf1991567b2baad3d8))
+
+## [1.51.6](https://github.com/adobe/spacecat-api-service/compare/v1.51.5...v1.51.6) (2024-07-04)
+
+
+### Bug Fixes
+
+* update hlx config when changed ([#388](https://github.com/adobe/spacecat-api-service/issues/388)) ([a2f08df](https://github.com/adobe/spacecat-api-service/commit/a2f08dfecddcda46c1846a3e5b36ef2f6ad038ed))
+
+## [1.51.5](https://github.com/adobe/spacecat-api-service/compare/v1.51.4...v1.51.5) (2024-07-04)
+
+
+### Bug Fixes
+
+* prevent unfurl for hlx config ([#385](https://github.com/adobe/spacecat-api-service/issues/385)) ([fde8990](https://github.com/adobe/spacecat-api-service/commit/fde89903eaa370daed1bf04618cfeed94eaf21ff))
+
 ## [1.51.4](https://github.com/adobe/spacecat-api-service/compare/v1.51.3...v1.51.4) (2024-07-03)
 
 
