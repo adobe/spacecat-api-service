@@ -1,3 +1,10 @@
+## [1.51.10](https://github.com/adobe/spacecat-api-service/compare/v1.51.9...v1.51.10) (2024-07-08)
+
+
+### Bug Fixes
+
+* suppress unnecessary slack noise coming from hlx config updates ([#392](https://github.com/adobe/spacecat-api-service/issues/392)) ([d003bef](https://github.com/adobe/spacecat-api-service/commit/d003bef3a6609fb6251d46c0d779539ff5ad0b8a))
+
 ## [1.51.9](https://github.com/adobe/spacecat-api-service/compare/v1.51.8...v1.51.9) (2024-07-06)
 
 
