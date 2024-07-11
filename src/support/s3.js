@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
@@ -29,6 +29,7 @@ export function s3ClientWrapper(fn) {
         s3Client: new S3Client({ region }),
         getSignedUrl,
         GetObjectCommand,
+        PutObjectCommand,
       };
     }
     return fn(request, context);

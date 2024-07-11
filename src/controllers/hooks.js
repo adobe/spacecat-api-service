@@ -11,14 +11,24 @@
  */
 
 import wrap from '@adobe/helix-shared-wrap';
-import { Message, Blocks, Elements } from 'slack-block-builder';
+import { Blocks, Elements, Message } from 'slack-block-builder';
 import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
-import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
+import {
+  composeBaseURL,
+  deepEqual,
+  hasText,
+  isNonEmptyObject,
+  isObject,
+} from '@adobe/spacecat-shared-utils';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
-import { SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import {
+  SITE_CANDIDATE_SOURCES,
+  SITE_CANDIDATE_STATUS,
+} from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { isHelixSite } from '../support/utils.js';
+import { fetch, isHelixSite } from '../support/utils.js';
+import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
 const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
@@ -83,8 +93,8 @@ function containsPathOrSearchParams(url) {
   return url.pathname !== '/' || url.search !== '';
 }
 
-async function verifyHelixSite(url) {
-  const { isHelix, reason } = await isHelixSite(url);
+async function verifyHelixSite(url, hlxConfig = {}) {
+  const { isHelix, reason } = await isHelixSite(url, hlxConfig);
 
   if (!isHelix) {
     throw new InvalidSiteCandidate(reason, url);
@@ -93,8 +103,109 @@ async function verifyHelixSite(url) {
   return true;
 }
 
-async function extractDomainFromXForwardedHostHeader(forwardedHost) {
-  return forwardedHost.split(',')[0]?.trim(); // get the domain from x-fw-host header
+function parseHlxRSO(domain) {
+  // This regex matches and captures domains of the form <ref>--<site>--<owner>.(hlx.live|aem.live)
+  // ^([\w-]+)--([\w-]+)--([\w-]+)\.(hlx\.live|aem\.live)$
+  // ^                  - asserts the position at the start of the string
+  // ([\w-]+)           - captures one or more word characters
+  //                      (alphanumeric and underscore) or hyphens as <ref>
+  // --                 - matches the literal string "--"
+  // ([\w-]+)           - captures one or more word characters or hyphens as <site>
+  // --                 - matches the literal string "--"
+  // ([\w-]+)           - captures one or more word characters or hyphens as <owner>
+  // \.                 - matches the literal dot character
+  // (hlx\.live|aem\.live) - captures either "hlx.live" or "aem.live" as the top-level domain
+  // $                  - asserts the position at the end of the string
+  const regex = /^([\w-]+)--([\w-]+)--([\w-]+)\.(hlx\.live|aem\.live)$/;
+  const match = domain.match(regex);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    ref: match[1],
+    site: match[2],
+    owner: match[3],
+    tld: match[4],
+  };
+}
+
+/**
+ * Fetches the edge config for the given site. If the config is not found, returns null.
+ * @param {object} rso - The rso object
+ * @param {string} rso.owner - The owner of the site
+ * @param {string} rso.site - The site name
+ * @param {string} [rso.ref] - The ref of the site, if any
+ * @param {string} [rso.tld] - The tld of the site, if any
+ * @param {string} hlxAdminToken - The hlx admin token
+ * @param {object} log - The logger object
+ * @param hlxAdminToken
+ * @param log
+ * @return {Promise<unknown>}
+ */
+async function fetchHlxConfig(rso, hlxAdminToken, log) {
+  const { owner, site } = rso;
+  const url = `https://admin.hlx.page/config/${owner}/aggregated/${site}.json`;
+
+  log.info(`Fetching hlx config for ${owner}/${site} with url: ${url}`);
+
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `token ${hlxAdminToken}` },
+    });
+
+    if (response.status === 200) {
+      log.info(`HLX config found for ${owner}/${site}`);
+      return response.json();
+    }
+
+    if (response.status === 404) {
+      log.info(`No hlx config found for ${owner}/${site}`);
+      return null;
+    }
+
+    log.error(`Error fetching hlx config for ${owner}/${site}. Status: ${response.status}. Error: ${response.headers.get('x-error')}`);
+  } catch (e) {
+    log.error(`Error fetching hlx config for ${owner}/${site}`, e);
+  }
+
+  return null;
+}
+
+/**
+ * Extracts the hlx config from the given list of domains.
+ * @param {string[]} domains - The list of domains (as extracted from the x-forwarded-host header)
+ * @param {string} hlxAdminToken - The hlx admin token
+ * @param {object} log - The logger object
+ * @return {Promise<{cdn: object, code: object, content: object, hlxVersion: number, rso: {}}>}
+ */
+async function extractHlxConfig(domains, hlxAdminToken, log) {
+  const hlxConfig = {
+    hlxVersion: 4,
+    rso: {},
+  };
+
+  for (const domain of domains.slice(1)) {
+    const rso = parseHlxRSO(domain);
+    if (isObject(rso)) {
+      hlxConfig.rso = rso;
+      log.info(`Parsed RSO: ${JSON.stringify(rso)} for domain: ${domain}`);
+      // eslint-disable-next-line no-await-in-loop
+      const config = await fetchHlxConfig(rso, hlxAdminToken, log);
+      if (isObject(config)) {
+        const { cdn, code, content } = config;
+        hlxConfig.cdn = cdn;
+        hlxConfig.code = code;
+        hlxConfig.content = content;
+        hlxConfig.hlxVersion = 5;
+        log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`);
+      }
+      break;
+    }
+  }
+
+  return hlxConfig;
 }
 
 function verifyURLCandidate(baseURL) {
@@ -122,12 +233,13 @@ function verifyURLCandidate(baseURL) {
   }
 }
 
-function buildSlackMessage(baseURL, source, channel) {
+function buildSlackMessage(baseURL, source, hlxConfig, channel) {
+  const hlxConfigMessagePart = getHlxConfigMessagePart(source, hlxConfig);
   return Message()
     .channel(channel)
     .blocks(
       Blocks.Section()
-        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*)`),
+        .text(`I discovered a new site on Edge Delivery Services: *<${baseURL}|${baseURL}>*. Would you like me to include it in the Star Catalogue? (_source:_ *${source}*${hlxConfigMessagePart})`),
       Blocks.Actions()
         .elements(
           Elements.Button()
@@ -155,21 +267,38 @@ function buildSlackMessage(baseURL, source, channel) {
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
 
-  async function processSiteCandidate(domain, source) {
+  async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(baseURL);
-    await verifyHelixSite(baseURL);
+    await verifyHelixSite(baseURL, hlxConfig);
 
     const siteCandidate = {
       baseURL,
       source,
       status: SITE_CANDIDATE_STATUS.PENDING,
+      hlxConfig,
     };
 
     const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
 
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
     if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
+      // for existing site with empty hlxConfig or non-equal hlxConfig, update it now
+      // todo: remove after back fill of hlx config for existing sites is complete
+      if (source === SITE_CANDIDATE_SOURCES.CDN && isNonEmptyObject(hlxConfig)) {
+        const siteHlxConfig = site.getHlxConfig();
+        const siteHasHlxConfig = isNonEmptyObject(siteHlxConfig);
+        const candidateHlxConfig = siteCandidate.hlxConfig;
+        const hlxConfigChanged = !deepEqual(siteHlxConfig, candidateHlxConfig);
+
+        if (hlxConfigChanged) {
+          site.updateHlxConfig(siteCandidate.hlxConfig);
+          await dataAccess.updateSite(site);
+
+          const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
+          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(SITE_CANDIDATE_SOURCES.CDN, hlxConfig)}`);
+        }
+      }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
 
@@ -183,24 +312,28 @@ function HooksController(lambdaContext) {
     return baseURL;
   }
 
-  async function sendDiscoveryMessage(baseURL, source) {
+  async function sendDiscoveryMessage(baseURL, source, hlxConfig = {}) {
     const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
-    return slackClient.postMessage(buildSlackMessage(baseURL, source, channel));
+    return slackClient.postMessage(buildSlackMessage(baseURL, source, hlxConfig, channel));
   }
 
   async function processCDNHook(context) {
     const { log } = context;
     const { forwardedHost } = context.data;
+    const { HLX_ADMIN_TOKEN: hlxAdminToken } = context.env;
+    const domains = forwardedHost.split(',').map((domain) => domain.trim());
+    const primaryDomain = domains[0];
 
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
-    // extract the url from the x-forwarded-host header
-    const domain = await extractDomainFromXForwardedHostHeader(forwardedHost);
+    // extract the url from the x-forwarded-host header and determine hlx config
+    const hlxConfig = await extractHlxConfig(domains, hlxAdminToken, log);
 
+    const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
     const source = SITE_CANDIDATE_SOURCES.CDN;
-    const baseURL = await processSiteCandidate(domain, source);
-    await sendDiscoveryMessage(baseURL, source);
+    const baseURL = await processSiteCandidate(domain, source, log, hlxConfig);
+    await sendDiscoveryMessage(baseURL, source, hlxConfig);
 
     return ok('CDN site candidate is successfully processed');
   }
@@ -212,7 +345,7 @@ function HooksController(lambdaContext) {
     log.info(`Processing RUM site candidate. Input: ${JSON.stringify(context.data)}`);
 
     const source = SITE_CANDIDATE_SOURCES.RUM;
-    const baseURL = await processSiteCandidate(domain, source);
+    const baseURL = await processSiteCandidate(domain, source, log);
     await sendDiscoveryMessage(baseURL, source);
 
     return ok('RUM site candidate is successfully processed');

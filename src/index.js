@@ -28,7 +28,9 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
-import auth from './support/auth.js';
+import auth from './support/auth/auth-wrapper.js';
+import LegacyApiKeyHandler from './support/auth/handlers/legacy-api-key.js';
+import AdobeImsHandler from './support/auth/handlers/ims.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
@@ -84,7 +86,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, origin, x-requested-with, content-type, accept',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -135,7 +137,7 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
   .with(dataAccess)
-  .with(auth)
+  .with(auth, { authHandlers: [LegacyApiKeyHandler, AdobeImsHandler] })
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
