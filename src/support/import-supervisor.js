@@ -92,6 +92,7 @@ function ImportSupervisor(services, config) {
       importQueueId,
       apiKey,
       options,
+      urlCount: urls.length,
       status: ImportJobStatus.RUNNING,
     };
     return dataAccess.createNewImportJob(newJob);
