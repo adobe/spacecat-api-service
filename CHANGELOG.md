@@ -1,3 +1,10 @@
+# [1.52.0](https://github.com/adobe/spacecat-api-service/compare/v1.51.11...v1.52.0) (2024-07-11)
+
+
+### Features
+
+* add urlCount to the data access layer ([#395](https://github.com/adobe/spacecat-api-service/issues/395)) ([729cf11](https://github.com/adobe/spacecat-api-service/commit/729cf11edf7a0cb37a4c16511ee3892f8db7ec4d))
+
 ## [1.51.11](https://github.com/adobe/spacecat-api-service/compare/v1.51.10...v1.51.11) (2024-07-08)
 
 
