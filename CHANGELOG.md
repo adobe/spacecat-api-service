@@ -1,3 +1,10 @@
+# [1.53.0](https://github.com/adobe/spacecat-api-service/compare/v1.52.0...v1.53.0) (2024-07-12)
+
+
+### Features
+
+* Update urlCount in the ImportJobDto ([#396](https://github.com/adobe/spacecat-api-service/issues/396)) ([da93ec3](https://github.com/adobe/spacecat-api-service/commit/da93ec35f673c332f75cfa681157b6f708df0bb4))
+
 # [1.52.0](https://github.com/adobe/spacecat-api-service/compare/v1.51.11...v1.52.0) (2024-07-11)
 
 
