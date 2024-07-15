@@ -414,7 +414,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(200);
       expect(await response.json()).to.deep.equal([{
         id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
-        status: 'RUNNING',
+        status: 'COMPLETE',
         options: {},
         baseURL: 'https://www.example.com',
         importQueueId: 'spacecat-import-queue-1',
