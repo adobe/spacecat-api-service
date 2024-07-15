@@ -123,7 +123,7 @@ import-jobs:
     description: |
       Note: Not implemented yet.
       
-      This endpoint can be used to query tall import jobs started between the startDate and endDate.
+      This endpoint can be used to query all import jobs started between the startDate and endDate.
     operationId: getImportJobsByDateRange
     security:
       - api_key: [ ]
