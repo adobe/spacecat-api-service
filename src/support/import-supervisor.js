@@ -57,8 +57,16 @@ function ImportSupervisor(services, config) {
    * Get an available import queue name that is not currently in use. Throws an error if no queue
    * is currently available.
    */
-  async function getAvailableImportQueue() {
+  async function getAvailableImportQueue(importApiKey) {
     const runningImportJobs = await dataAccess.getImportJobsByStatus(ImportJobStatus.RUNNING);
+
+    // Check that this import API key has capacity to start an import job
+    for (const job of runningImportJobs) {
+      if (job.getApiKey() === importApiKey) {
+        throw new ErrorWithStatusCode(`Too Many Requests: API key ${importApiKey} cannot be used to start any more import jobs`, 429);
+      }
+    }
+
     const activeQueues = runningImportJobs.map((job) => job.getImportQueueId());
 
     // Find an import queue that is not in use
@@ -184,7 +192,7 @@ function ImportSupervisor(services, config) {
     log.info(`Import requested for ${urls.length} URLs, using import API key: ${importApiKey}`);
 
     // Determine if there is a free import queue
-    const importQueueId = await getAvailableImportQueue();
+    const importQueueId = await getAvailableImportQueue(importApiKey);
 
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(urls, importQueueId, importApiKey, options);
