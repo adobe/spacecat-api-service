@@ -66,6 +66,7 @@ describe('getRouteHandlers', () => {
     createImportJob: sinon.stub(),
     getImportJobStatus: sinon.stub(),
     getImportJobResult: sinon.stub(),
+    getImportJobsByDateRange: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -97,6 +98,7 @@ describe('getRouteHandlers', () => {
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/import',
+      'GET /tools/import/jobs',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);

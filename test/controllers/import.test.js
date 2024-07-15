@@ -44,6 +44,7 @@ describe('ImportController tests', () => {
     baseURL: 'https://www.example.com',
     apiKey: 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
     importQueueId: 'spacecat-import-queue-1',
+    startTime: '2022-10-06T14:48:00.000Z',
   };
 
   beforeEach(() => {
@@ -71,6 +72,7 @@ describe('ImportController tests', () => {
       createNewImportJob: (data) => createImportJob(data),
       createNewImportUrl: (data) => createImportUrl(data),
       getImportJobByID: sandbox.stub(),
+      getImportJobsByDateRange: sandbox.stub().resolves(),
     };
 
     mockDataAccess.getImportJobByID.callsFake(async (jobId) => {
@@ -388,6 +390,36 @@ describe('ImportController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal('Presigner error');
+    });
+  });
+
+  describe('getImportJobsByDateRange', () => {
+    it('should throw an error when no jobs are found', async () => {
+      requestContext.data.startDate = '2022-10-05T14:48:00.000Z';
+      requestContext.data.endDate = '2022-10-07T14:48:00.000Z';
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(404);
+      expect(response.headers.get('x-error')).to.equal('Not found');
+    });
+
+    it('should return an array of import jobs', async () => {
+      const job = createImportJob(exampleJob);
+      context.dataAccess.getImportJobsByDateRange = sandbox.stub().resolves([job]);
+      requestContext.data.startDate = '2022-10-05T14:48:00.000Z';
+      requestContext.data.endDate = '2022-10-07T14:48:00.000Z';
+
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.deep.equal([{
+        id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
+        status: 'RUNNING',
+        options: {},
+        baseURL: 'https://www.example.com',
+        importQueueId: 'spacecat-import-queue-1',
+        startTime: '2022-10-06T14:48:00.000Z',
+      }]);
     });
   });
 });

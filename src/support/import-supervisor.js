@@ -99,6 +99,21 @@ function ImportSupervisor(services, config) {
   }
 
   /**
+   * Get all import jobs between the specified start and end dates.
+   * @param {string} startDate - The start date of the range.
+   * @param {string} endDate - The end date of the range.
+   * @param {string} importApiKey - The API
+   * @returns {Promise<Array<ImportJobDto>>}
+   */
+  async function getImportJobsByDateRange(startDate, endDate) {
+    const jobs = await dataAccess.getImportJobsByDateRange(startDate, endDate);
+    if (!jobs) {
+      throw new ErrorWithStatusCode('Not found', 404);
+    }
+    return jobs;
+  }
+
+  /**
    * Persist the URLs to import in the data layer, each as an import URL record.
    */
   async function persistUrls(jobId, urls) {
@@ -251,6 +266,7 @@ function ImportSupervisor(services, config) {
     startNewJob,
     getImportJob,
     getJobArchiveSignedUrl,
+    getImportJobsByDateRange,
   };
 }
 

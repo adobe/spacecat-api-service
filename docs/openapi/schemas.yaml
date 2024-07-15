@@ -999,6 +999,23 @@ ImportJobRequest:
     options:
       enableJavaScript: true
       scrollToBottom: true
+ImportJobsByDateRangeRequest:
+  type: object
+  required:
+    - startDate
+    - endDate
+  properties:
+    startDate:
+      description: The date and time of the first timestamp in ISO 8601 format
+      $ref: '#/DateTime'
+    endDate:
+      description: The date and time of the second timestamp in ISO 8601 format
+      $ref: '#/DateTime'
+  example:
+    startDate:
+      - '2022-10-05T14:48:00.000Z'
+    endDate:
+      - '2022-10-07T14:48:00.000Z'
 ImportJobStatus:
   type: object
   properties:

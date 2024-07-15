@@ -14,7 +14,7 @@ import {
   createResponse,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -83,10 +83,41 @@ function ImportController(context) {
     }
   }
 
+  function validateIsoDates(startDate, endDate) {
+    if (!startDate || !endDate) {
+      throw new ErrorWithStatusCode('Invalid request: startDate and endDate are required', STATUS_BAD_REQUEST);
+    }
+
+    if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
+      throw new ErrorWithStatusCode('Invalid request: startDate and endDate must be in ISO format', STATUS_BAD_REQUEST);
+    }
+  }
+
   function createErrorResponse(error) {
     return createResponse({}, error.status || 500, {
       [HEADER_ERROR]: error.message,
     });
+  }
+
+  /**
+   * Get all import jobs between startDate and endDate
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.startDate - The start date of the range.
+   * @param {string} requestContext.params.endDate - The end date of the range.
+   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key to use for the job.
+   * @returns {Promise<Response>} 200 OK with a JSON representation of the import jobs.
+   */
+  async function getImportJobsByDateRange(requestContext) {
+    const { data: { startDate, endDate } } = requestContext;
+
+    try {
+      validateIsoDates(startDate, endDate);
+      const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
+      return ok(jobs.map(ImportJobDto.toJSON));
+    } catch (error) {
+      log.error(`Failed to fetch import jobs by date range: ${error.message}`);
+      return createErrorResponse(error);
+    }
   }
 
   /**
@@ -170,6 +201,7 @@ function ImportController(context) {
     createImportJob,
     getImportJobStatus,
     getImportJobResult,
+    getImportJobsByDateRange,
   };
 }
 

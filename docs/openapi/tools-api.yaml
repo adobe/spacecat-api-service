@@ -115,3 +115,36 @@ import-job-result:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
+import-jobs:
+  get:
+    tags:
+      - import
+    summary: Query all import jobs started between two timestamps
+    description: |
+      Note: Not implemented yet.
+      
+      This endpoint can be used to query tall import jobs started between the startDate and endDate.
+    operationId: getImportJobsByDateRange
+    security:
+      - api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/ImportJobsByDateRangeRequest'
+    responses:
+      '200':
+        description: Successful operation with an array of import status object returned.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ImportJobStatus'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
