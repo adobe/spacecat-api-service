@@ -20,6 +20,7 @@ import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
 import setLiveStatus from './commands/set-live-status.js';
 import help from './commands/help.js';
+import bulkUpdateAuditConfigs from './commands/bulk-update-audits.js';
 
 /**
  * Returns all commands.
@@ -37,5 +38,6 @@ export default (context) => [
   runAudit(context),
   runImport(context),
   setLiveStatus(context),
+  bulkUpdateAuditConfigs(context),
   help(context),
 ];
