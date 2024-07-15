@@ -1,3 +1,45 @@
+## [1.53.2](https://github.com/adobe/spacecat-api-service/compare/v1.53.1...v1.53.2) (2024-07-13)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#397](https://github.com/adobe/spacecat-api-service/issues/397)) ([982e3f3](https://github.com/adobe/spacecat-api-service/commit/982e3f3aa2824453d3ec1358784e68f71f6bfae6))
+
+## [1.53.1](https://github.com/adobe/spacecat-api-service/compare/v1.53.0...v1.53.1) (2024-07-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.3.0 ([#394](https://github.com/adobe/spacecat-api-service/issues/394)) ([b2194ff](https://github.com/adobe/spacecat-api-service/commit/b2194ff677244f7c342cf3bab5ed7ea131e9debe))
+
+# [1.53.0](https://github.com/adobe/spacecat-api-service/compare/v1.52.0...v1.53.0) (2024-07-12)
+
+
+### Features
+
+* Update urlCount in the ImportJobDto ([#396](https://github.com/adobe/spacecat-api-service/issues/396)) ([da93ec3](https://github.com/adobe/spacecat-api-service/commit/da93ec35f673c332f75cfa681157b6f708df0bb4))
+
+# [1.52.0](https://github.com/adobe/spacecat-api-service/compare/v1.51.11...v1.52.0) (2024-07-11)
+
+
+### Features
+
+* add urlCount to the data access layer ([#395](https://github.com/adobe/spacecat-api-service/issues/395)) ([729cf11](https://github.com/adobe/spacecat-api-service/commit/729cf11edf7a0cb37a4c16511ee3892f8db7ec4d))
+
+## [1.51.11](https://github.com/adobe/spacecat-api-service/compare/v1.51.10...v1.51.11) (2024-07-08)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#393](https://github.com/adobe/spacecat-api-service/issues/393)) ([07c8725](https://github.com/adobe/spacecat-api-service/commit/07c8725a6e8bf55b6a5b072ea4dcbb5e767b6cd1))
+
+## [1.51.10](https://github.com/adobe/spacecat-api-service/compare/v1.51.9...v1.51.10) (2024-07-08)
+
+
+### Bug Fixes
+
+* suppress unnecessary slack noise coming from hlx config updates ([#392](https://github.com/adobe/spacecat-api-service/issues/392)) ([d003bef](https://github.com/adobe/spacecat-api-service/commit/d003bef3a6609fb6251d46c0d779539ff5ad0b8a))
+
 ## [1.51.9](https://github.com/adobe/spacecat-api-service/compare/v1.51.8...v1.51.9) (2024-07-06)
 
 
