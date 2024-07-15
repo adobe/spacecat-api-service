@@ -403,6 +403,31 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Not found');
     });
 
+    it('should throw an error when startDate is not present', async () => {
+      requestContext.data.endDate = '2022-10-07T14:48:00.000Z';
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate are required');
+    });
+
+    it('should throw an error when endDate is not present', async () => {
+      requestContext.data.startDate = '2022-10-05T14:48:00.000Z';
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate are required');
+    });
+
+    it('should throw an error when startDate or endDate is not a valid ISO format', async () => {
+      requestContext.data.startDate = 'invalid-date';
+      requestContext.data.endDate = '2022-10-07T14:48:00.000Z';
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO format');
+    });
+
     it('should return an array of import jobs', async () => {
       const job = createImportJob(exampleJob);
       context.dataAccess.getImportJobsByDateRange = sandbox.stub().resolves([job]);
