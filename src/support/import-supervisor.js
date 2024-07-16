@@ -115,9 +115,6 @@ function ImportSupervisor(services, config) {
    */
   async function getImportJobsByDateRange(startDate, endDate) {
     const jobs = await dataAccess.getImportJobsByDateRange(startDate, endDate);
-    if (!jobs) {
-      throw new ErrorWithStatusCode('Not found', 404);
-    }
     return jobs;
   }
 

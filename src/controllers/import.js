@@ -84,12 +84,8 @@ function ImportController(context) {
   }
 
   function validateIsoDates(startDate, endDate) {
-    if (!startDate || !endDate) {
-      throw new ErrorWithStatusCode('Invalid request: startDate and endDate are required', STATUS_BAD_REQUEST);
-    }
-
     if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
-      throw new ErrorWithStatusCode('Invalid request: startDate and endDate must be in ISO format', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: startDate and endDate must be in ISO 8601 format', STATUS_BAD_REQUEST);
     }
   }
 
@@ -115,7 +111,7 @@ function ImportController(context) {
       const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
       return ok(jobs.map(ImportJobDto.toJSON));
     } catch (error) {
-      log.error(`Failed to fetch import jobs by date range: ${error.message}`);
+      log.error(`Failed to fetch import jobs between startDate: ${startDate} and endDate: ${endDate}, ${error.message}`);
       return createErrorResponse(error);
     }
   }
