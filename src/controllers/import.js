@@ -66,7 +66,7 @@ function ImportController(context) {
     }
 
     if (data.urls.length > maxUrlsPerJob) {
-      throw new ErrorWithStatusCode(`Invalid request: number of URLs provided exceeds the maximum allowed (${maxUrlsPerJob})`, STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode(`Invalid request: number of URLs provided (${data.urls.length}) exceeds the maximum allowed (${maxUrlsPerJob})`, STATUS_BAD_REQUEST);
     }
 
     data.urls.forEach((url) => {

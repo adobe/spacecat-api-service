@@ -323,7 +323,7 @@ describe('ImportController tests', () => {
       ];
       const response = await importController.createImportJob(requestContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided exceeds the maximum allowed (3)');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (4) exceeds the maximum allowed (3)');
     });
 
     it('should fail when the number of URLs exceeds the (default) maximum allowed', async () => {
@@ -337,7 +337,7 @@ describe('ImportController tests', () => {
       ];
       const response = await importController.createImportJob(requestContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided exceeds the maximum allowed (1)');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
     });
   });
 
