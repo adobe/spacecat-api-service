@@ -98,7 +98,7 @@ describe('getRouteHandlers', () => {
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/import',
-      'GET /tools/import/jobs',
+      'GET /tools/import/jobs/by-date-range',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
