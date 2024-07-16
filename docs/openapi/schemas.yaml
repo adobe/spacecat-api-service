@@ -420,21 +420,21 @@ UpdateAuditConfigType:
   type: object
   properties:
     excludedURLs:
-      description: Set of urls to exclude. If empty, will remove previously excluded URLs.
+      description: Set of urls to exclude. If empty, will remove all previously excluded URLs.
       type: array
       items:
         type: string
     manualOverwrites:
-      description: Set of urls to exclude. If empty, will remove previously excluded URLs.
+      description: Set of urls to overwrite. If empty, will remove all previously manualOverwrites.
       type: array
       items:
         type: object
         properties:
           brokenTargetURL:
-            description: Whether audits are disabled for this site
+            description: url of the broken backlink
             type: string
           targetURL:
-            description: Whether audits are disabled for this site
+            description: url of the correct target
             type: string
   example:
     excludedURLs:
