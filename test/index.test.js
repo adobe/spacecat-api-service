@@ -78,7 +78,11 @@ describe('Index Tests', () => {
           getImsOrgId: () => 'default',
           getCreatedAt: () => '2023-12-16T09:21:09.000Z',
           getUpdatedAt: () => '2023-12-16T09:21:09.000Z',
-          getConfig: () => ({ getSlackConfig: () => {}, getHandlers: () => {} }),
+          getConfig: () => ({
+            getSlackConfig: () => {},
+            getHandlers: () => {},
+            getImports: () => [],
+          }),
         }),
         getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),
       },

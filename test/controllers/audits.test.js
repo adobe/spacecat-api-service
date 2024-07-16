@@ -364,6 +364,7 @@ describe('Audits Controller', () => {
           ...handlerTypeConfig,
           getHandlerConfig: (type) => ({ [type]: {} }),
           getSlackConfig: () => {},
+          getImports: () => [],
           getHandlers: () => (({ [auditType]: {} })),
         }),
         updateConfig: sinon.stub(),
@@ -402,6 +403,7 @@ describe('Audits Controller', () => {
           getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
+          getImports: () => [],
         }),
         updateConfig: sinon.stub(),
       };
@@ -440,6 +442,7 @@ describe('Audits Controller', () => {
           getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
+          getImports: () => [],
         }),
         updateConfig: sinon.stub(),
       };
@@ -481,6 +484,7 @@ describe('Audits Controller', () => {
           getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
+          getImports: () => [],
         }),
         updateConfig: sinon.stub(),
       };
@@ -567,6 +571,7 @@ describe('Audits Controller', () => {
           getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
+          getImports: () => [],
         }),
         updateConfig: sinon.stub(),
       };
@@ -609,6 +614,7 @@ describe('Audits Controller', () => {
           getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
+          getImports: () => [],
         }),
         updateConfig: sinon.stub(),
       };
@@ -651,6 +657,7 @@ describe('Audits Controller', () => {
           getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
+          getImports: () => [],
         }),
         updateConfig: sinon.stub(),
       };
@@ -691,6 +698,7 @@ describe('Audits Controller', () => {
           getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
+          getImports: () => [],
         }),
         updateConfig: sinon.stub(),
       };
