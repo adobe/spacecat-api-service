@@ -1,3 +1,10 @@
+# [1.54.0](https://github.com/adobe/spacecat-api-service/compare/v1.53.3...v1.54.0) (2024-07-16)
+
+
+### Features
+
+* Enforce a maximum of 1 running import job per API key ([#401](https://github.com/adobe/spacecat-api-service/issues/401)) ([7bc437e](https://github.com/adobe/spacecat-api-service/commit/7bc437ecbd52750f554c1b1a02e594f5016484e0))
+
 ## [1.53.3](https://github.com/adobe/spacecat-api-service/compare/v1.53.2...v1.53.3) (2024-07-16)
 
 
