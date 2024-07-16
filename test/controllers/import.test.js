@@ -101,6 +101,7 @@ describe('ImportController tests', () => {
         saveAsDocs: true,
         transformationFileUrl: 'https://example.com/transform.js',
       },
+      maxUrlsPerJob: 3,
     };
 
     context = {
@@ -311,6 +312,32 @@ describe('ImportController tests', () => {
         saveAsDocs: true,
         transformationFileUrl: 'https://example.com/transform.js',
       });
+    });
+
+    it('should fail when the number of URLs exceeds the maximum allowed', async () => {
+      requestContext.data.urls = [
+        'https://example.com/page1',
+        'https://example.com/page2',
+        'https://example.com/page3',
+        'https://example.com/page4',
+      ];
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided exceeds the maximum allowed (3)');
+    });
+
+    it('should fail when the number of URLs exceeds the (default) maximum allowed', async () => {
+      delete importConfiguration.maxUrlsPerJob; // Should fall back to 1
+      context.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+      importController = ImportController(context);
+
+      requestContext.data.urls = [
+        'https://example.com/page1',
+        'https://example.com/page2',
+      ];
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided exceeds the maximum allowed (1)');
     });
   });
 

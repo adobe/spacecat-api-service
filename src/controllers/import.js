@@ -50,7 +50,7 @@ function ImportController(context) {
   }
 
   const importSupervisor = new ImportSupervisor(services, importConfiguration);
-  const { allowedApiKeys = [] } = importConfiguration;
+  const { allowedApiKeys = [], maxUrlsPerJob = 1 } = importConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
@@ -63,6 +63,10 @@ function ImportController(context) {
 
     if (!Array.isArray(data.urls) || !data.urls.length > 0) {
       throw new ErrorWithStatusCode('Invalid request: urls must be provided as a non-empty array', STATUS_BAD_REQUEST);
+    }
+
+    if (data.urls.length > maxUrlsPerJob) {
+      throw new ErrorWithStatusCode(`Invalid request: number of URLs provided exceeds the maximum allowed (${maxUrlsPerJob})`, STATUS_BAD_REQUEST);
     }
 
     data.urls.forEach((url) => {
