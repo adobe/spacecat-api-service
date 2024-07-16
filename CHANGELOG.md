@@ -1,3 +1,17 @@
+# [1.54.0](https://github.com/adobe/spacecat-api-service/compare/v1.53.3...v1.54.0) (2024-07-16)
+
+
+### Features
+
+* Enforce a maximum of 1 running import job per API key ([#401](https://github.com/adobe/spacecat-api-service/issues/401)) ([7bc437e](https://github.com/adobe/spacecat-api-service/commit/7bc437ecbd52750f554c1b1a02e594f5016484e0))
+
+## [1.53.3](https://github.com/adobe/spacecat-api-service/compare/v1.53.2...v1.53.3) (2024-07-16)
+
+
+### Bug Fixes
+
+* Include x-import-api-key header in Access-Control-Allow-Headers ([#400](https://github.com/adobe/spacecat-api-service/issues/400)) ([19af952](https://github.com/adobe/spacecat-api-service/commit/19af9527918b700d22c6a329e329527a592d6f20))
+
 ## [1.53.2](https://github.com/adobe/spacecat-api-service/compare/v1.53.1...v1.53.2) (2024-07-13)
 
 
