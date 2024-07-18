@@ -58,7 +58,7 @@ HandlerConfig:
     mentions:
       $ref: '#/SlackMentionConfig'
     excludedURLs:
-      description: URLs to be excluded from the alert
+      description: URLs to be excluded from the handler's processing
       type: array
       items:
         type: string
