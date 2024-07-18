@@ -1,0 +1,26 @@
+experiments:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - experiments
+    summary: Retrieve experiments for site
+    description: |
+      This endpoint provide a list of experiments obtained from RUM data for the given site along with all the experiment details.
+    operationId: getExperiments
+    responses:
+      '200':
+        description: A list of site experiments
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteExperimentList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

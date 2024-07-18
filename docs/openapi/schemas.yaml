@@ -919,6 +919,154 @@ SiteTopPageList:
   type: array
   items:
     $ref: './schemas.yaml#/SiteTopPage'
+SiteExperimentVariant:
+  type: object
+  properties:
+    name:
+      description: The name of the variant
+      type: string
+    label:
+      description: The label of the variant
+      type: string
+    split:
+      description: The split allocation of the traffic to the variant
+      type: number
+    url:
+      description: The url of the variant
+      $ref: '#/URL'
+    views:
+      description: The number of views for the variant
+      type: integer
+    interactionsCount:
+      description: The interactions count for the variant
+      type: integer
+    p_value:
+      description: The p-value of the variant for the configured metric or clicks
+      type: number
+    power:
+      description: The power of the variant for the configured metric or clicks
+      type: number
+    statsig:
+      description: The statistical significance of the variant based on the configured metric or clicks
+      type: string
+      enum:
+        - 'True'
+        - 'False'
+    metrics:
+      description: The metrics for the variant
+      type: array
+      items:
+        type: object
+        properties:
+          selector:
+            description: The css selector of the element on which the interaction was performed
+            type: string
+          value:
+            description: The value of the metric on the selector
+            type: number
+          type:
+            description: The type of the metric
+            type: string
+            enum:
+              - 'click'
+              - 'convert'
+              - 'formsubmit'
+  example:
+    name: 'challenger-1'
+    label: 'Challenger 1'
+    split: 0.5
+    url: 'https://example-site.com/foo/bar'
+    views: 1000
+    interactionsCount: 200
+    p_value: 0.04
+    power: 97.6
+    statsig: 'True'
+    metrics:
+      - selector: '.add-to-cart'
+        value: 10
+        type: 'click'
+SiteExperiment:
+  type: object
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    experimentId:
+      description: The ID of the experiment
+      type: string
+    name:
+      description: The name of the experiment
+      type: string
+    url:
+      description: The URL of the experiment
+      $ref: '#/URL'
+    status:
+      description: The status of the experiment
+      type: string
+      enum:
+        - 'ACTIVE'
+        - 'COMPLETE'
+    type:
+      description: The type of the experiment
+      type: string
+      enum:
+        - 'FULL'
+        - 'AB'
+        - 'MAB'
+    startDate:
+      description: The start date and time of the experiment
+      $ref: '#/DateTime'
+    endDate:
+      description: The end date and time of the experiment
+      $ref: '#/DateTime'
+    variants:
+      description: The variants of the experiment
+      type: array
+      items:
+        $ref: './schemas.yaml#/SiteExperimentVariant'
+    updatedAt:
+      description: The date and time when the experiment was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: The user/entity who last updated the experiment
+      type: string
+    conversionEventName:
+      description: The name of the conversion event
+      type: string
+    conversionEventValue:
+      description: The name of conversion event value
+      type: string
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    experimentId: '1012-home-page-optimization'
+    name: '1012 Home Page Optimization'
+    url: 'https://example-site.com/foo/bar'
+    type: 'AB'
+    status: 'ACTIVE'
+    startDate: '2024-04-29T15:14:33.653Z'
+    endDate: '2024-05-29T15:14:33.653Z'
+    variants:
+      - name: 'challenger-1'
+        label: 'Challenger 1'
+        split: 0.5
+        url: 'https://example-site.com/foo/bar'
+        views: 1000
+        interactionsCount: 200
+        p_value: 0.04
+        power: 97.6
+        statsig: 'True'
+        metrics:
+          - selector: '.add-to-cart'
+            value: 10
+            type: 'click'
+    updatedAt: '2024-05-31T15:14:33.653Z'
+    updatedBy: 'admin'
+    conversionEventName: 'click'
+    conversionEventValue: '.add-to-cart'
+SiteExperimentList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/SiteExperiment'
 SiteMetric:
   type: object
   required:
