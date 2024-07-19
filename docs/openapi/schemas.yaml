@@ -948,10 +948,7 @@ SiteExperimentVariant:
       type: number
     statsig:
       description: The statistical significance of the variant based on the configured metric or clicks
-      type: string
-      enum:
-        - 'True'
-        - 'False'
+      type: boolean
     metrics:
       description: The metrics for the variant
       type: array
@@ -980,7 +977,7 @@ SiteExperimentVariant:
     interactionsCount: 200
     p_value: 0.04
     power: 97.6
-    statsig: 'True'
+    statsig: true
     metrics:
       - selector: '.add-to-cart'
         value: 10
@@ -1054,7 +1051,7 @@ SiteExperiment:
         interactionsCount: 200
         p_value: 0.04
         power: 97.6
-        statsig: 'True'
+        statsig: true
         metrics:
           - selector: '.add-to-cart'
             value: 10
