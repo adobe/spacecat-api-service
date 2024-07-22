@@ -1,3 +1,17 @@
+## [1.55.1](https://github.com/adobe/spacecat-api-service/compare/v1.55.0...v1.55.1) (2024-07-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.4.0 ([#405](https://github.com/adobe/spacecat-api-service/issues/405)) ([9bd759a](https://github.com/adobe/spacecat-api-service/commit/9bd759a658ae58bc4e1d0dbddec2b0d9fbd93c79))
+
+# [1.55.0](https://github.com/adobe/spacecat-api-service/compare/v1.54.1...v1.55.0) (2024-07-18)
+
+
+### Features
+
+* Enforce a maximum number of URLs that can be imported per job ([#403](https://github.com/adobe/spacecat-api-service/issues/403)) ([14d0615](https://github.com/adobe/spacecat-api-service/commit/14d06158ac9a142f922192e18e19872dda3ae6e0))
+
 ## [1.54.1](https://github.com/adobe/spacecat-api-service/compare/v1.54.0...v1.54.1) (2024-07-16)
 
 
