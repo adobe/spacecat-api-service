@@ -7,7 +7,6 @@ experiments:
       - experiments
     summary: Retrieves all experiments for the site
     description: |
-      Not implemented yet.
       This endpoint provide a list of experiments obtained from RUM data for the given site along with all the experiment details.
     operationId: getExperiments
     responses:
