@@ -16,6 +16,7 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
 
@@ -193,7 +194,8 @@ function AuditsController(dataAccess) {
     }
     if (hasUpdates) {
       const handlerType = config.getHandlerConfig(auditType);
-      site.updateConfig(config);
+      const configObj = Config.toDynamoItem(config);
+      site.updateConfig(configObj);
       await dataAccess.updateSite(site);
       return ok(handlerType);
     }
