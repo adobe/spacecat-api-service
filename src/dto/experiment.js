@@ -10,39 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import {
-  createExperiment,
-} from '@adobe/spacecat-shared-data-access/src/models/experiment.js';
-
 /**
  * Data transfer object for Experiment.
  */
 export const ExperimentDto = {
-
-  /**
-   * Converts a JSON object into an Experiment object.
-   * @param {object } jsonObject - JSON object.
-   * @returns {Readonly<Experiment>} Experiment object.
-   */
-  fromJson: (jsonObject) => {
-    const experimentData = {
-      siteId: jsonObject.siteId,
-      experimentId: jsonObject.experimentId,
-      name: jsonObject.name,
-      url: jsonObject.url,
-      status: jsonObject.status,
-      type: jsonObject.type,
-      startDate: jsonObject.startDate,
-      endDate: jsonObject.endDate,
-      variants: jsonObject.variants,
-      updatedAt: jsonObject.updatedAt,
-      updatedBy: jsonObject.updatedBy,
-      conversionEventName: jsonObject.conversionEventName,
-      conversionEventValue: jsonObject.conversionEventValue,
-    };
-
-    return createExperiment(experimentData);
-  },
 
   /**
    * Converts an Experiment object into a JSON object.
