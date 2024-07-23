@@ -25,6 +25,7 @@ AuditType:
     - 'lhs-mobile'
     - 'broken-backlinks'
     - 'sitemap'
+    - 'canonical'
   example: 'cwv'
 URL:
   type: string
