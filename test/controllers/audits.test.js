@@ -356,7 +356,7 @@ describe('Audits Controller', () => {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([]),
-        updateExcludedURLs: sinon.stub(),
+        updateExcludeURLs: sinon.stub(),
       };
 
       const site = {
@@ -375,7 +375,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(site.getConfig().updateExcludedURLs.calledWith(auditType, [])).to.be.true;
+      expect(site.getConfig().updateExcludeURLs.calledWith(auditType, [])).to.be.true;
       expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
@@ -394,7 +394,7 @@ describe('Audits Controller', () => {
         getExcludedURLs: sinon.stub().returns(undefined),
         getFixedURLs: sinon.stub().returns(undefined),
         getManualOverwrites: sinon.stub().returns(undefined),
-        updateExcludedURLs: sinon.stub(),
+        updateExcludeURLs: sinon.stub(),
       };
 
       const site = {
@@ -413,7 +413,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(site.getConfig().updateExcludedURLs.calledWith(auditType, ['https://foo.com', 'https://bar.com'])).to.be.true;
+      expect(site.getConfig().updateExcludeURLs.calledWith(auditType, ['https://foo.com', 'https://bar.com'])).to.be.true;
       expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
@@ -432,7 +432,7 @@ describe('Audits Controller', () => {
         getExcludedURLs: sinon.stub().returns(['https://example.com/page3']),
         getManualOverwrites: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
-        updateExcludedURLs: sinon.stub(),
+        updateExcludeURLs: sinon.stub(),
         disabled: sinon.stub().returns(false),
       };
 
@@ -452,7 +452,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(site.getConfig().updateExcludedURLs.calledWith(auditType, [
+      expect(site.getConfig().updateExcludeURLs.calledWith(auditType, [
         'https://example.com/page3',
         'https://example.com/page1',
         'https://example.com/page2',
@@ -475,7 +475,7 @@ describe('Audits Controller', () => {
         getExcludedURLs: sinon.stub().returns(['https://example.com/page2']),
         getFixedURLs: sinon.stub().returns([]),
         getManualOverwrites: sinon.stub().returns([]),
-        updateExcludedURLs: sinon.stub(),
+        updateExcludeURLs: sinon.stub(),
       };
 
       const site = {
@@ -494,7 +494,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(site.getConfig().updateExcludedURLs.calledWith(auditType, [
+      expect(site.getConfig().updateExcludeURLs.calledWith(auditType, [
         'https://example.com/page2',
         'https://example.com/page1',
       ])).to.be.true;

@@ -163,7 +163,7 @@ function AuditsController(dataAccess) {
         ? []
         : Array.from(new Set([...(config.getExcludedURLs(auditType) || []), ...excludedURLs]));
 
-      config.updateExcludedURLs(auditType, newExcludedURLs);
+      config.updateExcludeURLs(auditType, newExcludedURLs);
     }
 
     if (Array.isArray(manualOverwrites)) {
