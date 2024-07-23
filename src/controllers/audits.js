@@ -193,11 +193,10 @@ function AuditsController(dataAccess) {
       config.updateManualOverwrites(auditType, newManualOverwrites);
     }
     if (hasUpdates) {
-      const obj = Config.toDynamoItem(config);
+      const configObj = Config.toDynamoItem(config);
       site.updateConfig(config);
       await dataAccess.updateSite(site);
-
-      return ok(obj);
+      return ok(configObj.handlers[auditType]);
     }
     return badRequest('No updates provided');
   };
