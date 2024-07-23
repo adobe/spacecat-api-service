@@ -16,7 +16,6 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
 
@@ -193,10 +192,10 @@ function AuditsController(dataAccess) {
       config.updateManualOverwrites(auditType, newManualOverwrites);
     }
     if (hasUpdates) {
-      const configObj = Config.toDynamoItem(config);
+      const handlerType = config.getHandlerConfig(auditType);
       site.updateConfig(config);
       await dataAccess.updateSite(site);
-      return ok(configObj.handlers[auditType]);
+      return ok(handlerType);
     }
     return badRequest('No updates provided');
   };
