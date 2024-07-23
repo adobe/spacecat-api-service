@@ -70,7 +70,7 @@ update-audit-config-for-site:
     summary: Update the configuration for an audit
     description: |
         This endpoint is useful for updating the configuration for an audit, 
-        for example to set which URLs to skip from the audit.
+        for example to set which URLs to skip from the audit or manual overwrite broken-backlinks.
     operationId: patchAuditForSite
     requestBody:
       required: true
