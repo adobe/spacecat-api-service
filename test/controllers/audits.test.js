@@ -355,7 +355,7 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns([]),
+        getManualOverrides: sinon.stub().returns([]),
         updateExcludeURLs: sinon.stub(),
       };
 
@@ -393,7 +393,7 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns(undefined),
         getFixedURLs: sinon.stub().returns(undefined),
-        getManualOverwrites: sinon.stub().returns(undefined),
+        getManualOverrides: sinon.stub().returns(undefined),
         updateExcludeURLs: sinon.stub(),
       };
 
@@ -430,7 +430,7 @@ describe('Audits Controller', () => {
 
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns(['https://example.com/page3']),
-        getManualOverwrites: sinon.stub().returns([]),
+        getManualOverrides: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
         updateExcludeURLs: sinon.stub(),
         disabled: sinon.stub().returns(false),
@@ -474,7 +474,7 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns(['https://example.com/page2']),
         getFixedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns([]),
+        getManualOverrides: sinon.stub().returns([]),
         updateExcludeURLs: sinon.stub(),
       };
 
@@ -559,10 +559,10 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns([
+        getManualOverrides: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
-        updateManualOverwrites: sinon.stub(),
+        updateManualOverrides: sinon.stub(),
       };
 
       const site = {
@@ -581,7 +581,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(site.getConfig().updateManualOverwrites.calledWith(auditType, [
+      expect(site.getConfig().updateManualOverrides.calledWith(auditType, [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
         { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
       ])).to.be.false;
@@ -602,10 +602,10 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns([
+        getManualOverrides: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
-        updateManualOverwrites: sinon.stub(),
+        updateManualOverrides: sinon.stub(),
       };
 
       const site = {
@@ -624,7 +624,7 @@ describe('Audits Controller', () => {
       const result = await auditsController.patchAuditForSite(context);
 
       expect(result.status).to.equal(200);
-      expect(site.getConfig().updateManualOverwrites.calledWith(auditType, [])).to.be.true;
+      expect(site.getConfig().updateManualOverrides.calledWith(auditType, [])).to.be.true;
       expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
       expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
     });
@@ -645,10 +645,10 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns([
+        getManualOverrides: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
-        updateManualOverwrites: sinon.stub(),
+        updateManualOverrides: sinon.stub(),
       };
 
       const site = {
@@ -686,10 +686,10 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns([
+        getManualOverrides: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
-        updateManualOverwrites: sinon.stub(),
+        updateManualOverrides: sinon.stub(),
       };
 
       const site = {
@@ -728,10 +728,10 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns([
+        getManualOverrides: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
-        updateManualOverwrites: sinon.stub(),
+        updateManualOverrides: sinon.stub(),
       };
 
       const site = {
@@ -769,10 +769,10 @@ describe('Audits Controller', () => {
       const handlerTypeConfig = {
         getExcludedURLs: sinon.stub().returns([]),
         getFixedURLs: sinon.stub().returns([]),
-        getManualOverwrites: sinon.stub().returns([
+        getManualOverrides: sinon.stub().returns([
           { brokenTargetURL: 'https://example.com/page2', targetURL: 'https://example.com/page2-new' },
         ]),
-        updateManualOverwrites: sinon.stub(),
+        updateManualOverrides: sinon.stub(),
         disabled: sinon.stub().returns(false),
       };
 

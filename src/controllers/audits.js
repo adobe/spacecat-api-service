@@ -185,12 +185,12 @@ function AuditsController(dataAccess) {
 
       hasUpdates = true;
 
-      const existingOverrides = config.getManualOverwrites(auditType);
+      const existingOverrides = config.getManualOverrides(auditType);
       const newManualOverwrites = manualOverwrites.length === 0
         ? []
         : mergeOverrides(existingOverrides, manualOverwrites);
 
-      config.updateManualOverwrites(auditType, newManualOverwrites);
+      config.updateManualOverrides(auditType, newManualOverwrites);
     }
     if (hasUpdates) {
       const handlerType = config.getHandlerConfig(auditType);
