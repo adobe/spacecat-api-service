@@ -1,3 +1,10 @@
+# [1.57.0](https://github.com/adobe/spacecat-api-service/compare/v1.56.1...v1.57.0) (2024-07-24)
+
+
+### Features
+
+* experiment API ([#412](https://github.com/adobe/spacecat-api-service/issues/412)) ([0787e17](https://github.com/adobe/spacecat-api-service/commit/0787e17c4e7eca4d057b870345f929d483d34eb5))
+
 ## [1.56.1](https://github.com/adobe/spacecat-api-service/compare/v1.56.0...v1.56.1) (2024-07-24)
 
 
