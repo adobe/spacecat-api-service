@@ -943,6 +943,7 @@ SiteExperiment:
       enum:
         - 'ACTIVE'
         - 'COMPLETE'
+        - 'INACTIVE'
     type:
       description: The type of the experiment
       type: string
