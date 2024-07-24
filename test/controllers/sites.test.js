@@ -451,30 +451,6 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Base URL required');
   });
 
-  it('updates audit configurations for a site', async () => {
-    const siteId = 'site1';
-    const auditConfigUpdate = {
-      auditsDisabled: true,
-      auditTypeConfigs: {
-        type1: { disabled: true },
-        type2: { disabled: false },
-      },
-    };
-
-    const response = await sitesController.updateSite({
-      params: { siteId },
-      data: { auditConfig: auditConfigUpdate },
-    });
-
-    expect(mockDataAccess.updateSite.calledOnce).to.be.true;
-    expect(response.status).to.equal(200);
-
-    const updatedSite = await response.json();
-    expect(updatedSite.auditConfig.auditsDisabled).to.be.true;
-    expect(updatedSite.auditConfig.auditTypeConfigs.type1.disabled).to.be.true;
-    expect(updatedSite.auditConfig.auditTypeConfigs.type2.disabled).to.be.false;
-  });
-
   it('create key event returns created key event', async () => {
     const siteId = sites[0].getId();
     const keyEvent = keyEvents[0];

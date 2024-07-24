@@ -259,20 +259,6 @@ function SitesController(dataAccess) {
       updates = true;
     }
 
-    if (requestBody.auditConfig) {
-      if (isBoolean(requestBody.auditConfig.auditsDisabled)) {
-        site.setAllAuditsDisabled(requestBody.auditConfig.auditsDisabled);
-        updates = true;
-      }
-
-      if (isObject(requestBody.auditConfig.auditTypeConfigs)) {
-        Object.entries(requestBody.auditConfig.auditTypeConfigs).forEach(([type, config]) => {
-          site.updateAuditTypeConfig(type, config);
-          updates = true;
-        });
-      }
-    }
-
     if (updates) {
       const updatedSite = await dataAccess.updateSite(site);
       return ok(SiteDto.toJSON(updatedSite));

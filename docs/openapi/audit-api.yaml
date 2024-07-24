@@ -59,7 +59,7 @@ latest-audit-for-site:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-update-audit-config-for-site:
+update-handler-type-config-for-site:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/auditType'
@@ -77,14 +77,14 @@ update-audit-config-for-site:
       content:
         application/json:
           schema:
-            $ref: './schemas.yaml#/UpdateAuditConfigType'
+            $ref: './schemas.yaml#/UpdateHandlerTypeConfig'
     responses:
       '200':
         description: The updated audit type config object
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/AuditConfigType'
+              $ref: './schemas.yaml#/HandlerConfig'
       '400':
         $ref: './responses.yaml#/400-patch-audit-for-site'
       '401':

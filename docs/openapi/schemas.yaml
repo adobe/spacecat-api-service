@@ -45,32 +45,31 @@ EmailAddress:
   format: email
   example: 'user@example.com'
 SlackMentionConfig:
+    type: object
+    properties:
+      slack:
+        type: array
+        items:
+          type: string
+HandlerConfig:
   type: object
-  additionalProperties: true
+  additionalProperties: false
   properties:
-    slack:
+    mentions:
+      $ref: '#/SlackMentionConfig'
+    excludedURLs:
+      description: URLs to be excluded from the handler's processing
       type: array
       items:
         type: string
-AlertConfig:
-  type: object
-  additionalProperties: true
-  properties:
-    type:
-      description: The type of the alert
-      type: string
-    byOrg:
-      description: Whether the alert should be sent by organization
-      type: boolean
-    mentions:
-      description: The Slack mentions to include in the alert
-      type: array
-      items:
-        $ref: '#/SlackMentionConfig'
-AlertsConfig:
-  type: array
-  items:
-    $ref: '#/AlertConfig'
+        format: uri
+  patternProperties:
+    "^(404|broken-backlinks)$":
+      type: object
+      properties:
+        mentions:
+          $ref: '#/SlackMentionConfig'
+        # Define other properties specific to the alert type here
 SlackConfig:
   type: object
   additionalProperties: true
@@ -98,9 +97,9 @@ Config:
     slack:
       description: Optional. The Slack configuration
       $ref: '#/SlackConfig'
-    alerts:
+    handlers:
       description: Optional. The Alert configuration
-      $ref: '#/AlertsConfig'
+      $ref: '#/HandlerConfig'
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -137,17 +136,17 @@ Organization:
         channel: '#example-channel'
         workspace: 'example-workspace'
         invitedUserCount: 5
-      alerts:
-        - type: '404'
+      handlers:
+        '404':
           byOrg: true
           mentions:
-            - slack:
+            slack:
                 - '@user1'
                 - '@user2'
-        - type: 'cwv'
+        'cwv':
           byOrg: false
           mentions:
-            - slack:
+            slack:
                 - '@user5'
                 - '@user6'
     createdAt: '2023-12-15T09:30:00Z'
@@ -177,17 +176,16 @@ OrganizationCreate:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
+      handlers:
+        '404':
           mentions:
-            - slack:
+            slack:
                 - '@user3'
                 - '@user4'
-        - type: 'cwv'
+        'cwv':
           byOrg: false
           mentions:
-            - slack:
+            slack:
                 - '@user5'
                 - '@user6'
 OrganizationUpdate:
@@ -209,19 +207,17 @@ OrganizationUpdate:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
-          mentions:
-            - slack:
-                - '@user1'
-                - '@user2'
-        - type: 'cwv'
-          byOrg: false
-          mentions:
-            - slack:
-                - '@user5'
-                - '@user6'
+        handlers:
+          '404':
+            mentions:
+              slack:
+                  - '@user3'
+                  - '@user4'
+          'cwv':
+            mentions:
+              slack:
+                  - '@user5'
+                  - '@user6'
 Site:
   type: object
   properties:
@@ -244,9 +240,6 @@ Site:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
     config:
       description: Optional. The configuration of the site. May override the organization configuration.
       $ref: '#/SiteConfig'
@@ -263,30 +256,27 @@ Site:
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
-    auditConfig:
-      auditsDisabled: false
-      auditTypeConfigs:
-        '404':
-          disabled: true
-        'cwv':
-          disabled: false
     config:
       slack:
         channel: 'C1234567890'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
+      handlers:
+        '404':
           mentions:
-            - slack:
+            slack:
                 - '@user1'
                 - '@user2'
-        - type: 'cwv'
-          byOrg: false
+        'broken-backlinks':
           mentions:
-            - slack:
+            slack:
                 - '@user5'
                 - '@user6'
+          excludedURLs:
+             description: URLs to be excluded from the alert
+             type: array
+             items:
+               type: string
+               format: uri'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -306,13 +296,6 @@ SiteWithLatestAudit:
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
-    auditConfig:
-      auditsDisabled: false
-      auditTypeConfigs:
-        '404':
-          disabled: true
-        'cwv':
-          disabled: false
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
     audits:
@@ -358,9 +341,6 @@ SiteCreate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
   example:
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://www.newsite.com'
@@ -378,9 +358,6 @@ SiteUpdate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
     config:
       description: Optional. The configuration of the site
       $ref: '#/SiteConfig'
@@ -388,23 +365,7 @@ SiteUpdate:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
     goLiveDate: '2024-01-20T10:00:00Z'
-AuditConfigType:
-  type: object
-  properties:
-    disabled:
-      description: Whether audits are disabled for the given audit type
-      type: boolean
-    excludedURLs:
-      description: (Optional) Set of urls to exclude. If empty, will remove previously excluded URLs. It's an array of strings
-      type: array
-      items:
-        type: string
-  example:
-    disabled: true
-    excludedURLs:
-      - 'https://www.adobe.com/some-page'
-      - 'https://www.adobe.com/another-page'
-UpdateAuditConfigType:
+UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
@@ -416,23 +377,6 @@ UpdateAuditConfigType:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
-AuditConfig:
-  type: object
-  properties:
-    auditsDisabled:
-      description: Whether audits are disabled for this site
-      type: boolean
-    auditTypeConfigs:
-      type: object
-      additionalProperties:
-        $ref: '#/AuditConfigType'
-  example:
-    auditsDisabled: false
-    auditTypeConfigs:
-      '404':
-        disabled: true
-      'cwv':
-        disabled: false
 Audit:
   type: object
   readOnly: true
@@ -446,10 +390,6 @@ Audit:
     expiresAt:
       description: The date and time when the audit expires in ISO 8601 format
       $ref: '#/DateTime'
-    auditType:
-      description: The type of the audit
-      $ref: '#/AuditType'
-    isError:
       type: boolean
     deliveryType:
       description: The type of the delivery this site is using
