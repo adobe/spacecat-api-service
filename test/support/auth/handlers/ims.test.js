@@ -13,7 +13,6 @@
 /* eslint-env mocha */
 
 import chai from 'chai';
-import nock from 'nock';
 import sinon from 'sinon';
 import chaiAsPromised from 'chai-as-promised';
 import fs from 'fs';
@@ -23,6 +22,7 @@ import publicJwk from '../../../fixtures/auth/ims/public-jwks.js';
 import AdobeImsHandler from '../../../../src/support/auth/handlers/ims.js';
 import AbstractHandler from '../../../../src/support/auth/handlers/abstract.js';
 import AuthInfo from '../../../../src/support/auth/auth-info.js';
+import imsIdpConfigDev from '../../../../src/support/auth/handlers/config/ims-stg.js';
 
 chai.use(chaiAsPromised);
 
@@ -107,22 +107,21 @@ describe('AdobeImsHandler', () => {
   });
 
   describe('token validation', () => {
+    let context;
+
     beforeEach(() => {
-      nock('https://ims-na1.adobelogin.com')
-        .get('/ims/keys')
-        .reply(200, JSON.stringify(publicJwk));
+      imsIdpConfigDev.discovery.jwks = publicJwk;
+      context = { func: { version: 'ci' }, log: logStub };
     });
 
     afterEach(() => {
-      nock.cleanAll();
+      delete imsIdpConfigDev.discovery.jwks;
     });
 
     it('returns null when created_at is not a number', async () => {
-      const token = await createToken({ as: 'ims-na1', created_at: 'not-a-number', expires_in: 3600 });
-      const context = {
-        log: logStub,
-        pathInfo: { headers: { authorization: `Bearer ${token}` } },
-      };
+      const token = await createToken({ as: 'ims-na1-stg1', created_at: 'not-a-number', expires_in: 3600 });
+      context.pathInfo = { headers: { authorization: `Bearer ${token}` } };
+
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.null;
@@ -130,11 +129,9 @@ describe('AdobeImsHandler', () => {
     });
 
     it('returns null when expires_in is not a number', async () => {
-      const token = await createToken({ as: 'ims-na1', created_at: Date.now(), expires_in: 'not-a-number' });
-      const context = {
-        log: logStub,
-        pathInfo: { headers: { authorization: `Bearer ${token}` } },
-      };
+      const token = await createToken({ as: 'ims-na1-stg1', created_at: Date.now(), expires_in: 'not-a-number' });
+      context.pathInfo = { headers: { authorization: `Bearer ${token}` } };
+
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.null;
@@ -142,11 +139,9 @@ describe('AdobeImsHandler', () => {
     });
 
     it('returns null when created_at is in the future', async () => {
-      const token = await createToken({ as: 'ims-na1', created_at: Date.now() + 1000, expires_in: 3600 });
-      const context = {
-        log: logStub,
-        pathInfo: { headers: { authorization: `Bearer ${token}` } },
-      };
+      const token = await createToken({ as: 'ims-na1-stg1', created_at: Date.now() + 1000, expires_in: 3600 });
+      context.pathInfo = { headers: { authorization: `Bearer ${token}` } };
+
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.null;
@@ -154,11 +149,9 @@ describe('AdobeImsHandler', () => {
     });
 
     it('returns null when the token is expired', async () => {
-      const token = await createToken({ as: 'ims-na1', created_at: Date.now(), expires_in: 0 });
-      const context = {
-        log: logStub,
-        pathInfo: { headers: { authorization: `Bearer ${token}` } },
-      };
+      const token = await createToken({ as: 'ims-na1-stg1', created_at: Date.now(), expires_in: 0 });
+      context.pathInfo = { headers: { authorization: `Bearer ${token}` } };
+
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.null;
@@ -168,18 +161,16 @@ describe('AdobeImsHandler', () => {
     it('successfully validates a token and returns the profile', async () => {
       const now = Date.now();
       const token = await createToken({
-        user_id: 'test-user', as: 'ims-na1', created_at: now, expires_in: 3600,
+        user_id: 'test-user', as: 'ims-na1-stg1', created_at: now, expires_in: 3600,
       });
-      const context = {
-        log: logStub,
-        pathInfo: { headers: { authorization: `Bearer ${token}` } },
-      };
+      context.pathInfo = { headers: { authorization: `Bearer ${token}` } };
+
       const result = await handler.checkAuth({}, context);
 
       expect(result).to.be.instanceof(AuthInfo);
       expect(result.authenticated).to.be.true;
       expect(result.profile).to.be.an('object');
-      expect(result.profile).to.have.property('as', 'ims-na1');
+      expect(result.profile).to.have.property('as', 'ims-na1-stg1');
       expect(result.profile).to.have.property('email', 'test-user');
       expect(result.profile).to.not.have.property('user_id');
       expect(result.profile).to.have.property('created_at', now);
