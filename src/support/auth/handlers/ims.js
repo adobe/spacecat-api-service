@@ -11,7 +11,12 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { createLocalJWKSet, createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
+import {
+  createLocalJWKSet,
+  createRemoteJWKSet,
+  decodeJwt,
+  jwtVerify,
+} from 'jose';
 
 import configProd from './config/ims.js';
 import configDev from './config/ims-stg.js';
