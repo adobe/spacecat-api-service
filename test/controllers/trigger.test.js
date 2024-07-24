@@ -37,7 +37,7 @@ describe('trigger handler', () => {
     }),
   }];
   const site = {
-    id: 'site1',
+    getId: () => 'site1',
     baseURL: 'http://site1.com',
     getOrganizationId: () => 'org123',
     getAuditConfig: sinon.stub().returns({
@@ -99,6 +99,7 @@ describe('trigger handler', () => {
       getOrganizations: sandbox.stub().resolves(orgs),
       getSitesByDeliveryType: sandbox.stub(),
       getSiteByBaseURL: sandbox.stub().resolves(site),
+      getConfiguration: sandbox.stub().resolves({ isHandlerEnabledForSite: () => true }),
     };
     await expect(handler(context)).to.be.fulfilled;
   });
