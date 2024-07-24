@@ -163,7 +163,7 @@ function AuditsController(dataAccess) {
         ? []
         : Array.from(new Set([...(config.getExcludedURLs(auditType) || []), ...excludedURLs]));
 
-      config.updateExcludeURLs(auditType, newExcludedURLs);
+      config.updateExcludedURLs(auditType, newExcludedURLs);
     }
 
     if (Array.isArray(manualOverwrites)) {
@@ -185,12 +185,12 @@ function AuditsController(dataAccess) {
 
       hasUpdates = true;
 
-      const existingOverrides = config.getManualOverrides(auditType);
+      const existingOverrides = config.getManualOverwrites(auditType);
       const newManualOverwrites = manualOverwrites.length === 0
         ? []
         : mergeOverrides(existingOverrides, manualOverwrites);
 
-      config.updateManualOverrides(auditType, newManualOverwrites);
+      config.updateManualOverwrites(auditType, newManualOverwrites);
     }
     if (hasUpdates) {
       const handlerType = config.getHandlerConfig(auditType);
