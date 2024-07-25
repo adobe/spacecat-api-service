@@ -16,7 +16,7 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
-import AuditConfigType from '@adobe/spacecat-shared-data-access/src/models/site/audit-config-type.js';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
 
@@ -145,9 +145,9 @@ function AuditsController(dataAccess) {
       return notFound('Site not found');
     }
 
-    const auditConfig = site.getAuditConfig();
-    const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
-    if (!auditTypeConfig) {
+    const config = site.getConfig();
+    const handlerConfig = config.getHandlerConfig(auditType);
+    if (!handlerConfig) {
       return notFound('Audit type not found');
     }
     if (Array.isArray(excludedURLs)) {
@@ -161,9 +161,9 @@ function AuditsController(dataAccess) {
 
       const newExcludedURLs = excludedURLs.length === 0
         ? []
-        : Array.from(new Set([...(auditTypeConfig.getExcludedURLs() || []), ...excludedURLs]));
+        : Array.from(new Set([...(config.getExcludedURLs(auditType) || []), ...excludedURLs]));
 
-      auditTypeConfig.updateExcludedURLs(newExcludedURLs);
+      config.updateExcludedURLs(auditType, newExcludedURLs);
     }
 
     if (Array.isArray(manualOverwrites)) {
@@ -185,19 +185,19 @@ function AuditsController(dataAccess) {
 
       hasUpdates = true;
 
-      const existingOverrides = auditTypeConfig.getManualOverwrites();
+      const existingOverrides = config.getManualOverwrites(auditType);
       const newManualOverwrites = manualOverwrites.length === 0
         ? []
         : mergeOverrides(existingOverrides, manualOverwrites);
 
-      auditTypeConfig.updateManualOverwrites(newManualOverwrites);
+      config.updateManualOverwrites(auditType, newManualOverwrites);
     }
     if (hasUpdates) {
-      const obj = AuditConfigType.toDynamoItem(auditTypeConfig);
-      site.updateAuditTypeConfig(auditType, obj);
+      const handlerType = config.getHandlerConfig(auditType);
+      const configObj = Config.toDynamoItem(config);
+      site.updateConfig(configObj);
       await dataAccess.updateSite(site);
-
-      return ok(obj);
+      return ok(handlerType);
     }
     return badRequest('No updates provided');
   };

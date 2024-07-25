@@ -44,6 +44,10 @@ describe('getRouteHandlers', () => {
     getByBaseURL: sinon.stub(),
   };
 
+  const mockExperimentsController = {
+    getExperiments: sinon.stub(),
+  };
+
   const mockOrganizationsController = {
     getAll: sinon.stub(),
     getByID: sinon.stub(),
@@ -75,6 +79,7 @@ describe('getRouteHandlers', () => {
       mockHooksController,
       mockOrganizationsController,
       mockSitesController,
+      mockExperimentsController,
       mockSlackController,
       mockTrigger,
       mockFulfillmentController,
@@ -133,6 +138,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/:auditType',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
+      'GET /sites/:siteId/experiments',
       'GET /sites/:siteId/key-events',
       'POST /sites/:siteId/key-events',
       'DELETE /sites/:siteId/key-events/:keyEventId',
@@ -170,5 +176,6 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/audits/latest'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].handler).to.equal(mockAuditsController.getLatestForSite);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
+    expect(dynamicRoutes['GET /sites/:siteId/experiments'].handler).to.equal(mockExperimentsController.getExperiments);
   });
 });

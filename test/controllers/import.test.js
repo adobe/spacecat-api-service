@@ -101,6 +101,7 @@ describe('ImportController tests', () => {
         saveAsDocs: true,
         transformationFileUrl: 'https://example.com/transform.js',
       },
+      maxUrlsPerJob: 3,
     };
 
     context = {
@@ -178,6 +179,18 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
     });
 
+    it('should reject when the given API key is already running an import job', async () => {
+      context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
+        createImportJob({
+          ...exampleJob,
+          apiKey: requestContext.pathInfo.headers['x-import-api-key'],
+        }),
+      ]);
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(429);
+      expect(response.headers.get('x-error')).to.equal('Too Many Requests: API key b9ebcfb5-80c9-4236-91ba-d50e361db71d cannot be used to start any more import jobs');
+    });
+
     it('should reject when invalid URLs are passed in', async () => {
       requestContext.data.urls = ['https://example.com/page1', 'not-a-valid-url'];
       const response = await importController.createImportJob(requestContext);
@@ -213,7 +226,10 @@ describe('ImportController tests', () => {
 
     it('should pick another import queue when the first one is in use', async () => {
       context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
-        createImportJob(exampleJob),
+        createImportJob({
+          ...exampleJob,
+          apiKey: '18149FB2-5B83-41E6-B8D2-C7F50ADF110E', // Queue is in use by another API key
+        }),
       ]);
       importController = ImportController(context);
       const response = await importController.createImportJob(requestContext);
@@ -233,10 +249,12 @@ describe('ImportController tests', () => {
         createImportJob({
           ...exampleJob,
           importQueueId: 'spacecat-import-queue-1',
+          apiKey: '50E8BD06-20AD-46FE-8D80-382DDF24E982', // Queue is in use by another API key
         }),
         createImportJob({
           ...exampleJob,
           importQueueId: 'spacecat-import-queue-2',
+          apiKey: '8B68CCE5-9A56-4952-9413-ED796135937A', // Queue is in use by another API key
         }),
       ]);
       importController = ImportController(context);
@@ -294,6 +312,32 @@ describe('ImportController tests', () => {
         saveAsDocs: true,
         transformationFileUrl: 'https://example.com/transform.js',
       });
+    });
+
+    it('should fail when the number of URLs exceeds the maximum allowed', async () => {
+      requestContext.data.urls = [
+        'https://example.com/page1',
+        'https://example.com/page2',
+        'https://example.com/page3',
+        'https://example.com/page4',
+      ];
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (4) exceeds the maximum allowed (3)');
+    });
+
+    it('should fail when the number of URLs exceeds the (default) maximum allowed', async () => {
+      delete importConfiguration.maxUrlsPerJob; // Should fall back to 1
+      context.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+      importController = ImportController(context);
+
+      requestContext.data.urls = [
+        'https://example.com/page1',
+        'https://example.com/page2',
+      ];
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
     });
   });
 
