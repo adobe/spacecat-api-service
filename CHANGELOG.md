@@ -1,3 +1,10 @@
+## [1.57.1](https://github.com/adobe/spacecat-api-service/compare/v1.57.0...v1.57.1) (2024-07-25)
+
+
+### Bug Fixes
+
+* configuration api endpoints ([a9cddd9](https://github.com/adobe/spacecat-api-service/commit/a9cddd983e21e77f868522e8df68a42db20093fa))
+
 # [1.57.0](https://github.com/adobe/spacecat-api-service/compare/v1.56.1...v1.57.0) (2024-07-24)
 
 
