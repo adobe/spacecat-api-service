@@ -46,6 +46,27 @@ describe('Configurations Controller', () => {
         type: 'cwv',
         interval: 'daily',
       }],
+      handlers: {
+        404: {
+          disabled: {
+            sites: ['site1'],
+            orgs: ['org1', 'org2'],
+          },
+          enabledByDefault: true,
+          dependencies: [],
+        },
+        'broken-backlinks': {
+          enabledByDefault: false,
+          enabled: {
+            sites: ['site2'],
+            orgs: ['org2'],
+          },
+          dependencies: [],
+        },
+        cwv: {
+          enabledByDefault: true,
+        },
+      },
       queues: {
         reports: 'sqs://some-reports-queue',
         audits: 'sqs://some-audits-queue',
