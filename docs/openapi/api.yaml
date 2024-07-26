@@ -113,11 +113,11 @@ paths:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'
-  /tools/import:
+  /tools/import/jobs:
     $ref: './tools-api.yaml#/import'
-  /tools/import/{jobId}:
+  /tools/import/jobs/{jobId}:
     $ref: './tools-api.yaml#/import-job-status'
-  /tools/import/{jobId}/result:
+  /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
 
 components:
