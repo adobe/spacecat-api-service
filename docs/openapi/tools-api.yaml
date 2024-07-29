@@ -4,13 +4,12 @@ import:
       - import
     summary: Create a new import job
     description: |
-      Note: Not implemented yet.
-      
       This endpoint can be used to start a new import job with a set of URLs, import API key,
       and an optional import.js mapping file. The import job will be processed asynchronously and 
-      the status of the job can be queried at the /tools/import/{jobId} endpoint. If there is no 
+      the status of the job can be queried at the /tools/import/jobs/{jobId} endpoint. If there is no 
       import queue available at the time of the request, a 503 Service Unavailable response will 
-      be returned.
+      be returned. A single import job per client is permitted, otherwise a 429 Too Many Requests
+      response will be returned.
     operationId: startImportJob
     security:
       - api_key: [ ]
@@ -49,8 +48,6 @@ import-job-status:
       - import
     summary: Query the status of an import job
     description: |
-      Note: Not implemented yet.
-      
       This endpoint can be used to query the status of an import job, given its jobId.
     operationId: getImportJobStatus
     security:
@@ -79,13 +76,11 @@ import-job-status:
       '500':
         $ref: './responses.yaml#/500'
 import-job-result:
-  get:
+  post:
     tags:
       - import
     summary: Request a pre-signed URL to download the result of an import job as a .zip archive
     description: |
-      Note: Not implemented yet.
-      
       This endpoint can be used to download an archive of an import job, which will include
       all the resulting documents that were generated as part of the import. It will also 
       include the import-report.xlsx file, which contains a summary of the import job.
