@@ -1,3 +1,10 @@
+# [1.58.0](https://github.com/adobe/spacecat-api-service/compare/v1.57.2...v1.58.0) (2024-07-29)
+
+
+### Features
+
+* Import API endpoint updates ([#415](https://github.com/adobe/spacecat-api-service/issues/415)) ([b3a3894](https://github.com/adobe/spacecat-api-service/commit/b3a38944029042e87848026d7dc6afecc8697fd9))
+
 ## [1.57.2](https://github.com/adobe/spacecat-api-service/compare/v1.57.1...v1.57.2) (2024-07-27)
 
 
