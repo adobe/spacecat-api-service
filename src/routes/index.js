@@ -111,9 +111,9 @@ export default function getRouteHandlers(
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
-    'POST /tools/import': importController.createImportJob,
-    'GET /tools/import/:jobId': importController.getImportJobStatus,
-    'GET /tools/import/:jobId/result': importController.getImportJobResult,
+    'POST /tools/import/jobs': importController.createImportJob,
+    'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
+    'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
   };
 
   // Initialization of static and dynamic routes

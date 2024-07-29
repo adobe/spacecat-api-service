@@ -1046,7 +1046,7 @@ ImportOptions:
     pageLoadTimeoutMs:
       description: The time in milliseconds to wait for the page to load
       type: integer
-    enableJavaScript:
+    enableJavascript:
       description: Whether to enable JavaScript on the page
       type: boolean
     scrollToBottom:
@@ -1084,12 +1084,12 @@ ImportJobRequest:
       - 'https://example.com/en/page1'
       - 'https://example.com/fr/page2'
     options:
-      enableJavaScript: true
+      enableJavascript: true
       scrollToBottom: true
 ImportJobStatus:
   type: object
   properties:
-    jobId:
+    id:
       description: The ID of the import job
       $ref: '#/Id'
     status:
@@ -1115,7 +1115,7 @@ ImportJobStatus:
       description: The number of URLs that failed to import
       type: integer
   example:
-    jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
     status: 'RUNNING'
     startTime: '2024-01-19T14:20:30Z'
     urlCount: 25
