@@ -16,6 +16,8 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 
 import nock from 'nock';
+import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 import trigger, { INITIAL_SITEMAP_SLACK_MESSAGE } from '../../../src/controllers/trigger/sitemap.js';
 import { getQueryParams } from '../../../src/utils/slack/base.js';
 
@@ -29,28 +31,32 @@ describe('Sitemap trigger', () => {
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
-
-    sites = [{
+    const configuration = {
+      isHandlerEnabledForSite: sandbox.stub().resolves(true),
+      isHandlerEnabledForOrganization: sandbox.stub().resolves(true),
+    };
+    sites = [createSite({
       id: 'site1',
       baseURL: 'http://site1.com',
-      getOrganizationId: () => 'org123',
-    },
-    {
+      organizationId: 'org123',
+    }),
+    createSite({
       id: 'site2',
       baseURL: 'http://site2.com',
-      getOrganizationId: () => 'org123',
-    },
+      getOrganizationId: 'org123',
+    }),
     ];
 
     orgs = [
-      {
-        getId: () => 'org123',
+      createOrganization({
+        id: 'org123',
         name: 'ABCD',
-      }];
+      })];
 
     dataAccessMock = {
       getOrganizations: sandbox.stub().resolves(orgs),
       getSitesByDeliveryType: sandbox.stub(),
+      getConfiguration: sandbox.stub().resolves(configuration),
     };
 
     sqsMock = {
@@ -85,28 +91,12 @@ describe('Sitemap trigger', () => {
         channel: 'DSA',
         ts: 'ts1',
       });
-    for (const site of sites) {
-      site.getAuditConfig = sinon.stub().returns({
-        auditsDisabled: sinon.stub().returns(true),
-        getAuditTypeConfig: sinon.stub().returns({
-          disabled: sinon.stub().returns(false),
-        }),
-      });
-    }
-    for (const org of orgs) {
-      org.getAuditConfig = sinon.stub().returns({
-        auditsDisabled: sinon.stub().returns(true),
-        getAuditTypeConfig: sinon.stub().returns({
-          disabled: sinon.stub().returns(false),
-        }),
-      });
-    }
 
     const response = await trigger(context);
     const result = await response.json();
 
     expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
-    expect(sqsMock.sendMessage.callCount).to.be.greaterThanOrEqual(0);
+    expect(sqsMock.sendMessage.callCount).to.equal(2);
     expect(result.message[0]).to.be.contain([]);
   });
 });

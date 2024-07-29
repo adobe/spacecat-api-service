@@ -46,32 +46,31 @@ EmailAddress:
   format: email
   example: 'user@example.com'
 SlackMentionConfig:
+    type: object
+    properties:
+      slack:
+        type: array
+        items:
+          type: string
+HandlerConfig:
   type: object
-  additionalProperties: true
+  additionalProperties: false
   properties:
-    slack:
+    mentions:
+      $ref: '#/SlackMentionConfig'
+    excludedURLs:
+      description: URLs to be excluded from the handler's processing
       type: array
       items:
         type: string
-AlertConfig:
-  type: object
-  additionalProperties: true
-  properties:
-    type:
-      description: The type of the alert
-      type: string
-    byOrg:
-      description: Whether the alert should be sent by organization
-      type: boolean
-    mentions:
-      description: The Slack mentions to include in the alert
-      type: array
-      items:
-        $ref: '#/SlackMentionConfig'
-AlertsConfig:
-  type: array
-  items:
-    $ref: '#/AlertConfig'
+        format: uri
+  patternProperties:
+    "^(404|broken-backlinks)$":
+      type: object
+      properties:
+        mentions:
+          $ref: '#/SlackMentionConfig'
+        # Define other properties specific to the alert type here
 SlackConfig:
   type: object
   additionalProperties: true
@@ -99,9 +98,9 @@ Config:
     slack:
       description: Optional. The Slack configuration
       $ref: '#/SlackConfig'
-    alerts:
+    handlers:
       description: Optional. The Alert configuration
-      $ref: '#/AlertsConfig'
+      $ref: '#/HandlerConfig'
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -138,17 +137,17 @@ Organization:
         channel: '#example-channel'
         workspace: 'example-workspace'
         invitedUserCount: 5
-      alerts:
-        - type: '404'
+      handlers:
+        '404':
           byOrg: true
           mentions:
-            - slack:
+            slack:
                 - '@user1'
                 - '@user2'
-        - type: 'cwv'
+        'cwv':
           byOrg: false
           mentions:
-            - slack:
+            slack:
                 - '@user5'
                 - '@user6'
     createdAt: '2023-12-15T09:30:00Z'
@@ -178,17 +177,16 @@ OrganizationCreate:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
+      handlers:
+        '404':
           mentions:
-            - slack:
+            slack:
                 - '@user3'
                 - '@user4'
-        - type: 'cwv'
+        'cwv':
           byOrg: false
           mentions:
-            - slack:
+            slack:
                 - '@user5'
                 - '@user6'
 OrganizationUpdate:
@@ -210,19 +208,17 @@ OrganizationUpdate:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
-          mentions:
-            - slack:
-                - '@user1'
-                - '@user2'
-        - type: 'cwv'
-          byOrg: false
-          mentions:
-            - slack:
-                - '@user5'
-                - '@user6'
+        handlers:
+          '404':
+            mentions:
+              slack:
+                  - '@user3'
+                  - '@user4'
+          'cwv':
+            mentions:
+              slack:
+                  - '@user5'
+                  - '@user6'
 Site:
   type: object
   properties:
@@ -245,9 +241,6 @@ Site:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
     config:
       description: Optional. The configuration of the site. May override the organization configuration.
       $ref: '#/SiteConfig'
@@ -264,30 +257,27 @@ Site:
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
-    auditConfig:
-      auditsDisabled: false
-      auditTypeConfigs:
-        '404':
-          disabled: true
-        'cwv':
-          disabled: false
     config:
       slack:
         channel: 'C1234567890'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
+      handlers:
+        '404':
           mentions:
-            - slack:
+            slack:
                 - '@user1'
                 - '@user2'
-        - type: 'cwv'
-          byOrg: false
+        'broken-backlinks':
           mentions:
-            - slack:
+            slack:
                 - '@user5'
                 - '@user6'
+          excludedURLs:
+             description: URLs to be excluded from the alert
+             type: array
+             items:
+               type: string
+               format: uri'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -307,13 +297,6 @@ SiteWithLatestAudit:
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
-    auditConfig:
-      auditsDisabled: false
-      auditTypeConfigs:
-        '404':
-          disabled: true
-        'cwv':
-          disabled: false
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
     audits:
@@ -359,9 +342,6 @@ SiteCreate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
   example:
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://www.newsite.com'
@@ -379,9 +359,6 @@ SiteUpdate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
     config:
       description: Optional. The configuration of the site
       $ref: '#/SiteConfig'
@@ -389,23 +366,7 @@ SiteUpdate:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
     goLiveDate: '2024-01-20T10:00:00Z'
-AuditConfigType:
-  type: object
-  properties:
-    disabled:
-      description: Whether audits are disabled for the given audit type
-      type: boolean
-    excludedURLs:
-      description: (Optional) Set of urls to exclude. If empty, will remove previously excluded URLs. It's an array of strings
-      type: array
-      items:
-        type: string
-  example:
-    disabled: true
-    excludedURLs:
-      - 'https://www.adobe.com/some-page'
-      - 'https://www.adobe.com/another-page'
-UpdateAuditConfigType:
+UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
@@ -417,23 +378,6 @@ UpdateAuditConfigType:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
-AuditConfig:
-  type: object
-  properties:
-    auditsDisabled:
-      description: Whether audits are disabled for this site
-      type: boolean
-    auditTypeConfigs:
-      type: object
-      additionalProperties:
-        $ref: '#/AuditConfigType'
-  example:
-    auditsDisabled: false
-    auditTypeConfigs:
-      '404':
-        disabled: true
-      'cwv':
-        disabled: false
 Audit:
   type: object
   readOnly: true
@@ -447,10 +391,6 @@ Audit:
     expiresAt:
       description: The date and time when the audit expires in ISO 8601 format
       $ref: '#/DateTime'
-    auditType:
-      description: The type of the audit
-      $ref: '#/AuditType'
-    isError:
       type: boolean
     deliveryType:
       description: The type of the delivery this site is using
@@ -920,6 +860,152 @@ SiteTopPageList:
   type: array
   items:
     $ref: './schemas.yaml#/SiteTopPage'
+SiteExperimentVariant:
+  type: object
+  properties:
+    name:
+      description: The name of the variant
+      type: string
+    label:
+      description: The label of the variant
+      type: string
+    split:
+      description: The split allocation of the traffic to the variant
+      type: number
+    url:
+      description: The url of the variant
+      $ref: '#/URL'
+    views:
+      description: The number of views for the variant
+      type: integer
+    interactionsCount:
+      description: The interactions count for the variant
+      type: integer
+    p_value:
+      description: The p-value of the variant for the configured metric or clicks
+      type: number
+    power:
+      description: The power of the variant for the configured metric or clicks
+      type: number
+    statsig:
+      description: The statistical significance of the variant based on the configured metric or clicks
+      type: boolean
+    metrics:
+      description: The metrics for the variant
+      type: array
+      items:
+        type: object
+        properties:
+          selector:
+            description: The css selector of the element on which the interaction was performed
+            type: string
+          value:
+            description: The value of the metric on the selector
+            type: number
+          type:
+            description: The type of the metric
+            type: string
+            enum:
+              - 'click'
+              - 'convert'
+              - 'formsubmit'
+  example:
+    name: 'challenger-1'
+    label: 'Challenger 1'
+    split: 0.5
+    url: 'https://example-site.com/foo/bar'
+    views: 1000
+    interactionsCount: 200
+    p_value: 0.04
+    power: 97.6
+    statsig: true
+    metrics:
+      - selector: '.add-to-cart'
+        value: 10
+        type: 'click'
+SiteExperiment:
+  type: object
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    experimentId:
+      description: The ID of the experiment
+      type: string
+    name:
+      description: The name of the experiment
+      type: string
+    url:
+      description: The URL of the experiment
+      $ref: '#/URL'
+    status:
+      description: The status of the experiment
+      type: string
+      enum:
+        - 'ACTIVE'
+        - 'COMPLETE'
+        - 'INACTIVE'
+    type:
+      description: The type of the experiment
+      type: string
+      enum:
+        - 'FULL'
+        - 'AB'
+        - 'MAB'
+    startDate:
+      description: The start date and time of the experiment
+      $ref: '#/DateTime'
+    endDate:
+      description: The end date and time of the experiment
+      $ref: '#/DateTime'
+    variants:
+      description: The variants of the experiment
+      type: array
+      items:
+        $ref: './schemas.yaml#/SiteExperimentVariant'
+    updatedAt:
+      description: The date and time when the experiment was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: The user/entity who last updated the experiment
+      type: string
+    conversionEventName:
+      description: The name of the conversion event
+      type: string
+    conversionEventValue:
+      description: The name of conversion event value
+      type: string
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    experimentId: '1012-home-page-optimization'
+    name: '1012 Home Page Optimization'
+    url: 'https://example-site.com/foo/bar'
+    type: 'AB'
+    status: 'ACTIVE'
+    startDate: '2024-04-29T15:14:33.653Z'
+    endDate: '2024-05-29T15:14:33.653Z'
+    variants:
+      - name: 'challenger-1'
+        label: 'Challenger 1'
+        split: 0.5
+        url: 'https://example-site.com/foo/bar'
+        views: 1000
+        interactionsCount: 200
+        p_value: 0.04
+        power: 97.6
+        statsig: true
+        metrics:
+          - selector: '.add-to-cart'
+            value: 10
+            type: 'click'
+    updatedAt: '2024-05-31T15:14:33.653Z'
+    updatedBy: 'admin'
+    conversionEventName: 'click'
+    conversionEventValue: '.add-to-cart'
+SiteExperimentList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/SiteExperiment'
 SiteMetric:
   type: object
   required:

@@ -79,17 +79,9 @@ describe('Index Tests', () => {
           getCreatedAt: () => '2023-12-16T09:21:09.000Z',
           getUpdatedAt: () => '2023-12-16T09:21:09.000Z',
           getConfig: () => ({
-            audits: {
-              auditsDisabled: () => false,
-              getAuditTypeConfigs: () => ({
-                404: {
-                  disabled: () => false,
-                  getExcludedURLs: () => [],
-                  getManualOverwrites: () => [],
-                  getFixedURLs: () => [],
-                },
-              }),
-            },
+            getSlackConfig: () => {},
+            getHandlers: () => {},
+            getImports: () => [],
           }),
         }),
         getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),

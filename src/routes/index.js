@@ -47,6 +47,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} hooksController - The hooks controller.
  * @param {Object} organizationsController - The organizations controller.
  * @param {Object} sitesController - The sites controller.
+ * @param {Object} experimentsController - The experiments controller.
  * @param {Object} slackController - The slack controller.
  * @param {Function} triggerHandler - The trigger handler function.
  * @param {Object} fulfillmentController - The fulfillment controller.
@@ -59,6 +60,7 @@ export default function getRouteHandlers(
   hooksController,
   organizationsController,
   sitesController,
+  experimentsController,
   slackController,
   triggerHandler,
   fulfillmentController,
@@ -97,6 +99,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
+    'GET /sites/:siteId/experiments': experimentsController.getExperiments,
     'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
     'POST /sites/:siteId/key-events': sitesController.createKeyEvent,
     'DELETE /sites/:siteId/key-events/:keyEventId': sitesController.removeKeyEvent,

@@ -38,6 +38,7 @@ import matchPath, { sanitizePath } from './utils/route-utils.js';
 import AuditsController from './controllers/audits.js';
 import OrganizationsController from './controllers/organizations.js';
 import SitesController from './controllers/sites.js';
+import ExperimentsController from './controllers/experiments.js';
 import HooksController from './controllers/hooks.js';
 import SlackController from './controllers/slack.js';
 import trigger from './controllers/trigger.js';
@@ -101,6 +102,7 @@ async function run(request, context) {
       HooksController(context),
       OrganizationsController(context.dataAccess, context.env),
       SitesController(context.dataAccess, log),
+      ExperimentsController(context.dataAccess),
       SlackController(SlackApp),
       trigger,
       FulfillmentController(context),

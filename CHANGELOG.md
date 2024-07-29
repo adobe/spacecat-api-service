@@ -1,3 +1,46 @@
+## [1.57.2](https://github.com/adobe/spacecat-api-service/compare/v1.57.1...v1.57.2) (2024-07-27)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#416](https://github.com/adobe/spacecat-api-service/issues/416)) ([486a4bb](https://github.com/adobe/spacecat-api-service/commit/486a4bb38fc0981d074dffd15b8bb81178602f83))
+
+## [1.57.1](https://github.com/adobe/spacecat-api-service/compare/v1.57.0...v1.57.1) (2024-07-25)
+
+
+### Bug Fixes
+
+* configuration api endpoints ([a9cddd9](https://github.com/adobe/spacecat-api-service/commit/a9cddd983e21e77f868522e8df68a42db20093fa))
+
+# [1.57.0](https://github.com/adobe/spacecat-api-service/compare/v1.56.1...v1.57.0) (2024-07-24)
+
+
+### Features
+
+* experiment API ([#412](https://github.com/adobe/spacecat-api-service/issues/412)) ([0787e17](https://github.com/adobe/spacecat-api-service/commit/0787e17c4e7eca4d057b870345f929d483d34eb5))
+
+## [1.56.1](https://github.com/adobe/spacecat-api-service/compare/v1.56.0...v1.56.1) (2024-07-24)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#408](https://github.com/adobe/spacecat-api-service/issues/408)) ([dfd1dcc](https://github.com/adobe/spacecat-api-service/commit/dfd1dccba6f5bcf91e6bc24156c3397561bec687))
+
+# [1.56.0](https://github.com/adobe/spacecat-api-service/compare/v1.55.2...v1.56.0) (2024-07-24)
+
+
+### Features
+
+* use new config model ([fcd15a5](https://github.com/adobe/spacecat-api-service/commit/fcd15a595535da802516037eb1c2ffa7b4c2efdc))
+
+## [1.55.2](https://github.com/adobe/spacecat-api-service/compare/v1.55.1...v1.55.2) (2024-07-24)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#406](https://github.com/adobe/spacecat-api-service/issues/406)) ([1155c78](https://github.com/adobe/spacecat-api-service/commit/1155c78bd4db5186d3ae1d91833d0dd1abad7000))
+* update node 20.15.1 ([#411](https://github.com/adobe/spacecat-api-service/issues/411)) ([cd5735b](https://github.com/adobe/spacecat-api-service/commit/cd5735b2dbf37173bd6c9dfec6998549c09b6db6))
+
 ## [1.55.1](https://github.com/adobe/spacecat-api-service/compare/v1.55.0...v1.55.1) (2024-07-19)
 
 

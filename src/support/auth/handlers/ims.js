@@ -11,7 +11,12 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
+import {
+  createLocalJWKSet,
+  createRemoteJWKSet,
+  decodeJwt,
+  jwtVerify,
+} from 'jose';
 
 import configProd from './config/ims.js';
 import configDev from './config/ims-stg.js';
@@ -37,6 +42,7 @@ const loadConfig = (context) => {
   const funcVersion = context.func?.version;
   const isDev = /^ci\d*$/i.test(funcVersion);
   context.log.debug(`Function version: ${funcVersion} (isDev: ${isDev})`);
+  /* c8 ignore next */
   return isDev ? configDev : configProd;
 };
 
@@ -67,7 +73,10 @@ export default class AdobeImsHandler extends AbstractHandler {
 
   async #getJwksUri(config) {
     if (!this.jwksCache) {
-      this.jwksCache = createRemoteJWKSet(new URL(config.discovery.jwks_uri));
+      /* c8 ignore next 3 */
+      this.jwksCache = config.discovery.jwks
+        ? createLocalJWKSet(config.discovery.jwks)
+        : createRemoteJWKSet(new URL(config.discovery.jwks_uri));
     }
 
     return this.jwksCache;

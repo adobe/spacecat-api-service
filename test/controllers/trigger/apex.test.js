@@ -32,6 +32,9 @@ describe('Apex trigger', () => {
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
+    const configuration = {
+      isHandlerEnabledForSite: sandbox.stub().resolves(true),
+    };
 
     sites = [
       createSite({
@@ -55,6 +58,7 @@ describe('Apex trigger', () => {
     dataAccessMock = {
       getOrganizations: sandbox.stub().resolves(orgs),
       getSitesByDeliveryType: sandbox.stub(),
+      getConfiguration: sandbox.stub().resolves(configuration),
     };
 
     sqsMock = {
