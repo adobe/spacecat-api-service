@@ -88,6 +88,12 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-max-scrape-urls-exceeded':
+  description: |
+    Bad request. The maximum number of URLs that can be scraped in a single request is 10.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '401':
   description: Not authenticated.
 '404':
