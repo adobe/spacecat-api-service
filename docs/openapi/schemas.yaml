@@ -45,12 +45,12 @@ EmailAddress:
   format: email
   example: 'user@example.com'
 SlackMentionConfig:
-    type: object
-    properties:
-      slack:
-        type: array
-        items:
-          type: string
+  type: object
+  properties:
+    slack:
+      type: array
+      items:
+        type: string
 HandlerConfig:
   type: object
   additionalProperties: false
@@ -141,14 +141,14 @@ Organization:
           byOrg: true
           mentions:
             slack:
-                - '@user1'
-                - '@user2'
+              - '@user1'
+              - '@user2'
         'cwv':
           byOrg: false
           mentions:
             slack:
-                - '@user5'
-                - '@user6'
+              - '@user5'
+              - '@user6'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 OrganizationList:
@@ -180,14 +180,14 @@ OrganizationCreate:
         '404':
           mentions:
             slack:
-                - '@user3'
-                - '@user4'
+              - '@user3'
+              - '@user4'
         'cwv':
           byOrg: false
           mentions:
             slack:
-                - '@user5'
-                - '@user6'
+              - '@user5'
+              - '@user6'
 OrganizationUpdate:
   type: object
   properties:
@@ -211,13 +211,13 @@ OrganizationUpdate:
           '404':
             mentions:
               slack:
-                  - '@user3'
-                  - '@user4'
+                - '@user3'
+                - '@user4'
           'cwv':
             mentions:
               slack:
-                  - '@user5'
-                  - '@user6'
+                - '@user5'
+                - '@user6'
 Site:
   type: object
   properties:
@@ -264,19 +264,19 @@ Site:
         '404':
           mentions:
             slack:
-                - '@user1'
-                - '@user2'
+              - '@user1'
+              - '@user2'
         'broken-backlinks':
           mentions:
             slack:
-                - '@user5'
-                - '@user6'
+              - '@user5'
+              - '@user6'
           excludedURLs:
-             description: URLs to be excluded from the alert
-             type: array
-             items:
-               type: string
-               format: uri'
+            description: URLs to be excluded from the alert
+            type: array
+            items:
+              type: string
+              format: uri'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -390,7 +390,6 @@ Audit:
     expiresAt:
       description: The date and time when the audit expires in ISO 8601 format
       $ref: '#/DateTime'
-      type: boolean
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
@@ -1132,3 +1131,89 @@ ImportJobArchive:
   example:
     jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
     downloadUrl: 'https://spacecat-example-bucket.s3.example-region.amazonaws.com/import/12d6ac8e-d5e4-4788-90eb-b69e10e745fd/import-result.zip?X-Amz-Algorithm=AWS...'
+ScrapeRequest:
+  type: object
+  required:
+    - urls
+  properties:
+    urls:
+      description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
+      type: array
+      items:
+        $ref: '#/URL'
+      example:
+        - 'https://example.com/en/page1'
+        - 'https://example.com/fr/page2'
+ScrapeResponse:
+  type: object
+  properties:
+    id:
+      description: The ID of the scrape job
+      $ref: '#/Id'
+    status:
+      description: The status of the scrape job
+      type: string
+      enum:
+        - 'COMPLETE'
+        - 'FAILED'
+    startTime:
+      description: The date and time when the scrape job started
+      $ref: '#/DateTime'
+    endTime:
+      description: The date and time when the scrape job ended, if finished
+      $ref: '#/DateTime'
+    urlCount:
+      description: The total number of URLs in the job
+      type: integer
+    successCount:
+      description: The number of URLs successfully scraped
+      type: integer
+    failedCount:
+      description: The number of URLs that failed to scrape
+      type: integer
+    results:
+      description: The scrape results
+      type: array
+      items:
+        $ref: '#/ScrapeResult'
+  example:
+    id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    status: 'COMPLETE'
+    startTime: '2024-01-19T14:20:30Z'
+    urlCount: 10
+    successCount: 9
+    failedCount: 1
+    results:
+      - url: 'https://example.com/en/page1'
+        status: 'COMPLETE'
+        content: '...'
+      - url: 'https://example.com/fr/page2'
+        status: 'FAILED'
+        error: '...'
+ScrapeResult:
+  type: array
+  items:
+    type: object
+    properties:
+      url:
+        description: The URL of the scraped page
+        $ref: '#/URL'
+      status:
+        description: The status of the scrape job
+        type: string
+        enum:
+          - 'COMPLETE'
+          - 'FAILED'
+      content:
+        description: The content of the scraped page
+        type: string
+      error:
+        description: The error message if the scrape failed
+        type: string
+    example:
+      - url: 'https://example.com/en/page1'
+        status: 'COMPLETE'
+        content: '<body>...</body>'
+      - url: 'https://example.com/fr/page2'
+        status: 'FAILED'
+        error: 'Timeout'

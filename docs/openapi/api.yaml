@@ -43,6 +43,8 @@ tags:
     description: Slack channel management
   - name: import
     description: APIs for importing content to Edge Delivery Services
+  - name: scrape
+    description: APIs for scraping web pages
 
 paths:
   /audits/latest/{auditType}:
@@ -73,6 +75,8 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /scrape:
+    $ref: './scrape-api.yaml#/scrape'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:
