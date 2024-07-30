@@ -1,3 +1,10 @@
+## [1.59.1](https://github.com/adobe/spacecat-api-service/compare/v1.59.0...v1.59.1) (2024-07-30)
+
+
+### Bug Fixes
+
+* move auth code to http-utils ([#420](https://github.com/adobe/spacecat-api-service/issues/420)) ([b1b304c](https://github.com/adobe/spacecat-api-service/commit/b1b304c936a4a83f937f55f4bece2c8c8f6c96bd))
+
 # [1.59.0](https://github.com/adobe/spacecat-api-service/compare/v1.58.0...v1.59.0) (2024-07-30)
 
 
