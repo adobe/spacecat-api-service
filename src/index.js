@@ -20,6 +20,10 @@ import {
   internalServerError,
   noContent,
   notFound,
+  authWrapper,
+  enrichPathInfo,
+  LegacyApiKeyHandler,
+  AdobeImsHandler,
 } from '@adobe/spacecat-shared-http-utils';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
@@ -28,9 +32,6 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
-import auth from './support/auth/auth-wrapper.js';
-import LegacyApiKeyHandler from './support/auth/handlers/legacy-api-key.js';
-import AdobeImsHandler from './support/auth/handlers/ims.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
@@ -53,21 +54,6 @@ import { s3ClientWrapper } from './support/s3.js';
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
-
-export function enrichPathInfo(fn) { // export for testing
-  return async (request, context) => {
-    const [_, route] = context?.pathInfo?.suffix?.split(/\/+/) || [];
-    context.pathInfo = {
-      ...context.pathInfo,
-      ...{
-        method: request.method.toUpperCase(),
-        headers: request.headers.plain(),
-        route,
-      },
-    };
-    return fn(request, context);
-  };
-}
 
 /**
  * This is the main function
@@ -139,7 +125,7 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
   .with(dataAccess)
-  .with(auth, { authHandlers: [LegacyApiKeyHandler, AdobeImsHandler] })
+  .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, AdobeImsHandler] })
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
