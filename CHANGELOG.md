@@ -1,3 +1,10 @@
+# [1.59.0](https://github.com/adobe/spacecat-api-service/compare/v1.58.0...v1.59.0) (2024-07-30)
+
+
+### Features
+
+* canonical url audit ([#410](https://github.com/adobe/spacecat-api-service/issues/410)) ([402b7ba](https://github.com/adobe/spacecat-api-service/commit/402b7bafdf62ce1e32c58111fa77b4de61036396))
+
 # [1.58.0](https://github.com/adobe/spacecat-api-service/compare/v1.57.2...v1.58.0) (2024-07-29)
 
 
