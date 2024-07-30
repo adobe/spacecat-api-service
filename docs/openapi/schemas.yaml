@@ -24,8 +24,8 @@ AuditType:
     - 'lhs-desktop'
     - 'lhs-mobile'
     - 'broken-backlinks'
-    - 'sitemap'
     - 'canonical'
+    - 'sitemap'
   example: 'cwv'
 URL:
   type: string
