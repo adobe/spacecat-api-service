@@ -1,0 +1,28 @@
+scrape:
+  post:
+    summary: Scrape a set of URLs
+    description: |
+      Warning: prototype endpoint. 
+      This endpoint allows you to scrape a set of URLs. The URLs are scraped in parallel and the results are returned in the same order as the input.
+      The maximum number of URLs that can be scraped in a single request is 10.
+    operationId: scrape
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/ScrapeRequest'
+    responses:
+      '200':
+        description: A list of scrape results
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ScrapeResponse'
+      '400':
+        $ref: './responses.yaml#/400-max-scrape-urls-exceeded'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

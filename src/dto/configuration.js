@@ -26,6 +26,7 @@ export const ConfigurationDto = {
     const configurationData = {
       version: jsonObject.version,
       jobs: jsonObject.jobs,
+      ...(jsonObject.handlers ? { handlers: jsonObject.handlers } : {}),
       queues: jsonObject.queues,
     };
 
@@ -41,6 +42,7 @@ export const ConfigurationDto = {
   toJSON: (configuration) => ({
     version: configuration.getVersion(),
     jobs: configuration.getJobs(),
+    ...(configuration.getHandlers() ? { handlers: configuration.getHandlers() } : {}),
     queues: configuration.getQueues(),
   }),
 };
