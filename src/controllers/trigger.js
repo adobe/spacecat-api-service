@@ -15,6 +15,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { badRequest } from '@adobe/spacecat-shared-http-utils';
 import apex from './trigger/apex.js';
 import cwv from './trigger/cwv.js';
+import canonical from './trigger/canonical.js';
 import sitemap from './trigger/sitemap.js';
 import backlinks from './trigger/backlinks.js';
 import organictraffic from './trigger/organictraffic.js';
@@ -22,6 +23,7 @@ import organictraffic from './trigger/organictraffic.js';
 const AUDITS = {
   apex,
   cwv,
+  canonical,
   sitemap,
   'broken-backlinks': backlinks,
   'organic-traffic': organictraffic,

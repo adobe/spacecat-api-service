@@ -1,3 +1,24 @@
+## [1.59.2](https://github.com/adobe/spacecat-api-service/compare/v1.59.1...v1.59.2) (2024-07-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.5.2 ([#421](https://github.com/adobe/spacecat-api-service/issues/421)) ([571402e](https://github.com/adobe/spacecat-api-service/commit/571402eab7dcb7a26a97dc4fd4a021935988df44))
+
+## [1.59.1](https://github.com/adobe/spacecat-api-service/compare/v1.59.0...v1.59.1) (2024-07-30)
+
+
+### Bug Fixes
+
+* move auth code to http-utils ([#420](https://github.com/adobe/spacecat-api-service/issues/420)) ([b1b304c](https://github.com/adobe/spacecat-api-service/commit/b1b304c936a4a83f937f55f4bece2c8c8f6c96bd))
+
+# [1.59.0](https://github.com/adobe/spacecat-api-service/compare/v1.58.0...v1.59.0) (2024-07-30)
+
+
+### Features
+
+* canonical url audit ([#410](https://github.com/adobe/spacecat-api-service/issues/410)) ([402b7ba](https://github.com/adobe/spacecat-api-service/commit/402b7bafdf62ce1e32c58111fa77b4de61036396))
+
 # [1.58.0](https://github.com/adobe/spacecat-api-service/compare/v1.57.2...v1.58.0) (2024-07-29)
 
 
