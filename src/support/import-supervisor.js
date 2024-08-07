@@ -249,14 +249,9 @@ function ImportSupervisor(services, config) {
       throw new ErrorWithStatusCode('Not found', 404);
     }
 
-    const metadata = await getApiKeyMetadata(importApiKey);
-    if (!metadata) {
-      throw new ErrorWithStatusCode('Server error', 500);
-    }
+    const apiKeyMetadata = await getApiKeyMetadata(importApiKey);
 
-    job = { ...job, metadata };
-
-    return job;
+    return { ...job, metadata: apiKeyMetadata || {} };
   }
 
   /**
