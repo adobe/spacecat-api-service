@@ -214,27 +214,6 @@ function ImportSupervisor(services, config) {
   }
 
   /**
-   * Get an import job from the data layer. Verifies the API key to ensure it matches the one
-   * used to start the job.
-   * @param {string} jobId - The ID of the job.
-   * @param {string} importApiKey - API key that was provided to start the job.
-   * @returns {Promise<ImportJobDto>}
-   */
-  async function getImportJob(jobId, importApiKey) {
-    if (!hasText(jobId)) {
-      throw new ErrorWithStatusCode('Job ID is required', 400);
-    }
-
-    const job = await dataAccess.getImportJobByID(jobId);
-    // Job must exist, and the import API key must match the one provided
-    if (!job || job.getApiKey() !== importApiKey) {
-      throw new ErrorWithStatusCode('Not found', 404);
-    }
-
-    return job;
-  }
-
-  /**
    * Gets the Api Key metadata based on the hashed key.
    * @param hashedKey
    * @return {Promise<null|{name: *, imsUserId: *, imsOrgId: *}>}
@@ -249,6 +228,35 @@ function ImportSupervisor(services, config) {
       };
     }
     return null;
+  }
+
+  /**
+   * Get an import job from the data layer. Verifies the API key to ensure it matches the one
+   * used to start the job.
+   * @param {string} jobId - The ID of the job.
+   * @param {string} importApiKey - API key that was provided to start the job.
+   * @returns {Promise<ImportJobDto>}
+   */
+  async function getImportJob(jobId, importApiKey) {
+    if (!hasText(jobId)) {
+      throw new ErrorWithStatusCode('Job ID is required', 400);
+    }
+
+    let job = await dataAccess.getImportJobByID(jobId);
+    // TODO: Modify importApiKey to hashedApiKey
+    // Job must exist, and the import API key must match the one provided
+    if (!job || job.getApiKey() !== importApiKey) {
+      throw new ErrorWithStatusCode('Not found', 404);
+    }
+
+    const metadata = await getApiKeyMetadata(importApiKey);
+    if (!metadata) {
+      throw new ErrorWithStatusCode('Server error', 500);
+    }
+
+    job = { ...job, metadata };
+
+    return job;
   }
 
   /**

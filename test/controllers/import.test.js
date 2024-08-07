@@ -370,20 +370,13 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Not found');
     });
 
-    it('should return job details for a valid jobId', async () => {
+    it('should throw server error if metadata is missing', async () => {
       requestContext.params.jobId = exampleJob.id;
       mockDataAccess.getApiKeyByHashedKey.resolves(null);
 
       const response = await importController.getImportJobStatus(requestContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(200);
-      const jobStatus = await response.json();
-      expect(jobStatus.id).to.equal('f91afda0-afc8-467e-bfa3-fdbeba3037e8');
-      expect(jobStatus.apiKey).to.be.undefined;
-      expect(jobStatus.baseURL).to.equal('https://www.example.com');
-      expect(jobStatus.importQueueId).to.equal('spacecat-import-queue-1');
-      expect(jobStatus.status).to.equal('RUNNING');
-      expect(jobStatus.options).to.deep.equal({});
+      expect(response.status).to.equal(500);
     });
 
     it('should return job details with metadata for a valid jobId', async () => {
@@ -400,6 +393,12 @@ describe('ImportController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       const jobStatus = await response.json();
+      expect(jobStatus.id).to.equal('f91afda0-afc8-467e-bfa3-fdbeba3037e8');
+      expect(jobStatus.apiKey).to.be.undefined;
+      expect(jobStatus.baseURL).to.equal('https://www.example.com');
+      expect(jobStatus.importQueueId).to.equal('spacecat-import-queue-1');
+      expect(jobStatus.status).to.equal('RUNNING');
+      expect(jobStatus.options).to.deep.equal({});
       expect(jobStatus.metadata.name).to.equal('Test');
       expect(jobStatus.metadata.imsOrgId).to.equal('Test Org');
     });
@@ -407,8 +406,15 @@ describe('ImportController tests', () => {
 
   describe('getImportJobResult', () => {
     beforeEach(() => {
+      const mockApiKey = {
+        id: 'test-id',
+        hashedKey: 'b9ebcfb5-8989-4236-91ba-d50e361db71d',
+        name: 'Test',
+        imsOrgId: 'Test Org',
+      };
       requestContext.pathInfo.headers['x-import-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
       requestContext.params.jobId = exampleJob.id;
+      mockDataAccess.getApiKeyByHashedKey.resolves(mockApiKey);
     });
 
     it('should fail to fetch the import result for a running job', async () => {
