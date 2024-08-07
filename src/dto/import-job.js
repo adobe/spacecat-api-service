@@ -29,5 +29,6 @@ export const ImportJobDto = {
     successCount: importJob.getSuccessCount(),
     failedCount: importJob.getFailedCount(),
     importQueueId: importJob.getImportQueueId(),
+    metadata: importJob.metadata,
   }),
 };

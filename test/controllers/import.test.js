@@ -71,6 +71,7 @@ describe('ImportController tests', () => {
       createNewImportJob: (data) => createImportJob(data),
       createNewImportUrl: (data) => createImportUrl(data),
       getImportJobByID: sandbox.stub(),
+      getApiKeyByHashedKey: sandbox.stub(),
     };
 
     mockDataAccess.getImportJobByID.callsFake(async (jobId) => {
@@ -371,6 +372,8 @@ describe('ImportController tests', () => {
 
     it('should return job details for a valid jobId', async () => {
       requestContext.params.jobId = exampleJob.id;
+      mockDataAccess.getApiKeyByHashedKey.resolves(null);
+
       const response = await importController.getImportJobStatus(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
@@ -381,6 +384,24 @@ describe('ImportController tests', () => {
       expect(jobStatus.importQueueId).to.equal('spacecat-import-queue-1');
       expect(jobStatus.status).to.equal('RUNNING');
       expect(jobStatus.options).to.deep.equal({});
+    });
+
+    it('should return job details with metadata for a valid jobId', async () => {
+      const mockApiKey = {
+        id: 'test-id',
+        hashedKey: 'b9ebcfb5-8989-4236-91ba-d50e361db71d',
+        name: 'Test',
+        imsOrgId: 'Test Org',
+      };
+      requestContext.params.jobId = exampleJob.id;
+      mockDataAccess.getApiKeyByHashedKey.resolves(mockApiKey);
+
+      const response = await importController.getImportJobStatus(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const jobStatus = await response.json();
+      expect(jobStatus.metadata.name).to.equal('Test');
+      expect(jobStatus.metadata.imsOrgId).to.equal('Test Org');
     });
   });
 

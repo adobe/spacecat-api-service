@@ -138,7 +138,14 @@ function ImportController(context) {
 
     try {
       validateImportApiKey(importApiKey);
-      const job = await importSupervisor.getImportJob(jobId, importApiKey);
+      let job = await importSupervisor.getImportJob(jobId, importApiKey);
+      // TODO: Modify importApiKey to hashedKey
+      const metadata = await importSupervisor.getApiKeyMetadata(importApiKey);
+      if (!metadata) {
+        log.error(`Could not retrieve metadata for the import jobId: ${jobId}`);
+      } else {
+        job = { ...job, metadata };
+      }
       return ok(ImportJobDto.toJSON(job));
     } catch (error) {
       log.error(`Failed to fetch import job status for jobId: ${jobId}, message: ${error.message}`);

@@ -235,6 +235,23 @@ function ImportSupervisor(services, config) {
   }
 
   /**
+   * Gets the Api Key metadata based on the hashed key.
+   * @param hashedKey
+   * @return {Promise<null|{name: *, imsUserId: *, imsOrgId: *}>}
+   */
+  async function getApiKeyMetadata(hashedKey) {
+    const metadata = await dataAccess.getApiKeyByHashedKey(hashedKey);
+    if (metadata) {
+      return {
+        imsOrgId: metadata.imsOrgId,
+        name: metadata.name,
+        imsUserId: metadata.imsUserId,
+      };
+    }
+    return null;
+  }
+
+  /**
    * For COMPLETE jobs, get a pre-signed URL for the import archive file stored in S3.
    * @param {ImportJob} job - The import job.
    * @returns {Promise<string>}
@@ -259,6 +276,7 @@ function ImportSupervisor(services, config) {
     startNewJob,
     getImportJob,
     getJobArchiveSignedUrl,
+    getApiKeyMetadata,
   };
 }
 
