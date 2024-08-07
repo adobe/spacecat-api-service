@@ -139,7 +139,7 @@ function ImportController(context) {
     try {
       validateImportApiKey(importApiKey);
       let job = await importSupervisor.getImportJob(jobId, importApiKey);
-      // TODO: Modify importApiKey to hashedKey
+      // TODO: Modify importApiKey to hashedApiKey
       const metadata = await importSupervisor.getApiKeyMetadata(importApiKey);
       if (!metadata) {
         log.error(`Could not retrieve metadata for the import jobId: ${jobId}`);

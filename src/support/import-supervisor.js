@@ -239,8 +239,8 @@ function ImportSupervisor(services, config) {
    * @param hashedKey
    * @return {Promise<null|{name: *, imsUserId: *, imsOrgId: *}>}
    */
-  async function getApiKeyMetadata(hashedKey) {
-    const metadata = await dataAccess.getApiKeyByHashedKey(hashedKey);
+  async function getApiKeyMetadata(hashedApiKey) {
+    const metadata = await dataAccess.getApiKeyByHashedKey(hashedApiKey);
     if (metadata) {
       return {
         imsOrgId: metadata.imsOrgId,
