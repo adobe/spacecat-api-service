@@ -63,7 +63,9 @@ function ImportSupervisor(services, config) {
 
     // Check that this import API key has capacity to start an import job
     for (const job of runningImportJobs) {
-      if (job.getApiKey() === importApiKey) {
+      // TODO: change it to hashWithSHA256(importApiKey) when the function is available
+      const hashedApiKey = crypto.createHash('sha256').update(importApiKey).digest('hex');
+      if (job.getHashedApiKey() === hashedApiKey) {
         throw new ErrorWithStatusCode(`Too Many Requests: API key ${importApiKey} cannot be used to start any more import jobs`, 429);
       }
     }
@@ -100,7 +102,7 @@ function ImportSupervisor(services, config) {
       baseURL: determineBaseURL(urls),
       importQueueId,
       // TODO: Change it to hashedApiKey once the spacecat-shared PR is merged in
-      apiKey: hashedApiKey,
+      hashedApiKey,
       options,
       urlCount: urls.length,
       status: ImportJobStatus.RUNNING,
