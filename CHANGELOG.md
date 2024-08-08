@@ -1,3 +1,10 @@
+# [1.60.0](https://github.com/adobe/spacecat-api-service/compare/v1.59.6...v1.60.0) (2024-08-08)
+
+
+### Features
+
+* Update spacecat-service to send hashedApiKey during createImportJob ([#431](https://github.com/adobe/spacecat-api-service/issues/431)) ([8afb5ea](https://github.com/adobe/spacecat-api-service/commit/8afb5eacf830b3395d5114e8872ee85652bac087))
+
 ## [1.59.6](https://github.com/adobe/spacecat-api-service/compare/v1.59.5...v1.59.6) (2024-08-06)
 
 
