@@ -12,6 +12,7 @@
 
 import { ImportJobStatus } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import crypto from 'crypto';
 import { ErrorWithStatusCode } from './utils.js';
 
 const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
@@ -62,7 +63,9 @@ function ImportSupervisor(services, config) {
 
     // Check that this import API key has capacity to start an import job
     for (const job of runningImportJobs) {
-      if (job.getApiKey() === importApiKey) {
+      // TODO: change it to hashWithSHA256(importApiKey) when the function is available
+      const hashedApiKey = crypto.createHash('sha256').update(importApiKey).digest('hex');
+      if (job.getHashedApiKey() === hashedApiKey) {
         throw new ErrorWithStatusCode(`Too Many Requests: API key ${importApiKey} cannot be used to start any more import jobs`, 429);
       }
     }
@@ -93,12 +96,13 @@ function ImportSupervisor(services, config) {
    * @param {object} options - Client provided options for the import job.
    * @returns {Promise<ImportJob>}
    */
-  async function createNewImportJob(urls, importQueueId, apiKey, options) {
+  async function createNewImportJob(urls, importQueueId, hashedApiKey, options) {
     const newJob = {
       id: crypto.randomUUID(),
       baseURL: determineBaseURL(urls),
       importQueueId,
-      apiKey,
+      // TODO: Change it to hashedApiKey once the spacecat-shared PR is merged in
+      hashedApiKey,
       options,
       urlCount: urls.length,
       status: ImportJobStatus.RUNNING,
@@ -194,8 +198,12 @@ function ImportSupervisor(services, config) {
     // Determine if there is a free import queue
     const importQueueId = await getAvailableImportQueue(importApiKey);
 
+    // Hash the API Key to ensure it is not stored in plain text
+    // TODO: change it to hashWithSHA256(importApiKey) when the function is available
+    const hashedApiKey = crypto.createHash('sha256').update(importApiKey).digest('hex');
+
     // If a queue is available, create the import-job record in dataAccess:
-    const newImportJob = await createNewImportJob(urls, importQueueId, importApiKey, options);
+    const newImportJob = await createNewImportJob(urls, importQueueId, hashedApiKey, options);
 
     log.info(`New import job created for API key: ${importApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
 
@@ -226,8 +234,13 @@ function ImportSupervisor(services, config) {
     }
 
     const job = await dataAccess.getImportJobByID(jobId);
+    let hashedApiKey;
+    if (job) {
+      // TODO: change it to hashWithSHA256(importApiKey) when the function is available
+      hashedApiKey = crypto.createHash('sha256').update(importApiKey).digest('hex');
+    }
     // Job must exist, and the import API key must match the one provided
-    if (!job || job.getApiKey() !== importApiKey) {
+    if (!job || job.getHashedApiKey() !== hashedApiKey) {
       throw new ErrorWithStatusCode('Not found', 404);
     }
 
