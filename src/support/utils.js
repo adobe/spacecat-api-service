@@ -21,6 +21,7 @@ export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
 
 export const GOOGLE_DRIVE = 'google-drive';
 export const MICROSOFT_SHAREPOINT = 'sharepoint';
+export const SITE_ROOT = 'sites';
 
 /**
  * Checks if the url parameter "url" equals "ALL".
@@ -270,8 +271,7 @@ export async function findDeliveryType(url) {
   return DELIVERY_TYPES.OTHER;
 }
 
-export async function getMountpointFromGithub(site) {
-  // TODO get from ${githubURL}/blob/main/fstab.yaml
+export async function getGithubMountpoint(site) {
   const githubURL = site.getGithubURL();
   const fstabResponse = await fetch(`${githubURL}/blob/main/fstab.yaml`);
   const fstabContent = await fstabResponse.text();
@@ -282,6 +282,18 @@ export async function getMountpointFromGithub(site) {
   const firstMountpoint = Object.entries(parsedContent.mountpoints)[0];
 
   return firstMountpoint;
+}
+
+function getRootPath(mountpoint) {
+  const mountapointURL = new URL(mountpoint);
+  const pathSegments = mountapointURL.pathname.split('/').filter((segment) => segment);
+  const lastSitesIndex = pathSegments.lastIndexOf(SITE_ROOT);
+
+  if (lastSitesIndex !== -1 && lastSitesIndex < pathSegments.length - 1) {
+    return pathSegments.slice(lastSitesIndex).join('/');
+  }
+
+  return null;
 }
 
 async function getMicrosoftClient(env, mountpoint) {
@@ -298,8 +310,8 @@ async function getMicrosoftClient(env, mountpoint) {
     },
     documentStoreConfig: {
       domain, /* Your sharepoint domain, i.e. 'adobe.sharepoint.com' */
-      domainId: 'TODO', /* The id for your domain, you can get it from the graph explorer */
-      rootPath: '/sites/petplace', /* The path from the collection root to the actual website root, i.e. '/sites/my-site' */
+      domainId: 'TODO', /* The id for your domain, you can get it from the graph explorer probably will store in the customer config */
+      rootPath: getRootPath(mountpoint),
     },
   });
 }
@@ -319,7 +331,8 @@ async function getGDriveClient(env, mountpoint) {
   });
 }
 
-export async function getContentClient(env, mountpoint) {
+export async function getContentClient(env, site) {
+  const mountpoint = getGithubMountpoint(site);
   if (mountpoint.includes(GOOGLE_DRIVE)) {
     return getGDriveClient(env, mountpoint);
   }
