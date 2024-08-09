@@ -320,12 +320,14 @@ function HooksController(lambdaContext) {
 
   async function processCDNHook(context) {
     const { log } = context;
-    const { forwardedHost } = context.data;
-    const { HLX_ADMIN_TOKEN: hlxAdminToken } = context.env;
-    const domains = forwardedHost.split(',').map((domain) => domain.trim());
-    const primaryDomain = domains[0];
 
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
+
+    // eslint-disable-next-line camelcase,no-unused-vars
+    const { hlxVersion, requestPath, requestXForwardedHost } = context.data;
+    const { HLX_ADMIN_TOKEN: hlxAdminToken } = context.env;
+    const domains = requestXForwardedHost.split(',').map((domain) => domain.trim());
+    const primaryDomain = domains[0];
 
     // extract the url from the x-forwarded-host header and determine hlx config
     const hlxConfig = await extractHlxConfig(domains, hlxAdminToken, log);
