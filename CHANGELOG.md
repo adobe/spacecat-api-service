@@ -1,3 +1,17 @@
+## [1.60.2](https://github.com/adobe/spacecat-api-service/compare/v1.60.1...v1.60.2) (2024-08-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#432](https://github.com/adobe/spacecat-api-service/issues/432)) ([0655409](https://github.com/adobe/spacecat-api-service/commit/06554094f65829c8ac917f2f06838548db24e0fd))
+
+## [1.60.1](https://github.com/adobe/spacecat-api-service/compare/v1.60.0...v1.60.1) (2024-08-09)
+
+
+### Bug Fixes
+
+* switch to spacecat coralogix for site detection ([#434](https://github.com/adobe/spacecat-api-service/issues/434)) ([f4fffd8](https://github.com/adobe/spacecat-api-service/commit/f4fffd8fceb18e137864fd00eaadc7d6e76bd3d4))
+
 # [1.60.0](https://github.com/adobe/spacecat-api-service/compare/v1.59.6...v1.60.0) (2024-08-08)
 
 
