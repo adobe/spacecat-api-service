@@ -97,6 +97,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
+    'PATCH /sites/:siteId/:auditType/publish-fixes': auditsController.patchAuditFixesForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,

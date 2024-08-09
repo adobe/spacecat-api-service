@@ -99,6 +99,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
+  /sites/{siteId}/{auditType}/publish-fixes:
+    $ref: './audit-api.yaml#/publish-audit-result-fixes-for-site'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
