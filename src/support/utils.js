@@ -342,14 +342,6 @@ export async function getContentClient(env, site) {
   throw new Error('Unknown content type client');
 }
 
-export function merge(existing, changes) {
-  const computedMerge = {};
-  [...existing, ...changes].forEach((override) => {
-    computedMerge[override.brokenTargetURL] = override;
-  });
-  return Object.values(computedMerge);
-}
-
 /**
  * Error class with a status code property.
  * @extends Error

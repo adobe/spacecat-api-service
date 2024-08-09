@@ -17,7 +17,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { getContentClient, merge } from '../support/utils.js';
+import { getContentClient } from '../support/utils.js';
 import { AuditDto } from '../dto/audit.js';
 
 /**
@@ -118,6 +118,13 @@ function AuditsController(dataAccess, env) {
    * @returns {Promise<Response>} the site's updated audit config
    */
   const patchAuditForSite = async (context) => {
+    function mergeOverwrites(existingOverwrites, manualOverwrites) {
+      const overrides = {};
+      [...existingOverwrites, ...manualOverwrites].forEach((overwrite) => {
+        overrides[overwrite.brokenTargetURL] = overwrite;
+      });
+      return Object.values(overrides);
+    }
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
@@ -177,10 +184,10 @@ function AuditsController(dataAccess, env) {
 
       hasUpdates = true;
 
-      const existingOverrides = config.getManualOverwrites(auditType);
+      const existingOverwrites = config.getManualOverwrites(auditType);
       const newManualOverwrites = manualOverwrites.length === 0
         ? []
-        : merge(existingOverrides, manualOverwrites);
+        : mergeOverwrites(existingOverwrites, manualOverwrites);
 
       config.updateManualOverwrites(auditType, newManualOverwrites);
     }
@@ -195,6 +202,13 @@ function AuditsController(dataAccess, env) {
   };
 
   const patchAuditFixesForSite = async (context) => {
+    function mergeFixes(existing, changes) {
+      const computedMerge = {};
+      [...existing, ...changes].forEach((fix) => {
+        computedMerge[fix.brokenTargetURL] = fix;
+      });
+      return Object.values(computedMerge);
+    }
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
     const { fixedURLs } = context.data;
@@ -228,7 +242,7 @@ function AuditsController(dataAccess, env) {
     const config = site.getConfig();
     if (Array.isArray(fixedURLs) && fixedURLs.length > 0) {
       const existingFixedURLs = config.getFixedURLs(auditType);
-      const newFixedURLs = merge(existingFixedURLs, fixedURLs);
+      const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
       const contentClient = await getContentClient(env, site);
       fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
         contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
