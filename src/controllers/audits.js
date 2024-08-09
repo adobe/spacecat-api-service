@@ -229,14 +229,14 @@ function AuditsController(dataAccess, env) {
     if (Array.isArray(fixedURLs) && fixedURLs.length > 0) {
       const existingFixedURLs = config.getFixedURLs(auditType);
       const newFixedURLs = merge(existingFixedURLs, fixedURLs);
-      config.updateFixedURLs(auditType, newFixedURLs);
-      const configObj = Config.toDynamoItem(config);
-      site.updateConfig(configObj);
-      await dataAccess.updateSite(site);
       const contentClient = await getContentClient(env, site);
       fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
         contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
       });
+      config.updateFixedURLs(auditType, newFixedURLs);
+      const configObj = Config.toDynamoItem(config);
+      site.updateConfig(configObj);
+      await dataAccess.updateSite(site);
     }
 
     return ok(config.getFixedURLs(auditType));
