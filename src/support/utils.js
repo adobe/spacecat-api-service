@@ -11,11 +11,17 @@
  */
 import { context as h2, h1 } from '@adobe/fetch';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { getClient, CONTENT_TYPES } from '@adobe/spececat-helix-context-sdk';
+import yaml from 'js-yaml';
 
 /* c8 ignore next 3 */
 export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
   ? h1()
   : h2();
+
+export const GOOGLE_DRIVE = 'google-drive';
+export const MICROSOFT_SHAREPOINT = 'sharepoint';
+export const SITE_ROOT = 'sites';
 
 /**
  * Checks if the url parameter "url" equals "ALL".
@@ -263,6 +269,77 @@ export async function findDeliveryType(url) {
   }
 
   return DELIVERY_TYPES.OTHER;
+}
+
+export async function getGithubMountpoint(site) {
+  const githubURL = site.getGithubURL();
+  const fstabResponse = await fetch(`${githubURL}/blob/main/fstab.yaml`);
+  const fstabContent = await fstabResponse.text();
+
+  const parsedContent = yaml.load(fstabContent);
+
+  // Extract the first mountpoint
+  const firstMountpoint = Object.entries(parsedContent.mountpoints)[0];
+
+  return firstMountpoint;
+}
+
+function getRootPath(mountpoint) {
+  const mountapointURL = new URL(mountpoint);
+  const pathSegments = mountapointURL.pathname.split('/').filter((segment) => segment);
+  const lastSitesIndex = pathSegments.lastIndexOf(SITE_ROOT);
+
+  if (lastSitesIndex !== -1 && lastSitesIndex < pathSegments.length - 1) {
+    return pathSegments.slice(lastSitesIndex).join('/');
+  }
+
+  return null;
+}
+
+async function getMicrosoftClient(env, mountpoint) {
+  const mountPointURL = new URL(mountpoint);
+  const domain = mountPointURL.hostname;
+  return getClient({
+    type: CONTENT_TYPES.MICROSOFT_SHAREPOINT,
+    authConfig: {
+      auth: {
+        authority: env.SHAREPOINT_AUTHORITY,
+        clientId: env.SHAREPOINT_CLIENT_ID,
+        clientSecret: env.clientSecret,
+      },
+    },
+    documentStoreConfig: {
+      domain, /* Your sharepoint domain, i.e. 'adobe.sharepoint.com' */
+      domainId: 'TODO', /* The id for your domain, you can get it from the graph explorer probably will store in the customer config */
+      rootPath: getRootPath(mountpoint),
+    },
+  });
+}
+
+async function getGDriveClient(env, mountpoint) {
+  const mountpointURL = new URL(mountpoint);
+  const pathSegments = mountpointURL.pathname.split('/').filter((segment) => segment);
+  const driveId = pathSegments[pathSegments.length - 1];
+  return getClient({
+    type: CONTENT_TYPES.GOOGLE_DRIVE,
+    authConfig: {
+      keyFile: env.KEY_FILE,
+    },
+    documentStoreConfig: {
+      driveId, /* The id for the project root folder (take it from the project's fstab.yaml) */
+    },
+  });
+}
+
+export async function getContentClient(env, site) {
+  const mountpoint = getGithubMountpoint(site);
+  if (mountpoint.includes(GOOGLE_DRIVE)) {
+    return getGDriveClient(env, mountpoint);
+  }
+  if (mountpoint.includes(MICROSOFT_SHAREPOINT)) {
+    return getMicrosoftClient(env, mountpoint);
+  }
+  throw new Error('Unknown content type client');
 }
 
 /**

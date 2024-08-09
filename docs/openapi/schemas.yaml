@@ -64,6 +64,18 @@ HandlerConfig:
       items:
         type: string
         format: uri
+    manualOverwrites:
+      description: Set of broken urls that contain manual fixes. If empty, will remove all manualOverwrites.
+      type: array
+      items:
+        type: object
+        properties:
+          brokenTargetURL:
+            description: The broken backlink URL
+            type: string
+          targetURL:
+            description: The correct target  for the broken backlink
+            type: string
   patternProperties:
     "^(404|broken-backlinks)$":
       type: object
@@ -71,6 +83,20 @@ HandlerConfig:
         mentions:
           $ref: '#/SlackMentionConfig'
         # Define other properties specific to the alert type here
+FixedURLs:
+  properties:
+    fixedURLs:
+      description: Set of urls that were fixed.
+      type: array
+      items:
+        type: object
+        properties:
+          brokenTargetURL:
+            description: The broken backlink URL
+            type: string
+          targetURL:
+            description: The target for the broken backlink included in redirects.xslx
+            type: string
 SlackConfig:
   type: object
   additionalProperties: true
