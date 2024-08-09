@@ -222,6 +222,9 @@ function AuditsController(dataAccess, env) {
     }
 
     if (Array.isArray(fixedURLs)) {
+      if (fixedURLs.length === 0) {
+        return badRequest('Fixed URL array cannot be empty');
+      }
       for (const fixedURL of fixedURLs) {
         if (!isObject(fixedURL)) {
           return badRequest('Fixed URL must be an object');
@@ -240,18 +243,16 @@ function AuditsController(dataAccess, env) {
     }
     const site = await dataAccess.getSiteByID(siteId);
     const config = site.getConfig();
-    if (Array.isArray(fixedURLs) && fixedURLs.length > 0) {
-      const existingFixedURLs = config.getFixedURLs(auditType);
-      const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
-      const contentClient = await getContentClient(env, site);
-      fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
-        contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
-      });
-      config.updateFixedURLs(auditType, newFixedURLs);
-      const configObj = Config.toDynamoItem(config);
-      site.updateConfig(configObj);
-      await dataAccess.updateSite(site);
-    }
+    const existingFixedURLs = config.getFixedURLs(auditType);
+    const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
+    const contentClient = await getContentClient(env, site);
+    fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
+      contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
+    });
+    config.updateFixedURLs(auditType, newFixedURLs);
+    const configObj = Config.toDynamoItem(config);
+    site.updateConfig(configObj);
+    await dataAccess.updateSite(site);
 
     return ok(config.getFixedURLs(auditType));
   };
