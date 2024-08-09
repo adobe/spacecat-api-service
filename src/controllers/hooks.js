@@ -133,18 +133,26 @@ function parseHlxRSO(domain) {
 
 /**
  * Fetches the edge config for the given site. If the config is not found, returns null.
- * @param {object} rso - The rso object
- * @param {string} rso.owner - The owner of the site
- * @param {string} rso.site - The site name
- * @param {string} [rso.ref] - The ref of the site, if any
- * @param {string} [rso.tld] - The tld of the site, if any
+ * @param {object} hlxConfig - The hlx config object
+ * @param {object} hlxConfig.rso - The rso object
+ * @param {string} hlxConfig.rso.owner - The owner of the site
+ * @param {string} hlxConfig.rso.site - The site name
+ * @param {string} [hlxConfig.rso.ref] - The ref of the site, if any
+ * @param {string} [hlxConfig.rso.tld] - The tld of the site, if any
  * @param {string} hlxAdminToken - The hlx admin token
  * @param {object} log - The logger object
  * @param hlxAdminToken
  * @param log
  * @return {Promise<unknown>}
  */
-async function fetchHlxConfig(rso, hlxAdminToken, log) {
+async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
+  const { hlxVersion, rso } = hlxConfig;
+
+  if (hlxVersion < 5) {
+    log.info(`HLX version is ${hlxVersion}. Skipping fetching hlx config`);
+    return null;
+  }
+
   const { owner, site } = rso;
   const url = `https://admin.hlx.page/config/${owner}/aggregated/${site}.json`;
 
@@ -176,13 +184,14 @@ async function fetchHlxConfig(rso, hlxAdminToken, log) {
 /**
  * Extracts the hlx config from the given list of domains.
  * @param {string[]} domains - The list of domains (as extracted from the x-forwarded-host header)
+ * @param {number} hlxVersion - The Helix Version
  * @param {string} hlxAdminToken - The hlx admin token
  * @param {object} log - The logger object
  * @return {Promise<{cdn: object, code: object, content: object, hlxVersion: number, rso: {}}>}
  */
-async function extractHlxConfig(domains, hlxAdminToken, log) {
+async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
   const hlxConfig = {
-    hlxVersion: 4,
+    hlxVersion,
     rso: {},
   };
 
@@ -192,7 +201,7 @@ async function extractHlxConfig(domains, hlxAdminToken, log) {
       hlxConfig.rso = rso;
       log.info(`Parsed RSO: ${JSON.stringify(rso)} for domain: ${domain}`);
       // eslint-disable-next-line no-await-in-loop
-      const config = await fetchHlxConfig(rso, hlxAdminToken, log);
+      const config = await fetchHlxConfig(hlxConfig, hlxAdminToken, log);
       if (isObject(config)) {
         const { cdn, code, content } = config;
         hlxConfig.cdn = cdn;
@@ -330,7 +339,7 @@ function HooksController(lambdaContext) {
     const primaryDomain = domains[0];
 
     // extract the url from the x-forwarded-host header and determine hlx config
-    const hlxConfig = await extractHlxConfig(domains, hlxAdminToken, log);
+    const hlxConfig = await extractHlxConfig(domains, hlxVersion, hlxAdminToken, log);
 
     const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
     const source = SITE_CANDIDATE_SOURCES.CDN;

@@ -254,6 +254,8 @@ describe('Hooks Controller', () => {
         .reply(200, validHelixDom);
 
       context.data = {
+        hlxVersion: 4,
+        requestPath: '/test',
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
@@ -425,6 +427,23 @@ describe('Hooks Controller', () => {
 
       expect(slackClient.postMessage.calledOnce).to.be.true;
       expect(actualMessage).to.deep.equal(expectedMessage);
+    });
+
+    it('CDN candidate is processed when fetching config is skipped for hlx version < 5', async () => {
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(context.log.info).to.have.been.calledWith('HLX version is 4. Skipping fetching hlx config');
+      expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
     it('CDN candidate is processed even with hlx config 404', async () => {
