@@ -42,7 +42,7 @@ describe('ImportController tests', () => {
     status: 'RUNNING',
     options: {},
     baseURL: 'https://www.example.com',
-    apiKey: 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
+    hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
     importQueueId: 'spacecat-import-queue-1',
   };
 
@@ -183,7 +183,7 @@ describe('ImportController tests', () => {
       context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
         createImportJob({
           ...exampleJob,
-          apiKey: requestContext.pathInfo.headers['x-import-api-key'],
+          hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
         }),
       ]);
       const response = await importController.createImportJob(requestContext);
@@ -228,7 +228,7 @@ describe('ImportController tests', () => {
       context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
         createImportJob({
           ...exampleJob,
-          apiKey: '18149FB2-5B83-41E6-B8D2-C7F50ADF110E', // Queue is in use by another API key
+          hashedApiKey: 'ac90ae98768efdb4c6349f23e63fc35e465333ca21bd30dd2838a100d1fd09d7', // Queue is in use by another API key
         }),
       ]);
       importController = ImportController(context);
@@ -249,12 +249,12 @@ describe('ImportController tests', () => {
         createImportJob({
           ...exampleJob,
           importQueueId: 'spacecat-import-queue-1',
-          apiKey: '50E8BD06-20AD-46FE-8D80-382DDF24E982', // Queue is in use by another API key
+          hashedApiKey: 'b76319539c6c50113d425259385cd1a382a369441d9242e641be22ed8c2d8069', // Queue is in use by another API key
         }),
         createImportJob({
           ...exampleJob,
           importQueueId: 'spacecat-import-queue-2',
-          apiKey: '8B68CCE5-9A56-4952-9413-ED796135937A', // Queue is in use by another API key
+          hashedApiKey: '23306638a0b7ed823e4da979b73592bf2a7ddd0ee027a58b1fc75b337b97cd9d', // Queue is in use by another API key
         }),
       ]);
       importController = ImportController(context);
