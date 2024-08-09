@@ -12,11 +12,16 @@
 
 import wrap from '@adobe/helix-shared-wrap';
 import { Blocks, Elements, Message } from 'slack-block-builder';
-import { internalServerError, notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import {
+  badRequest,
+  internalServerError,
+  notFound,
+  ok,
+} from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
   deepEqual,
-  hasText,
+  hasText, isInteger,
   isNonEmptyObject,
   isObject,
 } from '@adobe/spacecat-shared-utils';
@@ -134,6 +139,7 @@ function parseHlxRSO(domain) {
 /**
  * Fetches the edge config for the given site. If the config is not found, returns null.
  * @param {object} hlxConfig - The hlx config object
+ * @param {number} hlxConfig.hlxVersion - The Helix Version
  * @param {object} hlxConfig.rso - The rso object
  * @param {string} hlxConfig.rso.owner - The owner of the site
  * @param {string} hlxConfig.rso.site - The site name
@@ -334,6 +340,17 @@ function HooksController(lambdaContext) {
 
     // eslint-disable-next-line camelcase,no-unused-vars
     const { hlxVersion, requestPath, requestXForwardedHost } = context.data;
+
+    if (!isInteger(hlxVersion)) {
+      log.warn('HLX version is not an integer. Skipping processing CDN site candidate');
+      return badRequest('HLX version is not an integer');
+    }
+
+    if (!hasText(requestXForwardedHost)) {
+      log.warn('X-Forwarded-Host header is missing. Skipping processing CDN site candidate');
+      return badRequest('X-Forwarded-Host header is missing');
+    }
+
     const { HLX_ADMIN_TOKEN: hlxAdminToken } = context.env;
     const domains = requestXForwardedHost.split(',').map((domain) => domain.trim());
     const primaryDomain = domains[0];

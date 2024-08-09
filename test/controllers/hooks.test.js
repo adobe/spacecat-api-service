@@ -117,6 +117,24 @@ describe('Hooks Controller', () => {
       expect(resp.status).to.equal(404);
       expect(slackClient.postMessage.notCalled).to.be.true;
     });
+
+    it('return 400 if hlx version is not an integer', async () => {
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+      context.data = { hlxVersion: 'not-integer' };
+
+      const resp = await hooksController.processCDNHook(context);
+      expect(resp.status).to.equal(400);
+      expect(slackClient.postMessage.notCalled).to.be.true;
+    });
+
+    it('return 400 if requestXForwardedHost has no text', async () => {
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+      context.data = { hlxVersion: 4, requestXForwardedHost: '' };
+
+      const resp = await hooksController.processCDNHook(context);
+      expect(resp.status).to.equal(400);
+      expect(slackClient.postMessage.notCalled).to.be.true;
+    });
   });
 
   describe('URL sanitization checks', () => {
@@ -222,6 +240,7 @@ describe('Hooks Controller', () => {
         .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
 
       context.data = {
+        hlxVersion: 4,
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
       };
 
@@ -237,6 +256,7 @@ describe('Hooks Controller', () => {
         .reply(200, invalidHelixDom);
 
       context.data = {
+        hlxVersion: 4,
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
       };
 
@@ -313,6 +333,7 @@ describe('Hooks Controller', () => {
       context.dataAccess.siteCandidateExists.resolves(false);
       context.dataAccess.upsertSiteCandidate.resolves();
       context.data = {
+        hlxVersion: 5,
         requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
       };
 
@@ -394,6 +415,7 @@ describe('Hooks Controller', () => {
     it('CDN candidate is processed and slack message sent', async () => {
       const hlx5Config = { cdn: { prod: { host: 'some-cdn-host.com' } } };
       context.data = {
+        hlxVersion: 5,
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
@@ -448,6 +470,7 @@ describe('Hooks Controller', () => {
 
     it('CDN candidate is processed even with hlx config 404', async () => {
       context.data = {
+        hlxVersion: 5,
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
@@ -468,6 +491,7 @@ describe('Hooks Controller', () => {
 
     it('CDN candidate is processed even with error status for helix config request', async () => {
       context.data = {
+        hlxVersion: 5,
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
@@ -488,6 +512,7 @@ describe('Hooks Controller', () => {
 
     it('CDN candidate is processed even when fetch throws for helix config request', async () => {
       context.data = {
+        hlxVersion: 5,
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
@@ -508,6 +533,7 @@ describe('Hooks Controller', () => {
 
     it('CDN candidate is processed and slack message sent even if site was added previously but is not aem_edge', async () => {
       context.data = {
+        hlxVersion: 4,
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
@@ -539,6 +565,7 @@ describe('Hooks Controller', () => {
 
     it('Slack message sending fails for CDN candidate', async () => {
       context.data = {
+        hlxVersion: 5,
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
