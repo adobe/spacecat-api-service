@@ -221,28 +221,37 @@ function AuditsController(dataAccess, env) {
       return badRequest('Audit type required');
     }
 
-    if (Array.isArray(fixedURLs)) {
-      if (fixedURLs.length === 0) {
-        return badRequest('Fixed URL array cannot be empty');
+    if (!Array.isArray(fixedURLs)) {
+      return badRequest('Fixed URL array required');
+    }
+
+    if (fixedURLs.length === 0) {
+      return badRequest('Fixed URL array cannot be empty');
+    }
+    for (const fixedURL of fixedURLs) {
+      if (!isObject(fixedURL)) {
+        return badRequest('Fixed URL must be an object');
       }
-      for (const fixedURL of fixedURLs) {
-        if (!isObject(fixedURL)) {
-          return badRequest('Fixed URL must be an object');
-        }
-        if (Object.keys(fixedURL).length === 0) {
-          return badRequest('Fixed URL object cannot be empty');
-        }
-        if (!hasText(fixedURL.brokenTargetURL) || !hasText(fixedURL.targetURL)) {
-          return badRequest('Fixed URL must have both brokenTargetURL and targetURL');
-        }
-        if (!isValidUrl(fixedURL.brokenTargetURL)
+      if (Object.keys(fixedURL).length === 0) {
+        return badRequest('Fixed URL object cannot be empty');
+      }
+      if (!hasText(fixedURL.brokenTargetURL) || !hasText(fixedURL.targetURL)) {
+        return badRequest('Fixed URL must have both brokenTargetURL and targetURL');
+      }
+      if (!isValidUrl(fixedURL.brokenTargetURL)
             || !isValidUrl(fixedURL.targetURL)) {
-          return badRequest('Fixed URL have invalid URL format');
-        }
+        return badRequest('Fixed URL have invalid URL format');
       }
     }
     const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
     const config = site.getConfig();
+    const handlerConfig = config.getHandlerConfig(auditType);
+    if (!handlerConfig) {
+      return notFound('Audit type not found');
+    }
     const existingFixedURLs = config.getFixedURLs(auditType);
     const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
     const contentClient = await getContentClient(env, site);

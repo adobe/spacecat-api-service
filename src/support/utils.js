@@ -271,7 +271,7 @@ export async function findDeliveryType(url) {
   return DELIVERY_TYPES.OTHER;
 }
 
-export async function getGithubMountpoint(site) {
+async function getGithubMountpoint(site) {
   const githubURL = site.getGithubURL();
   const fstabResponse = await fetch(`${githubURL}/blob/main/fstab.yaml`);
   const fstabContent = await fstabResponse.text();
@@ -284,9 +284,17 @@ export async function getGithubMountpoint(site) {
   return firstMountpoint;
 }
 
+async function getMountpoint(site) {
+  const hlxCfg = site.getHlxConfig();
+  if (hlxCfg?.content?.source?.url) {
+    return hlxCfg?.content?.source?.url;
+  }
+  return getGithubMountpoint(site);
+}
+
 function getRootPath(mountpoint) {
-  const mountapointURL = new URL(mountpoint);
-  const pathSegments = mountapointURL.pathname.split('/').filter((segment) => segment);
+  const mountpointURL = new URL(mountpoint);
+  const pathSegments = mountpointURL.pathname.split('/').filter((segment) => segment);
   const lastSitesIndex = pathSegments.lastIndexOf(SITE_ROOT);
 
   if (lastSitesIndex !== -1 && lastSitesIndex < pathSegments.length - 1) {
@@ -332,7 +340,7 @@ async function getGDriveClient(env, mountpoint) {
 }
 
 export async function getContentClient(env, site) {
-  const mountpoint = getGithubMountpoint(site);
+  const mountpoint = getMountpoint(site);
   if (mountpoint.includes(GOOGLE_DRIVE)) {
     return getGDriveClient(env, mountpoint);
   }
