@@ -17,7 +17,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { getContentClient } from '../support/utils.js';
+import { getContentClient, publishToHelixAdmin } from '../support/utils.js';
 import { AuditDto } from '../dto/audit.js';
 
 /**
@@ -258,6 +258,8 @@ function AuditsController(dataAccess, env) {
     fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
       contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
     });
+    const hlxConfig = config.getHLXConfig();
+    await publishToHelixAdmin(hlxConfig.rso.owner, hlxConfig.rso.site, hlxConfig.rso.ref, '/redirects.xlsx');
     // TODO use helix admin to publish the redirect sheet
     config.updateFixedURLs(auditType, newFixedURLs);
     const configObj = Config.toDynamoItem(config);

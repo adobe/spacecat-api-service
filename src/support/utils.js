@@ -339,6 +339,23 @@ export async function getContentClient(env, site) {
   throw new Error('Unknown content type client');
 }
 
+export async function publishToHelixAdmin(owner, repo, ref, path) {
+  const url = `https://admin.hlx.page/live/${owner}/${repo}/${ref}/${path}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to publish resource ${path} : ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 /**
  * Error class with a status code property.
  * @extends Error
