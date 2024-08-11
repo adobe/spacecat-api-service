@@ -292,34 +292,23 @@ async function getMountpoint(site) {
   return getGithubMountpoint(site);
 }
 
-function getRootPath(mountpoint) {
-  const mountpointURL = new URL(mountpoint);
-  const pathSegments = mountpointURL.pathname.split('/').filter((segment) => segment);
-  const lastSitesIndex = pathSegments.lastIndexOf(SITE_ROOT);
-
-  if (lastSitesIndex !== -1 && lastSitesIndex < pathSegments.length - 1) {
-    return pathSegments.slice(lastSitesIndex).join('/');
-  }
-
-  return null;
-}
-
 async function getMicrosoftClient(env, mountpoint) {
   const mountPointURL = new URL(mountpoint);
   const domain = mountPointURL.hostname;
+  const rootPath = mountPointURL.pathname;
   return getClient({
     type: CONTENT_TYPES.MICROSOFT_SHAREPOINT,
     authConfig: {
       auth: {
         authority: env.SHAREPOINT_AUTHORITY,
         clientId: env.SHAREPOINT_CLIENT_ID,
-        clientSecret: env.clientSecret,
+        clientSecret: env.SHAREPOINT_CLIENT_SECRET,
       },
     },
     documentStoreConfig: {
       domain, /* Your sharepoint domain, i.e. 'adobe.sharepoint.com' */
-      domainId: 'TODO', /* The id for your domain, you can get it from the graph explorer probably will store in the customer config */
-      rootPath: getRootPath(mountpoint),
+      domainId: env.ADOBE_SHAREPOINT_DOMAIN_ID, /* you can get it from the graph explorer */
+      rootPath,
     },
   });
 }
