@@ -255,17 +255,16 @@ function AuditsController(dataAccess, env) {
     const existingFixedURLs = config.getFixedURLs(auditType);
     const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
     const contentClient = await getContentClient(env, site);
-    const row = contentClient.findRowInSheet('/redirects.xlsx', 'Sheet1', 3);
-    // fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
-    //  contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
-    // });
-    // TODO publish the sheet
+    fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
+      contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
+    });
+    // TODO use helix admin to publish the redirect sheet
     config.updateFixedURLs(auditType, newFixedURLs);
     const configObj = Config.toDynamoItem(config);
     site.updateConfig(configObj);
     await dataAccess.updateSite(site);
 
-    return ok(JSON.stringify(row));
+    return ok(config.getFixedURLs(auditType));
   };
 
   return {
