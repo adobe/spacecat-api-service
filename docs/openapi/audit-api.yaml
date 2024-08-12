@@ -99,12 +99,6 @@ publish-audit-result-fixes-for-site:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/auditType'
-  requestBody:
-    required: true
-    content:
-      application/json:
-        schema:
-          $ref: './schemas.yaml#/FixedURLs'
   patch:
     tags:
       - audit
@@ -113,6 +107,12 @@ publish-audit-result-fixes-for-site:
     description: |
       This endpoint is useful for publishing the fixes for an audit result to the site document based authoring.
     operationId: publishAuditFixesForSite
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/FixedURLs'
     responses:
       '200':
         description: The updated audit type config object
