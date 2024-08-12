@@ -272,9 +272,10 @@ export async function findDeliveryType(url) {
 }
 
 async function getGithubMountpoint(site) {
-  const githubURL = site.getGitHubURL();
-  const ref = site.getHlxConfig()?.content?.source?.ref || 'main';
-  const fstabResponse = await fetch(`${githubURL}/blob/${ref}/fstab.yaml`);
+  const ref = site.getHlxConfig()?.rso?.ref || 'main';
+  const repo = site.getHlxConfig()?.rso?.site || SITE_ROOT;
+  const owner = site.getHlxConfig()?.rso?.owner;
+  const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
   const fstabContent = await fstabResponse.text();
 
   const parsedContent = yaml.load(fstabContent);
