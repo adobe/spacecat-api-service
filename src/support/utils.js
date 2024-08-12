@@ -329,7 +329,7 @@ async function getGDriveClient(env, mountpoint) {
 }
 
 export async function getContentClient(env, site) {
-  const mountpoint = getMountpoint(site);
+  const mountpoint = await getMountpoint(site);
   if (mountpoint.includes(GOOGLE_DRIVE)) {
     return getGDriveClient(env, mountpoint);
   }
