@@ -415,14 +415,54 @@ Audit:
     previousAuditResult:
       someProperty: 'somePreviousValue'
 AuditResult:
-  type: object
-  description: |
-    The result of an audit, which is dependent on the audit type.
-  additionalProperties: true
+  description: The result of an audit, which is dependent on the audit type.
+  oneOf:
+    - type: object
+      additionalProperties: true
+    - type: object
+      properties:
+        experimentationOpportunities:
+          type: array
+          description: A list of experimentation opportunities
+          items:
+            oneOf:
+              - $ref: './schemas.yaml#/ExpOpportunityGeneric'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+ExpOpportunityGeneric:
+  type: object
+  readOnly: true
+  properties:
+    page:
+      type: string
+      description: The title of the webpage
+      example: 'Retirement Calculator'
+    screenshot:
+      type: string
+      format: url
+      description: A URL pointing to the screenshot of the webpage.
+      example: "https://space.cat/screenshots/some-cool-page.png"
+    trackedPageConversion:
+      type: string
+      description: The type of conversions tracked for this webpage.
+      example: 'New Account Sign Up'
+    pageviews:
+      type: integer
+      description: The total number of views this webpage has received
+      example: 15000
+    conversionRate:
+      type: number
+      format: float
+      description: The conversion rate for this webpage, represented as a percentage
+      example: 2.5
+    activeExperiments:
+      type: string
+      description: The number of active experiments on the webpage, or 'none' if there are no active experiments.
+      examples:
+        - 'None'
+        - '2 active'
 HoolihanHeaders:
   type: object
   properties:
