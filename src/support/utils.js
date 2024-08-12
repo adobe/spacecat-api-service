@@ -281,7 +281,7 @@ async function getGithubMountpoint(site) {
   const parsedContent = yaml.load(fstabContent);
 
   // Extract the first mountpoint
-  const firstMountpoint = Object.entries(parsedContent.mountpoints)[0];
+  const firstMountpoint = Object.entries(parsedContent.mountpoints)[0][1];
 
   return firstMountpoint;
 }
