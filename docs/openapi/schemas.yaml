@@ -903,6 +903,9 @@ SiteExperimentVariant:
     views:
       description: The number of views for the variant
       type: integer
+    samples:
+      description: The number of data points (samples) used for this variant
+      type: integer
     interactionsCount:
       description: The interactions count for the variant
       type: integer
@@ -927,6 +930,9 @@ SiteExperimentVariant:
           value:
             description: The value of the metric on the selector
             type: number
+          samples:
+            description: The number of data points (samples) used for calculating this metric object
+            type: integer
           type:
             description: The type of the metric
             type: string
@@ -940,13 +946,15 @@ SiteExperimentVariant:
     split: 0.5
     url: 'https://example-site.com/foo/bar'
     views: 1000
+    samples: 10
     interactionsCount: 200
     p_value: 0.04
     power: 97.6
     statsig: true
     metrics:
       - selector: '.add-to-cart'
-        value: 10
+        value: 300
+        samples: 3
         type: 'click'
 SiteExperiment:
   type: object
@@ -1015,13 +1023,15 @@ SiteExperiment:
         split: 0.5
         url: 'https://example-site.com/foo/bar'
         views: 1000
+        samples: 10
         interactionsCount: 200
         p_value: 0.04
         power: 97.6
         statsig: true
         metrics:
           - selector: '.add-to-cart'
-            value: 10
+            value: 300
+            samples: 3
             type: 'click'
     updatedAt: '2024-05-31T15:14:33.653Z'
     updatedBy: 'admin'

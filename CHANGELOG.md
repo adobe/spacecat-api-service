@@ -1,3 +1,24 @@
+## [1.60.4](https://github.com/adobe/spacecat-api-service/compare/v1.60.3...v1.60.4) (2024-08-10)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#437](https://github.com/adobe/spacecat-api-service/issues/437)) ([958c9f2](https://github.com/adobe/spacecat-api-service/commit/958c9f2ab0c2a94876f54371c91911cd61ab6bc9))
+
+## [1.60.3](https://github.com/adobe/spacecat-api-service/compare/v1.60.2...v1.60.3) (2024-08-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.7.2 ([#436](https://github.com/adobe/spacecat-api-service/issues/436)) ([923f96e](https://github.com/adobe/spacecat-api-service/commit/923f96ecf36b0f0384af7d5731689820170cd429))
+
+## [1.60.2](https://github.com/adobe/spacecat-api-service/compare/v1.60.1...v1.60.2) (2024-08-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#432](https://github.com/adobe/spacecat-api-service/issues/432)) ([0655409](https://github.com/adobe/spacecat-api-service/commit/06554094f65829c8ac917f2f06838548db24e0fd))
+
 ## [1.60.1](https://github.com/adobe/spacecat-api-service/compare/v1.60.0...v1.60.1) (2024-08-09)
 
 

@@ -11,7 +11,7 @@
  */
 import { context as h2, h1 } from '@adobe/fetch';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { getClient, CONTENT_TYPES } from '@adobe/spececat-helix-context-sdk';
+import { getClient, CONTENT_TYPES } from 'spacecat-helix-content-sdk';
 import yaml from 'js-yaml';
 
 /* c8 ignore next 3 */
