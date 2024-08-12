@@ -435,6 +435,10 @@ ExpOpportunityGeneric:
   type: object
   readOnly: true
   properties:
+    type:
+      type: string
+      description: Type of the experimentation opportunity
+      example: 'generic'
     page:
       type: string
       description: The title of the webpage
