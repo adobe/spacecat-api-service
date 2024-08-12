@@ -272,7 +272,7 @@ export async function findDeliveryType(url) {
 }
 
 async function getGithubMountpoint(site) {
-  const githubURL = site.getGithubURL();
+  const githubURL = site.getGitHubURL();
   const fstabResponse = await fetch(`${githubURL}/blob/main/fstab.yaml`);
   const fstabContent = await fstabResponse.text();
 
