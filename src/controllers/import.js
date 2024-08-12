@@ -11,10 +11,10 @@
  */
 
 import {
-  createResponse,
+  createResponse, hashWithSHA256,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -96,6 +96,12 @@ function ImportController(context) {
     });
   }
 
+  function validateIsoDates(startDate, endDate) {
+    if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
+      throw new ErrorWithStatusCode('Invalid request: startDate and endDate must be in ISO 8601 format', STATUS_BAD_REQUEST);
+    }
+  }
+
   /**
    * Create and start a new import job.
    * @param {object} requestContext - Context of the request.
@@ -127,6 +133,38 @@ function ImportController(context) {
       jobId: requestContext.params.jobId,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
     };
+  }
+
+  /**
+   * Get all import jobs between startDate and endDate
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.startDate - The start date of the range.
+   * @param {string} requestContext.params.endDate - The end date of the range.
+   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key to use for the job.
+   * @returns {Promise<Response>} 200 OK with a JSON representation of the import jobs.
+   */
+  async function getImportJobsByDateRange(requestContext) {
+    const { data: { startDate, endDate }, pathInfo: { headers } } = requestContext;
+    const { 'x-import-api-key': importApiKey } = headers;
+
+    try {
+      // TODO: Once the controller auth changes are implemented, verify the relevant scopes
+      validateImportApiKey(importApiKey);
+      validateIsoDates(startDate, endDate);
+      const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
+      const importJobs = jobs.map(async (job) => {
+        const hashedApiKey = hashWithSHA256(importApiKey);
+        const { name, imsOrgId, imsUserId } = await dataAccess
+          .getApiKeyByHashedKey(hashedApiKey);
+        const metadata = { apiKeyName: name, imsOrgId, imsUserId };
+        return { ...ImportJobDto.toJSON(job), metadata };
+      });
+      const resolvedImportJobs = await Promise.all(importJobs);
+      return ok(resolvedImportJobs);
+    } catch (error) {
+      log.error(`Failed to fetch import jobs between startDate: ${startDate} and endDate: ${endDate}, ${error.message}`);
+      return createErrorResponse(error);
+    }
   }
 
   /**
@@ -179,6 +217,7 @@ function ImportController(context) {
     createImportJob,
     getImportJobStatus,
     getImportJobResult,
+    getImportJobsByDateRange,
   };
 }
 

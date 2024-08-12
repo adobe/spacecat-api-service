@@ -47,6 +47,12 @@ describe('ImportController tests', () => {
     importQueueId: 'spacecat-import-queue-1',
   };
 
+  const exampleApiKeyMetadata = {
+    hashedKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
+    name: 'Test API Key',
+    imsOrgId: 'Test Org',
+  };
+
   beforeEach(() => {
     sandbox = sinon.createSandbox();
 
@@ -76,6 +82,7 @@ describe('ImportController tests', () => {
       createNewImportJob: (data) => createImportJob(data),
       createNewImportUrl: (data) => createImportUrl(data),
       getImportJobByID: sandbox.stub(),
+      getApiKeyByHashedKey: sandbox.stub().resolves(exampleApiKeyMetadata),
     };
 
     mockDataAccess.getImportJobByID.callsFake(async (jobId) => {
@@ -426,6 +433,41 @@ describe('ImportController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal('Presigner error');
+    });
+  });
+
+  describe('getImportJobsByDateRange', () => {
+    it('should throw an error when startDate is not present', async () => {
+      requestContext.data.endDate = '2024-05-29T14:26:00.000Z';
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO 8601 format');
+    });
+
+    it('should throw an error when endDate is not present', async () => {
+      requestContext.data.startDate = '2024-05-29T14:26:00.000Z';
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO 8601 format');
+    });
+
+    it('should return an array of import jobs', async () => {
+      const job = createImportJob(exampleJob);
+      context.dataAccess.getImportJobsByDateRange = sandbox.stub().resolves([job]);
+      requestContext.data.startDate = '2022-10-05T14:48:00.000Z';
+      requestContext.data.endDate = '2022-10-07T14:48:00.000Z';
+
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const responseResult = await response.json();
+      expect(responseResult[0].metadata).to.deep.equal({
+        apiKeyName: 'Test API Key',
+        imsOrgId: 'Test Org',
+      });
+      expect(responseResult[0].baseURL).to.equal('https://www.example.com');
     });
   });
 });
