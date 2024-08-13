@@ -6,7 +6,11 @@ trigger:
     tags:
       - trigger
     summary: Trigger an audit
+    deprecated: true
     description: |
+      **Warning:** This API is deprecated, will be removed in future versions and should no longer be used or enhanced.
+      Please use the Slack commands to trigger audits on-demand.
+      
       This endpoint is useful for triggering an audit.
       The audit will be run asynchronously and the response will be returned immediately.
 
