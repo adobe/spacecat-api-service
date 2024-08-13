@@ -452,7 +452,7 @@ ExperimentationOpportunity:
       description: The name of KPI tracked for this experiment.
       example: 'Bounce rate'
     trackedPageKPIValue:
-      type: float
+      type: number
       description: The value of KPI tracked for this experiment.
       example: 0.80
     pageviews:
