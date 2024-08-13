@@ -816,6 +816,7 @@ describe('Audits Controller', () => {
       const context = {
         params: { siteId, auditType },
         data: {},
+        log: { info: () => {} },
       };
 
       const site = {
@@ -842,6 +843,7 @@ describe('Audits Controller', () => {
       const context = {
         params: { siteId, auditType },
         data: { fixedURLs: 'http://valid-url.com' },
+        log: { info: () => {} },
       };
 
       const result = await auditsController.patchAuditFixesForSite(context);

@@ -17,6 +17,9 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Client } from '@microsoft/microsoft-graph-client';
+import fs from 'fs';
+import path from 'path';
 import { getContentClient, publishToHelixAdmin } from '../support/utils.js';
 import { AuditDto } from '../dto/audit.js';
 
@@ -254,6 +257,21 @@ function AuditsController(dataAccess, env) {
     }
     const existingFixedURLs = config.getFixedURLs(auditType);
     const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
+    const { log } = context;
+    try {
+      const nodeModulesPath = path.resolve('/var/task/node_modules');
+      const packages = fs.readdirSync(nodeModulesPath);
+      log.info('Installed packages:', packages);
+
+      // Check if Microsoft Graph Client is loaded successfully
+      if (Client) {
+        log.info('Microsoft Graph Client loaded successfully.');
+      } else {
+        log.error('Microsoft Graph Client could not be loaded.');
+      }
+    } catch (e) {
+      log.info('Running locally:', e);
+    }
     const contentClient = await getContentClient(env, site);
     fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
       contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
