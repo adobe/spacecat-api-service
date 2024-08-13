@@ -255,10 +255,11 @@ function AuditsController(dataAccess, env) {
     const existingFixedURLs = config.getFixedURLs(auditType);
     const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
     const contentClient = await getContentClient(env, site);
-    fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
-      contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
-    });
-    const hlxConfig = config.getHLXConfig();
+    for (const { brokenTargetURL, targetURL } of fixedURLs) {
+      // eslint-disable-next-line no-await-in-loop
+      await contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
+    }
+    const hlxConfig = config.getHlxConfig();
     await publishToHelixAdmin(hlxConfig.rso.owner, hlxConfig.rso.site, hlxConfig.rso.ref, '/redirects.xlsx');
     config.updateFixedURLs(auditType, newFixedURLs);
     const configObj = Config.toDynamoItem(config);
