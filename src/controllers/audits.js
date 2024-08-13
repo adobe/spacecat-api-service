@@ -17,7 +17,6 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import graph from '@microsoft/microsoft-graph-client';
 import { getContentClient, publishToHelixAdmin } from '../support/utils.js';
 import { AuditDto } from '../dto/audit.js';
 
@@ -255,13 +254,6 @@ function AuditsController(dataAccess, env) {
     }
     const existingFixedURLs = config.getFixedURLs(auditType);
     const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
-    const { log } = context;
-    // Check if Microsoft Graph Client is loaded successfully
-    if (graph.Client) {
-      log.info('Microsoft Graph Client loaded successfully.');
-    } else {
-      log.error('Microsoft Graph Client could not be loaded.');
-    }
     const contentClient = await getContentClient(env, site);
     fixedURLs.forEach(({ brokenTargetURL, targetURL }) => {
       contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
