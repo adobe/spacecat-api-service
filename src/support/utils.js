@@ -361,7 +361,6 @@ export async function publishToHelixAdmin(hlxAdminToken, owner, repo, ref, path)
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
       Authorization: `token ${hlxAdminToken}`,
     },
   });
