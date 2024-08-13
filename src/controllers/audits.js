@@ -260,7 +260,6 @@ function AuditsController(dataAccess, env) {
     });
     const hlxConfig = config.getHLXConfig();
     await publishToHelixAdmin(hlxConfig.rso.owner, hlxConfig.rso.site, hlxConfig.rso.ref, '/redirects.xlsx');
-    // TODO use helix admin to publish the redirect sheet
     config.updateFixedURLs(auditType, newFixedURLs);
     const configObj = Config.toDynamoItem(config);
     site.updateConfig(configObj);

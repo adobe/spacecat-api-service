@@ -294,10 +294,22 @@ async function getMountpoint(site) {
   return getGithubMountpoint(site);
 }
 
+function getRootPath(url) {
+  const urlObj = new URL(url);
+  const pathSegments = urlObj.pathname.split('/').filter((segment) => segment);
+  const lastSitesIndex = pathSegments.lastIndexOf(SITE_ROOT);
+
+  if (lastSitesIndex !== -1 && lastSitesIndex < pathSegments.length - 1) {
+    return pathSegments.slice(lastSitesIndex).join('/');
+  }
+
+  return null;
+}
+
 async function getMicrosoftClient(env, mountpoint) {
   const mountPointURL = new URL(mountpoint);
   const domain = mountPointURL.hostname;
-  const rootPath = mountPointURL.pathname;
+  const rootPath = getRootPath(mountPointURL.pathname);
   return getClient({
     type: CONTENT_TYPES.MICROSOFT_SHAREPOINT,
     authConfig: {
@@ -310,7 +322,7 @@ async function getMicrosoftClient(env, mountpoint) {
     documentStoreConfig: {
       domain, /* Your sharepoint domain, i.e. 'adobe.sharepoint.com' */
       domainId: env.ADOBE_SHAREPOINT_DOMAIN_ID, /* you can get it from the graph explorer */
-      rootPath,
+      rootPath: `/${rootPath}`,
     },
   });
 }
