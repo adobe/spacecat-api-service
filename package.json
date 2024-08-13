@@ -74,7 +74,7 @@
     "@slack/bolt": "3.19.0",
     "js-yaml": "4.1.0",
     "slack-block-builder": "2.8.0",
-    "spacecat-helix-content-sdk": "1.0.4"
+    "spacecat-helix-content-sdk": "1.0.5"
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.6",
