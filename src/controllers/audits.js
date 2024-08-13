@@ -17,7 +17,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { Client } from '@microsoft/microsoft-graph-client';
+import graph from '@microsoft/microsoft-graph-client';
 import { getContentClient, publishToHelixAdmin } from '../support/utils.js';
 import { AuditDto } from '../dto/audit.js';
 
@@ -257,7 +257,7 @@ function AuditsController(dataAccess, env) {
     const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
     const { log } = context;
     // Check if Microsoft Graph Client is loaded successfully
-    if (Client) {
+    if (graph.Client) {
       log.info('Microsoft Graph Client loaded successfully.');
     } else {
       log.error('Microsoft Graph Client could not be loaded.');
