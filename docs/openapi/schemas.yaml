@@ -425,13 +425,12 @@ AuditResult:
           type: array
           description: A list of experimentation opportunities
           items:
-            oneOf:
-              - $ref: './schemas.yaml#/ExpOpportunityGeneric'
+            $ref: './schemas.yaml#/ExperimentationOpportunity'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
-ExpOpportunityGeneric:
+ExperimentationOpportunity:
   type: object
   readOnly: true
   properties:
@@ -448,25 +447,33 @@ ExpOpportunityGeneric:
       format: url
       description: A URL pointing to the screenshot of the webpage.
       example: "https://space.cat/screenshots/some-cool-page.png"
-    trackedPageConversion:
+    trackedPageKPIName:
       type: string
-      description: The type of conversions tracked for this webpage.
-      example: 'New Account Sign Up'
+      description: The name of KPI tracked for this experiment.
+      example: 'Bounce rate'
+    trackedPageKPIValue:
+      type: float
+      description: The value of KPI tracked for this experiment.
+      example: 0.80
     pageviews:
       type: integer
       description: The total number of views this webpage has received
       example: 15000
-    conversionRate:
-      type: number
-      format: float
-      description: The conversion rate for this webpage, represented as a percentage
-      example: 2.5
+    samples:
+      type: integer
+      description: The total number of samples we have for this webpage in RUM
+      example: 150
     activeExperiments:
       type: string
       description: The number of active experiments on the webpage, or 'none' if there are no active experiments.
       examples:
         - 'None'
         - '2 active'
+    metrics:
+      type: array
+      description: The metrics for the experimentation opportunity
+      items:
+        type: object
 HoolihanHeaders:
   type: object
   properties:
