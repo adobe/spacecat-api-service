@@ -305,10 +305,13 @@ function getRootPath(pathname) {
   return null;
 }
 
-async function getMicrosoftClient(env, mountpoint) {
+async function getMicrosoftClient(env, mountpoint, log) {
   const mountPointURL = new URL(mountpoint);
   const domain = mountPointURL.hostname;
   const rootPath = getRootPath(mountPointURL.pathname);
+  log.info(mountpoint);
+  log.info(domain);
+  log.info(rootPath);
   return getClient({
     type: CONTENT_TYPES.MICROSOFT_SHAREPOINT,
     authConfig: {
@@ -341,13 +344,13 @@ async function getGDriveClient(env, mountpoint) {
   });
 }
 
-export async function getContentClient(env, site) {
+export async function getContentClient(env, site, log) {
   const mountpoint = await getMountpoint(site);
   if (mountpoint.includes(GOOGLE_DRIVE)) {
     return getGDriveClient(env, mountpoint);
   }
   if (mountpoint.includes(MICROSOFT_SHAREPOINT)) {
-    return getMicrosoftClient(env, mountpoint);
+    return getMicrosoftClient(env, mountpoint, log);
   }
   throw new Error('Unknown content type client');
 }

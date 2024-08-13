@@ -209,6 +209,7 @@ function AuditsController(dataAccess, env) {
       });
       return Object.values(computedMerge);
     }
+    const { log } = context;
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
     const { fixedURLs } = context.data;
@@ -254,7 +255,7 @@ function AuditsController(dataAccess, env) {
     }
     const existingFixedURLs = config.getFixedURLs(auditType);
     const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
-    const contentClient = await getContentClient(env, site);
+    const contentClient = await getContentClient(env, site, log);
     for (const { brokenTargetURL, targetURL } of fixedURLs) {
       // eslint-disable-next-line no-await-in-loop
       await contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
