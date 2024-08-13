@@ -13,6 +13,7 @@
 import { ImportJobStatus } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'crypto';
+import { hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
 import { ErrorWithStatusCode } from './utils.js';
 
 const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
@@ -63,8 +64,7 @@ function ImportSupervisor(services, config) {
 
     // Check that this import API key has capacity to start an import job
     for (const job of runningImportJobs) {
-      // TODO: change it to hashWithSHA256(importApiKey) when the function is available
-      const hashedApiKey = crypto.createHash('sha256').update(importApiKey).digest('hex');
+      const hashedApiKey = hashWithSHA256(importApiKey);
       if (job.getHashedApiKey() === hashedApiKey) {
         throw new ErrorWithStatusCode(`Too Many Requests: API key ${importApiKey} cannot be used to start any more import jobs`, 429);
       }
@@ -101,7 +101,6 @@ function ImportSupervisor(services, config) {
       id: crypto.randomUUID(),
       baseURL: determineBaseURL(urls),
       importQueueId,
-      // TODO: Change it to hashedApiKey once the spacecat-shared PR is merged in
       hashedApiKey,
       options,
       urlCount: urls.length,
@@ -199,8 +198,7 @@ function ImportSupervisor(services, config) {
     const importQueueId = await getAvailableImportQueue(importApiKey);
 
     // Hash the API Key to ensure it is not stored in plain text
-    // TODO: change it to hashWithSHA256(importApiKey) when the function is available
-    const hashedApiKey = crypto.createHash('sha256').update(importApiKey).digest('hex');
+    const hashedApiKey = hashWithSHA256(importApiKey);
 
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(urls, importQueueId, hashedApiKey, options);
@@ -236,8 +234,7 @@ function ImportSupervisor(services, config) {
     const job = await dataAccess.getImportJobByID(jobId);
     let hashedApiKey;
     if (job) {
-      // TODO: change it to hashWithSHA256(importApiKey) when the function is available
-      hashedApiKey = crypto.createHash('sha256').update(importApiKey).digest('hex');
+      hashedApiKey = hashWithSHA256(importApiKey);
     }
     // Job must exist, and the import API key must match the one provided
     if (!job || job.getHashedApiKey() !== hashedApiKey) {

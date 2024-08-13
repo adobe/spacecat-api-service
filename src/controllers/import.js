@@ -32,7 +32,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  */
 function ImportController(context) {
   const {
-    dataAccess, sqs, s3, log, env,
+    dataAccess, sqs, s3, log, env, auth,
   } = context;
   const services = {
     dataAccess,
@@ -80,10 +80,16 @@ function ImportController(context) {
     }
   }
 
-  function validateImportApiKey(importApiKey) {
+  function validateImportApiKey(importApiKey, scopes) {
     // Parse the allowed import keys from the environment
     if (!allowedApiKeys.includes(importApiKey)) {
       throw new ErrorWithStatusCode('Invalid import API key', 401);
+    }
+
+    try {
+      auth.checkScopes(scopes);
+    } catch (error) {
+      throw new ErrorWithStatusCode('Missing required scopes', 401);
     }
   }
 
@@ -106,7 +112,8 @@ function ImportController(context) {
     const { 'x-import-api-key': importApiKey } = headers;
 
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.write is required to create a new import job
+      validateImportApiKey(importApiKey, ['imports.write']);
       validateRequestData(data);
 
       const { urls, options = importConfiguration.options, importScript } = data;
@@ -137,7 +144,8 @@ function ImportController(context) {
     const { jobId, importApiKey } = parseRequestContext(requestContext);
 
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.read is required to get the import job status
+      validateImportApiKey(importApiKey, ['imports.read']);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       return ok(ImportJobDto.toJSON(job));
     } catch (error) {
@@ -157,7 +165,8 @@ function ImportController(context) {
     const { jobId, importApiKey } = parseRequestContext(requestContext);
 
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.read is required to get the import job status
+      validateImportApiKey(importApiKey, ['imports.read']);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       const downloadUrl = await importSupervisor.getJobArchiveSignedUrl(job);
       return ok({

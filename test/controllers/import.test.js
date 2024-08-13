@@ -36,6 +36,7 @@ describe('ImportController tests', () => {
   let mockDataAccess;
   let mockS3;
   let importConfiguration;
+  let mockAuth;
 
   const exampleJob = {
     id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
@@ -51,6 +52,10 @@ describe('ImportController tests', () => {
 
     mockSqsClient = {
       sendMessage: sandbox.stub(),
+    };
+
+    mockAuth = {
+      checkScopes: sandbox.stub().resolves(true),
     };
 
     requestContext = {
@@ -112,6 +117,7 @@ describe('ImportController tests', () => {
       sqs: mockSqsClient,
       s3: mockS3,
       dataAccess: mockDataAccess,
+      auth: mockAuth,
     };
 
     importController = ImportController(context);
@@ -166,6 +172,13 @@ describe('ImportController tests', () => {
       const response = await importControllerNoApiKeys.createImportJob(requestContext);
       expect(response.status).to.equal(401); // Unauthorized
       expect(response.headers.get('x-error')).to.equal('Invalid import API key');
+    });
+
+    it('should reject when auth scopes are invalid', async () => {
+      context.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
+      const response = await importController.createImportJob(requestContext);
+      expect(response.status).to.equal(401);
+      expect(response.headers.get('x-error')).to.equal('Missing required scopes');
     });
 
     it('should reject when no import queues are defined', async () => {
