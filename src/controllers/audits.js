@@ -260,7 +260,7 @@ function AuditsController(dataAccess, env) {
       // eslint-disable-next-line no-await-in-loop
       await contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
     }
-    const hlxConfig = config.getHlxConfig();
+    const hlxConfig = site.getHlxConfig();
     await publishToHelixAdmin(hlxConfig.rso.owner, hlxConfig.rso.site, hlxConfig.rso.ref, '/redirects.xlsx');
     config.updateFixedURLs(auditType, newFixedURLs);
     const configObj = Config.toDynamoItem(config);
