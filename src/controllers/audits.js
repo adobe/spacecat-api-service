@@ -261,7 +261,7 @@ function AuditsController(dataAccess, env) {
       await contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
     }
     const hlxConfig = site.getHlxConfig();
-    await publishToHelixAdmin(hlxConfig.rso.owner, hlxConfig.rso.site, hlxConfig.rso.ref, '/redirects.xlsx');
+    await publishToHelixAdmin(hlxConfig.rso.owner, hlxConfig.rso.site, hlxConfig.rso.ref, 'redirects.xlsx');
     config.updateFixedURLs(auditType, newFixedURLs);
     const configObj = Config.toDynamoItem(config);
     site.updateConfig(configObj);
