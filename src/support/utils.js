@@ -294,9 +294,8 @@ async function getMountpoint(site) {
   return getGithubMountpoint(site);
 }
 
-function getRootPath(url) {
-  const urlObj = new URL(url);
-  const pathSegments = urlObj.pathname.split('/').filter((segment) => segment);
+function getRootPath(pathname) {
+  const pathSegments = pathname.split('/').filter((segment) => segment);
   const lastSitesIndex = pathSegments.lastIndexOf(SITE_ROOT);
 
   if (lastSitesIndex !== -1 && lastSitesIndex < pathSegments.length - 1) {
