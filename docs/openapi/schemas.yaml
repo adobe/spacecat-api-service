@@ -441,14 +441,65 @@ Audit:
     previousAuditResult:
       someProperty: 'somePreviousValue'
 AuditResult:
-  type: object
-  description: |
-    The result of an audit, which is dependent on the audit type.
-  additionalProperties: true
+  description: The result of an audit, which is dependent on the audit type.
+  oneOf:
+    - type: object
+      additionalProperties: true
+    - type: object
+      properties:
+        experimentationOpportunities:
+          type: array
+          description: A list of experimentation opportunities
+          items:
+            $ref: './schemas.yaml#/ExperimentationOpportunity'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+ExperimentationOpportunity:
+  type: object
+  readOnly: true
+  properties:
+    type:
+      type: string
+      description: Type of the experimentation opportunity
+      example: 'generic'
+    page:
+      type: string
+      description: The title of the webpage
+      example: 'Retirement Calculator'
+    screenshot:
+      type: string
+      format: url
+      description: A URL pointing to the screenshot of the webpage.
+      example: "https://space.cat/screenshots/some-cool-page.png"
+    trackedPageKPIName:
+      type: string
+      description: The name of KPI tracked for this experiment.
+      example: 'Bounce rate'
+    trackedPageKPIValue:
+      type: number
+      description: The value of KPI tracked for this experiment.
+      example: 0.80
+    pageviews:
+      type: integer
+      description: The total number of views this webpage has received
+      example: 15000
+    samples:
+      type: integer
+      description: The total number of samples we have for this webpage in RUM
+      example: 150
+    activeExperiments:
+      type: string
+      description: The number of active experiments on the webpage, or 'none' if there are no active experiments.
+      examples:
+        - 'None'
+        - '2 active'
+    metrics:
+      type: array
+      description: The metrics for the experimentation opportunity
+      items:
+        type: object
 HoolihanHeaders:
   type: object
   properties:
