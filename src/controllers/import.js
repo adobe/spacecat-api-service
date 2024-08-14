@@ -81,6 +81,7 @@ function ImportController(context) {
   }
 
   function validateImportApiKey(importApiKey, scopes) {
+    log.info(`validating scopes: ${scopes}`);
     // Parse the allowed import keys from the environment
     if (!allowedApiKeys.includes(importApiKey)) {
       throw new ErrorWithStatusCode('Invalid import API key', 401);
