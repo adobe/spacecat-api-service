@@ -66,7 +66,7 @@ describe('ImportController tests', () => {
       },
       pathInfo: {
         headers: {
-          'x-import-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
+          'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
         },
       },
     };
@@ -156,7 +156,7 @@ describe('ImportController tests', () => {
     });
 
     it('should reject an invalid import API key', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = 'unknown-api-key';
+      requestContext.pathInfo.headers['x-api-key'] = 'unknown-api-key';
       const response = await importController.createImportJob(requestContext);
 
       expect(response.status).to.equal(401); // Unauthorized
@@ -373,7 +373,7 @@ describe('ImportController tests', () => {
     });
 
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
+      requestContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
       requestContext.params.jobId = exampleJob.id;
       const response = await importController.getImportJobStatus(requestContext);
 
@@ -399,7 +399,7 @@ describe('ImportController tests', () => {
 
   describe('getImportJobResult', () => {
     beforeEach(() => {
-      requestContext.pathInfo.headers['x-import-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
+      requestContext.pathInfo.headers['x-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
       requestContext.params.jobId = exampleJob.id;
     });
 

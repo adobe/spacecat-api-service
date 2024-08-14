@@ -104,12 +104,12 @@ function ImportController(context) {
    * @param {object} requestContext - Context of the request.
    * @param {Array<string>} requestContext.data.urls - Array of URLs to import.
    * @param {object} requestContext.data.options - Optional import configuration parameters.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key to use for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
-    const { 'x-import-api-key': importApiKey } = headers;
+    const { 'x-api-key': importApiKey } = headers;
 
     try {
       // The API scope imports.write is required to create a new import job
@@ -129,7 +129,7 @@ function ImportController(context) {
   function parseRequestContext(requestContext) {
     return {
       jobId: requestContext.params.jobId,
-      importApiKey: requestContext.pathInfo.headers['x-import-api-key'],
+      importApiKey: requestContext.pathInfo.headers['x-api-key'],
     };
   }
 
@@ -137,7 +137,7 @@ function ImportController(context) {
    * Get the status of an import job.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key used for the job.
    * @returns {Promise<Response>} 200 OK with a JSON representation of the import job.
    */
   async function getImportJobStatus(requestContext) {
@@ -158,7 +158,7 @@ function ImportController(context) {
    * Get the result of an import job, as a pre-signed download URL to S3.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key used for the job.
    * @returns {Promise<Response>} 200 OK with a pre-signed URL to download the job result.
    */
   async function getImportJobResult(requestContext) {
