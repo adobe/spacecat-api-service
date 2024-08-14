@@ -1218,3 +1218,87 @@ ScrapeResult:
       - url: 'https://example.com/fr/page2'
         status: 'FAILED'
         error: 'Timeout'
+FixedURLs:
+  properties:
+    fixedURLs:
+      description: Set of urls that were fixed.
+      type: array
+      items:
+        type: object
+        properties:
+          sourceURL:
+            description: The broken backlink URL
+            type: string
+          destinationURL:
+            description: The target for the broken backlink included in redirects.xslx
+            type: string
+Metadata:
+  properties:
+    metadata:
+      description: Set of key value pairs to be added to the metadata table.
+      type: array
+      items:
+        type: object
+        properties:
+          key:
+            description: The metadata key propertu
+            type: string
+          value:
+            description: The metadata value property
+            type: string
+MultiStatusItem:
+  type: object
+  required:
+    - status
+  properties:
+    status:
+      type: integer
+      minimum: 200
+      maximum: 600
+      example: 400
+    message:
+      type: string
+      example: "Not found"
+MultiStatusMetadata:
+  type: object
+  required:
+    - failure
+    - success
+    - total
+  properties:
+    failure:
+      type: integer
+      minimum: 0
+      example: 1
+    success:
+      type: integer
+      minimum: 0
+      example: 3
+    total:
+      type: integer
+      minimum: 0
+      example: 4
+MultiStatusResponse:
+  type: object
+  required:
+    - payload
+  properties:
+    payload:
+      type: object
+      required:
+        - items
+        - metadata
+      properties:
+        items:
+          type: array
+          description: A list of multi status response items
+          items:
+            $ref: '#/MultiStatusItem'
+        metadata:
+          $ref: '#/MultiStatusMetadata'
+MultiStatus:
+  description: Multi-Status
+  content:
+    application/json:
+      schema:
+        $ref: '#/MultiStatusResponse'
