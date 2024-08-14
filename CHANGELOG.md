@@ -1,3 +1,10 @@
+## [1.60.5](https://github.com/adobe/spacecat-api-service/compare/v1.60.4...v1.60.5) (2024-08-14)
+
+
+### Bug Fixes
+
+* add deprecation notice for trigger API ([#441](https://github.com/adobe/spacecat-api-service/issues/441)) ([c11c5df](https://github.com/adobe/spacecat-api-service/commit/c11c5df09dc3734aa914913e78af09a1d706c85b))
+
 ## [1.60.4](https://github.com/adobe/spacecat-api-service/compare/v1.60.3...v1.60.4) (2024-08-10)
 
 
