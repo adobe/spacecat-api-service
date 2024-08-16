@@ -107,7 +107,7 @@ function ImportController(context) {
   async function createImportJob(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey } = headers;
-    log.info('Creating a new import job with hashed API key');
+    log.info('Creating a new import job with API key');
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
