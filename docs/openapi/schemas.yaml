@@ -26,6 +26,7 @@ AuditType:
     - 'broken-backlinks'
     - 'canonical'
     - 'sitemap'
+    - 'url-inspect'
   example: 'cwv'
 URL:
   type: string
@@ -426,6 +427,12 @@ AuditResult:
           description: A list of experimentation opportunities
           items:
             $ref: './schemas.yaml#/ExperimentationOpportunity'
+    - type: object
+      properties:
+        urlInspection:
+          type: object
+          description: Information about the provided URL in the Google index.
+          $ref: './schemas.yaml#/URLInspection'
 AuditList:
   type: array
   items:
@@ -474,6 +481,71 @@ ExperimentationOpportunity:
       description: The metrics for the experimentation opportunity
       items:
         type: object
+URLInspection:
+  type: object
+  readOnly: true
+  properties:
+    indexStatusResult:
+      type: object
+      description: Result of the index status analysis.
+      properties:
+        verdict:
+          $ref: '#/Verdict'
+        lastCrawlTime:
+          type: string
+          description: Last time this URL was crawled by Google using the primary crawler. Absent if the URL was never crawled successfully.
+          format: date-time
+          example: '2024-01-19T14:20:30Z'
+    richResultsResult:
+        type: object
+        description: Result of the Rich Results analysis. Absent if there are no rich results found.
+        properties:
+          verdict:
+            $ref: '#/Verdict'
+          detectedItems:
+            type: array
+            description: A list of zero or more rich results detected on this page. Rich results that cannot even be parsed due to syntactic issues will not be listed here.
+            items:
+              type: object
+              properties:
+                richResultType:
+                  type: string
+                  description: Rich Results type detected on this page.
+                  example: 'Product snippets'
+                items:
+                  type: array
+                  description: List of Rich Results items.
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: The user-provided name of this item.
+                        example: 'Product name'
+                      issues:
+                        type: array
+                        description: A list of zero or more rich result issues found for this instance.
+                        items:
+                          type: object
+                          properties:
+                            issueMessage:
+                              type: string
+                              description: Rich Results issue type.
+                              example: 'Missing field "image"'
+                            severity:
+                              type: string
+                              description: Severity of this issue. WARNING, or ERROR. Items with an issue of status ERROR cannot appear with rich result features in Google Search results.
+                              example: 'ERROR'
+
+Verdict:
+  type: string
+  description: High-level verdict about whether the URL is indexed.
+  enum:
+    - 'VERDICT_UNSPECIFIED'
+    - 'PASS'
+    - 'PARTIAL'
+    - 'FAIL'
+    - 'NEUTRAL'
 HoolihanHeaders:
   type: object
   properties:
