@@ -50,7 +50,7 @@ function ImportController(context) {
   }
 
   const importSupervisor = new ImportSupervisor(services, importConfiguration);
-  const { allowedApiKeys = [], maxUrlsPerJob = 1 } = importConfiguration;
+  const { maxUrlsPerJob = 1 } = importConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
@@ -82,10 +82,6 @@ function ImportController(context) {
 
   function validateImportApiKey(importApiKey, scopes) {
     log.info(`validating scopes: ${scopes}`);
-    // Parse the allowed import keys from the environment
-    if (!allowedApiKeys.includes(importApiKey)) {
-      throw new ErrorWithStatusCode('Invalid import API key', 401);
-    }
 
     try {
       auth.checkScopes(scopes);

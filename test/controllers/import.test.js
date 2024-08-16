@@ -155,25 +155,6 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
 
-    it('should reject an invalid import API key', async () => {
-      requestContext.pathInfo.headers['x-api-key'] = 'unknown-api-key';
-      const response = await importController.createImportJob(requestContext);
-
-      expect(response.status).to.equal(401); // Unauthorized
-      expect(response.headers.get('x-error')).to.equal('Invalid import API key');
-    });
-
-    it('should reject when no allowed API keys are defined', async () => {
-      const contextNoApiKeys = { ...context };
-      delete importConfiguration.allowedApiKeys;
-      contextNoApiKeys.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
-
-      const importControllerNoApiKeys = new ImportController(contextNoApiKeys);
-      const response = await importControllerNoApiKeys.createImportJob(requestContext);
-      expect(response.status).to.equal(401); // Unauthorized
-      expect(response.headers.get('x-error')).to.equal('Invalid import API key');
-    });
-
     it('should reject when auth scopes are invalid', async () => {
       context.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
       const response = await importController.createImportJob(requestContext);
