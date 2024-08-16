@@ -430,9 +430,10 @@ AuditResult:
     - type: object
       properties:
         urlInspection:
-          type: object
-          description: Information about the provided URL in the Google index.
-          $ref: './schemas.yaml#/URLInspection'
+          type: array
+          description: Information about the provided URLs in the Google index.
+          items:
+            $ref: './schemas.yaml#/URLInspection'
 AuditList:
   type: array
   items:
@@ -485,6 +486,9 @@ URLInspection:
   type: object
   readOnly: true
   properties:
+    inspectionUrl:
+      type: string
+      description: The URL that was inspected
     indexStatusResult:
       type: object
       description: Result of the index status analysis.
