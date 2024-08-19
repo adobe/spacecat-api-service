@@ -203,7 +203,7 @@ function ImportSupervisor(services, config) {
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(urls, importQueueId, hashedApiKey, options);
 
-    log.info(`New import job created for API key: ${importApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
+    log.info(`New import job created for hashed API key: ${hashedApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
 
     // Custom import.js scripts are not initially supported.
     if (importScript) {
