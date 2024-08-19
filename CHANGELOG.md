@@ -1,3 +1,10 @@
+# [1.61.0](https://github.com/adobe/spacecat-api-service/compare/v1.60.11...v1.61.0) (2024-08-19)
+
+
+### Features
+
+* add scopes in the import controller ([#442](https://github.com/adobe/spacecat-api-service/issues/442)) ([2bf9c47](https://github.com/adobe/spacecat-api-service/commit/2bf9c47168ecd87dea467cabc0b32c69c93065ed))
+
 ## [1.60.11](https://github.com/adobe/spacecat-api-service/compare/v1.60.10...v1.60.11) (2024-08-19)
 
 
