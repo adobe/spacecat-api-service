@@ -421,7 +421,7 @@ AuditResult:
       properties:
         brokenBacklinks:
           type: array
-          description: A list of broken backlinks
+          description: A list of broken backlinks.
           items:
             $ref: './schemas.yaml#/BrokenBacklink'
         fullAuditRef:
@@ -1304,17 +1304,17 @@ BrokenBacklink:
   type: object
   properties:
     url_to:
-      description: The URL of the broken link
+      description: The URL of the broken link.
       $ref: '#/URL'
     title:
-      description: The title of the page referring to the broken link
+      description: The title of the page referring to the broken link.
       type: string
     url_from:
-      description: The URL of the page referring to the broken link
+      description: The URL of the page referring to the broken link.
       $ref: '#/URL'
     traffic_domain:
-      description: The referring domain's estimated monthly organic traffic from search
+      description: The referring domain's estimated monthly organic traffic from search.
       type: number
     url_suggested:
-      description: The URL suggested for redirecting from the broken backlink
+      description: The URL suggested for redirecting from the broken backlink.
       $ref: '#/URL'
