@@ -33,6 +33,9 @@ describe('S3 client wrapper tests', () => {
       runtime: {
         region: 'us-east-1',
       },
+      env: {
+        S3_BUCKET_NAME: 'test-bucket',
+      },
     };
 
     exampleHandler = sinon.spy(async (message, context) => {
@@ -57,6 +60,7 @@ describe('S3 client wrapper tests', () => {
     expect(firstCall.args[1].s3).to.be.an('object');
     expect(firstCall.args[1].s3.s3Client).to.be.an('object');
     expect(firstCall.args[1].s3.getSignedUrl).to.be.a('function');
+    expect(firstCall.args[1].s3.s3Bucket).to.equal(mockContext.env.S3_BUCKET_NAME);
   });
 
   it('does not create a new S3Client if one already exists in the context', async () => {
