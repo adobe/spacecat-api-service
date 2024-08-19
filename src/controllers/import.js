@@ -81,7 +81,7 @@ function ImportController(context) {
   }
 
   function validateImportApiKey(importApiKey, scopes) {
-    log.info(`validating scopes: ${scopes}`);
+    log.debug(`validating scopes: ${scopes}`);
 
     try {
       auth.checkScopes(scopes);
