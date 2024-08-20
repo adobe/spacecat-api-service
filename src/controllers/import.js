@@ -32,7 +32,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  */
 function ImportController(context) {
   const {
-    dataAccess, sqs, s3, log, env,
+    dataAccess, sqs, s3, log, env, auth,
   } = context;
   const services = {
     dataAccess,
@@ -50,7 +50,7 @@ function ImportController(context) {
   }
 
   const importSupervisor = new ImportSupervisor(services, importConfiguration);
-  const { allowedApiKeys = [], maxUrlsPerJob = 1 } = importConfiguration;
+  const { maxUrlsPerJob = 1 } = importConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
@@ -80,10 +80,13 @@ function ImportController(context) {
     }
   }
 
-  function validateImportApiKey(importApiKey) {
-    // Parse the allowed import keys from the environment
-    if (!allowedApiKeys.includes(importApiKey)) {
-      throw new ErrorWithStatusCode('Invalid import API key', 401);
+  function validateImportApiKey(importApiKey, scopes) {
+    log.debug(`validating scopes: ${scopes}`);
+
+    try {
+      auth.checkScopes(scopes);
+    } catch (error) {
+      throw new ErrorWithStatusCode('Missing required scopes', 401);
     }
   }
 
@@ -98,15 +101,15 @@ function ImportController(context) {
    * @param {object} requestContext - Context of the request.
    * @param {Array<string>} requestContext.data.urls - Array of URLs to import.
    * @param {object} requestContext.data.options - Optional import configuration parameters.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key to use for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
-    const { 'x-import-api-key': importApiKey } = headers;
-
+    const { 'x-api-key': importApiKey } = headers;
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.write is required to create a new import job
+      validateImportApiKey(importApiKey, ['imports.write']);
       validateRequestData(data);
 
       const { urls, options = importConfiguration.options, importScript } = data;
@@ -122,7 +125,7 @@ function ImportController(context) {
   function parseRequestContext(requestContext) {
     return {
       jobId: requestContext.params.jobId,
-      importApiKey: requestContext.pathInfo.headers['x-import-api-key'],
+      importApiKey: requestContext.pathInfo.headers['x-api-key'],
     };
   }
 
@@ -130,14 +133,15 @@ function ImportController(context) {
    * Get the status of an import job.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key used for the job.
    * @returns {Promise<Response>} 200 OK with a JSON representation of the import job.
    */
   async function getImportJobStatus(requestContext) {
     const { jobId, importApiKey } = parseRequestContext(requestContext);
 
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.read is required to get the import job status
+      validateImportApiKey(importApiKey, ['imports.read']);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       return ok(ImportJobDto.toJSON(job));
     } catch (error) {
@@ -150,14 +154,15 @@ function ImportController(context) {
    * Get the result of an import job, as a pre-signed download URL to S3.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key used for the job.
    * @returns {Promise<Response>} 200 OK with a pre-signed URL to download the job result.
    */
   async function getImportJobResult(requestContext) {
     const { jobId, importApiKey } = parseRequestContext(requestContext);
 
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.read is required to get the import job status
+      validateImportApiKey(importApiKey, ['imports.read']);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       const downloadUrl = await importSupervisor.getJobArchiveSignedUrl(job);
       return ok({
