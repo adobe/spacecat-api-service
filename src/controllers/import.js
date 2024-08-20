@@ -146,6 +146,7 @@ function ImportController(context) {
   async function getImportJobsByDateRange(requestContext) {
     const { query: { startDate, endDate }, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey } = headers;
+    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}`);
 
     try {
       validateImportApiKey(importApiKey, 'imports.read_all');
