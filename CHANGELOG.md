@@ -1,3 +1,10 @@
+## [1.61.2](https://github.com/adobe/spacecat-api-service/compare/v1.61.1...v1.61.2) (2024-08-20)
+
+
+### Bug Fixes
+
+* use metrics-store and s3 wrapper from shared ([#449](https://github.com/adobe/spacecat-api-service/issues/449)) ([d6133b1](https://github.com/adobe/spacecat-api-service/commit/d6133b1095ea721573e9c8740e9e7dd3e579740b))
+
 ## [1.61.1](https://github.com/adobe/spacecat-api-service/compare/v1.61.0...v1.61.1) (2024-08-20)
 
 
