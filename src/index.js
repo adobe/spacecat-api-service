@@ -23,6 +23,7 @@ import {
   authWrapper,
   enrichPathInfo,
   LegacyApiKeyHandler,
+  ScopedApiKeyHandler,
   AdobeImsHandler,
 } from '@adobe/spacecat-shared-http-utils';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
@@ -124,8 +125,8 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
+  .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler] })
   .with(dataAccess)
-  .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, AdobeImsHandler] })
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
