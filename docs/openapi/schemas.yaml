@@ -26,6 +26,7 @@ AuditType:
     - 'broken-backlinks'
     - 'canonical'
     - 'sitemap'
+    - 'costs'
   example: 'cwv'
 URL:
   type: string
@@ -402,18 +403,6 @@ Audit:
       $ref: '#/AuditResult'
     previousAuditResult:
       $ref: '#/AuditResult'
-  example:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    auditedAt: '2024-01-20T12:00:00Z'
-    expiresAt: '2024-07-20T12:00:00Z'
-    auditType: 'cwv'
-    isError: false
-    deliveryType: 'aem_edge'
-    fullAuditRef: 'https://some-audit-system/full-report/1234'
-    auditResult:
-      someProperty: 'someValue'
-    previousAuditResult:
-      someProperty: 'somePreviousValue'
 AuditResult:
   description: The result of an audit, which is dependent on the audit type.
   oneOf:
@@ -426,6 +415,38 @@ AuditResult:
           description: A list of experimentation opportunities
           items:
             $ref: './schemas.yaml#/ExperimentationOpportunity'
+    - type: object
+      description: |
+        The result of broken-backlinks audit.
+      properties:
+        brokenBacklinks:
+          type: array
+          description: A list of broken backlinks.
+          items:
+            $ref: './schemas.yaml#/BrokenBacklink'
+        fullAuditRef:
+          description: |
+            A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+          type: string
+    - type: object
+      description: |
+        The result of costs audit.
+      properties:
+        ahrefs:
+          type: object
+          properties:
+            usedApiUnits:
+              description: |
+                API units used so far in the current month.
+              type: integer
+            limitApiUnits:
+              description: |
+                Limit of API units for the current month.
+              type: integer
+            fullAuditRef:
+              description: |
+                A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+              type: string
 AuditList:
   type: array
   items:
@@ -1279,3 +1300,21 @@ ScrapeResult:
       - url: 'https://example.com/fr/page2'
         status: 'FAILED'
         error: 'Timeout'
+BrokenBacklink:
+  type: object
+  properties:
+    url_to:
+      description: The URL of the broken link.
+      $ref: '#/URL'
+    title:
+      description: The title of the page referring to the broken link.
+      type: string
+    url_from:
+      description: The URL of the page referring to the broken link.
+      $ref: '#/URL'
+    traffic_domain:
+      description: The referring domain's estimated monthly organic traffic from search.
+      type: number
+    url_suggested:
+      description: The URL suggested for redirecting from the broken backlink.
+      $ref: '#/URL'
