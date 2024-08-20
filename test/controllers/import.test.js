@@ -75,6 +75,7 @@ describe('ImportController tests', () => {
           'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
         },
       },
+      query: {},
     };
 
     mockDataAccess = {
@@ -438,7 +439,7 @@ describe('ImportController tests', () => {
 
   describe('getImportJobsByDateRange', () => {
     it('should throw an error when startDate is not present', async () => {
-      requestContext.data.endDate = '2024-05-29T14:26:00.000Z';
+      requestContext.query.endDate = '2024-05-29T14:26:00.000Z';
       const response = await importController.getImportJobsByDateRange(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
@@ -446,7 +447,7 @@ describe('ImportController tests', () => {
     });
 
     it('should throw an error when endDate is not present', async () => {
-      requestContext.data.startDate = '2024-05-29T14:26:00.000Z';
+      requestContext.query.startDate = '2024-05-29T14:26:00.000Z';
       const response = await importController.getImportJobsByDateRange(requestContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
@@ -456,8 +457,8 @@ describe('ImportController tests', () => {
     it('should return an array of import jobs', async () => {
       const job = createImportJob(exampleJob);
       context.dataAccess.getImportJobsByDateRange = sandbox.stub().resolves([job]);
-      requestContext.data.startDate = '2022-10-05T14:48:00.000Z';
-      requestContext.data.endDate = '2022-10-07T14:48:00.000Z';
+      requestContext.query.startDate = '2022-10-05T14:48:00.000Z';
+      requestContext.query.endDate = '2022-10-07T14:48:00.000Z';
 
       const response = await importController.getImportJobsByDateRange(requestContext);
       expect(response).to.be.an.instanceOf(Response);

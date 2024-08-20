@@ -144,7 +144,7 @@ function ImportController(context) {
    * @returns {Promise<Response>} 200 OK with a JSON representation of the import jobs.
    */
   async function getImportJobsByDateRange(requestContext) {
-    const { data: { startDate, endDate }, pathInfo: { headers } } = requestContext;
+    const { query: { startDate, endDate }, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey } = headers;
 
     try {
