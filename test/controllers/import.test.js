@@ -14,7 +14,7 @@
 
 import { Response } from '@adobe/fetch';
 
-import chai, { expect } from 'chai';
+import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -24,8 +24,8 @@ import { createImportUrl } from '@adobe/spacecat-shared-data-access/src/models/i
 import ImportController from '../../src/controllers/import.js';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
-chai.use(sinonChai);
-chai.use(chaiAsPromised);
+use(sinonChai);
+use(chaiAsPromised);
 
 describe('ImportController tests', () => {
   let sandbox;

@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import nock from 'nock';
@@ -20,8 +20,7 @@ import { Blocks, Elements, Message } from 'slack-block-builder';
 import HooksController from '../../src/controllers/hooks.js';
 import { SiteDto } from '../../src/dto/site.js';
 
-chai.use(sinonChai);
-const { expect } = chai;
+use(sinonChai);
 
 function getExpectedSlackMessage(baseURL, channel, source, hlxConfig) {
   const cdnConfigPart = hlxConfig

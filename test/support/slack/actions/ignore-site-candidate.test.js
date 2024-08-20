@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
@@ -21,9 +21,8 @@ import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } fr
 import ignoreSiteCandidate from '../../../../src/support/slack/actions/ignore-site-candidate.js';
 import { expectedIgnoredReply, slackActionResponse, slackFriendsFamilyResponse } from './slack-fixtures.js';
 
-chai.use(chaiAsPromised);
-chai.use(sinonChai);
-const { expect } = chai;
+use(chaiAsPromised);
+use(sinonChai);
 
 describe('ignoreSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';

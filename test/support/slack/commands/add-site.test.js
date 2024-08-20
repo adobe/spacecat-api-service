@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
@@ -20,8 +20,7 @@ import nock from 'nock';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
 
-chai.use(sinonChai);
-const { expect } = chai;
+use(sinonChai);
 
 const validHelixDom = '<!doctype html><html lang="en"><head></head><body><header></header><main><div></div></main></body></html>';
 

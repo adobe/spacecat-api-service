@@ -12,15 +12,13 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import BaseCommand from '../../../../src/support/slack/commands/base.js';
 
-chai.use(chaiAsPromised);
-
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('BaseCommand', () => {
   describe('Initialization and Properties', () => {
