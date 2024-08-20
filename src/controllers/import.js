@@ -147,7 +147,7 @@ function ImportController(context) {
    */
   async function getImportJobsByDateRange(requestContext) {
     const { startDate, endDate, importApiKey } = parseRequestContext(requestContext);
-    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate} for analytics`);
+    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}`);
 
     try {
       validateImportApiKey(importApiKey, ['imports.read_all']);
