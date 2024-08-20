@@ -99,7 +99,7 @@ async function run(request, context) {
     const routeMatch = matchPath(method, suffix, routeHandlers);
 
     if (routeMatch) {
-      const { handler, params } = routeMatch;
+      const { handler, params, query } = routeMatch;
       //
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
@@ -108,6 +108,7 @@ async function run(request, context) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
+      context.query = query;
 
       return await handler(context);
     } else {
