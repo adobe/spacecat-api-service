@@ -140,22 +140,21 @@ function ImportController(context) {
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.startDate - The start date of the range.
    * @param {string} requestContext.params.endDate - The end date of the range.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key to use for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
    * @returns {Promise<Response>} 200 OK with a JSON representation of the import jobs.
    */
   async function getImportJobsByDateRange(requestContext) {
     const { data: { startDate, endDate }, pathInfo: { headers } } = requestContext;
-    const { 'x-import-api-key': importApiKey } = headers;
+    const { 'x-api-key': importApiKey } = headers;
 
     try {
-      // TODO: Once the controller auth changes are implemented, verify the relevant scopes
-      validateImportApiKey(importApiKey);
+      validateImportApiKey(importApiKey, 'imports.read_all');
       validateIsoDates(startDate, endDate);
       const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
       const importJobs = jobs.map(async (job) => {
         const hashedApiKey = hashWithSHA256(importApiKey);
         const { name, imsOrgId, imsUserId } = await dataAccess
-          .getApiKeyByHashedKey(hashedApiKey);
+          .getApiKeyByHashedApiKey(hashedApiKey);
         const metadata = { apiKeyName: name, imsOrgId, imsUserId };
         return { ...ImportJobDto.toJSON(job), metadata };
       });

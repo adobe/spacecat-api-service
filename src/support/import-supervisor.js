@@ -114,11 +114,10 @@ function ImportSupervisor(services, config) {
    * @param {string} startDate - The start date of the range.
    * @param {string} endDate - The end date of the range.
    * @param {string} importApiKey - The API
-   * @returns {Promise<Array<ImportJobDto>>}
+   * @returns {Promise<ImportJob[]>}
    */
   async function getImportJobsByDateRange(startDate, endDate) {
-    const jobs = await dataAccess.getImportJobsByDateRange(startDate, endDate);
-    return jobs;
+    return dataAccess.getImportJobsByDateRange(startDate, endDate);
   }
 
   /**

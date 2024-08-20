@@ -48,7 +48,7 @@ describe('ImportController tests', () => {
   };
 
   const exampleApiKeyMetadata = {
-    hashedKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
+    hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
     name: 'Test API Key',
     imsOrgId: 'Test Org',
   };
@@ -82,7 +82,7 @@ describe('ImportController tests', () => {
       createNewImportJob: (data) => createImportJob(data),
       createNewImportUrl: (data) => createImportUrl(data),
       getImportJobByID: sandbox.stub(),
-      getApiKeyByHashedKey: sandbox.stub().resolves(exampleApiKeyMetadata),
+      getApiKeyByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
     };
 
     mockDataAccess.getImportJobByID.callsFake(async (jobId) => {
