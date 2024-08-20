@@ -150,7 +150,7 @@ function ImportController(context) {
     log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}`);
 
     try {
-      validateImportApiKey(importApiKey, 'imports.read_all');
+      validateImportApiKey(importApiKey, ['imports.read_all']);
       validateIsoDates(startDate, endDate);
       const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
       const importJobs = jobs.map(async (job) => {
