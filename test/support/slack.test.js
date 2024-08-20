@@ -12,13 +12,12 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import nock from 'nock';
 import { getQueryParams, postSlackMessage } from '../../src/utils/slack/base.js';
 
-chai.use(chaiAsPromised);
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('slack', () => {
   let context;

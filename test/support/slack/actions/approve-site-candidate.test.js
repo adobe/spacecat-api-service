@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
@@ -26,9 +26,8 @@ import {
   slackFriendsFamilyResponse,
 } from './slack-fixtures.js';
 
-chai.use(chaiAsPromised);
-chai.use(sinonChai);
-const { expect } = chai;
+use(chaiAsPromised);
+use(sinonChai);
 
 describe('approveSiteCandidate', () => {
   const baseURL = 'https://spacecat.com';

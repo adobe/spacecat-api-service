@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import esmock from 'esmock';
@@ -22,9 +22,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import SitesController from '../../src/controllers/sites.js';
 import { SiteDto } from '../../src/dto/site.js';
 
-chai.use(chaiAsPromised);
-
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
