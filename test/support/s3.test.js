@@ -12,14 +12,13 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import { s3ClientWrapper } from '../../src/support/s3.js';
 
-chai.use(chaiAsPromised);
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('S3 client wrapper tests', () => {
   let mockRequest;

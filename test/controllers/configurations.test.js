@@ -12,16 +12,14 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import ConfigurationsController from '../../src/controllers/configuration.js';
 import { ConfigurationDto } from '../../src/dto/configuration.js';
 
-chai.use(chaiAsPromised);
-
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('Configurations Controller', () => {
   const sandbox = sinon.createSandbox();

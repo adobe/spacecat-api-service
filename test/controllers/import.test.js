@@ -14,7 +14,7 @@
 
 import { Response } from '@adobe/fetch';
 
-import chai, { expect } from 'chai';
+import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -24,8 +24,8 @@ import { createImportUrl } from '@adobe/spacecat-shared-data-access/src/models/i
 import ImportController from '../../src/controllers/import.js';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
-chai.use(sinonChai);
-chai.use(chaiAsPromised);
+use(sinonChai);
+use(chaiAsPromised);
 
 describe('ImportController tests', () => {
   let sandbox;
@@ -36,6 +36,7 @@ describe('ImportController tests', () => {
   let mockDataAccess;
   let mockS3;
   let importConfiguration;
+  let mockAuth;
 
   const exampleJob = {
     id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
@@ -53,6 +54,10 @@ describe('ImportController tests', () => {
       sendMessage: sandbox.stub(),
     };
 
+    mockAuth = {
+      checkScopes: sandbox.stub().resolves(true),
+    };
+
     requestContext = {
       data: {
         urls: [],
@@ -61,7 +66,7 @@ describe('ImportController tests', () => {
       },
       pathInfo: {
         headers: {
-          'x-import-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
+          'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
         },
       },
     };
@@ -112,6 +117,7 @@ describe('ImportController tests', () => {
       sqs: mockSqsClient,
       s3: mockS3,
       dataAccess: mockDataAccess,
+      auth: mockAuth,
     };
 
     importController = ImportController(context);
@@ -149,23 +155,11 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
 
-    it('should reject an invalid import API key', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = 'unknown-api-key';
+    it('should reject when auth scopes are invalid', async () => {
+      context.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
       const response = await importController.createImportJob(requestContext);
-
-      expect(response.status).to.equal(401); // Unauthorized
-      expect(response.headers.get('x-error')).to.equal('Invalid import API key');
-    });
-
-    it('should reject when no allowed API keys are defined', async () => {
-      const contextNoApiKeys = { ...context };
-      delete importConfiguration.allowedApiKeys;
-      contextNoApiKeys.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
-
-      const importControllerNoApiKeys = new ImportController(contextNoApiKeys);
-      const response = await importControllerNoApiKeys.createImportJob(requestContext);
-      expect(response.status).to.equal(401); // Unauthorized
-      expect(response.headers.get('x-error')).to.equal('Invalid import API key');
+      expect(response.status).to.equal(401);
+      expect(response.headers.get('x-error')).to.equal('Missing required scopes');
     });
 
     it('should reject when no import queues are defined', async () => {
@@ -360,7 +354,7 @@ describe('ImportController tests', () => {
     });
 
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
+      requestContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
       requestContext.params.jobId = exampleJob.id;
       const response = await importController.getImportJobStatus(requestContext);
 
@@ -386,7 +380,7 @@ describe('ImportController tests', () => {
 
   describe('getImportJobResult', () => {
     beforeEach(() => {
-      requestContext.pathInfo.headers['x-import-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
+      requestContext.pathInfo.headers['x-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
       requestContext.params.jobId = exampleJob.id;
     });
 

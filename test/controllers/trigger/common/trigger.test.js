@@ -15,13 +15,13 @@
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
-import chai, { expect } from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import { triggerFromData } from '../../../../src/controllers/trigger/common/trigger.js';
 
-chai.use(chaiAsPromised);
+use(chaiAsPromised);
 
 describe('Trigger from data access', () => {
   let context;
