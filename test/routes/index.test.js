@@ -103,7 +103,6 @@ describe('getRouteHandlers', () => {
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/import/jobs',
-      'GET /tools/import/jobs/by-date-range',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -147,6 +146,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /tools/import/jobs/:jobId',
       'POST /tools/import/jobs/:jobId/result',
+      'GET /tools/import/jobs/by-date-range/:startDate/:endDate',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
