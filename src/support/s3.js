@@ -25,8 +25,13 @@ export function s3ClientWrapper(fn) {
     if (!context.s3) {
       // Create an S3 client and add it to the context
       const { region } = context.runtime;
+      const {
+        S3_BUCKET_NAME: bucket,
+      } = context.env;
+
       context.s3 = {
         s3Client: new S3Client({ region }),
+        s3Bucket: bucket,
         getSignedUrl,
         GetObjectCommand,
         PutObjectCommand,
