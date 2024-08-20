@@ -131,6 +131,8 @@ function ImportController(context) {
   function parseRequestContext(requestContext) {
     return {
       jobId: requestContext.params.jobId,
+      startDate: requestContext.params.startDate,
+      endDate: requestContext.params.endDate,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
     };
   }
@@ -144,8 +146,7 @@ function ImportController(context) {
    * @returns {Promise<Response>} 200 OK with a JSON representation of the import jobs.
    */
   async function getImportJobsByDateRange(requestContext) {
-    const { query: { startDate, endDate }, pathInfo: { headers } } = requestContext;
-    const { 'x-api-key': importApiKey } = headers;
+    const { startDate, endDate, importApiKey } = parseRequestContext(requestContext);
     log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}`);
 
     try {
