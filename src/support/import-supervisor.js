@@ -114,7 +114,6 @@ function ImportSupervisor(services, config) {
    * Get all import jobs between the specified start and end dates.
    * @param {string} startDate - The start date of the range.
    * @param {string} endDate - The end date of the range.
-   * @param {string} importApiKey - The API
    * @returns {Promise<ImportJob[]>}
    */
   async function getImportJobsByDateRange(startDate, endDate) {
