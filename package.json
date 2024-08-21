@@ -4,6 +4,10 @@
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
+  "engines": {
+    "node": "^20.0.0 <21.0.0",
+    "npm": "^10.0.0 <11.0.0"
+  },
   "scripts": {
     "start": "nodemon",
     "test": "c8 --skip-full mocha -i -g 'Post-Deploy' --spec=test/**/*.test.js",
