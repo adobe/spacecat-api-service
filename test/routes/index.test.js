@@ -146,7 +146,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /tools/import/jobs/:jobId',
       'POST /tools/import/jobs/:jobId/result',
-      'GET /tools/import/jobs/by-date-range/:startDate/:endDate',
+      'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

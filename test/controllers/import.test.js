@@ -37,6 +37,7 @@ describe('ImportController tests', () => {
   let mockS3;
   let importConfiguration;
   let mockAuth;
+  let mockAttributes;
 
   const exampleJob = {
     id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
@@ -45,6 +46,9 @@ describe('ImportController tests', () => {
     baseURL: 'https://www.example.com',
     hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
     importQueueId: 'spacecat-import-queue-1',
+    initiatedBy: {
+      apiKeyName: 'Test key',
+    },
   };
 
   const exampleApiKeyMetadata = {
@@ -73,9 +77,19 @@ describe('ImportController tests', () => {
       pathInfo: {
         headers: {
           'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
+          'user-agent': 'Unit test',
         },
       },
-      query: {},
+    };
+
+    mockAttributes = {
+      authInfo: {
+        profile: {
+          getName: () => 'Test User',
+          getImsOrgId: () => 'TestOrgId',
+          getImsUserId: () => 'TestUserId',
+        },
+      },
     };
 
     mockDataAccess = {
@@ -126,6 +140,7 @@ describe('ImportController tests', () => {
       s3: mockS3,
       dataAccess: mockDataAccess,
       auth: mockAuth,
+      attributes: mockAttributes,
     };
 
     importController = ImportController(context);
@@ -464,9 +479,8 @@ describe('ImportController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       const responseResult = await response.json();
-      expect(responseResult[0].metadata).to.deep.equal({
-        apiKeyName: 'Test API Key',
-        imsOrgId: 'Test Org',
+      expect(responseResult[0].initiatedBy).to.deep.equal({
+        apiKeyName: 'Test key',
       });
       expect(responseResult[0].baseURL).to.equal('https://www.example.com');
     });

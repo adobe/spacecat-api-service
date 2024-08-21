@@ -11,7 +11,7 @@
  */
 
 import {
-  createResponse, hashWithSHA256,
+  createResponse,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
@@ -32,7 +32,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  */
 function ImportController(context) {
   const {
-    dataAccess, sqs, s3, log, env, auth,
+    dataAccess, sqs, s3, log, env, auth, attributes,
   } = context;
   const services = {
     dataAccess,
@@ -112,15 +112,32 @@ function ImportController(context) {
    */
   async function createImportJob(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
-    const { 'x-api-key': importApiKey } = headers;
+    const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
       validateRequestData(data);
 
-      const { urls, options = importConfiguration.options, importScript } = data;
-      const job = await importSupervisor.startNewJob(urls, importApiKey, options, importScript);
+      let initiatedBy = {};
 
+      const { authInfo: { profile } } = attributes;
+      if (profile) {
+        initiatedBy = {
+          apiKeyName: profile.getName(),
+          imsOrgId: profile.getImsOrgId(),
+          imsUserId: profile.getImsUserId(),
+          userAgent,
+        };
+      }
+
+      const { urls, options = importConfiguration.options, importScript } = data;
+      const job = await importSupervisor.startNewJob(
+        urls,
+        importApiKey,
+        options,
+        importScript,
+        initiatedBy,
+      );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {
       log.error(`Failed to create a new import job: ${error.message}`);
@@ -153,15 +170,7 @@ function ImportController(context) {
       validateImportApiKey(importApiKey, ['imports.read_all']);
       validateIsoDates(startDate, endDate);
       const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
-      const importJobs = jobs.map(async (job) => {
-        const hashedApiKey = hashWithSHA256(importApiKey);
-        const { name, imsOrgId, imsUserId } = await dataAccess
-          .getApiKeyByHashedApiKey(hashedApiKey);
-        const metadata = { apiKeyName: name, imsOrgId, imsUserId };
-        return { ...ImportJobDto.toJSON(job), metadata };
-      });
-      const resolvedImportJobs = await Promise.all(importJobs);
-      return ok(resolvedImportJobs);
+      return ok(jobs.map((job) => ImportJobDto.toJSON(job)));
     } catch (error) {
       log.error(`Failed to fetch import jobs between startDate: ${startDate} and endDate: ${endDate}, ${error.message}`);
       return createErrorResponse(error);
