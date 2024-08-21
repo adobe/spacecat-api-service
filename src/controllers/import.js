@@ -14,7 +14,7 @@ import {
   createResponse,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -32,7 +32,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  */
 function ImportController(context) {
   const {
-    dataAccess, sqs, s3, log, env, auth,
+    dataAccess, sqs, s3, log, env, auth, attributes,
   } = context;
   const services = {
     dataAccess,
@@ -96,6 +96,12 @@ function ImportController(context) {
     });
   }
 
+  function validateIsoDates(startDate, endDate) {
+    if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
+      throw new ErrorWithStatusCode('Invalid request: startDate and endDate must be in ISO 8601 format', STATUS_BAD_REQUEST);
+    }
+  }
+
   /**
    * Create and start a new import job.
    * @param {object} requestContext - Context of the request.
@@ -106,15 +112,32 @@ function ImportController(context) {
    */
   async function createImportJob(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
-    const { 'x-api-key': importApiKey } = headers;
+    const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
       validateRequestData(data);
 
-      const { urls, options = importConfiguration.options, importScript } = data;
-      const job = await importSupervisor.startNewJob(urls, importApiKey, options, importScript);
+      let initiatedBy = {};
 
+      const { authInfo: { profile } } = attributes;
+      if (profile) {
+        initiatedBy = {
+          apiKeyName: profile.getName(),
+          imsOrgId: profile.getImsOrgId(),
+          imsUserId: profile.getImsUserId(),
+          userAgent,
+        };
+      }
+
+      const { urls, options = importConfiguration.options, importScript } = data;
+      const job = await importSupervisor.startNewJob(
+        urls,
+        importApiKey,
+        options,
+        importScript,
+        initiatedBy,
+      );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {
       log.error(`Failed to create a new import job: ${error.message}`);
@@ -125,8 +148,33 @@ function ImportController(context) {
   function parseRequestContext(requestContext) {
     return {
       jobId: requestContext.params.jobId,
+      startDate: requestContext.params.startDate,
+      endDate: requestContext.params.endDate,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
     };
+  }
+
+  /**
+   * Get all import jobs between startDate and endDate
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.startDate - The start date of the range.
+   * @param {string} requestContext.params.endDate - The end date of the range.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
+   * @returns {Promise<Response>} 200 OK with a JSON representation of the import jobs.
+   */
+  async function getImportJobsByDateRange(requestContext) {
+    const { startDate, endDate, importApiKey } = parseRequestContext(requestContext);
+    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}.`);
+
+    try {
+      validateImportApiKey(importApiKey, ['imports.read_all']);
+      validateIsoDates(startDate, endDate);
+      const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
+      return ok(jobs.map((job) => ImportJobDto.toJSON(job)));
+    } catch (error) {
+      log.error(`Failed to fetch import jobs between startDate: ${startDate} and endDate: ${endDate}, ${error.message}`);
+      return createErrorResponse(error);
+    }
   }
 
   /**
@@ -179,6 +227,7 @@ function ImportController(context) {
     createImportJob,
     getImportJobStatus,
     getImportJobResult,
+    getImportJobsByDateRange,
   };
 }
 

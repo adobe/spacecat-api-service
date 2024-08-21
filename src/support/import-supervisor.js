@@ -96,7 +96,7 @@ function ImportSupervisor(services, config) {
    * @param {object} options - Client provided options for the import job.
    * @returns {Promise<ImportJob>}
    */
-  async function createNewImportJob(urls, importQueueId, hashedApiKey, options) {
+  async function createNewImportJob(urls, importQueueId, hashedApiKey, options, initiatedBy) {
     const newJob = {
       id: crypto.randomUUID(),
       baseURL: determineBaseURL(urls),
@@ -105,8 +105,19 @@ function ImportSupervisor(services, config) {
       options,
       urlCount: urls.length,
       status: ImportJobStatus.RUNNING,
+      initiatedBy,
     };
     return dataAccess.createNewImportJob(newJob);
+  }
+
+  /**
+   * Get all import jobs between the specified start and end dates.
+   * @param {string} startDate - The start date of the range.
+   * @param {string} endDate - The end date of the range.
+   * @returns {Promise<ImportJob[]>}
+   */
+  async function getImportJobsByDateRange(startDate, endDate) {
+    return dataAccess.getImportJobsByDateRange(startDate, endDate);
   }
 
   /**
@@ -191,7 +202,7 @@ function ImportSupervisor(services, config) {
    * @param {string} importScript - Optional custom Base64 encoded import script.
    * @returns {Promise<ImportJob>}
    */
-  async function startNewJob(urls, importApiKey, options, importScript) {
+  async function startNewJob(urls, importApiKey, options, importScript, initiatedBy) {
     log.info(`Import requested for ${urls.length} URLs, using import API key: ${importApiKey}`);
 
     // Determine if there is a free import queue
@@ -201,7 +212,13 @@ function ImportSupervisor(services, config) {
     const hashedApiKey = hashWithSHA256(importApiKey);
 
     // If a queue is available, create the import-job record in dataAccess:
-    const newImportJob = await createNewImportJob(urls, importQueueId, hashedApiKey, options);
+    const newImportJob = await createNewImportJob(
+      urls,
+      importQueueId,
+      hashedApiKey,
+      options,
+      initiatedBy,
+    );
 
     log.info(`New import job created for hashed API key: ${hashedApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
 
@@ -269,6 +286,7 @@ function ImportSupervisor(services, config) {
     startNewJob,
     getImportJob,
     getJobArchiveSignedUrl,
+    getImportJobsByDateRange,
   };
 }
 
