@@ -1,3 +1,24 @@
+## [1.61.3](https://github.com/adobe/spacecat-api-service/compare/v1.61.2...v1.61.3) (2024-08-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.42.0 ([#457](https://github.com/adobe/spacecat-api-service/issues/457)) ([8744abf](https://github.com/adobe/spacecat-api-service/commit/8744abf046a22f384fb89cb9fbe99f1fc4449d09))
+
+## [1.61.2](https://github.com/adobe/spacecat-api-service/compare/v1.61.1...v1.61.2) (2024-08-20)
+
+
+### Bug Fixes
+
+* use metrics-store and s3 wrapper from shared ([#449](https://github.com/adobe/spacecat-api-service/issues/449)) ([d6133b1](https://github.com/adobe/spacecat-api-service/commit/d6133b1095ea721573e9c8740e9e7dd3e579740b))
+
+## [1.61.1](https://github.com/adobe/spacecat-api-service/compare/v1.61.0...v1.61.1) (2024-08-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.41.6 ([#456](https://github.com/adobe/spacecat-api-service/issues/456)) ([76b2be9](https://github.com/adobe/spacecat-api-service/commit/76b2be932d8c8ceceade753560be26a7698b564c))
+
 # [1.61.0](https://github.com/adobe/spacecat-api-service/compare/v1.60.11...v1.61.0) (2024-08-19)
 
 

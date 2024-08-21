@@ -548,13 +548,25 @@ describe('Sites Controller', () => {
     getStoredMetrics.resolves(storedMetrics);
 
     const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-      '../../src/support/metrics-store.js': {
+      '@adobe/spacecat-shared-utils': {
         getStoredMetrics,
       },
     });
 
     const resp = await (await sitesControllerMock.default(mockDataAccess).getSiteMetricsBySource({
       params: { siteId, source, metric },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
+      s3: {
+        s3Client: {
+          send: sinon.stub(),
+        },
+        s3Bucket: 'test-bucket',
+        region: 'us-west-2',
+      },
     })).json();
 
     expect(resp).to.deep.equal(storedMetrics);
