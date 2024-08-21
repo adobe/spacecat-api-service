@@ -11,6 +11,9 @@ If the PR is changing the API specification:
 If the PR is changing the API implementation or an entity exposed through the API:
 - [ ] make sure you update the API specification and the examples to reflect the changes.
 
+If the PR is introducing a new audit type:
+- [ ] make sure you update the API specification with the type, schema of the audit result and an example
+
 ## Related Issues
 
 
