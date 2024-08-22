@@ -1,3 +1,17 @@
+# [1.62.0](https://github.com/adobe/spacecat-api-service/compare/v1.61.4...v1.62.0) (2024-08-21)
+
+
+### Features
+
+* API to get all import jobs ([#440](https://github.com/adobe/spacecat-api-service/issues/440)) ([88414f6](https://github.com/adobe/spacecat-api-service/commit/88414f613e90a751c122e5095a0344d896ccbe31))
+
+## [1.61.4](https://github.com/adobe/spacecat-api-service/compare/v1.61.3...v1.61.4) (2024-08-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.43.0 ([#460](https://github.com/adobe/spacecat-api-service/issues/460)) ([b6c174b](https://github.com/adobe/spacecat-api-service/commit/b6c174bf49a6f36f5fd97dface37e3c265dc057e))
+
 ## [1.61.3](https://github.com/adobe/spacecat-api-service/compare/v1.61.2...v1.61.3) (2024-08-20)
 
 
