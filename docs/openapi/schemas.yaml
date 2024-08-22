@@ -26,7 +26,7 @@ AuditType:
     - 'broken-backlinks'
     - 'canonical'
     - 'sitemap'
-    - 'url-inspect'
+    - 'structured-data'
     - 'costs'
   example: 'cwv'
 URL:
@@ -441,13 +441,10 @@ AuditResult:
           description: |
             A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
           type: string
-    - type: object
-      properties:
-        urlInspection:
-          type: array
-          description: Information about the provided URLs in the Google index.
-          items:
-            $ref: './schemas.yaml#/URLInspection'
+    - type: array
+      description: Information about the provided URLs in the Google index.
+      items:
+        $ref: './schemas.yaml#/StructuredData'
     - type: object
       description: |
         The result of costs audit.
@@ -515,7 +512,7 @@ ExperimentationOpportunity:
       description: The metrics for the experimentation opportunity
       items:
         type: object
-URLInspection:
+StructuredData:
   type: object
   readOnly: true
   properties:
@@ -529,19 +526,22 @@ URLInspection:
         verdict:
           $ref: '#/Verdict'
         lastCrawlTime:
-          type: string
-          description: Last time this URL was crawled by Google using the primary crawler. Absent if the URL was never crawled successfully.
-          format: date-time
-          example: '2024-01-19T14:20:30Z'
-    richResultsResult:
+          $ref: '#/DateTime'
+    richResults:
         type: object
         description: Result of the Rich Results analysis. Absent if there are no rich results found.
         properties:
           verdict:
             $ref: '#/Verdict'
-          detectedItems:
+          detectedItemTypes:
             type: array
-            description: A list of zero or more rich results detected on this page. Rich results that cannot even be parsed due to syntactic issues will not be listed here.
+            description: A list of zero or more rich result types detected on this page.
+            items:
+              type: string
+              example: 'Product snippets'
+          detectedIssues:
+            type: array
+            description: A list of zero or more rich results errors detected on this page.
             items:
               type: object
               properties:
@@ -551,7 +551,7 @@ URLInspection:
                   example: 'Product snippets'
                 items:
                   type: array
-                  description: List of Rich Results items.
+                  description: List of Rich Results items that have issues.
                   items:
                     type: object
                     properties:
@@ -561,7 +561,7 @@ URLInspection:
                         example: 'Product name'
                       issues:
                         type: array
-                        description: A list of zero or more rich result issues found for this instance.
+                        description: A list of rich result issues found for this instance.
                         items:
                           type: object
                           properties:
@@ -571,7 +571,7 @@ URLInspection:
                               example: 'Missing field "image"'
                             severity:
                               type: string
-                              description: Severity of this issue. WARNING, or ERROR. Items with an issue of status ERROR cannot appear with rich result features in Google Search results.
+                              description: Severity of this issue.
                               example: 'ERROR'
 
 Verdict:
