@@ -1,3 +1,10 @@
+# [1.63.0](https://github.com/adobe/spacecat-api-service/compare/v1.62.2...v1.63.0) (2024-08-23)
+
+
+### Features
+
+* introducing structured-data audit result type ([#448](https://github.com/adobe/spacecat-api-service/issues/448)) ([1d7b226](https://github.com/adobe/spacecat-api-service/commit/1d7b226777f60d054511c8fe3c5f670ff2e8c557))
+
 ## [1.62.2](https://github.com/adobe/spacecat-api-service/compare/v1.62.1...v1.62.2) (2024-08-22)
 
 
