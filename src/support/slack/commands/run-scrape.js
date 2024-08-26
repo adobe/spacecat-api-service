@@ -18,31 +18,31 @@ import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import { triggerImportRun } from '../../utils.js';
 import {
-    extractURLFromSlackInput,
-    postErrorMessage,
-    postSiteNotFoundMessage,
+  extractURLFromSlackInput,
+  postErrorMessage,
+  postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
 
 const PHRASES = ['run scrape'];
 
 function isValidDateInterval(startDate, endDate) {
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(startDate)) {
-        return false;
-    }
-    if (!dateRegex.test(endDate)) {
-        return false;
-    }
-    const parsedStartDate = new Date(startDate);
-    if (Number.isNaN(parsedStartDate.getTime())) {
-        return false;
-    }
-    const parsedEndDate = new Date(endDate);
-    if (Number.isNaN(parsedEndDate.getTime())) {
-        return false;
-    }
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(startDate)) {
+    return false;
+  }
+  if (!dateRegex.test(endDate)) {
+    return false;
+  }
+  const parsedStartDate = new Date(startDate);
+  if (Number.isNaN(parsedStartDate.getTime())) {
+    return false;
+  }
+  const parsedEndDate = new Date(endDate);
+  if (Number.isNaN(parsedEndDate.getTime())) {
+    return false;
+  }
 
-    return parsedStartDate < parsedEndDate
+  return parsedStartDate < parsedEndDate
         && (parsedEndDate - parsedStartDate) <= 1000 * 60 * 60 * 24 * 365 * 2; // 2 years
 }
 
@@ -54,94 +54,93 @@ function isValidDateInterval(startDate, endDate) {
  * @constructor
  */
 function RunScrapeCommand(context) {
-    const baseCommand = BaseCommand({
-        id: 'run-scrape',
-        name: 'Run Scrape',
-        description: 'Runs the specified sc type for the site identified with its id, and optionally for a date range.'
+  const baseCommand = BaseCommand({
+    id: 'run-scrape',
+    name: 'Run Scrape',
+    description: 'Runs the specified scrape type for the site identified with its id, and optionally for a date range.'
             + '\nOnly selected SpaceCat fluid team members can run scraper.'
-            + '\nCurrently this will run the import for all sources and all destinations configured for the site, hence be aware of costs'
+            + '\nCurrently this will run the scraper for all sources and all destinations configured for the site, hence be aware of costs'
             + ' (source: ahrefs) when choosing the date range.',
-        phrases: PHRASES,
-        usageText: `${PHRASES[0]} {importType} {baseURL} {startDate} {endDate}`,
-    });
+    phrases: PHRASES,
+    usageText: `${PHRASES[0]} {importType} {baseURL} {startDate} {endDate}`,
+  });
 
-    const { dataAccess, log } = context;
+  const { dataAccess, log } = context;
 
-    /**
-     * Validates input and triggers a new import run for the given site.
+  /**
+     * Validates input and triggers a new scrape run for the given site.
      *
      * @param {string[]} args - The arguments provided to the command ([site]).
      * @param {Object} slackContext - The Slack context object.
      * @param {Function} slackContext.say - The Slack say function.
      * @returns {Promise} A promise that resolves when the operation is complete.
      */
-    const handleExecution = async (args, slackContext) => {
-        const { say, user } = slackContext;
+  const handleExecution = async (args, slackContext) => {
+    const { say, user } = slackContext;
 
-        const admins = JSON.parse(context?.env?.SLACK_IDS_RUN_IMPORT || '[]');
+    const admins = JSON.parse(context?.env?.SLACK_IDS_RUN_IMPORT || '[]');
 
-        if (!admins.includes(user)) {
-            await say(':error: Only selected SpaceCat fluid team members can run imports.');
-            return;
-        }
+    if (!admins.includes(user)) {
+      await say(':error: Only selected SpaceCat fluid team members can run imports.');
+      return;
+    }
 
-        try {
-            const [importType, baseURLInput, startDate, endDate] = args;
-            const baseURL = extractURLFromSlackInput(baseURLInput);
+    try {
+      const [scrapeType, baseURLInput, startDate, endDate] = args;
+      const baseURL = extractURLFromSlackInput(baseURLInput);
 
-            if (!hasText(importType) || !hasText(baseURL)) {
-                await say(baseCommand.usage());
-                return;
-            }
+      if (!hasText(scrapeType) || !hasText(baseURL)) {
+        await say(baseCommand.usage());
+        return;
+      }
 
-            if ((startDate || endDate) && !isValidDateInterval(startDate, endDate)) {
-                await say(':error: Invalid date interval. '
+      if ((startDate || endDate) && !isValidDateInterval(startDate, endDate)) {
+        await say(':error: Invalid date interval. '
                     + 'Please provide valid dates in the format YYYY-MM-DD. '
                     + 'The end date must be after the start date and within a two-year range.');
-                return;
-            }
+        return;
+      }
 
-            const config = await dataAccess.getConfiguration();
-            const jobConfig = config.getJobs().filter((job) => job.group === 'imports' && job.type === importType);
+      const config = await dataAccess.getConfiguration();
+      const jobConfig = config.getJobs().filter((job) => job.group === 'imports' && job.type === scrapeType);
 
-            if (!Array.isArray(jobConfig) || jobConfig.length === 0) {
-                const validImportTypes = config.getJobs().filter((job) => job.group === 'imports').map((job) => job.type);
-                await say(`:warning: Import type ${importType} does not exist. Valid import types are: ${validImportTypes.join(', ')}`);
-                return;
-            }
+      if (!Array.isArray(jobConfig) || jobConfig.length === 0) {
+        const validScrapeTypes = config.getJobs().filter((job) => job.group === 'imports').map((job) => job.type);
+        await say(`:warning: Import type ${scrapeType} does not exist. Valid import types are: ${validScrapeTypes.join(', ')}`);
+        return;
+      }
 
-            const site = await dataAccess.getSiteByBaseURL(baseURL);
-            if (!isObject(site)) {
-                await postSiteNotFoundMessage(say, baseURL);
-                return;
-            }
+      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      if (!isObject(site)) {
+        await postSiteNotFoundMessage(say, baseURL);
+        return;
+      }
 
-            await triggerImportRun(
-                config,
-                importType,
-                site.getId(),
-                startDate,
-                endDate,
-                slackContext,
-                context,
-            );
+      await triggerImportRun(
+        config,
+        scrapeType,
+        site.getId(),
+        startDate,
+        endDate,
+        slackContext,
+        context,
+      );
 
-            const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
-            // message += 'Stand by for results. I will post them here when they are ready.';
+      const message = `:adobe-run: Triggered scrape run of type ${scrapeType} for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
 
-            await say(message);
-        } catch (error) {
-            log.error(error);
-            await postErrorMessage(say, error);
-        }
-    };
+      await say(message);
+    } catch (error) {
+      log.error(error);
+      await postErrorMessage(say, error);
+    }
+  };
 
-    baseCommand.init(context);
+  baseCommand.init(context);
 
-    return {
-        ...baseCommand,
-        handleExecution,
-    };
+  return {
+    ...baseCommand,
+    handleExecution,
+  };
 }
 
 export default RunScrapeCommand;
