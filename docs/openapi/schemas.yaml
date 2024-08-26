@@ -464,10 +464,53 @@ AuditResult:
               description: |
                 A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
               type: string
+    - type: object
+      description: The result of CWV audit
+      properties:
+        cwv:
+          type: array
+          description: A list of CWV metrics per url.
+          items:
+            $ref: './schemas.yaml#/CWVResult'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+CWVResult:
+  type: object
+  properties:
+    url:
+      $ref: '#/URL'
+    pageviews:
+      type: integer
+      example: 349900
+    lcp:
+      type: number
+      format: float
+      example: 3303.300000000745
+    lcpCount:
+      type: integer
+      example: 4873
+    cls:
+      type: number
+      format: float
+      example: 0.0138671875
+    clsCount:
+      type: integer
+      example: 4216
+    inp:
+      type: integer
+      example: 72
+    inpCount:
+      type: integer
+      example: 1952
+    ttfb:
+      type: number
+      format: float
+      example: 732.0500007271767
+    ttfbCount:
+      type: integer
+      example: 5678
 ExperimentationOpportunity:
   type: object
   readOnly: true
@@ -528,51 +571,51 @@ StructuredData:
         lastCrawlTime:
           $ref: '#/DateTime'
     richResults:
-        type: object
-        description: Result of the Rich Results analysis. Absent if there are no rich results found.
-        properties:
-          verdict:
-            $ref: '#/Verdict'
-          detectedItemTypes:
-            type: array
-            description: A list of zero or more rich result types detected on this page.
-            items:
-              type: string
-              example: 'Product snippets'
-          detectedIssues:
-            type: array
-            description: A list of zero or more rich results errors detected on this page.
-            items:
-              type: object
-              properties:
-                richResultType:
-                  type: string
-                  description: Rich Results type detected on this page.
-                  example: 'Product snippets'
+      type: object
+      description: Result of the Rich Results analysis. Absent if there are no rich results found.
+      properties:
+        verdict:
+          $ref: '#/Verdict'
+        detectedItemTypes:
+          type: array
+          description: A list of zero or more rich result types detected on this page.
+          items:
+            type: string
+            example: 'Product snippets'
+        detectedIssues:
+          type: array
+          description: A list of zero or more rich results errors detected on this page.
+          items:
+            type: object
+            properties:
+              richResultType:
+                type: string
+                description: Rich Results type detected on this page.
+                example: 'Product snippets'
+              items:
+                type: array
+                description: List of Rich Results items that have issues.
                 items:
-                  type: array
-                  description: List of Rich Results items that have issues.
-                  items:
-                    type: object
-                    properties:
-                      name:
-                        type: string
-                        description: The user-provided name of this item.
-                        example: 'Product name'
-                      issues:
-                        type: array
-                        description: A list of rich result issues found for this instance.
-                        items:
-                          type: object
-                          properties:
-                            issueMessage:
-                              type: string
-                              description: Rich Results issue type.
-                              example: 'Missing field "image"'
-                            severity:
-                              type: string
-                              description: Severity of this issue.
-                              example: 'ERROR'
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: The user-provided name of this item.
+                      example: 'Product name'
+                    issues:
+                      type: array
+                      description: A list of rich result issues found for this instance.
+                      items:
+                        type: object
+                        properties:
+                          issueMessage:
+                            type: string
+                            description: Rich Results issue type.
+                            example: 'Missing field "image"'
+                          severity:
+                            type: string
+                            description: Severity of this issue.
+                            example: 'ERROR'
 
 Verdict:
   type: string
