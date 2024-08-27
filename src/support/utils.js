@@ -17,10 +17,6 @@ export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
   ? h1()
   : h2();
 
-export const GOOGLE_DRIVE = 'google-drive';
-export const MICROSOFT_SHAREPOINT = 'sharepoint';
-export const SITE_ROOT = 'sites';
-
 /**
  * Checks if the url parameter "url" equals "ALL".
  * @param {string} url - URL parameter.
