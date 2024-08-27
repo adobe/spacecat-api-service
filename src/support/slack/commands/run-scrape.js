@@ -88,23 +88,32 @@ function RunScrapeCommand(context) {
         return;
       }
 
-      const topPages = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
-      const urls = topPages.map(
-        (page) => ({
-          url: page.getURL(),
-        }),
-      );
-      const jobId = crypto.randomUUID();
-      await triggerScraperRun(
-        jobId,
-        urls,
-        slackContext,
-        context,
-      );
+      const result = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
+      const topPages = result || [];
+      if (topPages.length > 0) {
+        const urls = topPages.map(
+          (page) => ({
+            url: page.getURL(),
+          }),
+        );
 
-      const message = `:adobe-run: Triggered scrape run for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
+        const topPagesListMessage = topPages.map((page) => `- ${page.getURL()}`).join('\n');
+        await say(`:white_check_mark: Found top pages for site \`${baseURL}\`:\n${topPagesListMessage}`);
 
-      await say(message);
+        const jobId = crypto.randomUUID();
+        await triggerScraperRun(
+          jobId,
+          urls,
+          slackContext,
+          context,
+        );
+
+        const message = `:adobe-run: Triggered scrape run for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
+
+        await say(message);
+      } else {
+        await say(`:warning: No top pages found for site \`${baseURL}\``);
+      }
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
