@@ -11,9 +11,9 @@
  */
 /**
  * Checks if the provided startDate & endDate is a valid interval
- * @param startDate
- * @param endDate
- * @returns {boolean}
+ * @param startDate - A starting date
+ * @param endDate - An ending date
+ * @returns {boolean} - true/false based on the validity of the interval
  */
 export function isValidDateInterval(startDate, endDate) {
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
