@@ -105,3 +105,69 @@ site:
         $ref: './responses.yaml#/404-site-not-found-with-id'
       '500':
         $ref: './responses.yaml#/500'
+redirects-for-site:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - site
+    summary: Publish redirects for a site
+    description: |
+      This endpoint is useful for publishing fixed URLs to the site document based authoring.
+    operationId: publishRedirectsForSite
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/FixedURLs'
+    responses:
+      '207':
+        description: The URLs that were successfully addeed to redirects and the URLs that failed
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/MultiStatus'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-audit-not-found'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+metadata-for-site:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - site
+    summary: Publish redirects for a site
+    description: |
+      This endpoint is useful for publishing fixed URLs to the site document based authoring.
+    operationId: publishRedirectsForSite
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/Metadata'
+    responses:
+      '200':
+        description: The updated audit type config object
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/MultiStatus'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-audit-not-found'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

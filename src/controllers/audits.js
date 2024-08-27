@@ -17,7 +17,6 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { getContentClient, publishToHelixAdmin } from '../support/utils.js';
 import { AuditDto } from '../dto/audit.js';
 
 /**
@@ -26,7 +25,7 @@ import { AuditDto } from '../dto/audit.js';
  * @returns {object} Audits controller.
  * @constructor
  */
-function AuditsController(dataAccess, env) {
+function AuditsController(dataAccess) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -201,82 +200,12 @@ function AuditsController(dataAccess, env) {
     return badRequest('No updates provided');
   };
 
-  const patchAuditFixesForSite = async (context) => {
-    function mergeFixes(existing, changes) {
-      const computedMerge = {};
-      [...existing, ...changes].forEach((fix) => {
-        computedMerge[fix.brokenTargetURL] = fix;
-      });
-      return Object.values(computedMerge);
-    }
-    const { log } = context;
-    const siteId = context.params?.siteId;
-    const auditType = context.params?.auditType;
-    const { fixedURLs } = context.data;
-
-    if (!hasText(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!hasText(auditType)) {
-      return badRequest('Audit type required');
-    }
-
-    if (!Array.isArray(fixedURLs)) {
-      return badRequest('Fixed URL array required');
-    }
-
-    if (fixedURLs.length === 0) {
-      return badRequest('Fixed URL array cannot be empty');
-    }
-    for (const fixedURL of fixedURLs) {
-      if (!isObject(fixedURL)) {
-        return badRequest('Fixed URL must be an object');
-      }
-      if (Object.keys(fixedURL).length === 0) {
-        return badRequest('Fixed URL object cannot be empty');
-      }
-      if (!hasText(fixedURL.brokenTargetURL) || !hasText(fixedURL.targetURL)) {
-        return badRequest('Fixed URL must have both brokenTargetURL and targetURL');
-      }
-      if (!isValidUrl(fixedURL.brokenTargetURL)
-            || !isValidUrl(fixedURL.targetURL)) {
-        return badRequest('Fixed URL have invalid URL format');
-      }
-    }
-    const site = await dataAccess.getSiteByID(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-    const config = site.getConfig();
-    const handlerConfig = config.getHandlerConfig(auditType);
-    if (!handlerConfig) {
-      return notFound('Audit type not found');
-    }
-    const existingFixedURLs = config.getFixedURLs(auditType);
-    const newFixedURLs = mergeFixes(existingFixedURLs, fixedURLs);
-    const contentClient = await getContentClient(env, site, log);
-    for (const { brokenTargetURL, targetURL } of fixedURLs) {
-      // eslint-disable-next-line no-await-in-loop
-      await contentClient.appendRowToSheet('/redirects.xlsx', 'Sheet1', [brokenTargetURL, targetURL]);
-    }
-    const hlxConfig = site.getHlxConfig();
-    await publishToHelixAdmin(env.HLX_ADMIN_TOKEN, hlxConfig.rso.owner, hlxConfig.rso.site, hlxConfig.rso.ref, 'redirects.xlsx');
-    config.updateFixedURLs(auditType, newFixedURLs);
-    const configObj = Config.toDynamoItem(config);
-    site.updateConfig(configObj);
-    await dataAccess.updateSite(site);
-
-    return ok(config.getFixedURLs(auditType));
-  };
-
   return {
     getAllForSite,
     getAllLatest,
     getAllLatestForSite,
     getLatestForSite,
     patchAuditForSite,
-    patchAuditFixesForSite,
   };
 }
 

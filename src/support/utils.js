@@ -11,8 +11,6 @@
  */
 import { context as h2, h1 } from '@adobe/fetch';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { getClient, CONTENT_TYPES } from 'spacecat-helix-content-sdk';
-import yaml from 'js-yaml';
 
 /* c8 ignore next 3 */
 export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
@@ -269,90 +267,6 @@ export async function findDeliveryType(url) {
   }
 
   return DELIVERY_TYPES.OTHER;
-}
-
-async function getGithubMountpoint(site) {
-  const ref = site.getHlxConfig()?.rso?.ref || 'main';
-  const repo = site.getHlxConfig()?.rso?.site || SITE_ROOT;
-  const owner = site.getHlxConfig()?.rso?.owner;
-  const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
-  const fstabContent = await fstabResponse.text();
-
-  const parsedContent = yaml.load(fstabContent);
-
-  // Extract the first mountpoint
-  const firstMountpoint = Object.entries(parsedContent.mountpoints)[0][1];
-
-  return firstMountpoint;
-}
-
-async function getMountpoint(site) {
-  const hlxCfg = site.getHlxConfig();
-  if (hlxCfg?.content?.source?.url) {
-    return hlxCfg?.content?.source?.url;
-  }
-  return getGithubMountpoint(site);
-}
-
-function getRootPath(pathname) {
-  const pathSegments = pathname.split('/').filter((segment) => segment);
-  const lastSitesIndex = pathSegments.lastIndexOf(SITE_ROOT);
-
-  if (lastSitesIndex !== -1 && lastSitesIndex < pathSegments.length - 1) {
-    return pathSegments.slice(lastSitesIndex).join('/');
-  }
-
-  return null;
-}
-
-async function getMicrosoftClient(env, mountpoint, log) {
-  const mountPointURL = new URL(mountpoint);
-  const domain = mountPointURL.hostname;
-  const rootPath = getRootPath(mountPointURL.pathname);
-  log.info(mountpoint);
-  log.info(domain);
-  log.info(rootPath);
-  return getClient({
-    type: CONTENT_TYPES.MICROSOFT_SHAREPOINT,
-    authConfig: {
-      auth: {
-        authority: env.SHAREPOINT_AUTHORITY,
-        clientId: env.SHAREPOINT_CLIENT_ID,
-        clientSecret: env.SHAREPOINT_CLIENT_SECRET,
-      },
-    },
-    documentStoreConfig: {
-      domain, /* Your sharepoint domain, i.e. 'adobe.sharepoint.com' */
-      domainId: env.ADOBE_SHAREPOINT_DOMAIN_ID, /* you can get it from the graph explorer */
-      rootPath: `/${rootPath}`,
-    },
-  });
-}
-
-async function getGDriveClient(env, mountpoint) {
-  const mountpointURL = new URL(mountpoint);
-  const pathSegments = mountpointURL.pathname.split('/').filter((segment) => segment);
-  const driveId = pathSegments[pathSegments.length - 1];
-  return getClient({
-    type: CONTENT_TYPES.GOOGLE_DRIVE,
-    authConfig: {
-      keyFile: env.KEY_FILE,
-    },
-    documentStoreConfig: {
-      driveId, /* The id for the project root folder (take it from the project's fstab.yaml) */
-    },
-  });
-}
-
-export async function getContentClient(env, site, log) {
-  const mountpoint = await getMountpoint(site);
-  if (mountpoint.includes(GOOGLE_DRIVE)) {
-    return getGDriveClient(env, mountpoint);
-  }
-  if (mountpoint.includes(MICROSOFT_SHAREPOINT)) {
-    return getMicrosoftClient(env, mountpoint, log);
-  }
-  throw new Error('Unknown content type client');
 }
 
 export async function publishToHelixAdmin(hlxAdminToken, owner, repo, ref, path) {

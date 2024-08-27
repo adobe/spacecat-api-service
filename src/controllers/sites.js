@@ -63,7 +63,7 @@ function SitesController(dataAccess) {
 
   /**
    * Gets all sites by delivery type.
-    * @param {object} context - Context of the request.
+   * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAllByDeliveryType = async (context) => {
@@ -248,7 +248,7 @@ function SitesController(dataAccess) {
     }
 
     if (requestBody.deliveryType !== site.getDeliveryType()
-      && Object.values(DELIVERY_TYPES).includes(requestBody.deliveryType)) {
+        && Object.values(DELIVERY_TYPES).includes(requestBody.deliveryType)) {
       site.updateDeliveryType(requestBody.deliveryType);
       updates = true;
     }
@@ -352,6 +352,16 @@ function SitesController(dataAccess) {
     return ok(metrics);
   };
 
+  // eslint-disable-next-line no-unused-vars
+  const updateRedirects = async (context) => {
+
+  };
+
+  // eslint-disable-next-line no-unused-vars
+  const updateMetadata = async (context) => {
+
+  };
+
   return {
     createSite,
     getAll,
@@ -372,6 +382,8 @@ function SitesController(dataAccess) {
 
     // site metrics
     getSiteMetricsBySource,
+    updateRedirects,
+    updateMetadata,
   };
 }
 
