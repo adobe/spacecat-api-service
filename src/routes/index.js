@@ -102,6 +102,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
     'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
     'POST /sites/:siteId/key-events': sitesController.createKeyEvent,
+    'PATCH /sites/:siteId/redirects': sitesController.updateRedirects,
+    'PATCH /sites/:siteId/metadata': sitesController.updateMetadata,
     'DELETE /sites/:siteId/key-events/:keyEventId': sitesController.removeKeyEvent,
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,

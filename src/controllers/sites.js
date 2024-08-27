@@ -352,6 +352,29 @@ function SitesController(dataAccess) {
     return ok(metrics);
   };
 
+  // eslint-disable-next-line consistent-return
+  const updateRedirects = async (context) => {
+    // eslint-disable-next-line no-unused-vars
+    const siteId = context.params?.siteId;
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+  };
+
+  // eslint-disable-next-line consistent-return
+  const updateMetadata = async (context) => {
+    const siteId = context.params?.siteId;
+    // eslint-disable-next-line no-unused-vars
+    const path = context.params?.path;
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    // eslint-disable-next-line no-unused-vars
+    const { metadata } = context.data;
+  };
+
   return {
     createSite,
     getAll,
@@ -372,6 +395,10 @@ function SitesController(dataAccess) {
 
     // site metrics
     getSiteMetricsBySource,
+
+    // content client ops
+    updateRedirects,
+    updateMetadata,
   };
 }
 
