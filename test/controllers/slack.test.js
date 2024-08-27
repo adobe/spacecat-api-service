@@ -14,7 +14,7 @@
 
 import { Response } from '@adobe/fetch';
 
-import chai, { expect } from 'chai';
+import { use, expect } from 'chai';
 import nock from 'nock';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -24,8 +24,8 @@ import { createOrganization } from '@adobe/spacecat-shared-data-access/src/model
 
 import SlackController from '../../src/controllers/slack.js';
 
-chai.use(sinonChai);
-chai.use(chaiAsPromised);
+use(sinonChai);
+use(chaiAsPromised);
 
 describe('SlackController', () => {
   let testPayload;

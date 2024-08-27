@@ -14,7 +14,7 @@
 
 import { Response } from '@adobe/fetch';
 
-import chai, { expect } from 'chai';
+import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -24,8 +24,8 @@ import { createImportUrl } from '@adobe/spacecat-shared-data-access/src/models/i
 import ImportController from '../../src/controllers/import.js';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
-chai.use(sinonChai);
-chai.use(chaiAsPromised);
+use(sinonChai);
+use(chaiAsPromised);
 
 describe('ImportController tests', () => {
   let sandbox;
@@ -36,6 +36,8 @@ describe('ImportController tests', () => {
   let mockDataAccess;
   let mockS3;
   let importConfiguration;
+  let mockAuth;
+  let mockAttributes;
 
   const exampleJob = {
     id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
@@ -44,6 +46,15 @@ describe('ImportController tests', () => {
     baseURL: 'https://www.example.com',
     hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
     importQueueId: 'spacecat-import-queue-1',
+    initiatedBy: {
+      apiKeyName: 'Test key',
+    },
+  };
+
+  const exampleApiKeyMetadata = {
+    hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
+    name: 'Test API Key',
+    imsOrgId: 'Test Org',
   };
 
   beforeEach(() => {
@@ -51,6 +62,10 @@ describe('ImportController tests', () => {
 
     mockSqsClient = {
       sendMessage: sandbox.stub(),
+    };
+
+    mockAuth = {
+      checkScopes: sandbox.stub().resolves(true),
     };
 
     requestContext = {
@@ -61,7 +76,18 @@ describe('ImportController tests', () => {
       },
       pathInfo: {
         headers: {
-          'x-import-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
+          'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
+          'user-agent': 'Unit test',
+        },
+      },
+    };
+
+    mockAttributes = {
+      authInfo: {
+        profile: {
+          getName: () => 'Test User',
+          getImsOrgId: () => 'TestOrgId',
+          getImsUserId: () => 'TestUserId',
         },
       },
     };
@@ -71,6 +97,7 @@ describe('ImportController tests', () => {
       createNewImportJob: (data) => createImportJob(data),
       createNewImportUrl: (data) => createImportUrl(data),
       getImportJobByID: sandbox.stub(),
+      getApiKeyByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
     };
 
     mockDataAccess.getImportJobByID.callsFake(async (jobId) => {
@@ -112,6 +139,8 @@ describe('ImportController tests', () => {
       sqs: mockSqsClient,
       s3: mockS3,
       dataAccess: mockDataAccess,
+      auth: mockAuth,
+      attributes: mockAttributes,
     };
 
     importController = ImportController(context);
@@ -149,23 +178,11 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
 
-    it('should reject an invalid import API key', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = 'unknown-api-key';
+    it('should reject when auth scopes are invalid', async () => {
+      context.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
       const response = await importController.createImportJob(requestContext);
-
-      expect(response.status).to.equal(401); // Unauthorized
-      expect(response.headers.get('x-error')).to.equal('Invalid import API key');
-    });
-
-    it('should reject when no allowed API keys are defined', async () => {
-      const contextNoApiKeys = { ...context };
-      delete importConfiguration.allowedApiKeys;
-      contextNoApiKeys.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
-
-      const importControllerNoApiKeys = new ImportController(contextNoApiKeys);
-      const response = await importControllerNoApiKeys.createImportJob(requestContext);
-      expect(response.status).to.equal(401); // Unauthorized
-      expect(response.headers.get('x-error')).to.equal('Invalid import API key');
+      expect(response.status).to.equal(401);
+      expect(response.headers.get('x-error')).to.equal('Missing required scopes');
     });
 
     it('should reject when no import queues are defined', async () => {
@@ -360,7 +377,7 @@ describe('ImportController tests', () => {
     });
 
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
-      requestContext.pathInfo.headers['x-import-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
+      requestContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
       requestContext.params.jobId = exampleJob.id;
       const response = await importController.getImportJobStatus(requestContext);
 
@@ -386,7 +403,7 @@ describe('ImportController tests', () => {
 
   describe('getImportJobResult', () => {
     beforeEach(() => {
-      requestContext.pathInfo.headers['x-import-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
+      requestContext.pathInfo.headers['x-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
       requestContext.params.jobId = exampleJob.id;
     });
 
@@ -432,6 +449,40 @@ describe('ImportController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal('Presigner error');
+    });
+  });
+
+  describe('getImportJobsByDateRange', () => {
+    it('should throw an error when startDate is not present', async () => {
+      requestContext.params.endDate = '2024-05-29T14:26:00.000Z';
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO 8601 format');
+    });
+
+    it('should throw an error when endDate is not present', async () => {
+      requestContext.params.startDate = '2024-05-29T14:26:00.000Z';
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO 8601 format');
+    });
+
+    it('should return an array of import jobs', async () => {
+      const job = createImportJob(exampleJob);
+      context.dataAccess.getImportJobsByDateRange = sandbox.stub().resolves([job]);
+      requestContext.params.startDate = '2022-10-05T14:48:00.000Z';
+      requestContext.params.endDate = '2022-10-07T14:48:00.000Z';
+
+      const response = await importController.getImportJobsByDateRange(requestContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const responseResult = await response.json();
+      expect(responseResult[0].initiatedBy).to.deep.equal({
+        apiKeyName: 'Test key',
+      });
+      expect(responseResult[0].baseURL).to.equal('https://www.example.com');
     });
   });
 });

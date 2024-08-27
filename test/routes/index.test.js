@@ -70,6 +70,7 @@ describe('getRouteHandlers', () => {
     createImportJob: sinon.stub(),
     getImportJobStatus: sinon.stub(),
     getImportJobResult: sinon.stub(),
+    getImportJobsByDateRange: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -146,6 +147,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /tools/import/jobs/:jobId',
       'POST /tools/import/jobs/:jobId/result',
+      'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

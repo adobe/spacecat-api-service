@@ -13,15 +13,14 @@
 /* eslint-env mocha */
 
 import { createExperiment } from '@adobe/spacecat-shared-data-access/src/models/experiment.js';
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import ExperimentsController from '../../src/controllers/experiments.js';
 import { ExperimentDto } from '../../src/dto/experiment.js';
 
-chai.use(chaiAsPromised);
-const { expect } = chai;
+use(chaiAsPromised);
 
 const siteId = 'site1';
 

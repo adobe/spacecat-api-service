@@ -12,12 +12,10 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { expect } from 'chai';
 import sinon from 'sinon';
 
 import SlackHandler from '../../src/support/slack/slack-handler.js';
-
-const { expect } = chai;
 
 describe('Slack Handler', () => {
   const sandbox = sinon.createSandbox();

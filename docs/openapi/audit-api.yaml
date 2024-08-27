@@ -19,6 +19,13 @@ audit-for-site:
           application/json:
             schema:
               $ref: './schemas.yaml#/Audit'
+            examples:
+              generic-audit:
+                $ref: './examples.yaml#/generic-audit'
+              broken-backlinks-audit:
+                $ref: './examples.yaml#/broken-backlinks-audit'
+              costs-audit:
+                $ref: './examples.yaml#/costs-audit'
       '400':
         $ref: './responses.yaml#/400-audit-for-site'
       '401':
@@ -49,6 +56,13 @@ latest-audit-for-site:
           application/json:
             schema:
               $ref: './schemas.yaml#/Audit'
+            examples:
+              generic-audit:
+                $ref: './examples.yaml#/generic-audit'
+              broken-backlinks-audit:
+                $ref: './examples.yaml#/broken-backlinks-audit'
+              costs-audit:
+                $ref: './examples.yaml#/costs-audit'
       '400':
         $ref: './responses.yaml#/400-latest-audit-for-site'
       '401':

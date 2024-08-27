@@ -26,6 +26,8 @@ AuditType:
     - 'broken-backlinks'
     - 'canonical'
     - 'sitemap'
+    - 'structured-data'
+    - 'costs'
   example: 'cwv'
 URL:
   type: string
@@ -441,14 +443,215 @@ Audit:
     previousAuditResult:
       someProperty: 'somePreviousValue'
 AuditResult:
-  type: object
-  description: |
-    The result of an audit, which is dependent on the audit type.
-  additionalProperties: true
+  description: The result of an audit, which is dependent on the audit type.
+  oneOf:
+    - type: object
+      additionalProperties: true
+    - type: object
+      properties:
+        experimentationOpportunities:
+          type: array
+          description: A list of experimentation opportunities
+          items:
+            $ref: './schemas.yaml#/ExperimentationOpportunity'
+    - type: object
+      description: |
+        The result of broken-backlinks audit.
+      properties:
+        brokenBacklinks:
+          type: array
+          description: A list of broken backlinks.
+          items:
+            $ref: './schemas.yaml#/BrokenBacklink'
+        fullAuditRef:
+          description: |
+            A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+          type: string
+    - type: array
+      description: Information about the provided URLs in the Google index.
+      items:
+        $ref: './schemas.yaml#/StructuredData'
+    - type: object
+      description: |
+        The result of costs audit.
+      properties:
+        ahrefs:
+          type: object
+          properties:
+            usedApiUnits:
+              description: |
+                API units used so far in the current month.
+              type: integer
+            limitApiUnits:
+              description: |
+                Limit of API units for the current month.
+              type: integer
+            fullAuditRef:
+              description: |
+                A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+              type: string
+    - type: object
+      description: The result of CWV audit
+      properties:
+        cwv:
+          type: array
+          description: A list of CWV metrics per url.
+          items:
+            $ref: './schemas.yaml#/CWVResult'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+CWVResult:
+  type: object
+  properties:
+    url:
+      $ref: '#/URL'
+    pageviews:
+      type: integer
+      example: 349900
+    lcp:
+      type: number
+      format: float
+      example: 3303.300000000745
+    lcpCount:
+      type: integer
+      example: 4873
+    cls:
+      type: number
+      format: float
+      example: 0.0138671875
+    clsCount:
+      type: integer
+      example: 4216
+    inp:
+      type: integer
+      example: 72
+    inpCount:
+      type: integer
+      example: 1952
+    ttfb:
+      type: number
+      format: float
+      example: 732.0500007271767
+    ttfbCount:
+      type: integer
+      example: 5678
+ExperimentationOpportunity:
+  type: object
+  readOnly: true
+  properties:
+    type:
+      type: string
+      description: Type of the experimentation opportunity
+      example: 'generic'
+    page:
+      type: string
+      description: The title of the webpage
+      example: 'Retirement Calculator'
+    screenshot:
+      type: string
+      format: url
+      description: A URL pointing to the screenshot of the webpage.
+      example: "https://space.cat/screenshots/some-cool-page.png"
+    trackedPageKPIName:
+      type: string
+      description: The name of KPI tracked for this experiment.
+      example: 'Bounce rate'
+    trackedPageKPIValue:
+      type: number
+      description: The value of KPI tracked for this experiment.
+      example: 0.80
+    pageviews:
+      type: integer
+      description: The total number of views this webpage has received
+      example: 15000
+    samples:
+      type: integer
+      description: The total number of samples we have for this webpage in RUM
+      example: 150
+    activeExperiments:
+      type: string
+      description: The number of active experiments on the webpage, or 'none' if there are no active experiments.
+      examples:
+        - 'None'
+        - '2 active'
+    metrics:
+      type: array
+      description: The metrics for the experimentation opportunity
+      items:
+        type: object
+StructuredData:
+  type: object
+  readOnly: true
+  properties:
+    inspectionUrl:
+      type: string
+      description: The URL that was inspected
+    indexStatusResult:
+      type: object
+      description: Result of the index status analysis.
+      properties:
+        verdict:
+          $ref: '#/Verdict'
+        lastCrawlTime:
+          $ref: '#/DateTime'
+    richResults:
+      type: object
+      description: Result of the Rich Results analysis. Absent if there are no rich results found.
+      properties:
+        verdict:
+          $ref: '#/Verdict'
+        detectedItemTypes:
+          type: array
+          description: A list of zero or more rich result types detected on this page.
+          items:
+            type: string
+            example: 'Product snippets'
+        detectedIssues:
+          type: array
+          description: A list of zero or more rich results errors detected on this page.
+          items:
+            type: object
+            properties:
+              richResultType:
+                type: string
+                description: Rich Results type detected on this page.
+                example: 'Product snippets'
+              items:
+                type: array
+                description: List of Rich Results items that have issues.
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: The user-provided name of this item.
+                      example: 'Product name'
+                    issues:
+                      type: array
+                      description: A list of rich result issues found for this instance.
+                      items:
+                        type: object
+                        properties:
+                          issueMessage:
+                            type: string
+                            description: Rich Results issue type.
+                            example: 'Missing field "image"'
+                          severity:
+                            type: string
+                            description: Severity of this issue.
+                            example: 'ERROR'
+
+Verdict:
+  type: string
+  description: High-level verdict about whether the URL is indexed.
+  enum:
+    - 'VERDICT_UNSPECIFIED'
+    - 'PASS'
+    - 'PARTIAL'
+    - 'FAIL'
+    - 'NEUTRAL'
 HoolihanHeaders:
   type: object
   properties:
@@ -1254,3 +1457,21 @@ ScrapeResult:
       - url: 'https://example.com/fr/page2'
         status: 'FAILED'
         error: 'Timeout'
+BrokenBacklink:
+  type: object
+  properties:
+    url_to:
+      description: The URL of the broken link.
+      $ref: '#/URL'
+    title:
+      description: The title of the page referring to the broken link.
+      type: string
+    url_from:
+      description: The URL of the page referring to the broken link.
+      $ref: '#/URL'
+    traffic_domain:
+      description: The referring domain's estimated monthly organic traffic from search.
+      type: number
+    url_suggested:
+      description: The URL suggested for redirecting from the broken backlink.
+      $ref: '#/URL'

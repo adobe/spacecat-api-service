@@ -14,7 +14,7 @@ import {
   createResponse,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -32,7 +32,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  */
 function ImportController(context) {
   const {
-    dataAccess, sqs, s3, log, env,
+    dataAccess, sqs, s3, log, env, auth, attributes,
   } = context;
   const services = {
     dataAccess,
@@ -50,7 +50,7 @@ function ImportController(context) {
   }
 
   const importSupervisor = new ImportSupervisor(services, importConfiguration);
-  const { allowedApiKeys = [], maxUrlsPerJob = 1 } = importConfiguration;
+  const { maxUrlsPerJob = 1 } = importConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
@@ -80,10 +80,13 @@ function ImportController(context) {
     }
   }
 
-  function validateImportApiKey(importApiKey) {
-    // Parse the allowed import keys from the environment
-    if (!allowedApiKeys.includes(importApiKey)) {
-      throw new ErrorWithStatusCode('Invalid import API key', 401);
+  function validateImportApiKey(importApiKey, scopes) {
+    log.debug(`validating scopes: ${scopes}`);
+
+    try {
+      auth.checkScopes(scopes);
+    } catch (error) {
+      throw new ErrorWithStatusCode('Missing required scopes', 401);
     }
   }
 
@@ -93,25 +96,48 @@ function ImportController(context) {
     });
   }
 
+  function validateIsoDates(startDate, endDate) {
+    if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
+      throw new ErrorWithStatusCode('Invalid request: startDate and endDate must be in ISO 8601 format', STATUS_BAD_REQUEST);
+    }
+  }
+
   /**
    * Create and start a new import job.
    * @param {object} requestContext - Context of the request.
    * @param {Array<string>} requestContext.data.urls - Array of URLs to import.
    * @param {object} requestContext.data.options - Optional import configuration parameters.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key to use for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
-    const { 'x-import-api-key': importApiKey } = headers;
-
+    const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.write is required to create a new import job
+      validateImportApiKey(importApiKey, ['imports.write']);
       validateRequestData(data);
 
-      const { urls, options = importConfiguration.options, importScript } = data;
-      const job = await importSupervisor.startNewJob(urls, importApiKey, options, importScript);
+      let initiatedBy = {};
 
+      const { authInfo: { profile } } = attributes;
+      if (profile) {
+        initiatedBy = {
+          apiKeyName: profile.getName(),
+          imsOrgId: profile.getImsOrgId(),
+          imsUserId: profile.getImsUserId(),
+          userAgent,
+        };
+      }
+
+      const { urls, options = importConfiguration.options, importScript } = data;
+      const job = await importSupervisor.startNewJob(
+        urls,
+        importApiKey,
+        options,
+        importScript,
+        initiatedBy,
+      );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {
       log.error(`Failed to create a new import job: ${error.message}`);
@@ -122,22 +148,48 @@ function ImportController(context) {
   function parseRequestContext(requestContext) {
     return {
       jobId: requestContext.params.jobId,
-      importApiKey: requestContext.pathInfo.headers['x-import-api-key'],
+      startDate: requestContext.params.startDate,
+      endDate: requestContext.params.endDate,
+      importApiKey: requestContext.pathInfo.headers['x-api-key'],
     };
+  }
+
+  /**
+   * Get all import jobs between startDate and endDate
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.startDate - The start date of the range.
+   * @param {string} requestContext.params.endDate - The end date of the range.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
+   * @returns {Promise<Response>} 200 OK with a JSON representation of the import jobs.
+   */
+  async function getImportJobsByDateRange(requestContext) {
+    const { startDate, endDate, importApiKey } = parseRequestContext(requestContext);
+    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}.`);
+
+    try {
+      validateImportApiKey(importApiKey, ['imports.read_all']);
+      validateIsoDates(startDate, endDate);
+      const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
+      return ok(jobs.map((job) => ImportJobDto.toJSON(job)));
+    } catch (error) {
+      log.error(`Failed to fetch import jobs between startDate: ${startDate} and endDate: ${endDate}, ${error.message}`);
+      return createErrorResponse(error);
+    }
   }
 
   /**
    * Get the status of an import job.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key used for the job.
    * @returns {Promise<Response>} 200 OK with a JSON representation of the import job.
    */
   async function getImportJobStatus(requestContext) {
     const { jobId, importApiKey } = parseRequestContext(requestContext);
 
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.read is required to get the import job status
+      validateImportApiKey(importApiKey, ['imports.read']);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       return ok(ImportJobDto.toJSON(job));
     } catch (error) {
@@ -150,14 +202,15 @@ function ImportController(context) {
    * Get the result of an import job, as a pre-signed download URL to S3.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @param {string} requestContext.pathInfo.headers.x-import-api-key - API key used for the job.
+   * @param {string} requestContext.pathInfo.headers.x-api-key - API key used for the job.
    * @returns {Promise<Response>} 200 OK with a pre-signed URL to download the job result.
    */
   async function getImportJobResult(requestContext) {
     const { jobId, importApiKey } = parseRequestContext(requestContext);
 
     try {
-      validateImportApiKey(importApiKey);
+      // The API scope imports.read is required to get the import job status
+      validateImportApiKey(importApiKey, ['imports.read']);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       const downloadUrl = await importSupervisor.getJobArchiveSignedUrl(job);
       return ok({
@@ -174,6 +227,7 @@ function ImportController(context) {
     createImportJob,
     getImportJobStatus,
     getImportJobResult,
+    getImportJobsByDateRange,
   };
 }
 

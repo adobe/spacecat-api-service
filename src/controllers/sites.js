@@ -22,15 +22,14 @@ import {
   hasText,
   isBoolean,
   isObject,
+  getStoredMetrics,
 } from '@adobe/spacecat-shared-utils';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { S3Client } from '@aws-sdk/client-s3';
 
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { getStoredMetrics } from '../support/metrics-store.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -348,8 +347,7 @@ function SitesController(dataAccess) {
       return notFound('Site not found');
     }
 
-    const s3Client = new S3Client();
-    const metrics = await getStoredMetrics(s3Client, { siteId, metric, source }, context);
+    const metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
     return ok(metrics);
   };
