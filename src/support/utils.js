@@ -66,10 +66,12 @@ export const sendExperimentationCandidatesMessage = async (
 export const sentRunScraperMessage = async (
   sqs,
   queueUrl,
+  jobId,
   urls,
   slackContext,
 ) => sqs.sendMessage(queueUrl, {
   processingType: 'import',
+  jobId,
   urls: [...urls],
   slackContext,
 });
@@ -161,12 +163,14 @@ export const triggerExperimentationCandidates = async (
 /* c8 ignore end */
 
 export const triggerScraperRun = async (
+  jobId,
   urls,
   slackContext,
   lambdaContext,
 ) => sentRunScraperMessage(
   lambdaContext.sqs,
   lambdaContext.env.SCRAPING_JOBS_QUEUE_URL,
+  jobId,
   urls,
   {
     channelId: slackContext.channelId,

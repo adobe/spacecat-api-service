@@ -15,6 +15,7 @@
 
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
+import crypto from 'crypto';
 import BaseCommand from './base.js';
 import { triggerScraperRun } from '../../utils.js';
 import {
@@ -113,7 +114,9 @@ function RunScrapeCommand(context) {
           url: page.getURL(),
         }),
       );
+      const jobId = crypto.randomUUID();
       await triggerScraperRun(
+        jobId,
         urls,
         slackContext,
         context,
