@@ -49,7 +49,8 @@ function ImportSupervisor(services, config) {
   } = services;
   const {
     queues = [], // Array of import queues
-    queueUrlPrefix,
+    queueUrlPrefix, // TODO remove queueUrlPrefix from IMPORT_CONFIGURATION
+    importWorkerQueue, // TODO add importWorkerQueue to IMPORT_CONFIGURATION
     s3Bucket,
     maxLengthImportScript,
   } = config;
@@ -168,6 +169,28 @@ function ImportSupervisor(services, config) {
     }
   }
 
+  /**
+   * Queue all URLs as a single message for processing by another function. This will enable
+   * the controller to respond with a new job ID ASAP, while the individual URLs are queued up
+   * asynchronously.
+   * @param {Array<string>} urls - Array of URL records to queue.
+   * @param {object} importJob - The import job record.
+   */
+  async function queueUrlsForImportWorker(urls, importJob) {
+    log.info(`Starting a new import job of baseUrl: ${importJob.getBaseURL()} with ${urls.length}`
+      + ` URLs. This new job has claimed: ${importJob.getImportQueueId} `
+      + `(jobId: ${importJob.getId()})`);
+
+    // Send a single message containing all URLs and the new job ID
+    const message = {
+      processingType: 'import',
+      jobId: importJob.getId(),
+      urls,
+    };
+
+    await sqs.sendMessage(importWorkerQueue, message);
+  }
+
   async function writeImportScriptToS3(jobId, importScript) {
     if (!hasText(importScript)) {
       throw new ErrorWithStatusCode('Bad Request: importScript should be a string', 400);
@@ -228,10 +251,15 @@ function ImportSupervisor(services, config) {
     }
 
     // Create 1 record per URL in the import-url table
-    const urlRecords = await persistUrls(newImportJob.getId(), urls);
+    // TODO this will be done from the content-import-worker
+    // const urlRecords = await persistUrls(newImportJob.getId(), urls);
 
-    // Queue all URLs for import
-    await queueUrlsForImport(urlRecords, newImportJob, importQueueId);
+    // TODO this will be done from the content-import-worker
+    // await queueUrlsForImport(urlRecords, newImportJob, importQueueId);
+
+    // Queue all URLs for import as a single message. This enables the controller to respond with
+    // a job ID ASAP, while the individual URLs are queued up asynchronously by another function.
+    await queueUrlsForImportWorker(urls, newImportJob);
 
     return newImportJob;
   }
