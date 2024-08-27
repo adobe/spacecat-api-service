@@ -63,6 +63,17 @@ export const sendExperimentationCandidatesMessage = async (
 });
 /* c8 ignore end */
 
+export const sentRunScraperMessage = async (
+  sqs,
+  queueUrl,
+  urls,
+  slackContext,
+) => sqs.sendMessage(queueUrl, {
+  processingType: 'import',
+  urls: [{ ...urls }],
+  slackContext,
+});
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const sendRunImportMessage = async (
@@ -149,6 +160,19 @@ export const triggerExperimentationCandidates = async (
 );
 /* c8 ignore end */
 
+export const triggerScraperRun = async (
+  urls,
+  slackContext,
+  lambdaContext,
+) => sentRunScraperMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.SCRAPING_JOBS_QUEUE_URL,
+  urls,
+  {
+    channelId: slackContext.channelId,
+    threadTs: slackContext.threadTs,
+  },
+);
 // todo: prototype - untested
 /* c8 ignore start */
 export const triggerImportRun = async (

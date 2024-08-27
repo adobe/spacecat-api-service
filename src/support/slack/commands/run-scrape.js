@@ -16,7 +16,7 @@
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
-import { triggerImportRun } from '../../utils.js';
+import { triggerScraperRun } from '../../utils.js';
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -62,7 +62,7 @@ function RunScrapeCommand(context) {
             + '\nCurrently this will run the scraper for all sources and all destinations configured for the site, hence be aware of costs'
             + ' (source: ahrefs) when choosing the date range.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType} {baseURL} {startDate} {endDate}`,
+    usageText: `${PHRASES[0]} {baseURL} {startDate} {endDate}`,
   });
 
   const { dataAccess, log } = context;
@@ -86,10 +86,10 @@ function RunScrapeCommand(context) {
     }
 
     try {
-      const [scrapeType, baseURLInput, startDate, endDate] = args;
+      const [baseURLInput, startDate, endDate] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
-      if (!hasText(scrapeType) || !hasText(baseURL)) {
+      if (!hasText(baseURL)) {
         await say(baseCommand.usage());
         return;
       }
@@ -101,32 +101,20 @@ function RunScrapeCommand(context) {
         return;
       }
 
-      const config = await dataAccess.getConfiguration();
-      const jobConfig = config.getJobs().filter((job) => job.group === 'imports' && job.type === scrapeType);
-
-      if (!Array.isArray(jobConfig) || jobConfig.length === 0) {
-        const validScrapeTypes = config.getJobs().filter((job) => job.group === 'imports').map((job) => job.type);
-        await say(`:warning: Import type ${scrapeType} does not exist. Valid import types are: ${validScrapeTypes.join(', ')}`);
-        return;
-      }
-
       const site = await dataAccess.getSiteByBaseURL(baseURL);
       if (!isObject(site)) {
         await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 
-      await triggerImportRun(
-        config,
-        scrapeType,
-        site.getId(),
-        startDate,
-        endDate,
+      const urls = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
+      await triggerScraperRun(
+        urls,
         slackContext,
         context,
       );
 
-      const message = `:adobe-run: Triggered scrape run of type ${scrapeType} for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
+      const message = `:adobe-run: Triggered scrape run for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
 
       await say(message);
     } catch (error) {
