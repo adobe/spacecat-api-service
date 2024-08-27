@@ -124,5 +124,5 @@ path:
   in: path
   required: true
   schema:
-        type: string
-        example: '/path/to/resource'
+    type: string
+    example: '/path/to/resource'
