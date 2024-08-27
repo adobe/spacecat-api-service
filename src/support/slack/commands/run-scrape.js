@@ -51,7 +51,7 @@ function isValidDateInterval(startDate, endDate) {
  * Factory function to create the RunScrapeCommand object.
  *
  * @param {Object} context - The context object.
- * @returns {RunImportCommand} The RunImportCommand object.
+ * @returns {RunScrapeCommand} The RunScrapeCommand object.
  * @constructor
  */
 function RunScrapeCommand(context) {
@@ -82,8 +82,8 @@ function RunScrapeCommand(context) {
     const admins = JSON.parse(context?.env?.SLACK_IDS_RUN_IMPORT || '[]');
 
     if (!admins.includes(user)) {
-      await say(':error: Only selected SpaceCat fluid team members can run imports.');
-      return;
+      await say(':error: Only selected SpaceCat fluid team members can run scraper.');
+      // return;
     }
 
     try {
