@@ -137,7 +137,6 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/audits/:auditType',
       'GET /sites/:siteId/audits/:auditType/:auditedAt',
       'PATCH /sites/:siteId/:auditType',
-      'PATCH /sites/:siteId/:auditType/publish-fixes',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
       'GET /sites/:siteId/experiments',

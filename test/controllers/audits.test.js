@@ -31,7 +31,6 @@ describe('Audits Controller', () => {
     'getAllLatestForSite',
     'getLatestForSite',
     'patchAuditForSite',
-    'patchAuditFixesForSite',
   ];
 
   const mockAudits = [
