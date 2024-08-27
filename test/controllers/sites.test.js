@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import esmock from 'esmock';
@@ -22,9 +22,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import SitesController from '../../src/controllers/sites.js';
 import { SiteDto } from '../../src/dto/site.js';
 
-chai.use(chaiAsPromised);
-
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -550,13 +548,25 @@ describe('Sites Controller', () => {
     getStoredMetrics.resolves(storedMetrics);
 
     const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-      '../../src/support/metrics-store.js': {
+      '@adobe/spacecat-shared-utils': {
         getStoredMetrics,
       },
     });
 
     const resp = await (await sitesControllerMock.default(mockDataAccess).getSiteMetricsBySource({
       params: { siteId, source, metric },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
+      s3: {
+        s3Client: {
+          send: sinon.stub(),
+        },
+        s3Bucket: 'test-bucket',
+        region: 'us-west-2',
+      },
     })).json();
 
     expect(resp).to.deep.equal(storedMetrics);

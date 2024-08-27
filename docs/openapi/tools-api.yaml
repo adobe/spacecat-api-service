@@ -15,7 +15,7 @@ import:
       - api_key: [ ]
     parameters:
       - in: header
-        name: x-import-api-key
+        name: x-api-key
         schema:
           type: string
         description: |
@@ -55,7 +55,7 @@ import-job-status:
     parameters:
       - $ref: './parameters.yaml#/jobId'
       - in: header
-        name: x-import-api-key
+        name: x-api-key
         schema:
           type: string
         description: |
@@ -90,7 +90,7 @@ import-job-result:
     parameters:
       - $ref: './parameters.yaml#/jobId'
       - in: header
-        name: x-import-api-key
+        name: x-api-key
         schema:
           type: string
         description: |

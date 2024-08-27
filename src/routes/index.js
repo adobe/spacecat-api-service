@@ -114,6 +114,7 @@ export default function getRouteHandlers(
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
+    'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
   };
 
   // Initialization of static and dynamic routes

@@ -1,7 +1,7 @@
 site-detection-cdn:
   parameters:
     - $ref: './parameters.yaml#/hookSecret'
-  get:
+  post:
     tags:
       - hooks
     summary: Process incoming site discovery hooks from CDN logs
@@ -31,7 +31,7 @@ site-detection-cdn:
 site-detection-rum:
   parameters:
     - $ref: './parameters.yaml#/hookSecret'
-  get:
+  post:
     tags:
       - hooks
     summary: Process incoming site discovery hooks from RUM logs

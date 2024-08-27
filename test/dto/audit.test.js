@@ -13,13 +13,12 @@
 /* eslint-env mocha */
 
 import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 
 import { AuditDto } from '../../src/dto/audit.js';
 
-chai.use(chaiAsPromised);
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('Audit DTO', () => {
   it('toAbbreviatedJSON returns all broken backlinks in the JSON', () => {

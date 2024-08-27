@@ -10,10 +10,8 @@
  * governing permissions and limitations under the License.
  */
 /* eslint-env mocha */
-import chai from 'chai';
+import { expect } from 'chai';
 import ImportSupervisor from '../../src/support/import-supervisor.js';
-
-const { expect } = chai;
 
 describe('Import Supervisor', () => {
   it('should fail to create an import supervisor when required services are missing', () => {

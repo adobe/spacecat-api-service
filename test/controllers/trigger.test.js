@@ -13,14 +13,13 @@
 /* eslint-env mocha */
 
 import sinon from 'sinon';
-import chai from 'chai';
+import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import handler from '../../src/controllers/trigger.js';
 
-chai.use(sinonChai);
-chai.use(chaiAsPromised);
-const { expect } = chai;
+use(sinonChai);
+use(chaiAsPromised);
 
 const sandbox = sinon.createSandbox();
 

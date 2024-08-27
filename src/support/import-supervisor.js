@@ -12,6 +12,8 @@
 
 import { ImportJobStatus } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import crypto from 'crypto';
+import { hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
 import { ErrorWithStatusCode } from './utils.js';
 
 const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
@@ -62,7 +64,8 @@ function ImportSupervisor(services, config) {
 
     // Check that this import API key has capacity to start an import job
     for (const job of runningImportJobs) {
-      if (job.getApiKey() === importApiKey) {
+      const hashedApiKey = hashWithSHA256(importApiKey);
+      if (job.getHashedApiKey() === hashedApiKey) {
         throw new ErrorWithStatusCode(`Too Many Requests: API key ${importApiKey} cannot be used to start any more import jobs`, 429);
       }
     }
@@ -93,17 +96,28 @@ function ImportSupervisor(services, config) {
    * @param {object} options - Client provided options for the import job.
    * @returns {Promise<ImportJob>}
    */
-  async function createNewImportJob(urls, importQueueId, apiKey, options) {
+  async function createNewImportJob(urls, importQueueId, hashedApiKey, options, initiatedBy) {
     const newJob = {
       id: crypto.randomUUID(),
       baseURL: determineBaseURL(urls),
       importQueueId,
-      apiKey,
+      hashedApiKey,
       options,
       urlCount: urls.length,
       status: ImportJobStatus.RUNNING,
+      initiatedBy,
     };
     return dataAccess.createNewImportJob(newJob);
+  }
+
+  /**
+   * Get all import jobs between the specified start and end dates.
+   * @param {string} startDate - The start date of the range.
+   * @param {string} endDate - The end date of the range.
+   * @returns {Promise<ImportJob[]>}
+   */
+  async function getImportJobsByDateRange(startDate, endDate) {
+    return dataAccess.getImportJobsByDateRange(startDate, endDate);
   }
 
   /**
@@ -188,16 +202,25 @@ function ImportSupervisor(services, config) {
    * @param {string} importScript - Optional custom Base64 encoded import script.
    * @returns {Promise<ImportJob>}
    */
-  async function startNewJob(urls, importApiKey, options, importScript) {
+  async function startNewJob(urls, importApiKey, options, importScript, initiatedBy) {
     log.info(`Import requested for ${urls.length} URLs, using import API key: ${importApiKey}`);
 
     // Determine if there is a free import queue
     const importQueueId = await getAvailableImportQueue(importApiKey);
 
-    // If a queue is available, create the import-job record in dataAccess:
-    const newImportJob = await createNewImportJob(urls, importQueueId, importApiKey, options);
+    // Hash the API Key to ensure it is not stored in plain text
+    const hashedApiKey = hashWithSHA256(importApiKey);
 
-    log.info(`New import job created for API key: ${importApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
+    // If a queue is available, create the import-job record in dataAccess:
+    const newImportJob = await createNewImportJob(
+      urls,
+      importQueueId,
+      hashedApiKey,
+      options,
+      initiatedBy,
+    );
+
+    log.info(`New import job created for hashed API key: ${hashedApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
 
     // Custom import.js scripts are not initially supported.
     if (importScript) {
@@ -226,8 +249,12 @@ function ImportSupervisor(services, config) {
     }
 
     const job = await dataAccess.getImportJobByID(jobId);
+    let hashedApiKey;
+    if (job) {
+      hashedApiKey = hashWithSHA256(importApiKey);
+    }
     // Job must exist, and the import API key must match the one provided
-    if (!job || job.getApiKey() !== importApiKey) {
+    if (!job || job.getHashedApiKey() !== hashedApiKey) {
       throw new ErrorWithStatusCode('Not found', 404);
     }
 
@@ -259,6 +286,7 @@ function ImportSupervisor(services, config) {
     startNewJob,
     getImportJob,
     getJobArchiveSignedUrl,
+    getImportJobsByDateRange,
   };
 }
 
