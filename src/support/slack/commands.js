@@ -18,6 +18,7 @@ import getSites from './commands/get-sites.js';
 import martechImpact from './commands/martech-impact.js';
 import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
+import runScrape from './commands/run-scrape.js';
 import setLiveStatus from './commands/set-live-status.js';
 import help from './commands/help.js';
 
@@ -36,6 +37,7 @@ export default (context) => [
   martechImpact(context),
   runAudit(context),
   runImport(context),
+  runScrape(context),
   setLiveStatus(context),
   help(context),
 ];
