@@ -107,7 +107,12 @@ function RunScrapeCommand(context) {
         return;
       }
 
-      const urls = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
+      const topPages = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
+      const urls = topPages.map(
+        (page) => ({
+          url: page.getURL(),
+        }),
+      );
       await triggerScraperRun(
         urls,
         slackContext,

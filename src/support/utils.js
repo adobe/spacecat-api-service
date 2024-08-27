@@ -70,7 +70,7 @@ export const sentRunScraperMessage = async (
   slackContext,
 ) => sqs.sendMessage(queueUrl, {
   processingType: 'import',
-  urls: [{ ...urls }],
+  urls: [...urls],
   slackContext,
 });
 
