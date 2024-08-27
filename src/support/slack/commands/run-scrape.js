@@ -23,29 +23,9 @@ import {
   postErrorMessage,
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
+import { isValidDateInterval } from '../../../utils/date-utils.js';
 
 const PHRASES = ['run scrape'];
-
-function isValidDateInterval(startDate, endDate) {
-  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!dateRegex.test(startDate)) {
-    return false;
-  }
-  if (!dateRegex.test(endDate)) {
-    return false;
-  }
-  const parsedStartDate = new Date(startDate);
-  if (Number.isNaN(parsedStartDate.getTime())) {
-    return false;
-  }
-  const parsedEndDate = new Date(endDate);
-  if (Number.isNaN(parsedEndDate.getTime())) {
-    return false;
-  }
-
-  return parsedStartDate < parsedEndDate
-        && (parsedEndDate - parsedStartDate) <= 1000 * 60 * 60 * 24 * 365 * 2; // 2 years
-}
 
 /**
  * Factory function to create the RunScrapeCommand object.
