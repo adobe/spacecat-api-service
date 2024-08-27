@@ -119,3 +119,10 @@ jobId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+path:
+  description: The site path
+  in: path
+  required: true
+  schema:
+        type: string
+        example: '/path/to/resource'

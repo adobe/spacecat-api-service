@@ -141,6 +141,7 @@ redirects-for-site:
 metadata-for-site:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/path'
   patch:
     tags:
       - site
