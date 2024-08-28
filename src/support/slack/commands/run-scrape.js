@@ -97,8 +97,7 @@ function RunScrapeCommand(context) {
           }),
         );
 
-        const topPagesListMessage = topPages.map((page) => `- ${page.getURL()}`).join('\n');
-        await say(`:white_check_mark: Found top pages for site \`${baseURL}\`:\n${topPagesListMessage}`);
+        await say(`:white_check_mark: Found top pages for site \`${baseURL}\``);
 
         const jobId = crypto.randomUUID();
         await triggerScraperRun(
