@@ -27,7 +27,7 @@ const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
  * @param {object} services.log - Logger.
  * @param {object} config - Import configuration details.
  * @param {Array<string>} config.queues - Array of available import queues.
- * @param {string} config.queueUrlPrefix - URL prefix for the import queues.
+ * @param {string} config.importWorkerQueue - URL of the import worker queue.
  * @param {string} config.s3Bucket - S3 bucket name where import artifacts will be stored.
  * @returns {object} Import Supervisor.
  */
@@ -49,8 +49,7 @@ function ImportSupervisor(services, config) {
   } = services;
   const {
     queues = [], // Array of import queues
-    queueUrlPrefix, // TODO remove queueUrlPrefix from IMPORT_CONFIGURATION
-    importWorkerQueue, // TODO add importWorkerQueue to IMPORT_CONFIGURATION
+    importWorkerQueue, // URL of the import worker queue
     s3Bucket,
     maxLengthImportScript,
   } = config;
