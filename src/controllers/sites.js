@@ -26,6 +26,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 
+import { ContentClient } from '@adobe/spacecat-shared-content-client';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -373,6 +374,8 @@ function SitesController(dataAccess) {
     }
     // eslint-disable-next-line no-unused-vars
     const { metadata } = context.data;
+    const contentClient = ContentClient.createFrom(context, site);
+    await contentClient.updatePageMetadata(path, new Map([['Alina', 'Zambila'], ['title', 'Site']]));
   };
 
   return {
