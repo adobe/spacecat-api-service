@@ -15,7 +15,6 @@
 
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
-import crypto from 'crypto';
 import BaseCommand from './base.js';
 import { triggerScraperRun } from '../../utils.js';
 import {
@@ -99,7 +98,7 @@ function RunScrapeCommand(context) {
 
         await say(`:white_check_mark: Found top pages for site \`${baseURL}\``);
 
-        const jobId = crypto.randomUUID();
+        const jobId = site.getId();
         await triggerScraperRun(
           jobId,
           urls,
