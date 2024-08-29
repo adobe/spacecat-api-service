@@ -9,10 +9,6 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-
-// todo: prototype - untested
-/* c8 ignore start */
-
 import { hasText, isObject } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
@@ -89,6 +85,7 @@ function RunScrapeCommand(context) {
 
       const result = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
       const topPages = result || [];
+
       if (topPages.length > 0) {
         const urls = topPages.map(
           (page) => ({
@@ -96,7 +93,7 @@ function RunScrapeCommand(context) {
           }),
         );
 
-        await say(`:white_check_mark: Found top pages for site \`${baseURL}\``);
+        await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
         const jobId = site.getId();
         await triggerScraperRun(
