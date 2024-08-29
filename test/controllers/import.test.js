@@ -120,9 +120,8 @@ describe('ImportController tests', () => {
     mockS3.getSignedUrl.callsFake(async () => 'https://example-bucket.s3.amazonaws.com/file-key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=EXAMPLE_ACCESS_KEY_ID%2F20240603%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240603T123456Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=abcdef1234567890');
 
     importConfiguration = {
-      allowedApiKeys: ['b9ebcfb5-80c9-4236-91ba-d50e361db71d', '7828b114-e20f-4234-bc4e-5b438b861edd'],
       queues: ['spacecat-import-queue-1', 'spacecat-import-queue-2'],
-      queueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
+      importWorkerQueue: 'https://sqs.us-east-1.amazonaws.com/1234567890/import-worker-queue',
       maxLengthImportScript: 20,
       options: {
         saveAsDocs: true,
@@ -205,7 +204,7 @@ describe('ImportController tests', () => {
       ]);
       const response = await importController.createImportJob(requestContext);
       expect(response.status).to.equal(429);
-      expect(response.headers.get('x-error')).to.equal('Too Many Requests: API key b9ebcfb5-80c9-4236-91ba-d50e361db71d cannot be used to start any more import jobs');
+      expect(response.headers.get('x-error')).to.equal('Too Many Requests: API key hash c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441 cannot be used to start any more import jobs');
     });
 
     it('should reject when invalid URLs are passed in', async () => {
@@ -238,7 +237,8 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(202);
 
       // Verify how many messages were sent to SQS
-      expect(mockSqsClient.sendMessage).to.have.been.calledThrice;
+      // (we only send a single message now, instead of 1 per URL)
+      expect(mockSqsClient.sendMessage).to.have.been.calledOnce;
     });
 
     it('should pick another import queue when the first one is in use', async () => {
@@ -254,11 +254,13 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(202);
 
       // Verify how many messages were sent to SQS
-      expect(mockSqsClient.sendMessage).to.have.been.calledThrice;
+      // (we only send a single message now, instead of 1 per URL)
+      expect(mockSqsClient.sendMessage).to.have.been.calledOnce;
 
-      // Should be using the 2nd import queue
+      // Check the resulting message to the import-worker-queue
       const firstCall = mockSqsClient.sendMessage.getCall(0);
-      expect(firstCall.args[0]).to.equal('https://sqs.us-east-1.amazonaws.com/1234567890/spacecat-import-queue-2');
+      expect(firstCall.args[1].urls.length).to.equal(3);
+      expect(firstCall.args[0]).to.equal('https://sqs.us-east-1.amazonaws.com/1234567890/import-worker-queue');
     });
 
     it('should fail when all (both) available queues are in use', async () => {
