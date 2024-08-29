@@ -57,7 +57,7 @@ function RunScrapeCommand(context) {
 
     if (!admins.includes(user)) {
       await say(':error: Only selected SpaceCat fluid team members can run scraper.');
-      // return;
+      return;
     }
 
     try {
@@ -90,33 +90,16 @@ function RunScrapeCommand(context) {
         await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
         const jobId = site.getId();
-        const batchSize = 100;
-        const totalBatches = Math.ceil(urls.length / batchSize);
-
-        const batchPromises = [];
-        // eslint-disable-next-line no-plusplus
-        for (let i = 0; i < totalBatches; i++) {
-          const startIndex = i * batchSize;
-          const endIndex = Math.min((i + 1) * batchSize, urls.length);
-          const urlBatch = urls.slice(startIndex, endIndex);
-
-          const batchPromise = (async () => {
-            await triggerScraperRun(
-              jobId,
-              urlBatch,
-              slackContext,
-              context,
-            );
-            await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - Batch ${i + 1}/${totalBatches} (${urlBatch.length} URLs)`);
-          })();
-
-          batchPromises.push(batchPromise);
-        }
-
-        await Promise.all(batchPromises);
+        await triggerScraperRun(
+          jobId,
+          urls,
+          slackContext,
+          context,
+        );
+        await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - total ${urls.length} URLs)`);
 
         const message = `:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`
-            + `Total batches: ${totalBatches}, Total URLs: ${urls.length}`;
+            + `Total URLs: ${urls.length}`;
         await say(message);
       } else {
         await say(`:warning: No top pages found for site \`${baseURL}\``);
