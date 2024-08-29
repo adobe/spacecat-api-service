@@ -66,7 +66,7 @@ function ImportSupervisor(services, config) {
     for (const job of runningImportJobs) {
       const hashedApiKey = hashWithSHA256(importApiKey);
       if (job.getHashedApiKey() === hashedApiKey) {
-        throw new ErrorWithStatusCode(`Too Many Requests: API key ${importApiKey} cannot be used to start any more import jobs`, 429);
+        throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more import jobs`, 429);
       }
     }
 
@@ -177,8 +177,6 @@ function ImportSupervisor(services, config) {
    * @returns {Promise<ImportJob>}
    */
   async function startNewJob(urls, importApiKey, options, importScript, initiatedBy) {
-    log.info(`Import requested for ${urls.length} URLs, using import API key: ${importApiKey}`);
-
     // Determine if there is a free import queue
     const importQueueId = await getAvailableImportQueue(importApiKey);
 
@@ -194,7 +192,12 @@ function ImportSupervisor(services, config) {
       initiatedBy,
     );
 
-    log.info(`New import job created for hashed API key: ${hashedApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
+    log.info('New import job created:\n'
+      + `- baseUrl: ${newImportJob.getBaseURL()}\n`
+      + `- urlCount: ${urls.length}\n`
+      + `- apiKeyName: ${initiatedBy.apiKeyName}\n`
+      + `- jobId: ${newImportJob.getId()}\n`
+      + `- importQueueId: ${importQueueId}`);
 
     // Write the import script to S3, if provided
     if (importScript) {
