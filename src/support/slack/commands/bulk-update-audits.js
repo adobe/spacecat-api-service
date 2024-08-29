@@ -12,6 +12,7 @@
 
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
+import { ConfigurationDto } from '../../../dto/configuration.js';
 
 const PHRASES = ['bulk'];
 function BulkUpdateAuditConfigCommand(context) {
@@ -35,63 +36,22 @@ function BulkUpdateAuditConfigCommand(context) {
       const auditTypes = auditTypesInput.split(',');
 
       const enableAudits = enableDisableInput.toLowerCase() === 'enable';
+      const configuration = await dataAccess.getConfiguration();
 
-      const organizationsMap = new Map();
-
-      const sites = await Promise.all(baseURLs.map(async (baseURLInput) => {
+      const siteResponses = await Promise.all(baseURLs.map(async (baseURLInput) => {
         const baseURL = extractURLFromSlackInput(baseURLInput);
         const site = await dataAccess.getSiteByBaseURL(baseURL);
         if (!site) {
-          return { baseURL, site: null };
+          return { payload: `Cannot update site with baseURL: ${baseURL}, site not found` };
         }
-        const organizationId = site.getOrganizationId();
-
-        if (organizationId !== 'default' && !organizationsMap.has(organizationId)) {
-          const organization = await dataAccess.getOrganizationByID(organizationId);
-          if (!organization) {
-            return { baseURL, error: `Error updating site with baseURL: ${baseURL} belonging organization with id: ${organizationId} not found` };
-          }
-          organizationsMap.set(organizationId, organization);
-        }
-
-        return { baseURL, site };
-      }));
-
-      const responses = await Promise.all(sites.map(async ({ baseURL, site, error }) => {
-        if (!site) {
-          return { payload: error || `Cannot update site with baseURL: ${baseURL}, site not found` };
-        }
-        const organizationId = site.getOrganizationId();
-        const organization = organizationsMap.get(organizationId);
-
-        auditTypes.forEach((auditType) => {
-          if (organization) {
-            organization.getAuditConfig().updateAuditTypeConfig(
-              auditType,
-            );
-          }
-          site.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
-        });
-
-        if (organization && enableAudits) {
-          try {
-            await dataAccess.updateOrganization(organization);
-            organizationsMap.delete(organizationId);
-          } catch (e) {
-            return { payload: `Error updating site with baseURL: ${baseURL}, organization with id: ${organizationId} update operation failed` };
-          }
-        }
-        try {
-          await dataAccess.updateSite(site);
-        } catch (e) {
-          return { payload: `Error updating site with with baseURL: ${baseURL}, update site operation failed` };
-        }
-
+        auditTypes.forEach((auditType) => (
+          enableAudits ? configuration.enableHandlerForSite(auditType, site)
+            : configuration.disableHandlerForSite(auditType, site)));
         return { payload: `${baseURL}: successfully updated` };
       }));
-
+      await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
       let message = 'Bulk update completed with the following responses:\n';
-      message += responses.map((response) => response.payload).join('\n');
+      message += siteResponses.map((response) => response.payload).join('\n');
       message += '\n';
 
       await say(message);

@@ -16,7 +16,7 @@ import {
   badRequest,
   noContent,
   notFound,
-  ok,
+  ok, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -30,6 +30,7 @@ import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
+import { ConfigurationDto } from '../dto/configuration.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -119,61 +120,24 @@ function SitesController(dataAccess) {
     if (!isBoolean(enableAudits)) {
       return badRequest('enableAudits is required');
     }
+    const configuration = await dataAccess.getConfiguration();
 
-    const organizationsMap = new Map();
-
-    const sites = await Promise.all(baseURLs.map(async (baseURL) => {
+    const responses = await Promise.all(baseURLs.map(async (baseURL) => {
       const site = await dataAccess.getSiteByBaseURL(baseURL);
       if (!site) {
         return { baseURL, errorMessage: `Site with baseURL: ${baseURL} not found`, status: 404 };
       }
-      const organizationId = site.getOrganizationId();
-
-      if (organizationId !== 'default' && !organizationsMap.has(organizationId)) {
-        const organization = await dataAccess.getOrganizationByID(organizationId);
-        if (!organization) {
-          return { baseURL, errorMessage: `Error updating site  with baseURL: ${baseURL}, organization with id: ${organizationId} organization not found`, status: 500 };
-        }
-        organizationsMap.set(organizationId, organization);
-      }
-
-      return { baseURL, site };
-    }));
-
-    const responses = await Promise.all(sites.map(async ({
-      baseURL, site, errorMessage, status,
-    }) => {
-      if (!site) {
-        return { baseURL, response: { message: errorMessage, status } };
-      }
-      const organizationId = site.getOrganizationId();
-      const organization = organizationsMap.get(organizationId);
-
-      auditTypes.forEach((auditType) => {
-        if (organization) {
-          organization.getAuditConfig().updateAuditTypeConfig(
-            auditType,
-          );
-        }
-        site.getAuditConfig().updateAuditTypeConfig(auditType, { auditsDisabled: !enableAudits });
-      });
-
-      if (organization && enableAudits) {
-        try {
-          await dataAccess.updateOrganization(organization);
-          organizationsMap.delete(organizationId);
-        } catch (error) {
-          return { baseURL: site.getBaseURL(), response: { message: `Error updating site with baseURL: ${baseURL}, update site organization with id: ${organizationId} failed`, status: 500 } };
-        }
-      }
-      try {
-        await dataAccess.updateSite(site);
-      } catch (error) {
-        return { baseURL: site.getBaseURL(), response: { message: `Error updating site with with baseURL: ${baseURL}, update site operation failed`, status: 500 } };
-      }
+      auditTypes.forEach((auditType) => (
+        enableAudits ? configuration.enableHandlerForSite(auditType, site)
+          : configuration.disableHandlerForSite(auditType, site)));
 
       return { baseURL: site.getBaseURL(), response: { body: SiteDto.toJSON(site), status: 200 } };
     }));
+    try {
+      await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return internalServerError('Failed to enable audits for all provided sites');
+    }
 
     return createResponse(responses, 207);
   };
