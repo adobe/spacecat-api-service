@@ -57,6 +57,60 @@ describe('RunScrapeCommand', () => {
   });
 
   describe('Handle Execution Method', () => {
+    it('handles null result from getTopPagesForSite', async () => {
+      dataAccessStub.getSiteByBaseURL.resolves({ getId: () => '123' });
+      dataAccessStub.getTopPagesForSite.resolves(null);
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com'], slackContext);
+      expect(slackContext.say.calledWith(':warning: No top pages found for site `https://example.com`')).to.be.true;
+    });
+
+    it('handles empty array result from getTopPagesForSite', async () => {
+      dataAccessStub.getSiteByBaseURL.resolves({ getId: () => '123' });
+      dataAccessStub.getTopPagesForSite.resolves([]);
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com'], slackContext);
+      expect(slackContext.say.calledWith(':warning: No top pages found for site `https://example.com`')).to.be.true;
+    });
+
+    it('parses SLACK_IDS_RUN_IMPORT correctly when present', async () => {
+      context.env.SLACK_IDS_RUN_IMPORT = JSON.stringify(['USER123', 'USER456']);
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com'], slackContext);
+      expect(slackContext.say.calledWith(':error: Only selected SpaceCat fluid team members can run scraper.')).to.be.false;
+    });
+
+    it('handles missing SLACK_IDS_RUN_IMPORT', async () => {
+      delete context.env.SLACK_IDS_RUN_IMPORT;
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com'], { ...slackContext, user: 'ANYUSER' });
+      expect(slackContext.say.calledWith(':error: Only selected SpaceCat fluid team members can run scraper.')).to.be.true;
+    });
+
+    it('rejects invalid date interval', async () => {
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com', '2023-12-31', '2023-01-01'], slackContext);
+      expect(slackContext.say.calledWith(sinon.match(':error: Invalid date interval.'))).to.be.true;
+    });
+    it('informs user when date interval is invalid', async () => {
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com', '2023-12-31', '2023-01-01'], slackContext);
+
+      expect(slackContext.say.calledOnce).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':error: Invalid date interval.');
+      expect(slackContext.say.firstCall.args[0]).to.include('Please provide valid dates in the format YYYY-MM-DD.');
+      expect(slackContext.say.firstCall.args[0]).to.include('The end date must be after the start date and within a two-year range.');
+    });
+
+    it('informs user when date interval is too long', async () => {
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com', '2020-01-01', '2023-01-01'], slackContext);
+
+      expect(slackContext.say.calledOnce).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':error: Invalid date interval.');
+      expect(slackContext.say.firstCall.args[0]).to.include('Please provide valid dates in the format YYYY-MM-DD.');
+      expect(slackContext.say.firstCall.args[0]).to.include('The end date must be after the start date and within a two-year range.');
+    });
     it('triggers a scrape for a valid site with top pages', async () => {
       dataAccessStub.getSiteByBaseURL.resolves({
         getId: () => '123',
