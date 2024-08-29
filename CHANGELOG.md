@@ -1,3 +1,10 @@
+## [1.63.5](https://github.com/adobe/spacecat-api-service/compare/v1.63.4...v1.63.5) (2024-08-29)
+
+
+### Bug Fixes
+
+* Spacecat API service responds with 503 when a large import is started ([#474](https://github.com/adobe/spacecat-api-service/issues/474)) ([b005081](https://github.com/adobe/spacecat-api-service/commit/b00508184c0a1041fcde0e9fd90c7f3af3957b56))
+
 ## [1.63.4](https://github.com/adobe/spacecat-api-service/compare/v1.63.3...v1.63.4) (2024-08-27)
 
 
