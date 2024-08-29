@@ -129,7 +129,7 @@ function ImportSupervisor(services, config) {
    */
   async function queueUrlsForImportWorker(urls, importJob) {
     log.info(`Starting a new import job of baseUrl: ${importJob.getBaseURL()} with ${urls.length}`
-      + ` URLs. This new job has claimed: ${importJob.getImportQueueId} `
+      + ` URLs. This new job has claimed: ${importJob.getImportQueueId()} `
       + `(jobId: ${importJob.getId()})`);
 
     // Send a single message containing all URLs and the new job ID
