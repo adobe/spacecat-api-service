@@ -88,7 +88,7 @@ async function run(request, context) {
       ConfigurationController(context.dataAccess),
       HooksController(context),
       OrganizationsController(context.dataAccess, context.env),
-      SitesController(context.dataAccess, log),
+      SitesController(context, log),
       ExperimentsController(context.dataAccess),
       SlackController(SlackApp),
       trigger,
