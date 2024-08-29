@@ -12,16 +12,17 @@
 
 /* eslint-env mocha */
 
+import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
+
 import { expect } from 'chai';
 import sinon from 'sinon';
 
 import nock from 'nock';
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
-import trigger, { INITIAL_SITEMAP_SLACK_MESSAGE } from '../../../src/controllers/trigger/sitemap.js';
+import trigger, { INITIAL_CANONICAL_SLACK_MESSAGE } from '../../../src/controllers/trigger/canonical.js';
 import { getQueryParams } from '../../../src/utils/slack/base.js';
 
-describe('Sitemap trigger', () => {
+describe('Canonical trigger', () => {
   let context;
   let dataAccessMock;
   let sqsMock;
@@ -33,18 +34,19 @@ describe('Sitemap trigger', () => {
     sandbox = sinon.createSandbox();
     const configuration = {
       isHandlerEnabledForSite: sandbox.stub().resolves(true),
-      isHandlerEnabledForOrganization: sandbox.stub().resolves(true),
     };
-    sites = [createSite({
-      id: 'site1',
-      baseURL: 'http://site1.com',
-      organizationId: 'org123',
-    }),
-    createSite({
-      id: 'site2',
-      baseURL: 'http://site2.com',
-      getOrganizationId: 'org123',
-    }),
+
+    sites = [
+      createSite({
+        id: 'site1',
+        baseURL: 'http://site1.com',
+        organizationId: 'org123',
+      }),
+      createSite({
+        id: 'site2',
+        baseURL: 'http://site2.com',
+        organizationId: 'org123',
+      }),
     ];
 
     orgs = [
@@ -68,12 +70,12 @@ describe('Sitemap trigger', () => {
     sandbox.restore();
   });
 
-  it('triggers a sitemap audit', async () => {
+  it('triggers a canonical audit', async () => {
     context = {
       log: console,
       dataAccess: dataAccessMock,
       sqs: sqsMock,
-      data: { type: 'sitemap', url: 'ALL' },
+      data: { type: 'canonical', url: 'ALL' },
       env: {
         AUDIT_JOBS_QUEUE_URL: 'http://sqs-queue-url.com',
         SLACK_BOT_TOKEN: 'token',
@@ -85,7 +87,7 @@ describe('Sitemap trigger', () => {
 
     nock('https://slack.com')
       .get('/api/chat.postMessage')
-      .query(getQueryParams('DSA', INITIAL_SITEMAP_SLACK_MESSAGE))
+      .query(getQueryParams('DSA', INITIAL_CANONICAL_SLACK_MESSAGE))
       .reply(200, {
         ok: true,
         channel: 'DSA',
@@ -97,6 +99,6 @@ describe('Sitemap trigger', () => {
 
     expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
-    expect(result.message[0]).to.be.contain([]);
+    expect(result.message[0]).to.equal('Triggered canonical audit for all 2 sites');
   });
 });

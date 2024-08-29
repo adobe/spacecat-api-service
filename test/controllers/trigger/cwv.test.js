@@ -13,17 +13,15 @@
 /* eslint-env mocha */
 
 import sinon from 'sinon';
-import chai from 'chai';
+import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 import cwv from '../../../src/controllers/trigger/cwv.js';
 
-chai.use(sinonChai);
-chai.use(chaiAsPromised);
-
-const { expect } = chai;
+use(sinonChai);
+use(chaiAsPromised);
 
 const sandbox = sinon.createSandbox();
 
@@ -35,38 +33,31 @@ describe('cvw handler', () => {
   let orgs;
 
   beforeEach(() => {
+    const configuration = {
+      isHandlerEnabledForSite: sandbox.stub(),
+    };
     sites = [
       createSite({
         id: 'site1',
         baseURL: 'http://site1.com',
-        auditConfig: {
-          auditTypeConfigs: {
-            cwv: {
-              disabled: true,
-            },
-          },
-        },
       }),
       createSite({
         id: 'site2',
         baseURL: 'http://site2.com',
       }),
     ];
-
+    configuration.isHandlerEnabledForSite.withArgs('cwv', sites[0]).returns(false);
+    configuration.isHandlerEnabledForSite.withArgs('cwv', sites[1]).returns(true);
     orgs = [
       createOrganization({
         id: 'default',
         name: 'ABCD',
-        config: {
-          audits: {
-            auditsDisabled: false,
-          },
-        },
       })];
 
     dataAccessMock = {
       getOrganizations: sandbox.stub().resolves(orgs),
       getSitesByDeliveryType: sandbox.stub(),
+      getConfiguration: sandbox.stub().resolves(configuration),
     };
 
     sqsMock = {

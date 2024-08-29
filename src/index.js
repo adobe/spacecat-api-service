@@ -20,6 +20,11 @@ import {
   internalServerError,
   noContent,
   notFound,
+  authWrapper,
+  enrichPathInfo,
+  LegacyApiKeyHandler,
+  ScopedApiKeyHandler,
+  AdobeImsHandler,
 } from '@adobe/spacecat-shared-http-utils';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
@@ -28,7 +33,6 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
 
-import auth from './support/auth.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
@@ -36,6 +40,7 @@ import matchPath, { sanitizePath } from './utils/route-utils.js';
 import AuditsController from './controllers/audits.js';
 import OrganizationsController from './controllers/organizations.js';
 import SitesController from './controllers/sites.js';
+import ExperimentsController from './controllers/experiments.js';
 import HooksController from './controllers/hooks.js';
 import SlackController from './controllers/slack.js';
 import trigger from './controllers/trigger.js';
@@ -50,21 +55,6 @@ import { s3ClientWrapper } from './support/s3.js';
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
-
-export function enrichPathInfo(fn) { // export for testing
-  return async (request, context) => {
-    const [_, route] = context?.pathInfo?.suffix?.split(/\/+/) || [];
-    context.pathInfo = {
-      ...context.pathInfo,
-      ...{
-        method: request.method.toUpperCase(),
-        headers: request.headers.plain(),
-        route,
-      },
-    };
-    return fn(request, context);
-  };
-}
 
 /**
  * This is the main function
@@ -84,7 +74,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, origin, x-requested-with, content-type, accept',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -99,6 +89,7 @@ async function run(request, context) {
       HooksController(context),
       OrganizationsController(context.dataAccess, context.env),
       SitesController(context.dataAccess, log),
+      ExperimentsController(context.dataAccess),
       SlackController(SlackApp),
       trigger,
       FulfillmentController(context),
@@ -134,8 +125,8 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
+  .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler] })
   .with(dataAccess)
-  .with(auth)
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)

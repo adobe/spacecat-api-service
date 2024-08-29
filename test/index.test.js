@@ -79,10 +79,9 @@ describe('Index Tests', () => {
           getCreatedAt: () => '2023-12-16T09:21:09.000Z',
           getUpdatedAt: () => '2023-12-16T09:21:09.000Z',
           getConfig: () => ({
-            audits: {
-              auditsDisabled: () => false,
-              getAuditTypeConfigs: () => ({ 404: { disabled: () => false } }),
-            },
+            getSlackConfig: () => {},
+            getHandlers: () => {},
+            getImports: () => [],
           }),
         }),
         getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),
@@ -119,7 +118,7 @@ describe('Index Tests', () => {
     expect(resp.status).to.equal(204);
     expect(resp.headers.plain()).to.eql({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, origin, x-requested-with, content-type, accept',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
       'content-type': 'application/json; charset=utf-8',

@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "local>adobe-rnd/spacecat-api-service"
+    "local>adobe/spacecat-api-service"
   ],
   "packageRules": [
     {
@@ -9,12 +9,6 @@
         "semantic-release"
       ],
       "allowedVersions": ">=23.0"
-    },
-    {
-      "matchPackageNames": [
-        "chai"
-      ],
-      "allowedVersions": "<5.0.0"
     },
     {
       "matchPackageNames": [

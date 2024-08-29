@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import fs from 'fs';
@@ -21,9 +21,7 @@ import { fileURLToPath } from 'url';
 
 import FulfillmentController from '../../../src/controllers/event/fulfillment.js';
 
-chai.use(chaiAsPromised);
-
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('Fulfillment Controller', () => {
   const sandbox = sinon.createSandbox();

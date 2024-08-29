@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
@@ -22,9 +22,7 @@ import OrganizationsController from '../../src/controllers/organizations.js';
 import { OrganizationDto } from '../../src/dto/organization.js';
 import { SiteDto } from '../../src/dto/site.js';
 
-chai.use(chaiAsPromised);
-
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();

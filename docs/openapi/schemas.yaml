@@ -24,7 +24,10 @@ AuditType:
     - 'lhs-desktop'
     - 'lhs-mobile'
     - 'broken-backlinks'
+    - 'canonical'
     - 'sitemap'
+    - 'structured-data'
+    - 'costs'
   example: 'cwv'
 URL:
   type: string
@@ -46,31 +49,30 @@ EmailAddress:
   example: 'user@example.com'
 SlackMentionConfig:
   type: object
-  additionalProperties: true
   properties:
     slack:
       type: array
       items:
         type: string
-AlertConfig:
+HandlerConfig:
   type: object
-  additionalProperties: true
+  additionalProperties: false
   properties:
-    type:
-      description: The type of the alert
-      type: string
-    byOrg:
-      description: Whether the alert should be sent by organization
-      type: boolean
     mentions:
-      description: The Slack mentions to include in the alert
+      $ref: '#/SlackMentionConfig'
+    excludedURLs:
+      description: URLs to be excluded from the handler's processing
       type: array
       items:
-        $ref: '#/SlackMentionConfig'
-AlertsConfig:
-  type: array
-  items:
-    $ref: '#/AlertConfig'
+        type: string
+        format: uri
+  patternProperties:
+    "^(404|broken-backlinks)$":
+      type: object
+      properties:
+        mentions:
+          $ref: '#/SlackMentionConfig'
+        # Define other properties specific to the alert type here
 SlackConfig:
   type: object
   additionalProperties: true
@@ -98,9 +100,9 @@ Config:
     slack:
       description: Optional. The Slack configuration
       $ref: '#/SlackConfig'
-    alerts:
+    handlers:
       description: Optional. The Alert configuration
-      $ref: '#/AlertsConfig'
+      $ref: '#/HandlerConfig'
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -137,19 +139,19 @@ Organization:
         channel: '#example-channel'
         workspace: 'example-workspace'
         invitedUserCount: 5
-      alerts:
-        - type: '404'
+      handlers:
+        '404':
           byOrg: true
           mentions:
-            - slack:
-                - '@user1'
-                - '@user2'
-        - type: 'cwv'
+            slack:
+              - '@user1'
+              - '@user2'
+        'cwv':
           byOrg: false
           mentions:
-            - slack:
-                - '@user5'
-                - '@user6'
+            slack:
+              - '@user5'
+              - '@user6'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 OrganizationList:
@@ -177,19 +179,18 @@ OrganizationCreate:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
+      handlers:
+        '404':
           mentions:
-            - slack:
-                - '@user3'
-                - '@user4'
-        - type: 'cwv'
+            slack:
+              - '@user3'
+              - '@user4'
+        'cwv':
           byOrg: false
           mentions:
-            - slack:
-                - '@user5'
-                - '@user6'
+            slack:
+              - '@user5'
+              - '@user6'
 OrganizationUpdate:
   type: object
   properties:
@@ -209,17 +210,15 @@ OrganizationUpdate:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
-          mentions:
-            - slack:
-                - '@user1'
-                - '@user2'
-        - type: 'cwv'
-          byOrg: false
-          mentions:
-            - slack:
+        handlers:
+          '404':
+            mentions:
+              slack:
+                - '@user3'
+                - '@user4'
+          'cwv':
+            mentions:
+              slack:
                 - '@user5'
                 - '@user6'
 Site:
@@ -244,9 +243,6 @@ Site:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
     config:
       description: Optional. The configuration of the site. May override the organization configuration.
       $ref: '#/SiteConfig'
@@ -263,30 +259,27 @@ Site:
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
-    auditConfig:
-      auditsDisabled: false
-      auditTypeConfigs:
-        '404':
-          disabled: true
-        'cwv':
-          disabled: false
     config:
       slack:
         channel: 'C1234567890'
         workspace: 'example-workspace'
-      alerts:
-        - type: '404'
-          byOrg: true
+      handlers:
+        '404':
           mentions:
-            - slack:
-                - '@user1'
-                - '@user2'
-        - type: 'cwv'
-          byOrg: false
+            slack:
+              - '@user1'
+              - '@user2'
+        'broken-backlinks':
           mentions:
-            - slack:
-                - '@user5'
-                - '@user6'
+            slack:
+              - '@user5'
+              - '@user6'
+          excludedURLs:
+            description: URLs to be excluded from the alert
+            type: array
+            items:
+              type: string
+              format: uri'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -306,13 +299,6 @@ SiteWithLatestAudit:
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
-    auditConfig:
-      auditsDisabled: false
-      auditTypeConfigs:
-        '404':
-          disabled: true
-        'cwv':
-          disabled: false
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
     audits:
@@ -358,9 +344,6 @@ SiteCreate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
   example:
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://www.newsite.com'
@@ -400,9 +383,6 @@ SiteUpdate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
       $ref: '#/DateTime'
-    auditConfig:
-      description: The audit configuration for this site
-      $ref: '#/AuditConfig'
     config:
       description: Optional. The configuration of the site
       $ref: '#/SiteConfig'
@@ -410,23 +390,7 @@ SiteUpdate:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
     goLiveDate: '2024-01-20T10:00:00Z'
-AuditConfigType:
-  type: object
-  properties:
-    disabled:
-      description: Whether audits are disabled for the given audit type
-      type: boolean
-    excludedURLs:
-      description: (Optional) Set of urls to exclude. If empty, will remove previously excluded URLs. It's an array of strings
-      type: array
-      items:
-        type: string
-  example:
-    disabled: true
-    excludedURLs:
-      - 'https://www.adobe.com/some-page'
-      - 'https://www.adobe.com/another-page'
-UpdateAuditConfigType:
+UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
@@ -438,23 +402,6 @@ UpdateAuditConfigType:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
-AuditConfig:
-  type: object
-  properties:
-    auditsDisabled:
-      description: Whether audits are disabled for this site
-      type: boolean
-    auditTypeConfigs:
-      type: object
-      additionalProperties:
-        $ref: '#/AuditConfigType'
-  example:
-    auditsDisabled: false
-    auditTypeConfigs:
-      '404':
-        disabled: true
-      'cwv':
-        disabled: false
 Audit:
   type: object
   readOnly: true
@@ -468,11 +415,6 @@ Audit:
     expiresAt:
       description: The date and time when the audit expires in ISO 8601 format
       $ref: '#/DateTime'
-    auditType:
-      description: The type of the audit
-      $ref: '#/AuditType'
-    isError:
-      type: boolean
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
@@ -497,14 +439,215 @@ Audit:
     previousAuditResult:
       someProperty: 'somePreviousValue'
 AuditResult:
-  type: object
-  description: |
-    The result of an audit, which is dependent on the audit type.
-  additionalProperties: true
+  description: The result of an audit, which is dependent on the audit type.
+  oneOf:
+    - type: object
+      additionalProperties: true
+    - type: object
+      properties:
+        experimentationOpportunities:
+          type: array
+          description: A list of experimentation opportunities
+          items:
+            $ref: './schemas.yaml#/ExperimentationOpportunity'
+    - type: object
+      description: |
+        The result of broken-backlinks audit.
+      properties:
+        brokenBacklinks:
+          type: array
+          description: A list of broken backlinks.
+          items:
+            $ref: './schemas.yaml#/BrokenBacklink'
+        fullAuditRef:
+          description: |
+            A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+          type: string
+    - type: array
+      description: Information about the provided URLs in the Google index.
+      items:
+        $ref: './schemas.yaml#/StructuredData'
+    - type: object
+      description: |
+        The result of costs audit.
+      properties:
+        ahrefs:
+          type: object
+          properties:
+            usedApiUnits:
+              description: |
+                API units used so far in the current month.
+              type: integer
+            limitApiUnits:
+              description: |
+                Limit of API units for the current month.
+              type: integer
+            fullAuditRef:
+              description: |
+                A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+              type: string
+    - type: object
+      description: The result of CWV audit
+      properties:
+        cwv:
+          type: array
+          description: A list of CWV metrics per url.
+          items:
+            $ref: './schemas.yaml#/CWVResult'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+CWVResult:
+  type: object
+  properties:
+    url:
+      $ref: '#/URL'
+    pageviews:
+      type: integer
+      example: 349900
+    lcp:
+      type: number
+      format: float
+      example: 3303.300000000745
+    lcpCount:
+      type: integer
+      example: 4873
+    cls:
+      type: number
+      format: float
+      example: 0.0138671875
+    clsCount:
+      type: integer
+      example: 4216
+    inp:
+      type: integer
+      example: 72
+    inpCount:
+      type: integer
+      example: 1952
+    ttfb:
+      type: number
+      format: float
+      example: 732.0500007271767
+    ttfbCount:
+      type: integer
+      example: 5678
+ExperimentationOpportunity:
+  type: object
+  readOnly: true
+  properties:
+    type:
+      type: string
+      description: Type of the experimentation opportunity
+      example: 'generic'
+    page:
+      type: string
+      description: The title of the webpage
+      example: 'Retirement Calculator'
+    screenshot:
+      type: string
+      format: url
+      description: A URL pointing to the screenshot of the webpage.
+      example: "https://space.cat/screenshots/some-cool-page.png"
+    trackedPageKPIName:
+      type: string
+      description: The name of KPI tracked for this experiment.
+      example: 'Bounce rate'
+    trackedPageKPIValue:
+      type: number
+      description: The value of KPI tracked for this experiment.
+      example: 0.80
+    pageviews:
+      type: integer
+      description: The total number of views this webpage has received
+      example: 15000
+    samples:
+      type: integer
+      description: The total number of samples we have for this webpage in RUM
+      example: 150
+    activeExperiments:
+      type: string
+      description: The number of active experiments on the webpage, or 'none' if there are no active experiments.
+      examples:
+        - 'None'
+        - '2 active'
+    metrics:
+      type: array
+      description: The metrics for the experimentation opportunity
+      items:
+        type: object
+StructuredData:
+  type: object
+  readOnly: true
+  properties:
+    inspectionUrl:
+      type: string
+      description: The URL that was inspected
+    indexStatusResult:
+      type: object
+      description: Result of the index status analysis.
+      properties:
+        verdict:
+          $ref: '#/Verdict'
+        lastCrawlTime:
+          $ref: '#/DateTime'
+    richResults:
+      type: object
+      description: Result of the Rich Results analysis. Absent if there are no rich results found.
+      properties:
+        verdict:
+          $ref: '#/Verdict'
+        detectedItemTypes:
+          type: array
+          description: A list of zero or more rich result types detected on this page.
+          items:
+            type: string
+            example: 'Product snippets'
+        detectedIssues:
+          type: array
+          description: A list of zero or more rich results errors detected on this page.
+          items:
+            type: object
+            properties:
+              richResultType:
+                type: string
+                description: Rich Results type detected on this page.
+                example: 'Product snippets'
+              items:
+                type: array
+                description: List of Rich Results items that have issues.
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: The user-provided name of this item.
+                      example: 'Product name'
+                    issues:
+                      type: array
+                      description: A list of rich result issues found for this instance.
+                      items:
+                        type: object
+                        properties:
+                          issueMessage:
+                            type: string
+                            description: Rich Results issue type.
+                            example: 'Missing field "image"'
+                          severity:
+                            type: string
+                            description: Severity of this issue.
+                            example: 'ERROR'
+
+Verdict:
+  type: string
+  description: High-level verdict about whether the URL is indexed.
+  enum:
+    - 'VERDICT_UNSPECIFIED'
+    - 'PASS'
+    - 'PARTIAL'
+    - 'FAIL'
+    - 'NEUTRAL'
 HoolihanHeaders:
   type: object
   properties:
@@ -941,6 +1084,162 @@ SiteTopPageList:
   type: array
   items:
     $ref: './schemas.yaml#/SiteTopPage'
+SiteExperimentVariant:
+  type: object
+  properties:
+    name:
+      description: The name of the variant
+      type: string
+    label:
+      description: The label of the variant
+      type: string
+    split:
+      description: The split allocation of the traffic to the variant
+      type: number
+    url:
+      description: The url of the variant
+      $ref: '#/URL'
+    views:
+      description: The number of views for the variant
+      type: integer
+    samples:
+      description: The number of data points (samples) used for this variant
+      type: integer
+    interactionsCount:
+      description: The interactions count for the variant
+      type: integer
+    p_value:
+      description: The p-value of the variant for the configured metric or clicks
+      type: number
+    power:
+      description: The power of the variant for the configured metric or clicks
+      type: number
+    statsig:
+      description: The statistical significance of the variant based on the configured metric or clicks
+      type: boolean
+    metrics:
+      description: The metrics for the variant
+      type: array
+      items:
+        type: object
+        properties:
+          selector:
+            description: The css selector of the element on which the interaction was performed
+            type: string
+          value:
+            description: The value of the metric on the selector
+            type: number
+          samples:
+            description: The number of data points (samples) used for calculating this metric object
+            type: integer
+          type:
+            description: The type of the metric
+            type: string
+            enum:
+              - 'click'
+              - 'convert'
+              - 'formsubmit'
+  example:
+    name: 'challenger-1'
+    label: 'Challenger 1'
+    split: 0.5
+    url: 'https://example-site.com/foo/bar'
+    views: 1000
+    samples: 10
+    interactionsCount: 200
+    p_value: 0.04
+    power: 97.6
+    statsig: true
+    metrics:
+      - selector: '.add-to-cart'
+        value: 300
+        samples: 3
+        type: 'click'
+SiteExperiment:
+  type: object
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    experimentId:
+      description: The ID of the experiment
+      type: string
+    name:
+      description: The name of the experiment
+      type: string
+    url:
+      description: The URL of the experiment
+      $ref: '#/URL'
+    status:
+      description: The status of the experiment
+      type: string
+      enum:
+        - 'ACTIVE'
+        - 'COMPLETE'
+        - 'INACTIVE'
+    type:
+      description: The type of the experiment
+      type: string
+      enum:
+        - 'FULL'
+        - 'AB'
+        - 'MAB'
+    startDate:
+      description: The start date and time of the experiment
+      $ref: '#/DateTime'
+    endDate:
+      description: The end date and time of the experiment
+      $ref: '#/DateTime'
+    variants:
+      description: The variants of the experiment
+      type: array
+      items:
+        $ref: './schemas.yaml#/SiteExperimentVariant'
+    updatedAt:
+      description: The date and time when the experiment was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: The user/entity who last updated the experiment
+      type: string
+    conversionEventName:
+      description: The name of the conversion event
+      type: string
+    conversionEventValue:
+      description: The name of conversion event value
+      type: string
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    experimentId: '1012-home-page-optimization'
+    name: '1012 Home Page Optimization'
+    url: 'https://example-site.com/foo/bar'
+    type: 'AB'
+    status: 'ACTIVE'
+    startDate: '2024-04-29T15:14:33.653Z'
+    endDate: '2024-05-29T15:14:33.653Z'
+    variants:
+      - name: 'challenger-1'
+        label: 'Challenger 1'
+        split: 0.5
+        url: 'https://example-site.com/foo/bar'
+        views: 1000
+        samples: 10
+        interactionsCount: 200
+        p_value: 0.04
+        power: 97.6
+        statsig: true
+        metrics:
+          - selector: '.add-to-cart'
+            value: 300
+            samples: 3
+            type: 'click'
+    updatedAt: '2024-05-31T15:14:33.653Z'
+    updatedBy: 'admin'
+    conversionEventName: 'click'
+    conversionEventValue: '.add-to-cart'
+SiteExperimentList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/SiteExperiment'
 SiteMetric:
   type: object
   required:
@@ -981,7 +1280,7 @@ ImportOptions:
     pageLoadTimeoutMs:
       description: The time in milliseconds to wait for the page to load
       type: integer
-    enableJavaScript:
+    enableJavascript:
       description: Whether to enable JavaScript on the page
       type: boolean
     scrollToBottom:
@@ -1019,21 +1318,21 @@ ImportJobRequest:
       - 'https://example.com/en/page1'
       - 'https://example.com/fr/page2'
     options:
-      enableJavaScript: true
+      enableJavascript: true
       scrollToBottom: true
 ImportJobStatus:
   type: object
   properties:
-    jobId:
+    id:
       description: The ID of the import job
       $ref: '#/Id'
     status:
       description: The status of the import job
       type: string
       enum:
-        - 'running'
-        - 'complete'
-        - 'failed'
+        - 'RUNNING'
+        - 'COMPLETE'
+        - 'FAILED'
     startTime:
       description: The date and time when the import job started
       $ref: '#/DateTime'
@@ -1050,9 +1349,125 @@ ImportJobStatus:
       description: The number of URLs that failed to import
       type: integer
   example:
-    jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
-    status: 'running'
+    id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    status: 'RUNNING'
     startTime: '2024-01-19T14:20:30Z'
     urlCount: 25
     successCount: 15
     failedCount: 0
+ImportJobArchive:
+  type: object
+  properties:
+    jobId:
+      description: The ID of the import job
+      $ref: '#/Id'
+    downloadUrl:
+      description: The pre-signed URL to download the archive of the import job
+      $ref: '#/URL'
+  example:
+    jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    downloadUrl: 'https://spacecat-example-bucket.s3.example-region.amazonaws.com/import/12d6ac8e-d5e4-4788-90eb-b69e10e745fd/import-result.zip?X-Amz-Algorithm=AWS...'
+ScrapeRequest:
+  type: object
+  required:
+    - urls
+  properties:
+    urls:
+      description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
+      type: array
+      items:
+        $ref: '#/URL'
+      example:
+        - 'https://example.com/en/page1'
+        - 'https://example.com/fr/page2'
+ScrapeResponse:
+  type: object
+  properties:
+    id:
+      description: The ID of the scrape job
+      $ref: '#/Id'
+    status:
+      description: The status of the scrape job
+      type: string
+      enum:
+        - 'COMPLETE'
+        - 'FAILED'
+    startTime:
+      description: The date and time when the scrape job started
+      $ref: '#/DateTime'
+    endTime:
+      description: The date and time when the scrape job ended, if finished
+      $ref: '#/DateTime'
+    urlCount:
+      description: The total number of URLs in the job
+      type: integer
+    successCount:
+      description: The number of URLs successfully scraped
+      type: integer
+    failedCount:
+      description: The number of URLs that failed to scrape
+      type: integer
+    results:
+      description: The scrape results
+      type: array
+      items:
+        $ref: '#/ScrapeResult'
+  example:
+    id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    status: 'COMPLETE'
+    startTime: '2024-01-19T14:20:30Z'
+    urlCount: 10
+    successCount: 9
+    failedCount: 1
+    results:
+      - url: 'https://example.com/en/page1'
+        status: 'COMPLETE'
+        content: '...'
+      - url: 'https://example.com/fr/page2'
+        status: 'FAILED'
+        error: '...'
+ScrapeResult:
+  type: array
+  items:
+    type: object
+    properties:
+      url:
+        description: The URL of the scraped page
+        $ref: '#/URL'
+      status:
+        description: The status of the scrape job
+        type: string
+        enum:
+          - 'COMPLETE'
+          - 'FAILED'
+      content:
+        description: The content of the scraped page
+        type: string
+      error:
+        description: The error message if the scrape failed
+        type: string
+    example:
+      - url: 'https://example.com/en/page1'
+        status: 'COMPLETE'
+        content: '<body>...</body>'
+      - url: 'https://example.com/fr/page2'
+        status: 'FAILED'
+        error: 'Timeout'
+BrokenBacklink:
+  type: object
+  properties:
+    url_to:
+      description: The URL of the broken link.
+      $ref: '#/URL'
+    title:
+      description: The title of the page referring to the broken link.
+      type: string
+    url_from:
+      description: The URL of the page referring to the broken link.
+      $ref: '#/URL'
+    traffic_domain:
+      description: The referring domain's estimated monthly organic traffic from search.
+      type: number
+    url_suggested:
+      description: The URL suggested for redirecting from the broken backlink.
+      $ref: '#/URL'

@@ -15,7 +15,8 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
 
@@ -117,6 +118,14 @@ function AuditsController(dataAccess) {
    * @returns {Promise<Response>} the site's updated audit config
    */
   const patchAuditForSite = async (context) => {
+    function mergeOverrides(existingOverrides, manualOverwrites) {
+      const overrides = {};
+      [...existingOverrides, ...manualOverwrites].forEach((override) => {
+        overrides[override.brokenTargetURL] = override;
+      });
+      return Object.values(overrides);
+    }
+
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
@@ -128,36 +137,68 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    // get audit type config
+    const { excludedURLs, manualOverwrites } = context.data;
+    let hasUpdates = false;
+
     const site = await dataAccess.getSiteByID(siteId);
-    const auditConfig = site.getAuditConfig();
-    const auditTypeConfig = auditConfig.getAuditTypeConfig(auditType);
-
-    const { excludedURLs } = context.data;
-
-    if (Array.isArray(excludedURLs)) {
-      let newState = {
-        ...auditTypeConfig,
-        excludedURLs: [
-          ...auditTypeConfig.excludedURLs?.filter((v) => excludedURLs.indexOf(v) < 0) ?? [],
-          ...excludedURLs,
-        ],
-      };
-
-      if (!excludedURLs.length) {
-        // remove all opt-outs
-        newState = {
-          ...auditTypeConfig,
-          excludedURLs: [],
-        };
-      }
-
-      await site.updateAuditTypeConfig(auditType, newState);
-      await dataAccess.updateSite(site);
-
-      return ok(newState);
+    if (!site) {
+      return notFound('Site not found');
     }
 
+    const config = site.getConfig();
+    const handlerConfig = config.getHandlerConfig(auditType);
+    if (!handlerConfig) {
+      return notFound('Audit type not found');
+    }
+    if (Array.isArray(excludedURLs)) {
+      for (const url of excludedURLs) {
+        if (!isValidUrl(url)) {
+          return badRequest('Invalid URL format');
+        }
+      }
+
+      hasUpdates = true;
+
+      const newExcludedURLs = excludedURLs.length === 0
+        ? []
+        : Array.from(new Set([...(config.getExcludedURLs(auditType) || []), ...excludedURLs]));
+
+      config.updateExcludedURLs(auditType, newExcludedURLs);
+    }
+
+    if (Array.isArray(manualOverwrites)) {
+      for (const manualOverwrite of manualOverwrites) {
+        if (!isObject(manualOverwrite)) {
+          return badRequest('Manual overwrite must be an object');
+        }
+        if (Object.keys(manualOverwrite).length === 0) {
+          return badRequest('Manual overwrite object cannot be empty');
+        }
+        if (!hasText(manualOverwrite.brokenTargetURL) || !hasText(manualOverwrite.targetURL)) {
+          return badRequest('Manual overwrite must have both brokenTargetURL and targetURL');
+        }
+        if (!isValidUrl(manualOverwrite.brokenTargetURL)
+            || !isValidUrl(manualOverwrite.targetURL)) {
+          return badRequest('Invalid URL format');
+        }
+      }
+
+      hasUpdates = true;
+
+      const existingOverrides = config.getManualOverwrites(auditType);
+      const newManualOverwrites = manualOverwrites.length === 0
+        ? []
+        : mergeOverrides(existingOverrides, manualOverwrites);
+
+      config.updateManualOverwrites(auditType, newManualOverwrites);
+    }
+    if (hasUpdates) {
+      const handlerType = config.getHandlerConfig(auditType);
+      const configObj = Config.toDynamoItem(config);
+      site.updateConfig(configObj);
+      await dataAccess.updateSite(site);
+      return ok(handlerType);
+    }
     return badRequest('No updates provided');
   };
 

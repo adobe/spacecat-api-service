@@ -120,16 +120,17 @@ function AddRepoCommand(context) {
       await dataAccess.updateSite(site);
 
       const auditType = 'lhs-mobile';
-      const auditConfig = site.getAuditConfig();
+      const configuration = await dataAccess.getConfiguration();
+      const isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
 
-      if (!auditConfig.auditsDisabled() && !auditConfig.getAuditTypeConfig(auditType)?.disabled()) {
+      if (isAuditEnabled) {
         await triggerAuditForSite(site, auditType, slackContext, context);
       }
 
       await say(`
       :white_check_mark: *GitHub repo added for <${site.getBaseURL()}|${site.getBaseURL()}>*
       
-${printSiteDetails(site)}
+${printSiteDetails(site, isAuditEnabled)}
       
       First PSI check with new repo is triggered! :adobe-run:
       `);

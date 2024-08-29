@@ -19,6 +19,13 @@ audit-for-site:
           application/json:
             schema:
               $ref: './schemas.yaml#/Audit'
+            examples:
+              generic-audit:
+                $ref: './examples.yaml#/generic-audit'
+              broken-backlinks-audit:
+                $ref: './examples.yaml#/broken-backlinks-audit'
+              costs-audit:
+                $ref: './examples.yaml#/costs-audit'
       '400':
         $ref: './responses.yaml#/400-audit-for-site'
       '401':
@@ -49,6 +56,13 @@ latest-audit-for-site:
           application/json:
             schema:
               $ref: './schemas.yaml#/Audit'
+            examples:
+              generic-audit:
+                $ref: './examples.yaml#/generic-audit'
+              broken-backlinks-audit:
+                $ref: './examples.yaml#/broken-backlinks-audit'
+              costs-audit:
+                $ref: './examples.yaml#/costs-audit'
       '400':
         $ref: './responses.yaml#/400-latest-audit-for-site'
       '401':
@@ -59,7 +73,7 @@ latest-audit-for-site:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-update-audit-config-for-site:
+update-handler-type-config-for-site:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/auditType'
@@ -77,14 +91,14 @@ update-audit-config-for-site:
       content:
         application/json:
           schema:
-            $ref: './schemas.yaml#/UpdateAuditConfigType'
+            $ref: './schemas.yaml#/UpdateHandlerTypeConfig'
     responses:
       '200':
-        description: A site object
+        description: The updated audit type config object
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/Site'
+              $ref: './schemas.yaml#/HandlerConfig'
       '400':
         $ref: './responses.yaml#/400-patch-audit-for-site'
       '401':

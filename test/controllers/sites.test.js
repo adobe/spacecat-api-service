@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import esmock from 'esmock';
@@ -23,9 +23,7 @@ import SitesController from '../../src/controllers/sites.js';
 import { SiteDto } from '../../src/dto/site.js';
 import { OrganizationDto } from '../../src/dto/organization.js';
 
-chai.use(chaiAsPromised);
-
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -455,30 +453,6 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Base URL required');
   });
 
-  it('updates audit configurations for a site', async () => {
-    const siteId = 'site1';
-    const auditConfigUpdate = {
-      auditsDisabled: true,
-      auditTypeConfigs: {
-        type1: { disabled: true },
-        type2: { disabled: false },
-      },
-    };
-
-    const response = await sitesController.updateSite({
-      params: { siteId },
-      data: { auditConfig: auditConfigUpdate },
-    });
-
-    expect(mockDataAccess.updateSite.calledOnce).to.be.true;
-    expect(response.status).to.equal(200);
-
-    const updatedSite = await response.json();
-    expect(updatedSite.auditConfig.auditsDisabled).to.be.true;
-    expect(updatedSite.auditConfig.auditTypeConfigs.type1.disabled).to.be.true;
-    expect(updatedSite.auditConfig.auditTypeConfigs.type2.disabled).to.be.false;
-  });
-
   it('create key event returns created key event', async () => {
     const siteId = sites[0].getId();
     const keyEvent = keyEvents[0];
@@ -578,13 +552,25 @@ describe('Sites Controller', () => {
     getStoredMetrics.resolves(storedMetrics);
 
     const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-      '../../src/support/metrics-store.js': {
+      '@adobe/spacecat-shared-utils': {
         getStoredMetrics,
       },
     });
 
     const resp = await (await sitesControllerMock.default(mockDataAccess).getSiteMetricsBySource({
       params: { siteId, source, metric },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
+      s3: {
+        s3Client: {
+          send: sinon.stub(),
+        },
+        s3Bucket: 'test-bucket',
+        region: 'us-west-2',
+      },
     })).json();
 
     expect(resp).to.deep.equal(storedMetrics);

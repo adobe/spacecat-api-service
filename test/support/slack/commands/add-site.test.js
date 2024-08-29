@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import chai from 'chai';
+import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
@@ -20,8 +20,7 @@ import nock from 'nock';
 import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
 
-chai.use(sinonChai);
-const { expect } = chai;
+use(sinonChai);
 
 const validHelixDom = '<!doctype html><html lang="en"><head></head><body><header></header><main><div></div></main></body></html>';
 
@@ -32,9 +31,13 @@ describe('AddSiteCommand', () => {
   let sqsStub;
 
   beforeEach(() => {
+    const configuration = {
+      isHandlerEnabledForSite: sinon.stub(),
+    };
     dataAccessStub = {
       getSiteByBaseURL: sinon.stub(),
       addSite: sinon.stub(),
+      getConfiguration: sinon.stub().resolves(configuration),
     };
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
@@ -125,7 +128,10 @@ describe('AddSiteCommand', () => {
         .get('/')
         .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
-      dataAccessStub.addSite.resolves(createSite({ baseURL, deliveryType: 'other' }));
+      const site = createSite({ baseURL, deliveryType: 'other' });
+      dataAccessStub.addSite.resolves(site);
+      const configuration = { isHandlerEnabledForSite: sinon.stub().withArgs('lhs-mobile', site).resolves(true) };
+      dataAccessStub.getConfiguration.resolves(configuration);
 
       const args = ['example.com'];
       const command = AddSiteCommand(context);
@@ -143,7 +149,6 @@ describe('AddSiteCommand', () => {
         .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
       const site = createSite({ baseURL, deliveryType: 'other' });
-      site.setAllAuditsDisabled(true);
       dataAccessStub.addSite.resolves(site);
 
       const args = ['example.com'];
@@ -162,7 +167,6 @@ describe('AddSiteCommand', () => {
         .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
       dataAccessStub.getSiteByBaseURL.resolves(null);
       const site = createSite({ baseURL, deliveryType: 'other' });
-      site.updateAuditTypeConfig('lhs-mobile', { disabled: true });
       dataAccessStub.addSite.resolves(site);
 
       const args = ['example.com'];

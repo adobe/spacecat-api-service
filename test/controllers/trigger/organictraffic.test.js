@@ -33,42 +33,37 @@ describe('Organic Traffic trigger', () => {
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
-
+    const configuration = {
+      isHandlerEnabledForSite: sandbox.stub(),
+    };
     sites = [
       createSite({
         id: 'site1',
         baseURL: 'http://site1.com',
-        auditConfig: {
-          auditTypeConfigs: {
-            'organic-traffic': {
-              disabled: false,
-            },
-          },
-        },
       }),
       createSite({
         id: 'site2',
         baseURL: 'http://site2.com',
       }),
     ];
-
+    configuration.isHandlerEnabledForSite.withArgs(
+      AUDIT_TYPE_ORGANIC_TRAFFIC,
+      sites[0],
+    ).returns(true);
+    configuration.isHandlerEnabledForSite.withArgs(
+      AUDIT_TYPE_ORGANIC_TRAFFIC,
+      sites[1],
+    ).returns(false);
     orgs = [
       createOrganization({
         id: 'default',
         name: 'ABCD',
-        config: {
-          audits: {
-            auditsDisabled: false,
-            auditTypeConfigs: {
-              [AUDIT_TYPE_ORGANIC_TRAFFIC]: { disabled: false },
-            },
-          },
-        },
       })];
 
     dataAccessMock = {
       getOrganizations: sandbox.stub().resolves(orgs),
       getSitesByDeliveryType: sandbox.stub(),
+      getConfiguration: sandbox.stub().resolves(configuration),
     };
 
     sqsMock = {

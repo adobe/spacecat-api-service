@@ -44,6 +44,10 @@ describe('getRouteHandlers', () => {
     getByBaseURL: sinon.stub(),
   };
 
+  const mockExperimentsController = {
+    getExperiments: sinon.stub(),
+  };
+
   const mockOrganizationsController = {
     getAll: sinon.stub(),
     getByID: sinon.stub(),
@@ -66,6 +70,7 @@ describe('getRouteHandlers', () => {
     createImportJob: sinon.stub(),
     getImportJobStatus: sinon.stub(),
     getImportJobResult: sinon.stub(),
+    getImportJobsByDateRange: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -75,6 +80,7 @@ describe('getRouteHandlers', () => {
       mockHooksController,
       mockOrganizationsController,
       mockSitesController,
+      mockExperimentsController,
       mockSlackController,
       mockTrigger,
       mockFulfillmentController,
@@ -97,7 +103,7 @@ describe('getRouteHandlers', () => {
       'GET /trigger',
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
-      'POST /tools/import',
+      'POST /tools/import/jobs',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -134,12 +140,14 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/:auditType',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
+      'GET /sites/:siteId/experiments',
       'GET /sites/:siteId/key-events',
       'POST /sites/:siteId/key-events',
       'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
-      'GET /tools/import/:jobId',
-      'GET /tools/import/:jobId/import-result.zip',
+      'GET /tools/import/jobs/:jobId',
+      'POST /tools/import/jobs/:jobId/result',
+      'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -171,5 +179,6 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/audits/latest'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].handler).to.equal(mockAuditsController.getLatestForSite);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
+    expect(dynamicRoutes['GET /sites/:siteId/experiments'].handler).to.equal(mockExperimentsController.getExperiments);
   });
 });
