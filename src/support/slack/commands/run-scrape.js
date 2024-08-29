@@ -53,12 +53,11 @@ function RunScrapeCommand(context) {
      */
   const handleExecution = async (args, slackContext) => {
     const { say, user } = slackContext;
-
     const admins = JSON.parse(context?.env?.SLACK_IDS_RUN_IMPORT || '[]');
 
     if (!admins.includes(user)) {
       await say(':error: Only selected SpaceCat fluid team members can run scraper.');
-      // return;
+      return;
     }
 
     try {
@@ -72,8 +71,8 @@ function RunScrapeCommand(context) {
 
       if ((startDate || endDate) && !isValidDateInterval(startDate, endDate)) {
         await say(':error: Invalid date interval. '
-                    + 'Please provide valid dates in the format YYYY-MM-DD. '
-                    + 'The end date must be after the start date and within a two-year range.');
+            + 'Please provide valid dates in the format YYYY-MM-DD. '
+            + 'The end date must be after the start date and within a two-year range.');
         return;
       }
 
@@ -87,24 +86,37 @@ function RunScrapeCommand(context) {
       const topPages = result || [];
 
       if (topPages.length > 0) {
-        const urls = topPages.map(
-          (page) => ({
-            url: page.getURL(),
-          }),
-        );
-
+        const urls = topPages.map((page) => ({ url: page.getURL() }));
         await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
         const jobId = site.getId();
-        await triggerScraperRun(
-          jobId,
-          urls,
-          slackContext,
-          context,
-        );
+        const batchSize = 100;
+        const totalBatches = Math.ceil(urls.length / batchSize);
 
-        const message = `:adobe-run: Triggered scrape run for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
+        const batchPromises = [];
+        // eslint-disable-next-line no-plusplus
+        for (let i = 0; i < totalBatches; i++) {
+          const startIndex = i * batchSize;
+          const endIndex = Math.min((i + 1) * batchSize, urls.length);
+          const urlBatch = urls.slice(startIndex, endIndex);
 
+          const batchPromise = (async () => {
+            await triggerScraperRun(
+              jobId,
+              urlBatch,
+              slackContext,
+              context,
+            );
+            await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - Batch ${i + 1}/${totalBatches} (${urlBatch.length} URLs)`);
+          })();
+
+          batchPromises.push(batchPromise);
+        }
+
+        await Promise.all(batchPromises);
+
+        const message = `:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`
+            + `Total batches: ${totalBatches}, Total URLs: ${urls.length}`;
         await say(message);
       } else {
         await say(`:warning: No top pages found for site \`${baseURL}\``);
@@ -114,7 +126,6 @@ function RunScrapeCommand(context) {
       await postErrorMessage(say, error);
     }
   };
-
   baseCommand.init(context);
 
   return {
