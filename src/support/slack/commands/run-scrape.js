@@ -57,7 +57,7 @@ function RunScrapeCommand(context) {
 
     if (!admins.includes(user)) {
       await say(':error: Only selected SpaceCat fluid team members can run scraper.');
-      return;
+      // return;
     }
 
     try {
