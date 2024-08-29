@@ -265,6 +265,23 @@ export async function findDeliveryType(url) {
   return DELIVERY_TYPES.OTHER;
 }
 
+export async function publishToHelixAdmin(hlxAdminToken, owner, repo, ref, path) {
+  const url = `https://admin.hlx.page/live/${owner}/${repo}/${ref}/${path}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `token ${hlxAdminToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to publish resource ${path} : ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 /**
  * Error class with a status code property.
  * @extends Error

@@ -17,7 +17,6 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-
 import { AuditDto } from '../dto/audit.js';
 
 /**
@@ -118,14 +117,13 @@ function AuditsController(dataAccess) {
    * @returns {Promise<Response>} the site's updated audit config
    */
   const patchAuditForSite = async (context) => {
-    function mergeOverrides(existingOverrides, manualOverwrites) {
+    function mergeOverwrites(existingOverwrites, manualOverwrites) {
       const overrides = {};
-      [...existingOverrides, ...manualOverwrites].forEach((override) => {
-        overrides[override.brokenTargetURL] = override;
+      [...existingOverwrites, ...manualOverwrites].forEach((overwrite) => {
+        overrides[overwrite.brokenTargetURL] = overwrite;
       });
       return Object.values(overrides);
     }
-
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
@@ -185,10 +183,10 @@ function AuditsController(dataAccess) {
 
       hasUpdates = true;
 
-      const existingOverrides = config.getManualOverwrites(auditType);
+      const existingOverwrites = config.getManualOverwrites(auditType);
       const newManualOverwrites = manualOverwrites.length === 0
         ? []
-        : mergeOverrides(existingOverrides, manualOverwrites);
+        : mergeOverwrites(existingOverwrites, manualOverwrites);
 
       config.updateManualOverwrites(auditType, newManualOverwrites);
     }
