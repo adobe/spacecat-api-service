@@ -201,6 +201,7 @@ function ImportSupervisor(services, config) {
 
     // Write the import script to S3, if provided
     if (importScript) {
+      log.info('Writing the import script to S3');
       await writeImportScriptToS3(newImportJob.getId(), importScript);
     }
 
