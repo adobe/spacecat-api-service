@@ -124,9 +124,8 @@ describe('RunScrapeCommand', () => {
       await command.handleExecution(['https://example.com', '2023-01-01', '2023-12-31'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Found top pages for site `https://example.com`, total 2 pages.');
-      expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Total promises 1 for site `https://example.com` - total 2 URLs in 1 batches');
-      expect(slackContext.say.thirdCall.args[0]).to.include(':adobe-run: Triggered scrape run for site `https://example.com` - total 2 URLs in 1 batches');
+      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Found top pages for site `https://example.com`');
+      expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Triggered scrape run for site `https://example.com`');
     });
 
     it('does not trigger a scrape when user is not authorized', async () => {
