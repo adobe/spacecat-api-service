@@ -90,16 +90,30 @@ function RunScrapeCommand(context) {
         await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
         const jobId = site.getId();
-        await triggerScraperRun(
-          jobId,
-          urls,
-          slackContext,
-          context,
-        );
-        await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - total ${urls.length} URLs)`);
+        const batchSize = 10;
+        const batches = Math.ceil(urls.length / batchSize);
+        const promises = [];
+
+        // eslint-disable-next-line no-plusplus
+        for (let i = 0; i < batches; i++) {
+          const batch = urls.slice(i * batchSize, Math.min((i + 1) * batchSize, urls.length));
+          promises.push(
+            triggerScraperRun(
+              jobId,
+              batch,
+              slackContext,
+              context,
+            ),
+          );
+        }
+
+        await Promise.all(promises);
+
+        await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - total ${urls.length} URLs in ${batches} batches`);
 
         const message = `:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`
-            + `Total URLs: ${urls.length}`;
+            + `Total URLs: ${urls.length}\n`
+            + `Total Batches: ${batches}`;
         await say(message);
       } else {
         await say(`:warning: No top pages found for site \`${baseURL}\``);
