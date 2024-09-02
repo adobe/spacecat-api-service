@@ -107,6 +107,8 @@ function RunScrapeCommand(context) {
           );
         }
 
+        await say(`:adobe-run: Total promises ${promises.length} for site \`${baseURL}\` - total ${urls.length} URLs in ${batches} batches`);
+
         await Promise.all(promises);
 
         await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - total ${urls.length} URLs in ${batches} batches`);
