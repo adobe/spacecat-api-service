@@ -120,3 +120,4 @@ IMPORT_CONFIGURATION=JSON document which includes the following configuration pr
   - queueUrlPrefix: prefix for import queue URLs (eg. https://sqs.us-east-1.amazonaws.com/1234567890/), used to create the complete queue URL for import jobs
   - s3Bucket: the S3 bucket to store import job artifacts
 ```
+
