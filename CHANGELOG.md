@@ -1,3 +1,10 @@
+## [1.63.7](https://github.com/adobe/spacecat-api-service/compare/v1.63.6...v1.63.7) (2024-09-03)
+
+
+### Bug Fixes
+
+* **site-detection:** ignore domains more ([4da01a8](https://github.com/adobe/spacecat-api-service/commit/4da01a8015abc0cb120b672e3f3ebf177dc08400))
+
 ## [1.63.6](https://github.com/adobe/spacecat-api-service/compare/v1.63.5...v1.63.6) (2024-09-03)
 
 
