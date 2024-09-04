@@ -287,7 +287,7 @@ const getConfigFromContext = (lambdaContext) => {
     ignoredDomains: ignoredDomains.split(',')
       .map((domain) => {
         const trimmedDomain = domain.trim();
-        const regexBody = trimmedDomain.replace(/^\/|\/$/g, '');
+        const regexBody = trimmedDomain.startsWith('/') && trimmedDomain.endsWith('/') ? trimmedDomain.slice(1, -1) : str;
         return new RegExp(regexBody);
       }),
     ignoredSubdomainTokens: ignoredSubdomainTokens.split(',')
