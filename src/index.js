@@ -63,8 +63,11 @@ const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
  * @returns {Response} a response
  */
 async function run(request, context) {
-  const { log, pathInfo } = context;
+  const { log, pathInfo, jobLog } = context;
   const { route, suffix, method } = pathInfo;
+
+  jobLog.info('Processing Shikha\'s info request');
+  jobLog.error('Processing Shikha\'s error request');
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
@@ -124,12 +127,36 @@ async function run(request, context) {
 
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
+export function jobLogWrapper(fn) {
+  return async (message, context) => {
+    // const { jobId } = message;
+    const jobId = 'test-job-id';
+
+    // Enhance the log object to include importJobId with each log statement
+    if (context.log && jobId) {
+      const originalLog = context.log;
+
+      context.jobLog = {
+        info: (...args) => {
+          originalLog.info(`[jobId=${jobId}]`, ...args);
+        },
+        error: (...args) => {
+          originalLog.error({ jobId, ...args });
+        },
+      };
+    }
+
+    return fn(message, context);
+  };
+}
+
 export const main = wrap(run)
   .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler] })
   .with(dataAccess)
   .with(enrichPathInfo)
   .with(bodyData)
   .with(sqs)
+  .with(jobLogWrapper)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
