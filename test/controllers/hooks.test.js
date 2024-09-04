@@ -70,6 +70,8 @@ describe('Hooks Controller', () => {
         HLX_ADMIN_TOKEN: 'hlx-admin-token',
         INCOMING_WEBHOOK_SECRET_CDN: 'hook-secret-for-cdn',
         INCOMING_WEBHOOK_SECRET_RUM: 'hook-secret-for-rum',
+        SITE_DETECTION_IGNORED_DOMAINS: '/helix3.dev/, /fastly.net/, /ngrok-free.app/, /oastify.co/, /fastly-aem.page/, /findmy.media/, /impactful-[0-9]+\\.site/, /shuyi-guan/, /adobevipthankyou/, /alshayauat/, /caseytokarchuk/',
+        SITE_DETECTION_IGNORED_SUBDOMAIN_TOKENS: 'demo, dev, stag, qa, --, sitemap, test, preview, cm-verify, owa, mail, ssl, secure, publish',
         SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: 'channel-id',
       },
       slackClients: {

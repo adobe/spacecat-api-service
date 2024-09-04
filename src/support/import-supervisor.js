@@ -27,7 +27,7 @@ const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
  * @param {object} services.log - Logger.
  * @param {object} config - Import configuration details.
  * @param {Array<string>} config.queues - Array of available import queues.
- * @param {string} config.queueUrlPrefix - URL prefix for the import queues.
+ * @param {string} config.importWorkerQueue - URL of the import worker queue.
  * @param {string} config.s3Bucket - S3 bucket name where import artifacts will be stored.
  * @returns {object} Import Supervisor.
  */
@@ -49,7 +49,7 @@ function ImportSupervisor(services, config) {
   } = services;
   const {
     queues = [], // Array of import queues
-    queueUrlPrefix,
+    importWorkerQueue, // URL of the import worker queue
     s3Bucket,
     maxLengthImportScript,
   } = config;
@@ -66,7 +66,7 @@ function ImportSupervisor(services, config) {
     for (const job of runningImportJobs) {
       const hashedApiKey = hashWithSHA256(importApiKey);
       if (job.getHashedApiKey() === hashedApiKey) {
-        throw new ErrorWithStatusCode(`Too Many Requests: API key ${importApiKey} cannot be used to start any more import jobs`, 429);
+        throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more import jobs`, 429);
       }
     }
 
@@ -121,51 +121,25 @@ function ImportSupervisor(services, config) {
   }
 
   /**
-   * Persist the URLs to import in the data layer, each as an import URL record.
-   */
-  async function persistUrls(jobId, urls) {
-    // - Generate a urlId guid for this single URL
-    // - Set status to 'pending'
-    const urlRecords = [];
-    for (const url of urls) {
-      const urlRecord = {
-        id: crypto.randomUUID(),
-        jobId,
-        url,
-        status: 'PENDING',
-      };
-      // eslint-disable-next-line no-await-in-loop
-      urlRecords.push(await dataAccess.createNewImportUrl(urlRecord));
-    }
-    return urlRecords;
-  }
-
-  /**
-   * Queue each URL for import in the queue which has been claimed for the job. Each URL will be
-   * queued as a single self-contained message along with the job details and import options.
-   * @param {Array<object>} urlRecords - Array of URL records to queue.
+   * Queue all URLs as a single message for processing by another function. This will enable
+   * the controller to respond with a new job ID ASAP, while the individual URLs are queued up
+   * asynchronously.
+   * @param {Array<string>} urls - Array of URL records to queue.
    * @param {object} importJob - The import job record.
-   * @param {string} importQueueId - The ID of the claimed import queue to use.
    */
-  async function queueUrlsForImport(urlRecords, importJob, importQueueId) {
-    log.info(`Queuing ${urlRecords.length} URLs for import in queue: ${importQueueId} (jobId: ${importJob.getId()}, baseUrl: ${importJob.getBaseURL()})`);
-    // Iterate through all URLs and queue a message for each one in the (claimed) import queue
-    for (const urlRecord of urlRecords) {
-      const message = {
-        processingType: 'import',
-        jobId: importJob.getId(),
-        options: importJob.getOptions(),
-        urls: [
-          {
-            urlId: urlRecord.getId(),
-            url: urlRecord.getUrl(),
-            status: urlRecord.getStatus(),
-          },
-        ],
-      };
-      // eslint-disable-next-line no-await-in-loop
-      await sqs.sendMessage(queueUrlPrefix + importQueueId, message);
-    }
+  async function queueUrlsForImportWorker(urls, importJob) {
+    log.info(`Starting a new import job of baseUrl: ${importJob.getBaseURL()} with ${urls.length}`
+      + ` URLs. This new job has claimed: ${importJob.getImportQueueId()} `
+      + `(jobId: ${importJob.getId()})`);
+
+    // Send a single message containing all URLs and the new job ID
+    const message = {
+      processingType: 'import',
+      jobId: importJob.getId(),
+      urls,
+    };
+
+    await sqs.sendMessage(importWorkerQueue, message);
   }
 
   async function writeImportScriptToS3(jobId, importScript) {
@@ -203,8 +177,6 @@ function ImportSupervisor(services, config) {
    * @returns {Promise<ImportJob>}
    */
   async function startNewJob(urls, importApiKey, options, importScript, initiatedBy) {
-    log.info(`Import requested for ${urls.length} URLs, using import API key: ${importApiKey}`);
-
     // Determine if there is a free import queue
     const importQueueId = await getAvailableImportQueue(importApiKey);
 
@@ -220,18 +192,21 @@ function ImportSupervisor(services, config) {
       initiatedBy,
     );
 
-    log.info(`New import job created for hashed API key: ${hashedApiKey} with jobId: ${newImportJob.getId()}, baseUrl: ${newImportJob.getBaseURL()}, claiming importQueueId: ${importQueueId}`);
+    log.info('New import job created:\n'
+      + `- baseUrl: ${newImportJob.getBaseURL()}\n`
+      + `- urlCount: ${urls.length}\n`
+      + `- apiKeyName: ${initiatedBy.apiKeyName}\n`
+      + `- jobId: ${newImportJob.getId()}\n`
+      + `- importQueueId: ${importQueueId}`);
 
-    // Custom import.js scripts are not initially supported.
+    // Write the import script to S3, if provided
     if (importScript) {
       await writeImportScriptToS3(newImportJob.getId(), importScript);
     }
 
-    // Create 1 record per URL in the import-url table
-    const urlRecords = await persistUrls(newImportJob.getId(), urls);
-
-    // Queue all URLs for import
-    await queueUrlsForImport(urlRecords, newImportJob, importQueueId);
+    // Queue all URLs for import as a single message. This enables the controller to respond with
+    // a job ID ASAP, while the individual URLs are queued up asynchronously by another function.
+    await queueUrlsForImportWorker(urls, newImportJob);
 
     return newImportJob;
   }
