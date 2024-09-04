@@ -1,3 +1,10 @@
+## [1.63.8](https://github.com/adobe/spacecat-api-service/compare/v1.63.7...v1.63.8) (2024-09-04)
+
+
+### Bug Fixes
+
+* make ignored (sub-/domains) configurable ([#480](https://github.com/adobe/spacecat-api-service/issues/480)) ([497f038](https://github.com/adobe/spacecat-api-service/commit/497f038ccd2fc470b248655ca56ff7722e5b9ea6))
+
 ## [1.63.7](https://github.com/adobe/spacecat-api-service/compare/v1.63.6...v1.63.7) (2024-09-03)
 
 
