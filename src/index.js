@@ -15,6 +15,8 @@ import { helixStatus } from '@adobe/helix-status';
 import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import dataAccess from '@adobe/spacecat-shared-data-access';
+import logger from '@adobe/helix-universal-logger';
+
 import {
   badRequest,
   internalServerError,
@@ -157,6 +159,7 @@ export const main = wrap(run)
   .with(bodyData)
   .with(sqs)
   .with(jobLogWrapper)
+  .with(logger)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
