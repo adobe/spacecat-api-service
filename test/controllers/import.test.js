@@ -158,6 +158,9 @@ describe('ImportController tests', () => {
           enableJavaScript: 'true',
         },
         importScript: 'QW5kIGV2',
+        customHeaders: {
+          Authorization: 'Bearer aXsPb3183G',
+        },
       };
     });
 
@@ -330,6 +333,8 @@ describe('ImportController tests', () => {
       expect(importJob.options).to.deep.equal({
         saveAsDocs: true,
         transformationFileUrl: 'https://example.com/transform.js',
+        isCustomHeadersProvided: true,
+        isCustomJavascriptProvided: true,
       });
     });
 

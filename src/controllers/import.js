@@ -130,13 +130,16 @@ function ImportController(context) {
         };
       }
 
-      const { urls, options = importConfiguration.options, importScript } = data;
+      const {
+        urls, options = importConfiguration.options, importScript, customHeaders,
+      } = data;
       const job = await importSupervisor.startNewJob(
         urls,
         importApiKey,
         options,
         importScript,
         initiatedBy,
+        customHeaders,
       );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {
