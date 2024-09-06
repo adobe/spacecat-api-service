@@ -78,6 +78,10 @@ function ImportController(context) {
     if (data.options && !isObject(data.options)) {
       throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
     }
+
+    if (data.customHeaders && !isObject(data.customHeaders)) {
+      throw new ErrorWithStatusCode('Invalid request: customHeaders must be an object', STATUS_BAD_REQUEST);
+    }
   }
 
   function validateImportApiKey(importApiKey, scopes) {

@@ -194,11 +194,11 @@ function ImportSupervisor(services, config) {
     let updatedOptions = { ...options };
 
     if (importScript) {
-      updatedOptions = { ...updatedOptions, isCustomJavascriptProvided: true };
+      updatedOptions = { ...updatedOptions, hasCustomImportJs: true };
     }
 
     if (customHeaders) {
-      updatedOptions = { ...updatedOptions, isCustomHeadersProvided: true };
+      updatedOptions = { ...updatedOptions, hasCustomHeaders: true };
     }
 
     // If a queue is available, create the import-job record in dataAccess:
@@ -215,7 +215,9 @@ function ImportSupervisor(services, config) {
       + `- urlCount: ${urls.length}\n`
       + `- apiKeyName: ${initiatedBy.apiKeyName}\n`
       + `- jobId: ${newImportJob.getId()}\n`
-      + `- importQueueId: ${importQueueId}`);
+      + `- importQueueId: ${importQueueId}\n`
+      + `- hasCustomImportJs: ${updatedOptions.hasCustomImportJs}\n`
+      + `- hasCustomHeaders: ${updatedOptions.hasCustomHeaders}`);
 
     // Write the import script to S3, if provided
     if (importScript) {

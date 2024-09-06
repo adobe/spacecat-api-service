@@ -242,6 +242,8 @@ describe('ImportController tests', () => {
       // Verify how many messages were sent to SQS
       // (we only send a single message now, instead of 1 per URL)
       expect(mockSqsClient.sendMessage).to.have.been.calledOnce;
+      const firstCall = mockSqsClient.sendMessage.getCall(0);
+      expect(firstCall.args[1].customHeaders).to.deep.equal({ Authorization: 'Bearer aXsPb3183G' });
     });
 
     it('should pick another import queue when the first one is in use', async () => {
