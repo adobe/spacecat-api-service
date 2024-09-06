@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import Busboy from 'busboy';
 import {
   createResponse,
   ok,
@@ -102,6 +103,41 @@ function ImportController(context) {
     }
   }
 
+  async function parseMultipartRequest(request, headers) {
+    return new Promise((resolve, reject) => {
+      const busboy = new Busboy({ headers });
+      const tempFilePath = `/tmp/${Date.now()}-${Math.random().toString(36).substring(2)}`;
+
+      const requestData = {};
+
+      busboy.on('file', (name, file, info) => {
+        // Handle file upload
+        const { filename, encoding, mimeType } = info;
+        console.log(
+          `File [${name}]: filename: %j, encoding: %j, mimeType: %j`,
+          filename,
+          encoding,
+          mimeType
+        );
+        file.on('data', (data) => {
+          console.log(`File [${name}] got ${data.length} bytes`);
+        }).on('close', () => {
+          console.log(`File [${name}] done`);
+        });
+      });
+      busboy.on('field', (name, val, info) => {
+        console.log(`Field [${name}]: value: %j`, val);
+      });
+      busboy.on('close', () => {
+        console.log('Done parsing form!');
+        resolve(requestData);
+        // res.writeHead(303, { Connection: 'close', Location: '/' });
+        // res.end();
+      });
+      request.pipe(busboy);
+    });
+  }
+
   /**
    * Create and start a new import job.
    * @param {object} requestContext - Context of the request.
@@ -111,16 +147,18 @@ function ImportController(context) {
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
-    const { data, pathInfo: { headers } } = requestContext;
+    const { pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
+
+      // Parse the multipart request, which can include an import.js script
+      const data = await parseMultipartRequest(headers);
       validateRequestData(data);
 
-      let initiatedBy = {};
-
       const { authInfo: { profile } } = attributes;
+      let initiatedBy = {};
       if (profile) {
         initiatedBy = {
           apiKeyName: profile.getName(),
@@ -130,7 +168,8 @@ function ImportController(context) {
         };
       }
 
-      const { urls, options = importConfiguration.options, importScript } = data;
+      const { urls, options = importConfiguration.options } = data;
+
       const job = await importSupervisor.startNewJob(
         urls,
         importApiKey,

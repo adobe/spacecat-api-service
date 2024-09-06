@@ -76,6 +76,7 @@
     "@aws-sdk/client-sqs": "3.637.0",
     "@aws-sdk/s3-request-presigner": "3.637.0",
     "@slack/bolt": "3.21.1",
+    "busboy": "1.6.0",
     "slack-block-builder": "2.8.0"
   },
   "devDependencies": {
