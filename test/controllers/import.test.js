@@ -180,6 +180,14 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
 
+    it('should respond with an error code when custom header is not an object', async () => {
+      requestContext.data.customHeaders = 'custom-header';
+      const response = await importController.createImportJob(requestContext);
+
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: customHeaders must be an object');
+    });
+
     it('should reject when auth scopes are invalid', async () => {
       context.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
       const response = await importController.createImportJob(requestContext);
@@ -335,8 +343,8 @@ describe('ImportController tests', () => {
       expect(importJob.options).to.deep.equal({
         saveAsDocs: true,
         transformationFileUrl: 'https://example.com/transform.js',
-        isCustomHeadersProvided: true,
-        isCustomJavascriptProvided: true,
+        hasCustomHeaders: true,
+        hasCustomImportJs: true,
       });
     });
 
