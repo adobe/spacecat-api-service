@@ -22,6 +22,8 @@ import { ImportJobDto } from '../dto/import-job.js';
 
 /**
  * Import controller. Provides methods to create, read, and fetch the result of import jobs.
+ * @param {Request} request - The request object (see fetch API).
+ * @param {UniversalContext} context - The context of the universal serverless function.
  * @param {DataAccess} context.dataAccess - Data access.
  * @param {object} context.sqs - AWS Simple Queue Service client.
  * @param {object} context.s3 - AWS S3 client and related helpers.
@@ -31,7 +33,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  * @returns {object} Import controller.
  * @constructor
  */
-function ImportController(context) {
+function ImportController(request, context) {
   const {
     dataAccess, sqs, s3, log, env, auth, attributes,
   } = context;
@@ -51,7 +53,7 @@ function ImportController(context) {
   }
 
   const importSupervisor = new ImportSupervisor(services, importConfiguration);
-  const { maxUrlsPerJob = 1 } = importConfiguration;
+  const { maxUrlsPerJob = 1, maxImportJsSizeMb = 10 } = importConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
@@ -103,58 +105,94 @@ function ImportController(context) {
     }
   }
 
-  async function parseMultipartRequest(request, headers) {
+  /**
+   * Parse a multipart request to extract the URLs, options, and custom import script (import.js).
+   * @param {Request} httpRequest - The request object.
+   * @param {object} headers - The headers object.
+   * @returns {Promise<{urls: string, options: object, importScript: string}>} Parsed request data.
+   */
+  async function parseMultipartRequest(httpRequest) {
     return new Promise((resolve, reject) => {
-      const busboy = new Busboy({ headers });
-      const tempFilePath = `/tmp/${Date.now()}-${Math.random().toString(36).substring(2)}`;
+      const busboy = Busboy({
+        headers: httpRequest.headers,
+        limits: {
+          fileSize: maxImportJsSizeMb * 1024 * 1024, // fileSize limit is specified in bytes
+          files: 1,
+        },
+      });
+      let importScript;
+      let urls;
+      let options;
 
-      const requestData = {};
-
+      // Handle import.js file uploads
       busboy.on('file', (name, file, info) => {
-        // Handle file upload
+        let fileBuffer = Buffer.from('');
         const { filename, encoding, mimeType } = info;
-        console.log(
-          `File [${name}]: filename: %j, encoding: %j, mimeType: %j`,
-          filename,
-          encoding,
-          mimeType
-        );
-        file.on('data', (data) => {
-          console.log(`File [${name}] got ${data.length} bytes`);
-        }).on('close', () => {
-          console.log(`File [${name}] done`);
-        });
+        log.debug(`File upload received for ${name}: filename: ${filename}, encoding: ${encoding}, mimeType: ${mimeType}`);
+        // Handle file upload
+        if (name === 'importScript') {
+          file.on('data', (data) => {
+            // Concatenate each chunk of data into the buffer
+            fileBuffer = Buffer.concat([fileBuffer, data]);
+          }).on('close', () => {
+            // Reached the end of the file data
+            log.debug(`File upload completed for ${name}`);
+            importScript = fileBuffer.toString('utf8');
+          }).on('limit', () => {
+            // This file size is above the configured maxImportJsSizeMb
+            reject(new ErrorWithStatusCode(`File size limit exceeded for ${name}`, STATUS_BAD_REQUEST));
+          });
+        }
       });
-      busboy.on('field', (name, val, info) => {
-        console.log(`Field [${name}]: value: %j`, val);
+
+      // Handle other fields
+      busboy.on('field', (name, val) => {
+        try {
+          if (name === 'urls') {
+            urls = JSON.parse(val);
+          } else if (name === 'options') {
+            options = JSON.parse(val);
+          }
+          // Otherwise: ignore the field
+        } catch (error) {
+          reject(error);
+        }
       });
+
+      // Handle the end of the request
       busboy.on('close', () => {
-        console.log('Done parsing form!');
+        const requestData = {
+          urls,
+          options,
+          importScript,
+        };
         resolve(requestData);
-        // res.writeHead(303, { Connection: 'close', Location: '/' });
-        // res.end();
       });
-      request.pipe(busboy);
+
+      busboy.on('error', (error) => {
+        reject(new ErrorWithStatusCode(`Invalid request: request body data is required: ${error.message}`, STATUS_BAD_REQUEST));
+      });
+
+      httpRequest.pipe(busboy);
     });
   }
 
   /**
    * Create and start a new import job.
-   * @param {object} requestContext - Context of the request.
-   * @param {Array<string>} requestContext.data.urls - Array of URLs to import.
-   * @param {object} requestContext.data.options - Optional import configuration parameters.
-   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
+   * This function requires the Request object in order to parse the multipart/form-data mime-type
+   * of the request (required for large file upload). The request is passed as a parameter to the
+   * controller, so we do not require any additional parameters to invoke this function.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
-  async function createImportJob(requestContext) {
-    const { pathInfo: { headers } } = requestContext;
+  async function createImportJob() {
+    const { headers } = request;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
 
-      // Parse the multipart request, which can include an import.js script
-      const data = await parseMultipartRequest(headers);
+      // Parse the multipart request, which can include a custom import.js script as a file upload
+      const data = await parseMultipartRequest(request);
       validateRequestData(data);
 
       const { authInfo: { profile } } = attributes;
@@ -168,7 +206,7 @@ function ImportController(context) {
         };
       }
 
-      const { urls, options = importConfiguration.options } = data;
+      const { urls, options = importConfiguration.options, importScript } = data;
 
       const job = await importSupervisor.startNewJob(
         urls,

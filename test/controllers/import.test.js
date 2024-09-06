@@ -12,8 +12,9 @@
 
 /* eslint-env mocha */
 
+import { PassThrough } from 'stream';
 import { Response } from '@adobe/fetch';
-
+import FormData from 'form-data';
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -30,6 +31,7 @@ use(chaiAsPromised);
 describe('ImportController tests', () => {
   let sandbox;
   let importController;
+  let request;
   let context;
   let requestContext = {};
   let mockSqsClient;
@@ -38,6 +40,24 @@ describe('ImportController tests', () => {
   let importConfiguration;
   let mockAuth;
   let mockAttributes;
+  const defaultHeaders = {
+    'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
+    'user-agent': 'Unit test',
+  };
+
+  // Mock the request to pipe form-data into
+  const createMockRequest = (formData, headers) => {
+    const req = new PassThrough();
+    req.headers = {
+      ...headers,
+      ...formData.getHeaders(),
+    };
+    req.method = 'POST';
+
+    // Pipe the form-data into the request stream
+    formData.pipe(req);
+    return req;
+  };
 
   const exampleJob = {
     id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
@@ -66,20 +86,6 @@ describe('ImportController tests', () => {
 
     mockAuth = {
       checkScopes: sandbox.stub().resolves(true),
-    };
-
-    requestContext = {
-      data: {
-        urls: [],
-      },
-      params: {
-      },
-      pathInfo: {
-        headers: {
-          'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
-          'user-agent': 'Unit test',
-        },
-      },
     };
 
     mockAttributes = {
@@ -142,7 +148,16 @@ describe('ImportController tests', () => {
       attributes: mockAttributes,
     };
 
-    importController = ImportController(context);
+    requestContext = {
+      data: {
+        urls: [],
+      },
+      params: {
+      },
+      pathInfo: {},
+    };
+
+    importController = ImportController(request, context);
   });
 
   afterEach(() => {
@@ -151,22 +166,33 @@ describe('ImportController tests', () => {
 
   describe('createImportJob', () => {
     beforeEach(() => {
-      // Prepare the new import job request
-      requestContext.data = {
-        urls: ['https://example.com/page1', 'https://example.com/page2', 'https://example.com/page3'],
-        options: {
-          enableJavaScript: 'true',
-        },
-        importScript: 'QW5kIGV2',
-      };
+      // Prepare the new import job request, which is special because it is using the
+      // multipart/form-data content type
+      const urls = [
+        'https://example.com/page1',
+        'https://example.com/page2',
+        'https://example.com/page3',
+      ];
+      const options = { enableJavascript: true };
+
+      const form = new FormData();
+      form.append('urls', JSON.stringify(urls));
+      form.append('options', JSON.stringify(options));
+      request = createMockRequest(form, defaultHeaders);
+      requestContext.pathInfo.headers = request.headers;
+
+      importController = ImportController(request, context);
     });
 
     it('should respond with an error code when the request is missing data', async () => {
-      delete requestContext.data;
+      const emptyForm = new FormData();
+      // emptyForm.append('urls', JSON.stringify({}));
+      request = createMockRequest(emptyForm, defaultHeaders);
+      importController = ImportController(request, context);
       const response = await importController.createImportJob(requestContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: request body data is required');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: request body data is required: Unexpected end of form');
     });
 
     it('should respond with an error code when the data format is incorrect', async () => {
@@ -189,7 +215,7 @@ describe('ImportController tests', () => {
       delete importConfiguration.queues;
       contextNoQueues.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
 
-      const importControllerNoQueues = new ImportController(contextNoQueues);
+      const importControllerNoQueues = ImportController(contextNoQueues);
       const response = await importControllerNoQueues.createImportJob(requestContext);
       expect(response.status).to.equal(503);
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');

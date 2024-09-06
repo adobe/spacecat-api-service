@@ -93,7 +93,7 @@ async function run(request, context) {
       SlackController(SlackApp),
       trigger,
       FulfillmentController(context),
-      ImportController(context),
+      ImportController(request, context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
