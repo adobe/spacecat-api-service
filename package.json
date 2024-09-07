@@ -72,10 +72,10 @@
     "@adobe/spacecat-shared-rum-api-client": "2.9.0",
     "@adobe/spacecat-shared-slack-client": "1.3.13",
     "@adobe/spacecat-shared-utils": "1.19.6",
-    "@aws-sdk/client-s3": "3.637.0",
-    "@aws-sdk/client-sqs": "3.637.0",
-    "@aws-sdk/s3-request-presigner": "3.637.0",
-    "@slack/bolt": "3.21.1",
+    "@aws-sdk/client-s3": "3.645.0",
+    "@aws-sdk/client-sqs": "3.645.0",
+    "@aws-sdk/s3-request-presigner": "3.645.0",
+    "@slack/bolt": "3.21.2",
     "slack-block-builder": "2.8.0"
   },
   "devDependencies": {
@@ -85,7 +85,7 @@
     "@adobe/helix-universal-devserver": "1.1.54",
     "@adobe/semantic-release-coralogix": "1.1.31",
     "@adobe/semantic-release-skms-cmr": "1.1.2",
-    "@redocly/cli": "1.22.1",
+    "@redocly/cli": "1.23.1",
     "@semantic-release/changelog": "6.0.3",
     "@semantic-release/exec": "6.0.3",
     "@semantic-release/git": "10.0.1",
@@ -98,7 +98,7 @@
     "esmock": "2.6.7",
     "husky": "9.1.5",
     "junit-report-builder": "5.0.0",
-    "lint-staged": "15.2.9",
+    "lint-staged": "15.2.10",
     "mocha": "10.7.3",
     "mocha-multi-reporters": "1.5.1",
     "mocha-suppress-logs": "0.5.1",
@@ -107,7 +107,7 @@
     "semantic-release": "24.1.0",
     "sinon": "18.0.0",
     "sinon-chai": "4.0.0",
-    "yaml": "2.5.0"
+    "yaml": "2.5.1"
   },
   "lint-staged": {
     "*.js": "eslint",
