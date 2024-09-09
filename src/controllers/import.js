@@ -60,10 +60,6 @@ function ImportController(request, context) {
   const STATUS_ACCEPTED = 202;
 
   function validateRequestData(data) {
-    if (!isObject(data)) {
-      throw new ErrorWithStatusCode('Invalid request: request body data is required', STATUS_BAD_REQUEST);
-    }
-
     if (!Array.isArray(data.urls) || !data.urls.length > 0) {
       throw new ErrorWithStatusCode('Invalid request: urls must be provided as a non-empty array', STATUS_BAD_REQUEST);
     }

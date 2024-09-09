@@ -186,8 +186,14 @@ describe('ImportController tests', () => {
       maxUrlsPerJob: 3,
     };
 
+    const { info, debug } = console;
+
     context = {
-      log: console,
+      log: {
+        info,
+        debug,
+        error: sandbox.stub(),
+      },
       env: {
         IMPORT_CONFIGURATION: JSON.stringify(importConfiguration),
       },
@@ -203,6 +209,12 @@ describe('ImportController tests', () => {
 
   afterEach(() => {
     sandbox.restore();
+  });
+
+  it('should fail for a bad IMPORT_CONFIGURATION', () => {
+    context.env.IMPORT_CONFIGURATION = 'not a JSON string';
+    ImportController(request, context);
+    expect(context.log.error.getCall(0).args[0]).to.equal('Failed to parse import configuration: Unexpected token \'o\', "not a JSON string" is not valid JSON');
   });
 
   describe('createImportJob', () => {
@@ -277,7 +289,7 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Invalid request: not-a-valid-url is not a valid URL');
     });
 
-    it('should reject when an invalid options object is passed in', async () => {
+    it('should reject when an invalid options object is provided', async () => {
       const badOptions = new FormData();
       badOptions.append('options', 'options object should be an object, not a string');
       request = createMockFormDataRequest(badOptions, defaultHeaders);
@@ -286,6 +298,20 @@ describe('ImportController tests', () => {
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Unable to parse request data field (options): Unexpected token \'o\', "options ob"... is not valid JSON');
+    });
+
+    it('should reject when an non-object options param is provided', async () => {
+      const badOptions = new FormData();
+      badOptions.append('urls', JSON.stringify(urls));
+      badOptions.append('options', JSON.stringify([12345, 42]));
+      importController = ImportController(
+        createMockFormDataRequest(badOptions, defaultHeaders),
+        context,
+      );
+      const response = await importController.createImportJob();
+
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: options must be an object');
     });
 
     it('should fail if sqs fails to send a message', async () => {
@@ -428,6 +454,17 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob();
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
+    });
+
+    it('should fail when URLs are empty', async () => {
+      const noUrls = [];
+      importController = ImportController(
+        createMockMultipartRequest(noUrls),
+        context,
+      );
+      const response = await importController.createImportJob();
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
   });
 
