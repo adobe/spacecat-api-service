@@ -78,6 +78,10 @@ function ImportController(context) {
     if (data.options && !isObject(data.options)) {
       throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
     }
+
+    if (data.customHeaders && !isObject(data.customHeaders)) {
+      throw new ErrorWithStatusCode('Invalid request: customHeaders must be an object', STATUS_BAD_REQUEST);
+    }
   }
 
   function validateImportApiKey(importApiKey, scopes) {
@@ -130,13 +134,16 @@ function ImportController(context) {
         };
       }
 
-      const { urls, options = importConfiguration.options, importScript } = data;
+      const {
+        urls, options = importConfiguration.options, importScript, customHeaders,
+      } = data;
       const job = await importSupervisor.startNewJob(
         urls,
         importApiKey,
         options,
         importScript,
         initiatedBy,
+        customHeaders,
       );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {

@@ -158,6 +158,9 @@ describe('ImportController tests', () => {
           enableJavaScript: 'true',
         },
         importScript: 'QW5kIGV2',
+        customHeaders: {
+          Authorization: 'Bearer aXsPb3183G',
+        },
       };
     });
 
@@ -175,6 +178,14 @@ describe('ImportController tests', () => {
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
+    });
+
+    it('should respond with an error code when custom header is not an object', async () => {
+      requestContext.data.customHeaders = 'custom-header';
+      const response = await importController.createImportJob(requestContext);
+
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: customHeaders must be an object');
     });
 
     it('should reject when auth scopes are invalid', async () => {
@@ -239,6 +250,8 @@ describe('ImportController tests', () => {
       // Verify how many messages were sent to SQS
       // (we only send a single message now, instead of 1 per URL)
       expect(mockSqsClient.sendMessage).to.have.been.calledOnce;
+      const firstCall = mockSqsClient.sendMessage.getCall(0);
+      expect(firstCall.args[1].customHeaders).to.deep.equal({ Authorization: 'Bearer aXsPb3183G' });
     });
 
     it('should pick another import queue when the first one is in use', async () => {
@@ -330,6 +343,8 @@ describe('ImportController tests', () => {
       expect(importJob.options).to.deep.equal({
         saveAsDocs: true,
         transformationFileUrl: 'https://example.com/transform.js',
+        hasCustomHeaders: true,
+        hasCustomImportJs: true,
       });
     });
 
