@@ -238,7 +238,7 @@ describe('ImportController tests', () => {
       importController = new ImportController(new Request('https://space.cat'), context);
       const response = await importController.createImportJob();
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: expected multipart/form-data (received: undefined)');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: expected multipart/form-data Content-Type');
     });
 
     it('should respond with an error code when the request is missing data', async () => {

@@ -107,7 +107,8 @@ function ImportController(request, context) {
 
   function isMultipartFormData(req) {
     // Check if the Content-Type header exists and starts with "multipart/form-data"
-    return req.headers['content-type'] && req.headers['content-type'].startsWith('multipart/form-data');
+    const contentType = req.headers['Content-Type'] || req.headers['content-type'];
+    return contentType && contentType.startsWith('multipart/form-data');
   }
 
   /**
@@ -126,7 +127,7 @@ function ImportController(request, context) {
       const { headers } = httpRequest;
       // Validate that request is multipart/form-data
       if (!isMultipartFormData(httpRequest)) {
-        reject(new ErrorWithStatusCode(`Invalid request: expected multipart/form-data (received: ${headers['content-type']})`, STATUS_BAD_REQUEST));
+        reject(new ErrorWithStatusCode('Invalid request: expected multipart/form-data Content-Type', STATUS_BAD_REQUEST));
       }
 
       const busboy = Busboy({
