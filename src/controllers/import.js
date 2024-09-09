@@ -77,6 +77,10 @@ function ImportController(request, context) {
     if (data.options && !isObject(data.options)) {
       throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
     }
+
+    if (data.customHeaders && !isObject(data.customHeaders)) {
+      throw new ErrorWithStatusCode('Invalid request: customHeaders must be an object', STATUS_BAD_REQUEST);
+    }
   }
 
   function validateImportApiKey(importApiKey, scopes) {
@@ -118,6 +122,7 @@ function ImportController(request, context) {
       let importScript;
       let urls;
       let options;
+      let customHeaders;
 
       // Handle import.js file uploads
       busboy.on('file', (name, file, info) => {
@@ -146,6 +151,8 @@ function ImportController(request, context) {
             urls = JSON.parse(val);
           } else if (name === 'options') {
             options = JSON.parse(val);
+          } else if (name === 'customHeaders') {
+            customHeaders = JSON.parse(val);
           }
           // Otherwise: ignore the field
         } catch (error) {
@@ -159,6 +166,7 @@ function ImportController(request, context) {
           urls,
           options,
           importScript,
+          customHeaders,
         };
         resolve(requestData);
       });
@@ -200,14 +208,16 @@ function ImportController(request, context) {
         };
       }
 
-      const { urls, options = importConfiguration.options, importScript } = data;
-
+      const {
+        urls, options = importConfiguration.options, importScript, customHeaders,
+      } = data;
       const job = await importSupervisor.startNewJob(
         urls,
         importApiKey,
         options,
         importScript,
         initiatedBy,
+        customHeaders,
       );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {

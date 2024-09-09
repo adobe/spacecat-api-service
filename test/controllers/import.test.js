@@ -49,6 +49,9 @@ describe('ImportController tests', () => {
     'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
     'user-agent': 'Unit test',
   };
+  const exampleCustomHeaders = {
+    Authorization: 'Bearer aXsPb3183G',
+  };
 
   /**
    * Creates a new mock request, which is (under the hood) just a stream.
@@ -76,6 +79,7 @@ describe('ImportController tests', () => {
     options,
     importScriptStream,
     headers = defaultHeaders,
+    customHeaders = exampleCustomHeaders,
   ) => {
     const formData = new FormData();
     formData.append('urls', JSON.stringify(urls));
@@ -84,6 +88,9 @@ describe('ImportController tests', () => {
     }
     if (importScriptStream) {
       formData.append('importScript', importScriptStream);
+    }
+    if (customHeaders) {
+      formData.append('customHeaders', JSON.stringify(customHeaders));
     }
 
     return createMockFormDataRequest(formData, headers);
@@ -248,6 +255,20 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Unable to parse request data field (urls): Unexpected token \'h\', "https://ex"... is not valid JSON');
     });
 
+    it('should respond with an error code when custom header is not an object', async () => {
+      const badOptions = new FormData();
+      badOptions.append('urls', JSON.stringify(urls));
+      badOptions.append('customHeaders', JSON.stringify([42]));
+      importController = ImportController(
+        createMockFormDataRequest(badOptions, defaultHeaders),
+        context,
+      );
+      const response = await importController.createImportJob(requestContext);
+
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: customHeaders must be an object');
+    });
+
     it('should reject when auth scopes are invalid', async () => {
       context.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
       const response = await importController.createImportJob();
@@ -330,6 +351,8 @@ describe('ImportController tests', () => {
       // Verify how many messages were sent to SQS
       // (we only send a single message now, instead of 1 per URL)
       expect(mockSqsClient.sendMessage).to.have.been.calledOnce;
+      const firstCall = mockSqsClient.sendMessage.getCall(0);
+      expect(firstCall.args[1].customHeaders).to.deep.equal({ Authorization: 'Bearer aXsPb3183G' });
     });
 
     it('should pick another import queue when the first one is in use', async () => {
@@ -408,8 +431,13 @@ describe('ImportController tests', () => {
     });
 
     it('should pick up the default options when none are provided', async () => {
+      // Bump the max allowed length of the import script
+      importConfiguration.maxLengthImportScript = 5000;
+      context.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+
+      const importScriptStream = fs.createReadStream(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
       importController = ImportController(
-        createMockMultipartRequest(urls),
+        createMockMultipartRequest(urls, undefined, importScriptStream),
         context,
       );
       const response = await importController.createImportJob();
@@ -420,6 +448,8 @@ describe('ImportController tests', () => {
 
       expect(importJob.options).to.deep.equal({
         enableJavascript: true,
+        hasCustomHeaders: true,
+        hasCustomImportJs: true,
       });
     });
 

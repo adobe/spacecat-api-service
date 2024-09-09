@@ -127,7 +127,7 @@ function ImportSupervisor(services, config) {
    * @param {Array<string>} urls - Array of URL records to queue.
    * @param {object} importJob - The import job record.
    */
-  async function queueUrlsForImportWorker(urls, importJob) {
+  async function queueUrlsForImportWorker(urls, importJob, customHeaders) {
     log.info(`Starting a new import job of baseUrl: ${importJob.getBaseURL()} with ${urls.length}`
       + ` URLs. This new job has claimed: ${importJob.getImportQueueId()} `
       + `(jobId: ${importJob.getId()})`);
@@ -137,6 +137,7 @@ function ImportSupervisor(services, config) {
       processingType: 'import',
       jobId: importJob.getId(),
       urls,
+      customHeaders,
     };
 
     await sqs.sendMessage(importWorkerQueue, message);
@@ -165,19 +166,36 @@ function ImportSupervisor(services, config) {
    * @param {string} importScript - Optional custom Base64 encoded import script.
    * @returns {Promise<ImportJob>}
    */
-  async function startNewJob(urls, importApiKey, options, importScript, initiatedBy) {
+  async function startNewJob(
+    urls,
+    importApiKey,
+    options,
+    importScript,
+    initiatedBy,
+    customHeaders,
+  ) {
     // Determine if there is a free import queue
     const importQueueId = await getAvailableImportQueue(importApiKey);
 
     // Hash the API Key to ensure it is not stored in plain text
     const hashedApiKey = hashWithSHA256(importApiKey);
 
+    let updatedOptions = { ...options };
+
+    if (importScript) {
+      updatedOptions = { ...updatedOptions, hasCustomImportJs: true };
+    }
+
+    if (customHeaders) {
+      updatedOptions = { ...updatedOptions, hasCustomHeaders: true };
+    }
+
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(
       urls,
       importQueueId,
       hashedApiKey,
-      options,
+      updatedOptions,
       initiatedBy,
     );
 
@@ -186,7 +204,9 @@ function ImportSupervisor(services, config) {
       + `- urlCount: ${urls.length}\n`
       + `- apiKeyName: ${initiatedBy.apiKeyName}\n`
       + `- jobId: ${newImportJob.getId()}\n`
-      + `- importQueueId: ${importQueueId}`);
+      + `- importQueueId: ${importQueueId}\n`
+      + `- hasCustomImportJs: ${updatedOptions.hasCustomImportJs}\n`
+      + `- hasCustomHeaders: ${updatedOptions.hasCustomHeaders}`);
 
     // Write the import script to S3, if provided
     if (importScript) {
@@ -195,7 +215,7 @@ function ImportSupervisor(services, config) {
 
     // Queue all URLs for import as a single message. This enables the controller to respond with
     // a job ID ASAP, while the individual URLs are queued up asynchronously by another function.
-    await queueUrlsForImportWorker(urls, newImportJob);
+    await queueUrlsForImportWorker(urls, newImportJob, customHeaders);
 
     return newImportJob;
   }
