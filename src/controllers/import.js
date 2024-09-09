@@ -123,13 +123,14 @@ function ImportController(request, context) {
    */
   async function parseMultipartRequest(httpRequest) {
     return new Promise((resolve, reject) => {
+      const { headers } = httpRequest;
       // Validate that request is multipart/form-data
       if (!isMultipartFormData(httpRequest)) {
-        reject(new ErrorWithStatusCode('Invalid request: expected multipart/form-data', STATUS_BAD_REQUEST));
+        reject(new ErrorWithStatusCode(`Invalid request: expected multipart/form-data (received: ${headers['content-type']})`, STATUS_BAD_REQUEST));
       }
 
       const busboy = Busboy({
-        headers: httpRequest.headers,
+        headers,
         limits: {
           files: 1, // Limit to one file upload — import.js
         },
