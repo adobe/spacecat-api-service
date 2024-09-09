@@ -1290,14 +1290,19 @@ ImportJobRequest:
     importScript:
       description: Optional import.js mapping file
       type: string
-      format: base64
+      format: binary
+    customHeaders:
+      description: Optional custom headers to send with each HTTP request
+      type: object
   example:
     urls:
       - 'https://example.com/en/page1'
       - 'https://example.com/fr/page2'
     options:
       enableJavascript: true
-      scrollToBottom: true
+    importScript: (binary data)
+    customHeaders:
+      example-header-name: 'example-header-value'
 ImportJobStatus:
   type: object
   properties:

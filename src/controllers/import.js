@@ -22,7 +22,7 @@ import { ImportJobDto } from '../dto/import-job.js';
 
 /**
  * Import controller. Provides methods to create, read, and fetch the result of import jobs.
- * @param {Request} request - The request object (see fetch API).
+ * @param {Request} request - The HTTP request object (see fetch API).
  * @param {UniversalContext} context - The context of the universal serverless function.
  * @param {DataAccess} context.dataAccess - Data access.
  * @param {object} context.sqs - AWS Simple Queue Service client.
@@ -105,18 +105,33 @@ function ImportController(request, context) {
     }
   }
 
+  function isMultipartFormData(req) {
+    // Check if the Content-Type header exists and starts with "multipart/form-data"
+    return req.headers['content-type'] && req.headers['content-type'].startsWith('multipart/form-data');
+  }
+
   /**
-   * Parse a multipart request to extract the URLs, options, and custom import script (import.js).
-   * @param {Request} httpRequest - The request object.
-   * @param {object} headers - The headers object.
-   * @returns {Promise<{urls: string, options: object, importScript: string}>} Parsed request data.
+   * Parse a multipart request to extract the URLs, options, custom import script (import.js), and
+   * custom headers.
+   * @param {Request} httpRequest - The HTTP request object.
+   * @returns {Promise<{
+   *   urls: string,
+   *   options: object,
+   *   importScript: string,
+   *   customHeaders: object
+   * }>} Parsed request data.
    */
   async function parseMultipartRequest(httpRequest) {
     return new Promise((resolve, reject) => {
+      // Validate that request is multipart/form-data
+      if (!isMultipartFormData(httpRequest)) {
+        reject(new ErrorWithStatusCode('Invalid request: expected multipart/form-data', STATUS_BAD_REQUEST));
+      }
+
       const busboy = Busboy({
         headers: httpRequest.headers,
         limits: {
-          files: 1,
+          files: 1, // Limit to one file upload — import.js
         },
       });
       let importScript;
@@ -124,7 +139,7 @@ function ImportController(request, context) {
       let options;
       let customHeaders;
 
-      // Handle import.js file uploads
+      // Handle import.js file uploads. In absence of an import.js this callback will not be called
       busboy.on('file', (name, file, info) => {
         let fileBuffer = Buffer.from('');
         const { filename, encoding, mimeType } = info;
@@ -134,7 +149,7 @@ function ImportController(request, context) {
           file.on('data', (data) => {
             // Concatenate each chunk of data into the buffer.
             // Future performance enhancement, should issues arise: keep the buffer in memory
-            // and stream the data directly to S3.
+            // and stream the data directly to S3 once jobId is created.
             fileBuffer = Buffer.concat([fileBuffer, data]);
           }).on('close', () => {
             // Reached the end of the file data
@@ -172,7 +187,7 @@ function ImportController(request, context) {
       });
 
       busboy.on('error', (error) => {
-        reject(new ErrorWithStatusCode(`Invalid request: request body data is required: ${error.message}`, STATUS_BAD_REQUEST));
+        reject(new ErrorWithStatusCode(`Invalid request, unable to parse request body: ${error.message}`, STATUS_BAD_REQUEST));
       });
 
       httpRequest.pipe(busboy);
@@ -182,7 +197,7 @@ function ImportController(request, context) {
   /**
    * Create and start a new import job.
    * This function requires the Request object in order to parse the multipart/form-data mime-type
-   * of the request (required for large file upload). The request is passed as a parameter to the
+   * of the request (required for large file uploads). The request is passed as a parameter to the
    * controller, so we do not require any additional parameters to invoke this function.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */

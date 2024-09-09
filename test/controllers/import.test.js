@@ -234,6 +234,13 @@ describe('ImportController tests', () => {
       importController = ImportController(request, context);
     });
 
+    it('should fail for a non-multipart/form-data request', async () => {
+      importController = new ImportController(new Request('https://space.cat'), context);
+      const response = await importController.createImportJob();
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: expected multipart/form-data');
+    });
+
     it('should respond with an error code when the request is missing data', async () => {
       const emptyForm = new FormData();
       request = createMockFormDataRequest(emptyForm, defaultHeaders);
@@ -241,7 +248,7 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob();
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: request body data is required: Unexpected end of form');
+      expect(response.headers.get('x-error')).to.equal('Invalid request, unable to parse request body: Unexpected end of form');
     });
 
     it('should respond with an error code when the data format is incorrect', async () => {
