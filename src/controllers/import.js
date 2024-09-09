@@ -53,7 +53,7 @@ function ImportController(request, context) {
   }
 
   const importSupervisor = new ImportSupervisor(services, importConfiguration);
-  const { maxUrlsPerJob = 1, maxImportJsSizeMb = 10 } = importConfiguration;
+  const { maxUrlsPerJob = 1 } = importConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
@@ -116,7 +116,6 @@ function ImportController(request, context) {
       const busboy = Busboy({
         headers: httpRequest.headers,
         limits: {
-          fileSize: maxImportJsSizeMb * 1024 * 1024, // fileSize limit is specified in bytes
           files: 1,
         },
       });
@@ -132,15 +131,14 @@ function ImportController(request, context) {
         // Handle file upload
         if (name === 'importScript') {
           file.on('data', (data) => {
-            // Concatenate each chunk of data into the buffer
+            // Concatenate each chunk of data into the buffer.
+            // Future performance enhancement, should issues arise: keep the buffer in memory
+            // and stream the data directly to S3.
             fileBuffer = Buffer.concat([fileBuffer, data]);
           }).on('close', () => {
             // Reached the end of the file data
             log.debug(`File upload completed for ${name}`);
             importScript = fileBuffer.toString('utf8');
-          }).on('limit', () => {
-            // This file size is above the configured maxImportJsSizeMb
-            reject(new ErrorWithStatusCode(`File size limit exceeded for ${name}`, STATUS_BAD_REQUEST));
           });
         }
       });
@@ -155,7 +153,7 @@ function ImportController(request, context) {
           }
           // Otherwise: ignore the field
         } catch (error) {
-          reject(error);
+          reject(new ErrorWithStatusCode(`Unable to parse request data field (${name}): ${error.message}`, STATUS_BAD_REQUEST));
         }
       });
 

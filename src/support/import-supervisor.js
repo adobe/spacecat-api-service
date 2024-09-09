@@ -143,24 +143,13 @@ function ImportSupervisor(services, config) {
   }
 
   async function writeImportScriptToS3(jobId, importScript) {
-    if (!hasText(importScript)) {
-      throw new ErrorWithStatusCode('Bad Request: importScript should be a string', 400);
-    }
-
     // Check for the length of the importScript
     if (importScript.length > maxLengthImportScript) {
       throw new ErrorWithStatusCode(`Bad Request: importScript should be less than ${maxLengthImportScript} characters`, 400);
     }
 
-    let decodedScript;
-    try {
-      decodedScript = Buffer.from(importScript, 'base64').toString('utf-8');
-    } catch {
-      throw new ErrorWithStatusCode('Bad Request: importScript should be a base64 encoded string', 400);
-    }
-
     const key = `imports/${jobId}/import.js`;
-    const command = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: decodedScript });
+    const command = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: importScript });
     try {
       await s3Client.send(command);
     } catch {
@@ -243,7 +232,7 @@ function ImportSupervisor(services, config) {
    */
   async function getJobArchiveSignedUrl(job) {
     if (job.getStatus() !== ImportJobStatus.COMPLETE) {
-      throw new ErrorWithStatusCode('Archive not available, job is still running', 404);
+      throw new ErrorWithStatusCode(`Archive not available, job status is: ${job.getStatus()}`, 404);
     }
 
     try {
