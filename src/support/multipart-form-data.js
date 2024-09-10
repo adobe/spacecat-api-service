@@ -73,6 +73,8 @@ async function getData(request, headers, fileCountLimit, maxFileSizeMb) {
     });
 
     request.pipe(busboy);
+    // busboy.write(request.body, request.isBase64Encoded ? 'base64' : 'binary');
+    // busboy.end();
   });
 }
 
@@ -106,6 +108,8 @@ export function multipartFormData(func) {
         MULTIPART_FORM_MAX_FILE_SIZE_MB = 20, // Defaults to a 20MB max, per file
       } = context.env;
       try {
+        logg.debug('request.body', JSON.stringify(request.body));
+        logg.debug('request.isBase64Encoded', JSON.stringify(request.isBase64Encoded));
         // Parse the request body and store it in the context
         context.multipartFormData = await getData(
           request,
