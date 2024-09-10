@@ -72,7 +72,7 @@ async function getData(request, headers, fileCountLimit, maxFileSizeMb) {
       reject(new Error(`Invalid request: ${error.message}`));
     });
 
-    request.pipe(busboy);
+    request.body.pipe(busboy);
     // busboy.write(request.body, request.isBase64Encoded ? 'base64' : 'binary');
     // busboy.end();
   });

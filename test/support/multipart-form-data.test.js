@@ -48,14 +48,15 @@ describe('Multipart form data wrapper test', () => {
       ...headers,
       ...formData.getHeaders(),
     };
-    req.method = 'POST';
-    req.url = 'https://space.cat';
-    req.headers = combinedHeaders;
 
     // Pipe the form-data into the request stream
     formData.pipe(req);
     return {
-      request: req,
+      request: {
+        method: 'POST',
+        url: 'https://space.cat',
+        body: req,
+      },
       context: {
         env: {},
         log: console,
