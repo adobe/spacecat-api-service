@@ -93,7 +93,11 @@ export function isMultipartFormData(headers) {
 export function multipartFormData(func) {
   return async (request, context) => {
     // Only act on requests which use the multipart/form-data Content-Type
+    // TOOD: remove
+    const { logg } = context;
+    logg.debug('DEBUG headers', request.headers);
     if (isMultipartFormData(request.headers) && !isObject(context.multipartFormData)) {
+      logg.debug('DEBUG isMultipartFormData', true);
       const {
         MULTIPART_FORM_FILE_COUNT_LIMIT = 1, // Default to a max of 1 file upload
         MULTIPART_FORM_MAX_FILE_SIZE_MB = 20, // Defaults to a 20MB max, per file
@@ -105,6 +109,8 @@ export function multipartFormData(func) {
           MULTIPART_FORM_FILE_COUNT_LIMIT,
           MULTIPART_FORM_MAX_FILE_SIZE_MB,
         );
+
+        logg.debug('DEBUG multipartFormData', multipartFormData);
       } catch (e) {
         const { log = console } = context;
         const message = `Error parsing request body: ${e.message}`;

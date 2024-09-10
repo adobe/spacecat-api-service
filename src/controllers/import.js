@@ -116,15 +116,12 @@ function ImportController(request, context) {
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
-    const { pathInfo: { headers } } = requestContext;
+    const { multipartFormData, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
 
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
-
-      // Read request data from the context
-      const { multipartFormData } = context;
       validateRequestData(multipartFormData);
 
       const { authInfo: { profile } } = attributes;
