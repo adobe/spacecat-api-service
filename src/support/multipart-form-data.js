@@ -94,7 +94,7 @@ export function multipartFormData(func) {
   return async (request, context) => {
     // Only act on requests which use the multipart/form-data Content-Type
     // TOOD: remove
-    const { logg } = context;
+    const { log: logg } = context;
     logg.debug('DEBUG headers', request.headers);
     if (isMultipartFormData(request.headers) && !isObject(context.multipartFormData)) {
       logg.debug('DEBUG isMultipartFormData', true);
