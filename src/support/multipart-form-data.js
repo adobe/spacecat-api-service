@@ -73,8 +73,6 @@ async function getData(request, headers, fileCountLimit, maxFileSizeMb) {
     });
 
     request.body.pipe(busboy);
-    // busboy.write(request.body, request.isBase64Encoded ? 'base64' : 'binary');
-    // busboy.end();
   });
 }
 
