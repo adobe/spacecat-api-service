@@ -21,9 +21,8 @@ import { isObject } from '@adobe/spacecat-shared-utils';
  * @param {number} maxFileSizeMb - Size limit of a single file which can be uploaded, in MB
  * @returns {Promise<{object}>} The parsed data from the request
  */
-async function getData(request, fileCountLimit, maxFileSizeMb) {
+async function getData(request, headers, fileCountLimit, maxFileSizeMb) {
   return new Promise((resolve, reject) => {
-    const { headers } = request;
     const busboy = Busboy({
       headers,
       limits: {
@@ -93,10 +92,14 @@ export function isMultipartFormData(headers) {
 export function multipartFormData(func) {
   return async (request, context) => {
     // Only act on requests which use the multipart/form-data Content-Type
+    const { pathInfo: { headers } } = context;
+
     // TOOD: remove
     const { log: logg } = context;
-    logg.debug('DEBUG headers', request.headers);
-    if (isMultipartFormData(request.headers) && !isObject(context.multipartFormData)) {
+    logg.debug('DEBUG headers', JSON.stringify(headers));
+    logg.debug('DEBUG isMultipartFormData(request)', isMultipartFormData(headers));
+    logg.debug('DEBUG isObject(context.multipartFormData)', isObject(context.multipartFormData));
+    if (isMultipartFormData(headers) && !isObject(context.multipartFormData)) {
       logg.debug('DEBUG isMultipartFormData', true);
       const {
         MULTIPART_FORM_FILE_COUNT_LIMIT = 1, // Default to a max of 1 file upload
@@ -106,6 +109,7 @@ export function multipartFormData(func) {
         // Parse the request body and store it in the context
         context.multipartFormData = await getData(
           request,
+          headers,
           MULTIPART_FORM_FILE_COUNT_LIMIT,
           MULTIPART_FORM_MAX_FILE_SIZE_MB,
         );

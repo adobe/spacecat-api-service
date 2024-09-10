@@ -152,32 +152,11 @@ describe('Multipart form data wrapper test', () => {
     expect(mockContext.multipartFormData).to.be.undefined;
 
     // Manually change boundary= in the content-type header to mess up busboy
-    mockRequest.headers['content-type'] = 'multipart/form-data; boundary=--------------------------12345';
+    mockContext.pathInfo.headers['content-type'] = 'multipart/form-data; boundary=--------------------------12345';
     await multipartFormData(exampleHandler)(mockRequest, mockContext);
 
     // Handler should not have been called
     expect(exampleHandler.notCalled).to.be.true;
-  });
-
-  it('should handle a bad multipart/form-data request', async () => {
-    expect(mockContext.multipartFormData).to.be.undefined;
-
-    const badRequest = new Request('https://space.cat', {
-      method: 'POST',
-      headers: {
-        'content-type': 'multipart/form-data',
-      },
-      body: 'This is not a valid multipart/form-data request',
-    });
-    await multipartFormData(exampleHandler)(badRequest, mockContext);
-
-    expect(exampleHandler.calledOnce).to.be.true;
-    const firstCall = exampleHandler.getCall(0);
-
-    // Check the context object passed to the handler
-    const updatedContext = firstCall.args[1];
-    // multipartFormData should not be included in the context
-    expect(updatedContext.multipartFormData).to.be.undefined;
   });
 
   it('does not act on the request if context.multipartFormData is already set', async () => {

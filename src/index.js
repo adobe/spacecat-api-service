@@ -94,7 +94,7 @@ async function run(request, context) {
       SlackController(SlackApp),
       trigger,
       FulfillmentController(context),
-      ImportController(request, context),
+      ImportController(context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -128,9 +128,9 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 export const main = wrap(run)
   .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler] })
   .with(dataAccess)
-  .with(enrichPathInfo)
   .with(bodyData)
   .with(multipartFormData)
+  .with(enrichPathInfo)
   .with(sqs)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)

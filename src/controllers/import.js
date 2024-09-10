@@ -21,7 +21,6 @@ import { ImportJobDto } from '../dto/import-job.js';
 
 /**
  * Import controller. Provides methods to create, read, and fetch the result of import jobs.
- * @param {Request} request - The HTTP request object (see fetch API).
  * @param {UniversalContext} context - The context of the universal serverless function.
  * @param {DataAccess} context.dataAccess - Data access.
  * @param {object} context.sqs - AWS Simple Queue Service client.
@@ -32,7 +31,7 @@ import { ImportJobDto } from '../dto/import-job.js';
  * @returns {object} Import controller.
  * @constructor
  */
-function ImportController(request, context) {
+function ImportController(context) {
   const {
     dataAccess, sqs, s3, log, env, auth, attributes,
   } = context;
