@@ -36,9 +36,8 @@ const thisDirectory = dirname(fileURLToPath(import.meta.url));
 describe('ImportController tests', () => {
   let sandbox;
   let importController;
-  let request;
-  let context;
-  let requestContext = {};
+  let baseRequest;
+  let baseContext;
   let mockSqsClient;
   let mockDataAccess;
   let mockS3;
@@ -55,11 +54,11 @@ describe('ImportController tests', () => {
 
   /**
    * Creates a new mock request, which is (under the hood) just a stream.
-   * @returns {Request}
+   * @returns {{request: Request, context: object}}
    */
   const createMockFormDataRequest = (formData, headers) => {
     const req = new PassThrough();
-    req.headers = {
+    const combinedHeaders = {
       ...headers,
       ...formData.getHeaders(),
     };
@@ -67,12 +66,23 @@ describe('ImportController tests', () => {
 
     // Pipe the form-data into the request stream
     formData.pipe(req);
-    return req;
+    return {
+      request: req,
+      context: {
+        ...baseContext,
+        pathInfo: {
+          headers: {
+            ...defaultHeaders,
+            ...combinedHeaders,
+          },
+        },
+      },
+    };
   };
 
   /**
    * Creates a new mock request, which is (under the hood) just a stream.
-   * @returns {Request}
+   * @returns {{request: Request, context: object}}
    */
   const createMockMultipartRequest = (
     urls,
@@ -132,20 +142,6 @@ describe('ImportController tests', () => {
       checkScopes: sandbox.stub().resolves(true),
     };
 
-    requestContext = {
-      data: {
-        urls: [],
-      },
-      params: {
-      },
-      pathInfo: {
-        headers: {
-          'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
-          'user-agent': 'Unit test',
-        },
-      },
-    };
-
     mockAttributes = {
       authInfo: {
         profile: {
@@ -193,13 +189,14 @@ describe('ImportController tests', () => {
       maxUrlsPerJob: 3,
     };
 
-    const { info, debug } = console;
+    const { info, debug, error } = console;
 
-    context = {
+    // Set up the base context
+    baseContext = {
       log: {
         info,
         debug,
-        error: sandbox.stub(),
+        error: sandbox.stub().callsFake(error),
       },
       env: {
         IMPORT_CONFIGURATION: JSON.stringify(importConfiguration),
@@ -209,9 +206,15 @@ describe('ImportController tests', () => {
       dataAccess: mockDataAccess,
       auth: mockAuth,
       attributes: mockAttributes,
+      pathInfo: {
+        headers: {
+          ...defaultHeaders,
+        },
+      },
+      params: {},
     };
 
-    importController = ImportController(request, context);
+    importController = ImportController(baseRequest, baseContext);
   });
 
   afterEach(() => {
@@ -219,33 +222,35 @@ describe('ImportController tests', () => {
   });
 
   it('should fail for a bad IMPORT_CONFIGURATION', () => {
-    context.env.IMPORT_CONFIGURATION = 'not a JSON string';
-    ImportController(request, context);
-    expect(context.log.error.getCall(0).args[0]).to.equal('Failed to parse import configuration: Unexpected token \'o\', "not a JSON string" is not valid JSON');
+    baseContext.env.IMPORT_CONFIGURATION = 'not a JSON string';
+    ImportController(baseRequest, baseContext);
+    expect(baseContext.log.error.getCall(0).args[0]).to.equal('Failed to parse import configuration: Unexpected token \'o\', "not a JSON string" is not valid JSON');
   });
 
   describe('createImportJob', () => {
     beforeEach(() => {
       // Prepare the new import job request, which is special because it is using the
       // multipart/form-data content type
-      request = createMockMultipartRequest(urls, customOptions);
-      requestContext.pathInfo.headers = request.headers;
+      const { request, context } = createMockMultipartRequest(urls, customOptions);
+      baseRequest = request;
+      baseContext = context;
 
       importController = ImportController(request, context);
     });
 
     it('should fail for a non-multipart/form-data request', async () => {
-      importController = new ImportController(new Request('https://space.cat'), context);
-      const response = await importController.createImportJob();
+      importController = new ImportController(new Request('https://space.cat'), baseContext);
+      baseContext.pathInfo.headers['content-type'] = 'application/json';
+      const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: expected multipart/form-data Content-Type');
     });
 
     it('should respond with an error code when the request is missing data', async () => {
       const emptyForm = new FormData();
-      request = createMockFormDataRequest(emptyForm, defaultHeaders);
+      const { request, context } = createMockFormDataRequest(emptyForm, defaultHeaders);
       importController = ImportController(request, context);
-      const response = await importController.createImportJob();
+      const response = await importController.createImportJob(context);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request, unable to parse request body: Unexpected end of form');
@@ -254,9 +259,9 @@ describe('ImportController tests', () => {
     it('should respond with an error code when the data format is incorrect', async () => {
       const badForm = new FormData();
       badForm.append('urls', 'https://example.com/must/be/an/array');
-      request = createMockFormDataRequest(badForm, defaultHeaders);
+      const { request, context } = createMockFormDataRequest(badForm, defaultHeaders);
       importController = ImportController(request, context);
-      const response = await importController.createImportJob();
+      const response = await importController.createImportJob(context);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Unable to parse request data field (urls): Unexpected token \'h\', "https://ex"... is not valid JSON');
@@ -266,42 +271,40 @@ describe('ImportController tests', () => {
       const badOptions = new FormData();
       badOptions.append('urls', JSON.stringify(urls));
       badOptions.append('customHeaders', JSON.stringify([42]));
-      importController = ImportController(
-        createMockFormDataRequest(badOptions, defaultHeaders),
-        context,
-      );
-      const response = await importController.createImportJob(requestContext);
+      const { request, context } = createMockFormDataRequest(badOptions, defaultHeaders);
+      importController = ImportController(request, context);
+      const response = await importController.createImportJob(context);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: customHeaders must be an object');
     });
 
     it('should reject when auth scopes are invalid', async () => {
-      context.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
-      const response = await importController.createImportJob();
+      baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
+      const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(401);
       expect(response.headers.get('x-error')).to.equal('Missing required scopes');
     });
 
     it('should reject when no import queues are defined', async () => {
-      const contextNoQueues = { ...context };
+      const contextNoQueues = { ...baseContext };
       delete importConfiguration.queues;
       contextNoQueues.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
 
-      const importControllerNoQueues = ImportController(request, contextNoQueues);
-      const response = await importControllerNoQueues.createImportJob();
+      const importControllerNoQueues = ImportController(baseRequest, contextNoQueues);
+      const response = await importControllerNoQueues.createImportJob(contextNoQueues);
       expect(response.status).to.equal(503);
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
     });
 
     it('should reject when the given API key is already running an import job', async () => {
-      context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
+      baseContext.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
         createImportJob({
           ...exampleJob,
           hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
         }),
       ]);
-      const response = await importController.createImportJob();
+      const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(429);
       expect(response.headers.get('x-error')).to.equal('Too Many Requests: API key hash c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441 cannot be used to start any more import jobs');
     });
@@ -309,9 +312,9 @@ describe('ImportController tests', () => {
     it('should reject when invalid URLs are passed in', async () => {
       const badUrls = new FormData();
       badUrls.append('urls', JSON.stringify(['https://example.com/page1', 'not-a-valid-url']));
-      request = createMockFormDataRequest(badUrls, defaultHeaders);
+      const { request, context } = createMockFormDataRequest(badUrls, defaultHeaders);
       importController = ImportController(request, context);
-      const response = await importController.createImportJob();
+      const response = await importController.createImportJob(context);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: not-a-valid-url is not a valid URL');
@@ -320,9 +323,9 @@ describe('ImportController tests', () => {
     it('should reject when an invalid options object is provided', async () => {
       const badOptions = new FormData();
       badOptions.append('options', 'options object should be an object, not a string');
-      request = createMockFormDataRequest(badOptions, defaultHeaders);
+      const { request, context } = createMockFormDataRequest(badOptions, defaultHeaders);
       importController = ImportController(request, context);
-      const response = await importController.createImportJob();
+      const response = await importController.createImportJob(context);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Unable to parse request data field (options): Unexpected token \'o\', "options ob"... is not valid JSON');
@@ -332,26 +335,24 @@ describe('ImportController tests', () => {
       const badOptions = new FormData();
       badOptions.append('urls', JSON.stringify(urls));
       badOptions.append('options', JSON.stringify([12345, 42]));
-      importController = ImportController(
-        createMockFormDataRequest(badOptions, defaultHeaders),
-        context,
-      );
-      const response = await importController.createImportJob();
+      const { request, context } = createMockFormDataRequest(badOptions, defaultHeaders);
+      importController = ImportController(request, context);
+      const response = await importController.createImportJob(context);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: options must be an object');
     });
 
     it('should fail if sqs fails to send a message', async () => {
-      context.sqs.sendMessage = sandbox.stub().throws(new Error('Queue error'));
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob();
+      baseContext.sqs.sendMessage = sandbox.stub().throws(new Error('Queue error'));
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal('Queue error');
     });
 
     it('should start a new import job', async () => {
-      const response = await importController.createImportJob();
+      const response = await importController.createImportJob(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(202);
 
@@ -363,14 +364,14 @@ describe('ImportController tests', () => {
     });
 
     it('should pick another import queue when the first one is in use', async () => {
-      context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
+      baseContext.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
         createImportJob({
           ...exampleJob,
           hashedApiKey: 'ac90ae98768efdb4c6349f23e63fc35e465333ca21bd30dd2838a100d1fd09d7', // Queue is in use by another API key
         }),
       ]);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob();
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(202);
 
@@ -385,7 +386,7 @@ describe('ImportController tests', () => {
     });
 
     it('should fail when all (both) available queues are in use', async () => {
-      context.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
+      baseContext.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
         createImportJob({
           ...exampleJob,
           importQueueId: 'spacecat-import-queue-1',
@@ -397,8 +398,8 @@ describe('ImportController tests', () => {
           hashedApiKey: '23306638a0b7ed823e4da979b73592bf2a7ddd0ee027a58b1fc75b337b97cd9d', // Queue is in use by another API key
         }),
       ]);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob();
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(503); // Service unavailable
@@ -408,11 +409,13 @@ describe('ImportController tests', () => {
 
     it('should reject when the length of the importScript exceeds the maximum allowed length', async () => {
       const importScriptStream = fs.createReadStream(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
-      importController = ImportController(
-        createMockMultipartRequest(urls, customOptions, importScriptStream),
-        context,
+      const { request, context } = createMockMultipartRequest(
+        urls,
+        customOptions,
+        importScriptStream,
       );
-      const response = await importController.createImportJob();
+      importController = ImportController(request, context);
+      const response = await importController.createImportJob(context);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
@@ -422,17 +425,19 @@ describe('ImportController tests', () => {
     it('should reject when s3Client fails to upload the importScript', async () => {
       // Bump the max allowed length of the import script
       importConfiguration.maxLengthImportScript = 5000;
-      context.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+      baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
 
       const importScriptStream = fs.createReadStream(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
-      importController = ImportController(
-        createMockMultipartRequest(urls, customOptions, importScriptStream),
-        context,
+      const { request, context } = createMockMultipartRequest(
+        urls,
+        customOptions,
+        importScriptStream,
       );
+      importController = ImportController(request, context);
 
       // Mock a rejection from the S3 API
       mockS3.s3Client.send.rejects(new Error('Cannot send message error'));
-      const response = await importController.createImportJob();
+      const response = await importController.createImportJob(context);
 
       expect(response.status).to.equal(500);
     });
@@ -440,14 +445,12 @@ describe('ImportController tests', () => {
     it('should pick up the default options when none are provided', async () => {
       // Bump the max allowed length of the import script
       importConfiguration.maxLengthImportScript = 5000;
-      context.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+      baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
 
       const importScriptStream = fs.createReadStream(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
-      importController = ImportController(
-        createMockMultipartRequest(urls, undefined, importScriptStream),
-        context,
-      );
-      const response = await importController.createImportJob();
+      const { request, context } = createMockMultipartRequest(urls, undefined, importScriptStream);
+      importController = ImportController(request, context);
+      const response = await importController.createImportJob(context);
       const importJob = await response.json();
 
       expect(response).to.be.an.instanceOf(Response);
@@ -467,39 +470,33 @@ describe('ImportController tests', () => {
         'https://example.com/page3',
         'https://example.com/page4',
       ];
-      importController = ImportController(
-        createMockMultipartRequest(manyUrls),
-        context,
-      );
-      const response = await importController.createImportJob();
+      const { request, context } = createMockMultipartRequest(manyUrls);
+      importController = ImportController(request, context);
+      const response = await importController.createImportJob(context);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (4) exceeds the maximum allowed (3)');
     });
 
     it('should fail when the number of URLs exceeds the (default) maximum allowed', async () => {
       delete importConfiguration.maxUrlsPerJob; // Should fall back to 1
-      context.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+      baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
       const twoUrls = [
         'https://example.com/page1',
         'https://example.com/page2',
       ];
-      importController = ImportController(
-        createMockMultipartRequest(twoUrls),
-        context,
-      );
+      const { request, context } = createMockMultipartRequest(twoUrls);
+      importController = ImportController(request, context);
 
-      const response = await importController.createImportJob();
+      const response = await importController.createImportJob(context);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
     });
 
     it('should fail when URLs are empty', async () => {
       const noUrls = [];
-      importController = ImportController(
-        createMockMultipartRequest(noUrls),
-        context,
-      );
-      const response = await importController.createImportJob();
+      const { request, context } = createMockMultipartRequest(noUrls);
+      importController = ImportController(request, context);
+      const response = await importController.createImportJob(context);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
@@ -507,7 +504,7 @@ describe('ImportController tests', () => {
 
   describe('getImportJobStatus', () => {
     it('should fail when jobId is not provided', async () => {
-      const response = await importController.getImportJobStatus(requestContext);
+      const response = await importController.getImportJobStatus(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
@@ -515,8 +512,8 @@ describe('ImportController tests', () => {
     });
 
     it('should return 404 when the jobID cannot be found', async () => {
-      requestContext.params.jobId = 'unknown-job-id';
-      const response = await importController.getImportJobStatus(requestContext);
+      baseContext.params.jobId = 'unknown-job-id';
+      const response = await importController.getImportJobStatus(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
@@ -524,9 +521,9 @@ describe('ImportController tests', () => {
     });
 
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
-      requestContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
-      requestContext.params.jobId = exampleJob.id;
-      const response = await importController.getImportJobStatus(requestContext);
+      baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
+      baseContext.params.jobId = exampleJob.id;
+      const response = await importController.getImportJobStatus(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
@@ -534,8 +531,8 @@ describe('ImportController tests', () => {
     });
 
     it('should return job details for a valid jobId', async () => {
-      requestContext.params.jobId = exampleJob.id;
-      const response = await importController.getImportJobStatus(requestContext);
+      baseContext.params.jobId = exampleJob.id;
+      const response = await importController.getImportJobStatus(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       const jobStatus = await response.json();
@@ -550,13 +547,13 @@ describe('ImportController tests', () => {
 
   describe('getImportJobResult', () => {
     beforeEach(() => {
-      requestContext.pathInfo.headers['x-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
-      requestContext.params.jobId = exampleJob.id;
+      baseContext.pathInfo.headers['x-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
+      baseContext.params.jobId = exampleJob.id;
     });
 
     it('should fail to fetch the import result for a running job', async () => {
       // exampleJob is RUNNING
-      const response = await importController.getImportJobResult(requestContext);
+      const response = await importController.getImportJobResult(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
       expect(response.headers.get('x-error')).to.equal('Archive not available, job status is: RUNNING');
@@ -566,7 +563,7 @@ describe('ImportController tests', () => {
       mockS3.getSignedUrl.throws(new Error('Presigner error'));
       exampleJob.status = 'COMPLETE';
 
-      const response = await importController.getImportJobResult(requestContext);
+      const response = await importController.getImportJobResult(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal('Error occurred generating a pre-signed job result URL');
@@ -575,7 +572,7 @@ describe('ImportController tests', () => {
     it('should generate a presigned URL for a COMPLETE job', async () => {
       exampleJob.status = 'COMPLETE';
 
-      const response = await importController.getImportJobResult(requestContext);
+      const response = await importController.getImportJobResult(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       expect(await response.json()).to.deep.equal({
@@ -592,7 +589,7 @@ describe('ImportController tests', () => {
       mockS3.getSignedUrl.rejects(new Error('Presigner error'));
       exampleJob.status = 'COMPLETE';
 
-      const response = await importController.getImportJobResult(requestContext);
+      const response = await importController.getImportJobResult(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal('Presigner error');
@@ -601,16 +598,16 @@ describe('ImportController tests', () => {
 
   describe('getImportJobsByDateRange', () => {
     it('should throw an error when startDate is not present', async () => {
-      requestContext.params.endDate = '2024-05-29T14:26:00.000Z';
-      const response = await importController.getImportJobsByDateRange(requestContext);
+      baseContext.params.endDate = '2024-05-29T14:26:00.000Z';
+      const response = await importController.getImportJobsByDateRange(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO 8601 format');
     });
 
     it('should throw an error when endDate is not present', async () => {
-      requestContext.params.startDate = '2024-05-29T14:26:00.000Z';
-      const response = await importController.getImportJobsByDateRange(requestContext);
+      baseContext.params.startDate = '2024-05-29T14:26:00.000Z';
+      const response = await importController.getImportJobsByDateRange(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO 8601 format');
@@ -618,11 +615,11 @@ describe('ImportController tests', () => {
 
     it('should return an array of import jobs', async () => {
       const job = createImportJob(exampleJob);
-      context.dataAccess.getImportJobsByDateRange = sandbox.stub().resolves([job]);
-      requestContext.params.startDate = '2022-10-05T14:48:00.000Z';
-      requestContext.params.endDate = '2022-10-07T14:48:00.000Z';
+      baseContext.dataAccess.getImportJobsByDateRange = sandbox.stub().resolves([job]);
+      baseContext.params.startDate = '2022-10-05T14:48:00.000Z';
+      baseContext.params.endDate = '2022-10-07T14:48:00.000Z';
 
-      const response = await importController.getImportJobsByDateRange(requestContext);
+      const response = await importController.getImportJobsByDateRange(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       const responseResult = await response.json();

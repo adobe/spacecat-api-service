@@ -105,9 +105,9 @@ function ImportController(request, context) {
     }
   }
 
-  function isMultipartFormData(req) {
+  function isMultipartFormData(headers) {
     // Check if the Content-Type header exists and starts with "multipart/form-data"
-    const contentType = req.headers['Content-Type'] || req.headers['content-type'];
+    const contentType = headers['Content-Type'] || headers['content-type'];
     return contentType && contentType.startsWith('multipart/form-data');
   }
 
@@ -115,6 +115,7 @@ function ImportController(request, context) {
    * Parse a multipart request to extract the URLs, options, custom import script (import.js), and
    * custom headers.
    * @param {Request} httpRequest - The HTTP request object.
+   * @param {object} headers - HTTP request headers object.
    * @returns {Promise<{
    *   urls: string,
    *   options: object,
@@ -122,11 +123,10 @@ function ImportController(request, context) {
    *   customHeaders: object
    * }>} Parsed request data.
    */
-  async function parseMultipartRequest(httpRequest) {
+  async function parseMultipartRequest(httpRequest, headers) {
     return new Promise((resolve, reject) => {
-      const { headers } = httpRequest;
       // Validate that request is multipart/form-data
-      if (!isMultipartFormData(httpRequest)) {
+      if (!isMultipartFormData(headers)) {
         reject(new ErrorWithStatusCode('Invalid request: expected multipart/form-data Content-Type', STATUS_BAD_REQUEST));
       }
 
@@ -203,18 +203,18 @@ function ImportController(request, context) {
    * controller, so we do not require any additional parameters to invoke this function.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
-  async function createImportJob() {
-    const { headers } = request;
+  async function createImportJob(requestContext) {
+    const { pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
 
-    log.debug('request', JSON.stringify(request)); // TODO: REMOVE - DEBUG ONLY
+    log.debug('headers', JSON.stringify(headers)); // TODO: REMOVE - DEBUG ONLY
 
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
 
       // Parse the multipart request, which can include a custom import.js script as a file upload
-      const data = await parseMultipartRequest(request);
+      const data = await parseMultipartRequest(request, headers);
       validateRequestData(data);
 
       const { authInfo: { profile } } = attributes;
