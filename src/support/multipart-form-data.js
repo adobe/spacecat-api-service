@@ -95,23 +95,12 @@ export function multipartFormData(func) {
   return async (request, context) => {
     // Only act on requests which use the multipart/form-data Content-Type
     const { pathInfo: { headers } } = context;
-
-    // TOOD: remove
-    const { log: logg } = context;
-    logg.debug('DEBUG headers', JSON.stringify(headers));
-    logg.debug('DEBUG isMultipartFormData(request)', isMultipartFormData(headers));
-    logg.debug('DEBUG isObject(context.multipartFormData)', isObject(context.multipartFormData));
     if (isMultipartFormData(headers) && !isObject(context.multipartFormData)) {
-      logg.debug('DEBUG isMultipartFormData', true);
       const {
         MULTIPART_FORM_FILE_COUNT_LIMIT = 1, // Default to a max of 1 file upload
         MULTIPART_FORM_MAX_FILE_SIZE_MB = 20, // Defaults to a 20MB max, per file
       } = context.env;
       try {
-        logg.debug('context', JSON.stringify(context));
-        logg.debug('request', JSON.stringify(request));
-        logg.debug('request.body', JSON.stringify(request.body));
-        logg.debug('request.isBase64Encoded', JSON.stringify(request.isBase64Encoded));
         // Parse the request body and store it in the context
         context.multipartFormData = await getData(
           request,
@@ -119,8 +108,6 @@ export function multipartFormData(func) {
           MULTIPART_FORM_FILE_COUNT_LIMIT,
           MULTIPART_FORM_MAX_FILE_SIZE_MB,
         );
-
-        logg.debug('DEBUG multipartFormData', multipartFormData);
       } catch (e) {
         const { log = console } = context;
         const message = `Error parsing request body: ${e.message}`;
