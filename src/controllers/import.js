@@ -207,8 +207,6 @@ function ImportController(request, context) {
     const { pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
 
-    log.debug('headers', JSON.stringify(headers)); // TODO: REMOVE - DEBUG ONLY
-
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
