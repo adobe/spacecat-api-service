@@ -51,7 +51,6 @@ function ImportSupervisor(services, config) {
     queues = [], // Array of import queues
     importWorkerQueue, // URL of the import worker queue
     s3Bucket,
-    maxLengthImportScript,
   } = config;
   const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
@@ -144,11 +143,6 @@ function ImportSupervisor(services, config) {
   }
 
   async function writeImportScriptToS3(jobId, importScript) {
-    // Check for the length of the importScript
-    if (importScript.length > maxLengthImportScript) {
-      throw new ErrorWithStatusCode(`Bad Request: importScript should be less than ${maxLengthImportScript} characters`, 400);
-    }
-
     const key = `imports/${jobId}/import.js`;
     const command = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: importScript });
     try {

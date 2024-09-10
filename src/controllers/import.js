@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-import Busboy from 'busboy';
 import {
   createResponse,
   ok,
@@ -60,6 +59,10 @@ function ImportController(request, context) {
   const STATUS_ACCEPTED = 202;
 
   function validateRequestData(data) {
+    if (!isObject(data)) {
+      throw new ErrorWithStatusCode('Invalid request: missing multipart/form-data request data', STATUS_BAD_REQUEST);
+    }
+
     if (!Array.isArray(data.urls) || !data.urls.length > 0) {
       throw new ErrorWithStatusCode('Invalid request: urls must be provided as a non-empty array', STATUS_BAD_REQUEST);
     }
@@ -105,97 +108,6 @@ function ImportController(request, context) {
     }
   }
 
-  function isMultipartFormData(headers) {
-    // Check if the Content-Type header exists and starts with "multipart/form-data"
-    const contentType = headers['Content-Type'] || headers['content-type'];
-    return contentType && contentType.startsWith('multipart/form-data');
-  }
-
-  /**
-   * Parse a multipart request to extract the URLs, options, custom import script (import.js), and
-   * custom headers.
-   * @param {Request} httpRequest - The HTTP request object.
-   * @param {object} headers - HTTP request headers object.
-   * @returns {Promise<{
-   *   urls: string,
-   *   options: object,
-   *   importScript: string,
-   *   customHeaders: object
-   * }>} Parsed request data.
-   */
-  async function parseMultipartRequest(httpRequest, headers) {
-    return new Promise((resolve, reject) => {
-      // Validate that request is multipart/form-data
-      if (!isMultipartFormData(headers)) {
-        reject(new ErrorWithStatusCode('Invalid request: expected multipart/form-data Content-Type', STATUS_BAD_REQUEST));
-      }
-
-      const busboy = Busboy({
-        headers,
-        limits: {
-          files: 1, // Limit to one file upload — import.js
-        },
-      });
-      let importScript;
-      let urls;
-      let options;
-      let customHeaders;
-
-      // Handle import.js file uploads. In absence of an import.js this callback will not be called
-      busboy.on('file', (name, file, info) => {
-        let fileBuffer = Buffer.from('');
-        const { filename, encoding, mimeType } = info;
-        log.debug(`File upload received for ${name}: filename: ${filename}, encoding: ${encoding}, mimeType: ${mimeType}`);
-        // Handle file upload
-        if (name === 'importScript') {
-          file.on('data', (data) => {
-            // Concatenate each chunk of data into the buffer.
-            // Future performance enhancement, should issues arise: keep the buffer in memory
-            // and stream the data directly to S3 once jobId is created.
-            fileBuffer = Buffer.concat([fileBuffer, data]);
-          }).on('close', () => {
-            // Reached the end of the file data
-            log.debug(`File upload completed for ${name}`);
-            importScript = fileBuffer.toString('utf8');
-          });
-        }
-      });
-
-      // Handle other fields
-      busboy.on('field', (name, val) => {
-        try {
-          if (name === 'urls') {
-            urls = JSON.parse(val);
-          } else if (name === 'options') {
-            options = JSON.parse(val);
-          } else if (name === 'customHeaders') {
-            customHeaders = JSON.parse(val);
-          }
-          // Otherwise: ignore the field
-        } catch (error) {
-          reject(new ErrorWithStatusCode(`Unable to parse request data field (${name}): ${error.message}`, STATUS_BAD_REQUEST));
-        }
-      });
-
-      // Handle the end of the request
-      busboy.on('close', () => {
-        const requestData = {
-          urls,
-          options,
-          importScript,
-          customHeaders,
-        };
-        resolve(requestData);
-      });
-
-      busboy.on('error', (error) => {
-        reject(new ErrorWithStatusCode(`Invalid request, unable to parse request body: ${error.message}`, STATUS_BAD_REQUEST));
-      });
-
-      httpRequest.pipe(busboy);
-    });
-  }
-
   /**
    * Create and start a new import job.
    * This function requires the Request object in order to parse the multipart/form-data mime-type
@@ -204,18 +116,16 @@ function ImportController(request, context) {
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
-    const { data: requestData, pathInfo: { headers } } = requestContext;
+    const { pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
-
-    log.debug('DEBUG (TODO: REMOVE ME): request data:', JSON.stringify(requestData));
 
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
 
-      // Parse the multipart request, which can include a custom import.js script as a file upload
-      const data = await parseMultipartRequest(request, headers);
-      validateRequestData(data);
+      // Read request data from the context
+      const { multipartFormData } = context;
+      validateRequestData(multipartFormData);
 
       const { authInfo: { profile } } = attributes;
       let initiatedBy = {};
@@ -230,7 +140,7 @@ function ImportController(request, context) {
 
       const {
         urls, options = importConfiguration.options, importScript, customHeaders,
-      } = data;
+      } = multipartFormData;
       const job = await importSupervisor.startNewJob(
         urls,
         importApiKey,

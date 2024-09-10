@@ -12,9 +12,7 @@
 
 /* eslint-env mocha */
 
-import { PassThrough } from 'stream';
 import { Response } from '@adobe/fetch';
-import FormData from 'form-data';
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -47,63 +45,10 @@ describe('ImportController tests', () => {
   const defaultHeaders = {
     'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
     'user-agent': 'Unit test',
+    'content-type': 'multipart/form-data; boundary=12345',
   };
   const exampleCustomHeaders = {
     Authorization: 'Bearer aXsPb3183G',
-  };
-
-  /**
-   * Creates a new mock request, which is (under the hood) just a stream.
-   * @returns {{request: Request, context: object}}
-   */
-  const createMockFormDataRequest = (formData, headers) => {
-    const req = new PassThrough();
-    const combinedHeaders = {
-      ...headers,
-      ...formData.getHeaders(),
-    };
-    req.method = 'POST';
-
-    // Pipe the form-data into the request stream
-    formData.pipe(req);
-    return {
-      request: req,
-      context: {
-        ...baseContext,
-        pathInfo: {
-          headers: {
-            ...defaultHeaders,
-            ...combinedHeaders,
-          },
-        },
-      },
-    };
-  };
-
-  /**
-   * Creates a new mock request, which is (under the hood) just a stream.
-   * @returns {{request: Request, context: object}}
-   */
-  const createMockMultipartRequest = (
-    urls,
-    options,
-    importScriptStream,
-    headers = defaultHeaders,
-    customHeaders = exampleCustomHeaders,
-  ) => {
-    const formData = new FormData();
-    formData.append('urls', JSON.stringify(urls));
-    if (options) {
-      formData.append('options', JSON.stringify(options));
-    }
-    if (importScriptStream) {
-      formData.append('importScript', importScriptStream);
-    }
-    if (customHeaders) {
-      formData.append('customHeaders', JSON.stringify(customHeaders));
-    }
-
-    return createMockFormDataRequest(formData, headers);
   };
 
   const exampleJob = {
@@ -182,7 +127,6 @@ describe('ImportController tests', () => {
     importConfiguration = {
       queues: ['spacecat-import-queue-1', 'spacecat-import-queue-2'],
       importWorkerQueue: 'https://sqs.us-east-1.amazonaws.com/1234567890/import-worker-queue',
-      maxLengthImportScript: 20,
       options: {
         enableJavascript: true,
       },
@@ -212,6 +156,9 @@ describe('ImportController tests', () => {
         },
       },
       params: {},
+      multipartFormData: {
+        urls,
+      },
     };
 
     importController = ImportController(baseRequest, baseContext);
@@ -231,49 +178,35 @@ describe('ImportController tests', () => {
     beforeEach(() => {
       // Prepare the new import job request, which is special because it is using the
       // multipart/form-data content type
-      const { request, context } = createMockMultipartRequest(urls, customOptions);
-      baseRequest = request;
-      baseContext = context;
+      baseRequest = new Request('https://space.cat', {
+        method: 'POST',
+        headers: {
+          ...defaultHeaders,
+        },
+      });
 
-      importController = ImportController(request, context);
+      importController = ImportController(baseRequest, baseContext);
     });
 
     it('should fail for a non-multipart/form-data request', async () => {
-      importController = new ImportController(new Request('https://space.cat'), baseContext);
-      baseContext.pathInfo.headers['content-type'] = 'application/json';
+      delete baseContext.multipartFormData;
       const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: expected multipart/form-data Content-Type');
-    });
-
-    it('should respond with an error code when the request is missing data', async () => {
-      const emptyForm = new FormData();
-      const { request, context } = createMockFormDataRequest(emptyForm, defaultHeaders);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
-
-      expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request, unable to parse request body: Unexpected end of form');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: missing multipart/form-data request data');
     });
 
     it('should respond with an error code when the data format is incorrect', async () => {
-      const badForm = new FormData();
-      badForm.append('urls', 'https://example.com/must/be/an/array');
-      const { request, context } = createMockFormDataRequest(badForm, defaultHeaders);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
+      baseContext.multipartFormData.urls = 'https://example.com/must/be/an/array';
+      const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Unable to parse request data field (urls): Unexpected token \'h\', "https://ex"... is not valid JSON');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
 
     it('should respond with an error code when custom header is not an object', async () => {
-      const badOptions = new FormData();
-      badOptions.append('urls', JSON.stringify(urls));
-      badOptions.append('customHeaders', JSON.stringify([42]));
-      const { request, context } = createMockFormDataRequest(badOptions, defaultHeaders);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
+      baseContext.multipartFormData.customHeaders = JSON.stringify([42]);
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: customHeaders must be an object');
@@ -287,12 +220,11 @@ describe('ImportController tests', () => {
     });
 
     it('should reject when no import queues are defined', async () => {
-      const contextNoQueues = { ...baseContext };
       delete importConfiguration.queues;
-      contextNoQueues.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
+      baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
 
-      const importControllerNoQueues = ImportController(baseRequest, contextNoQueues);
-      const response = await importControllerNoQueues.createImportJob(contextNoQueues);
+      const importControllerNoQueues = ImportController(baseRequest, baseContext);
+      const response = await importControllerNoQueues.createImportJob(baseContext);
       expect(response.status).to.equal(503);
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
     });
@@ -310,34 +242,28 @@ describe('ImportController tests', () => {
     });
 
     it('should reject when invalid URLs are passed in', async () => {
-      const badUrls = new FormData();
-      badUrls.append('urls', JSON.stringify(['https://example.com/page1', 'not-a-valid-url']));
-      const { request, context } = createMockFormDataRequest(badUrls, defaultHeaders);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
+      baseContext.multipartFormData.urls = ['https://example.com/page1', 'not-a-valid-url'];
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: not-a-valid-url is not a valid URL');
     });
 
     it('should reject when an invalid options object is provided', async () => {
-      const badOptions = new FormData();
-      badOptions.append('options', 'options object should be an object, not a string');
-      const { request, context } = createMockFormDataRequest(badOptions, defaultHeaders);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
+      baseContext.multipartFormData.options = 'options object should be an object, not a string';
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Unable to parse request data field (options): Unexpected token \'o\', "options ob"... is not valid JSON');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: options must be an object');
     });
 
     it('should reject when an non-object options param is provided', async () => {
-      const badOptions = new FormData();
-      badOptions.append('urls', JSON.stringify(urls));
-      badOptions.append('options', JSON.stringify([12345, 42]));
-      const { request, context } = createMockFormDataRequest(badOptions, defaultHeaders);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
+      baseContext.multipartFormData.urls = urls;
+      baseContext.multipartFormData.options = [12345, 42];
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: options must be an object');
@@ -352,6 +278,9 @@ describe('ImportController tests', () => {
     });
 
     it('should start a new import job', async () => {
+      baseContext.multipartFormData.customHeaders = {
+        ...exampleCustomHeaders,
+      };
       const response = await importController.createImportJob(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(202);
@@ -407,50 +336,29 @@ describe('ImportController tests', () => {
         .to.equal('Service Unavailable: No import queue available');
     });
 
-    it('should reject when the length of the importScript exceeds the maximum allowed length', async () => {
-      const importScriptStream = fs.createReadStream(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
-      const { request, context } = createMockMultipartRequest(
-        urls,
-        customOptions,
-        importScriptStream,
-      );
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
-
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Bad Request: importScript should be less than 20 characters');
-    });
-
     it('should reject when s3Client fails to upload the importScript', async () => {
-      // Bump the max allowed length of the import script
-      importConfiguration.maxLengthImportScript = 5000;
       baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
 
-      const importScriptStream = fs.createReadStream(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
-      const { request, context } = createMockMultipartRequest(
-        urls,
-        customOptions,
-        importScriptStream,
-      );
-      importController = ImportController(request, context);
+      const importScriptStream = fs.readFileSync(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
+      baseContext.multipartFormData.options = customOptions;
+      baseContext.multipartFormData.importScript = importScriptStream;
+      importController = ImportController(baseRequest, baseContext);
 
       // Mock a rejection from the S3 API
       mockS3.s3Client.send.rejects(new Error('Cannot send message error'));
-      const response = await importController.createImportJob(context);
+      const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(500);
     });
 
     it('should pick up the default options when none are provided', async () => {
-      // Bump the max allowed length of the import script
-      importConfiguration.maxLengthImportScript = 5000;
       baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
 
-      const importScriptStream = fs.createReadStream(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
-      const { request, context } = createMockMultipartRequest(urls, undefined, importScriptStream);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
+      const importScriptStream = fs.readFileSync(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
+      baseContext.multipartFormData.importScript = importScriptStream;
+      baseContext.multipartFormData.customHeaders = exampleCustomHeaders;
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
       const importJob = await response.json();
 
       expect(response).to.be.an.instanceOf(Response);
@@ -464,15 +372,14 @@ describe('ImportController tests', () => {
     });
 
     it('should fail when the number of URLs exceeds the maximum allowed', async () => {
-      const manyUrls = [
+      baseContext.multipartFormData.urls = [
         'https://example.com/page1',
         'https://example.com/page2',
         'https://example.com/page3',
         'https://example.com/page4',
       ];
-      const { request, context } = createMockMultipartRequest(manyUrls);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (4) exceeds the maximum allowed (3)');
     });
@@ -480,23 +387,21 @@ describe('ImportController tests', () => {
     it('should fail when the number of URLs exceeds the (default) maximum allowed', async () => {
       delete importConfiguration.maxUrlsPerJob; // Should fall back to 1
       baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
-      const twoUrls = [
+      baseContext.multipartFormData.urls = [
         'https://example.com/page1',
         'https://example.com/page2',
       ];
-      const { request, context } = createMockMultipartRequest(twoUrls);
-      importController = ImportController(request, context);
+      importController = ImportController(baseRequest, baseContext);
 
-      const response = await importController.createImportJob(context);
+      const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
     });
 
     it('should fail when URLs are empty', async () => {
-      const noUrls = [];
-      const { request, context } = createMockMultipartRequest(noUrls);
-      importController = ImportController(request, context);
-      const response = await importController.createImportJob(context);
+      baseContext.multipartFormData.urls = [];
+      importController = ImportController(baseRequest, baseContext);
+      const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
