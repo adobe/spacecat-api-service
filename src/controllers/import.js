@@ -204,8 +204,10 @@ function ImportController(request, context) {
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
-    const { pathInfo: { headers } } = requestContext;
+    const { data: requestData, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
+
+    log.debug('DEBUG (TODO: REMOVE ME): request data:', requestData);
 
     try {
       // The API scope imports.write is required to create a new import job
