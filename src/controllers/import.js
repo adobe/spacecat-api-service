@@ -21,6 +21,7 @@ import { ImportJobDto } from '../dto/import-job.js';
 
 /**
  * Import controller. Provides methods to create, read, and fetch the result of import jobs.
+ * @param {UniversalContext} context - The context of the universal serverless function.
  * @param {DataAccess} context.dataAccess - Data access.
  * @param {object} context.sqs - AWS Simple Queue Service client.
  * @param {object} context.s3 - AWS S3 client and related helpers.
@@ -58,7 +59,7 @@ function ImportController(context) {
 
   function validateRequestData(data) {
     if (!isObject(data)) {
-      throw new ErrorWithStatusCode('Invalid request: request body data is required', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: missing multipart/form-data request data', STATUS_BAD_REQUEST);
     }
 
     if (!Array.isArray(data.urls) || !data.urls.length > 0) {
@@ -108,23 +109,22 @@ function ImportController(context) {
 
   /**
    * Create and start a new import job.
-   * @param {object} requestContext - Context of the request.
-   * @param {Array<string>} requestContext.data.urls - Array of URLs to import.
-   * @param {object} requestContext.data.options - Optional import configuration parameters.
-   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
+   * @param {UniversalContext} requestContext - The context of the universal serverless function.
+   * @param {object} requestContext.multipartFormData - Parsed multipart/form-data request data.
+   * @param {object} requestContext.pathInfo.headers - HTTP request headers.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {
-    const { data, pathInfo: { headers } } = requestContext;
+    const { multipartFormData, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
+
     try {
       // The API scope imports.write is required to create a new import job
       validateImportApiKey(importApiKey, ['imports.write']);
-      validateRequestData(data);
-
-      let initiatedBy = {};
+      validateRequestData(multipartFormData);
 
       const { authInfo: { profile } } = attributes;
+      let initiatedBy = {};
       if (profile) {
         initiatedBy = {
           apiKeyName: profile.getName(),
@@ -135,12 +135,16 @@ function ImportController(context) {
       }
 
       const {
-        urls, options = importConfiguration.options, importScript, customHeaders,
-      } = data;
+        urls, options, importScript, customHeaders,
+      } = multipartFormData;
+      const mergedOptions = {
+        ...importConfiguration.options,
+        ...options,
+      };
       const job = await importSupervisor.startNewJob(
         urls,
         importApiKey,
-        options,
+        mergedOptions,
         importScript,
         initiatedBy,
         customHeaders,
