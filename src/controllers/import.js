@@ -109,9 +109,9 @@ function ImportController(context) {
 
   /**
    * Create and start a new import job.
-   * This function requires the Request object in order to parse the multipart/form-data mime-type
-   * of the request (required for large file uploads). The request is passed as a parameter to the
-   * controller, so we do not require any additional parameters to invoke this function.
+   * @param {UniversalContext} requestContext - The context of the universal serverless function.
+   * @param {object} requestContext.multipartFormData - Parsed multipart/form-data request data.
+   * @param {object} requestContext.pathInfo.headers - HTTP request headers.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createImportJob(requestContext) {

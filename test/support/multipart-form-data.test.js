@@ -93,15 +93,11 @@ describe('Multipart form data wrapper test', () => {
 
   beforeEach(() => {
     const { request, context } = createMockMultipartRequest(
-      ['https://space.cat'],
+      ['https://example.com/section2/page4'],
       { enableJavascript: true },
     );
     mockRequest = request;
-    mockContext = {
-      env: {},
-      log: console,
-      ...context,
-    };
+    mockContext = context;
 
     exampleHandler = sinon.spy(async (_, ctx) => {
       const { log, multipartFormData: data } = ctx;
@@ -123,7 +119,7 @@ describe('Multipart form data wrapper test', () => {
     const updatedContext = firstCall.args[1];
     expect(updatedContext.multipartFormData).to.be.an('object');
     expect(updatedContext.multipartFormData.urls).to.be.an('array');
-    expect(updatedContext.multipartFormData.urls[0]).to.equal('https://space.cat');
+    expect(updatedContext.multipartFormData.urls[0]).to.equal('https://example.com/section2/page4');
 
     expect(updatedContext.multipartFormData.options).to.be.an('object');
     expect(updatedContext.multipartFormData.options).to.deep.equal({ enableJavascript: true });
@@ -132,7 +128,7 @@ describe('Multipart form data wrapper test', () => {
   it('should parse a non-JSON field', async () => {
     const formData = new FormData();
     formData.append('stringData', 'Non-JSON value');
-    const { context, request } = createMockFormDataRequest(formData, defaultHeaders);
+    const { request, context } = createMockFormDataRequest(formData, defaultHeaders);
 
     expect(mockContext.multipartFormData).to.be.undefined;
 

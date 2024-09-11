@@ -16,10 +16,11 @@ import { isObject } from '@adobe/spacecat-shared-utils';
 /**
  * Parses the data from a request with multipart/form-data content type.
  *
- * @param {Request} request - The HTTP request
- * @param {number} fileCountLimit - Limit of files that can be included on the request
- * @param {number} maxFileSizeMb - Size limit of a single file which can be uploaded, in MB
- * @returns {Promise<{object}>} The parsed data from the request
+ * @param {Request} request - The HTTP request.
+ * @param {object} headers - The HTTP request headers.
+ * @param {number} fileCountLimit - Limit of files that can be included in the request.
+ * @param {number} maxFileSizeMb - Size limit of a single file which can be uploaded, in MB.
+ * @returns {Promise<{object}>} The parsed data from the request.
  */
 async function getData(request, headers, fileCountLimit, maxFileSizeMb) {
   return new Promise((resolve, reject) => {
@@ -36,10 +37,10 @@ async function getData(request, headers, fileCountLimit, maxFileSizeMb) {
     // Handle file uploads
     busboy.on('file', (name, file) => {
       let fileBuffer = Buffer.from('');
-      // Handle file upload
+      // Handle incoming data
       file.on('data', (data) => {
         // Concatenate each chunk of data into the buffer.
-        // Future performance enhancement, should issues arise: keep the _buffer_ in memory
+        // Future performance enhancement (should issues arise): keep the _buffer_ in memory
         // and stream the data elsewhere (e.g. to S3) later on.
         fileBuffer = Buffer.concat([fileBuffer, data]);
       }).on('close', () => {
@@ -77,17 +78,17 @@ async function getData(request, headers, fileCountLimit, maxFileSizeMb) {
 }
 
 export function isMultipartFormData(headers) {
-  // Check if the Content-Type header exists and starts with "multipart/form-data"
+  // Check if the content-type header exists and starts with "multipart/form-data"
   const contentType = headers['content-type'] || headers['Content-Type'];
   return contentType && contentType.startsWith('multipart/form-data');
 }
 
 /**
- * Wraps a function with a multipart/form-data middleware that extracts the request data. Only acts
+ * Wrap a function with multipart/form-data middleware that extracts the request data. Only acts
  * on requests with the multipart/form-data Content-Type.
  *
- * @param {UniversalFunction} func - The universal function
- * @returns {UniversalFunction} A universal function with the added middleware
+ * @param {UniversalFunction} func - The universal function.
+ * @returns {UniversalFunction} A universal function with the added middleware.
  */
 export function multipartFormData(func) {
   return async (request, context) => {
