@@ -1,3 +1,10 @@
+# [1.65.0](https://github.com/adobe/spacecat-api-service/compare/v1.64.0...v1.65.0) (2024-09-11)
+
+
+### Features
+
+* Update new import job endpoint content-type to multipart/form-data to support upload of custom import.js ([#491](https://github.com/adobe/spacecat-api-service/issues/491)) ([5f61a7e](https://github.com/adobe/spacecat-api-service/commit/5f61a7e489837bd46227e42558b081285912e674))
+
 # [1.64.0](https://github.com/adobe/spacecat-api-service/compare/v1.63.9...v1.64.0) (2024-09-09)
 
 
