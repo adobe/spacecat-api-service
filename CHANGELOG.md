@@ -1,3 +1,10 @@
+## [1.65.1](https://github.com/adobe/spacecat-api-service/compare/v1.65.0...v1.65.1) (2024-09-11)
+
+
+### Bug Fixes
+
+* Update import API docs to match implementation ([#494](https://github.com/adobe/spacecat-api-service/issues/494)) ([34bcd8a](https://github.com/adobe/spacecat-api-service/commit/34bcd8aae37af5d7639c8ee7f1807fb1f035d11a))
+
 # [1.65.0](https://github.com/adobe/spacecat-api-service/compare/v1.64.0...v1.65.0) (2024-09-11)
 
 
