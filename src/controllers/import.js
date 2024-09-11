@@ -135,12 +135,16 @@ function ImportController(context) {
       }
 
       const {
-        urls, options = importConfiguration.options, importScript, customHeaders,
+        urls, options, importScript, customHeaders,
       } = multipartFormData;
+      const mergedOptions = {
+        ...importConfiguration.options,
+        ...options,
+      };
       const job = await importSupervisor.startNewJob(
         urls,
         importApiKey,
-        options,
+        mergedOptions,
         importScript,
         initiatedBy,
         customHeaders,
