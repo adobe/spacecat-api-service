@@ -44,9 +44,6 @@ export const BUTTON_LABELS = {
   IGNORE: 'Ignore',
 };
 
-const IGNORED_DOMAINS = [/helix3.dev/, /fastly.net/, /ngrok-free.app/, /oastify.co/, /fastly-aem.page/, /findmy.media/, /impactful-[0-9]+\.site/, /shuyi-guan/, /adobevipthankyou/, /alshayauat/];
-const IGNORED_SUBDOMAIN_TOKENS = ['demo', 'dev', 'stag', 'qa', '--', 'sitemap', 'test', 'preview', 'cm-verify', 'owa', 'mail', 'ssl', 'secure', 'publish'];
-
 class InvalidSiteCandidate extends Error {
   constructor(message, url) {
     super(message);
@@ -81,13 +78,13 @@ function errorHandler(fn, opts) {
   };
 }
 
-function isInvalidSubdomain(hostname) {
+function isInvalidSubdomain(config, hostname) {
   const subdomain = hostname.split('.').slice(0, -2).join('.');
-  return IGNORED_SUBDOMAIN_TOKENS.some((ignored) => subdomain.includes(ignored));
+  return config.ignoredSubdomainTokens.some((ignored) => subdomain.includes(ignored));
 }
 
-function isInvalidDomain(hostname) {
-  return IGNORED_DOMAINS.some((ignored) => hostname.match(ignored));
+function isInvalidDomain(config, hostname) {
+  return config.ignoredDomains.some((ignored) => hostname.match(ignored));
 }
 
 function isIPAddress(hostname) {
@@ -223,7 +220,7 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
   return hlxConfig;
 }
 
-function verifyURLCandidate(baseURL) {
+function verifyURLCandidate(config, baseURL) {
   const url = new URL(baseURL);
 
   // x-fw-host header should contain hostname only. If it contains path and/or search
@@ -238,12 +235,12 @@ function verifyURLCandidate(baseURL) {
   }
 
   // disregard the non-prod hostnames
-  if (isInvalidSubdomain(url.hostname)) {
+  if (isInvalidSubdomain(config, url.hostname)) {
     throw new InvalidSiteCandidate('URL most likely contains a non-prod domain', url.href);
   }
 
   // disregard unwanted domains
-  if (isInvalidDomain(url.hostname)) {
+  if (isInvalidDomain(config, url.hostname)) {
     throw new InvalidSiteCandidate('URL contains an unwanted domain', url.href);
   }
 }
@@ -274,6 +271,30 @@ function buildSlackMessage(baseURL, source, hlxConfig, channel) {
     .buildToObject();
 }
 
+const getConfigFromContext = (lambdaContext) => {
+  const {
+    env: {
+      HLX_ADMIN_TOKEN: hlxAdminToken,
+      SITE_DETECTION_IGNORED_DOMAINS: ignoredDomains = '',
+      SITE_DETECTION_IGNORED_SUBDOMAIN_TOKENS: ignoredSubdomainTokens = '',
+      SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel,
+    },
+  } = lambdaContext;
+
+  return {
+    channel,
+    hlxAdminToken,
+    ignoredDomains: ignoredDomains.split(',')
+      .map((domain) => {
+        const trimmedDomain = domain.trim();
+        const regexBody = trimmedDomain.startsWith('/') && trimmedDomain.endsWith('/') ? trimmedDomain.slice(1, -1) : trimmedDomain;
+        return new RegExp(regexBody);
+      }),
+    ignoredSubdomainTokens: ignoredSubdomainTokens.split(',')
+      .map((token) => token.trim()),
+  };
+};
+
 /**
  * Hooks controller. Provides methods to process incoming webhooks.
  * @returns {object} Hooks controller.
@@ -281,10 +302,11 @@ function buildSlackMessage(baseURL, source, hlxConfig, channel) {
  */
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
+  const config = getConfigFromContext(lambdaContext);
 
   async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
-    verifyURLCandidate(baseURL);
+    verifyURLCandidate(config, baseURL);
     await verifyHelixSite(baseURL, hlxConfig);
 
     const siteCandidate = {
@@ -328,9 +350,8 @@ function HooksController(lambdaContext) {
   }
 
   async function sendDiscoveryMessage(baseURL, source, hlxConfig = {}) {
-    const { SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: channel } = lambdaContext.env;
     const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
-    return slackClient.postMessage(buildSlackMessage(baseURL, source, hlxConfig, channel));
+    return slackClient.postMessage(buildSlackMessage(baseURL, source, hlxConfig, config.channel));
   }
 
   async function processCDNHook(context) {
@@ -351,12 +372,11 @@ function HooksController(lambdaContext) {
       return badRequest('X-Forwarded-Host header is missing');
     }
 
-    const { HLX_ADMIN_TOKEN: hlxAdminToken } = context.env;
     const domains = requestXForwardedHost.split(',').map((domain) => domain.trim());
     const primaryDomain = domains[0];
 
     // extract the url from the x-forwarded-host header and determine hlx config
-    const hlxConfig = await extractHlxConfig(domains, hlxVersion, hlxAdminToken, log);
+    const hlxConfig = await extractHlxConfig(domains, hlxVersion, config.hlxAdminToken, log);
 
     const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
     const source = SITE_CANDIDATE_SOURCES.CDN;

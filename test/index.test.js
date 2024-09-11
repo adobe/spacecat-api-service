@@ -69,6 +69,7 @@ describe('Index Tests', () => {
         IMS_CLIENT_ID: 'mock-client-id',
         IMS_CLIENT_CODE: 'mock-client-code',
         IMS_CLIENT_SECRET: 'mock-client-secret',
+        IMPORT_CONFIGURATION: '{}',
       },
       dataAccess: {
         getSitesWithLatestAudit: sinon.stub().resolves([]),
