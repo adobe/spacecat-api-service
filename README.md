@@ -120,3 +120,10 @@ IMPORT_CONFIGURATION=JSON document which includes the following configuration pr
   - queueUrlPrefix: prefix for import queue URLs (eg. https://sqs.us-east-1.amazonaws.com/1234567890/), used to create the complete queue URL for import jobs
   - s3Bucket: the S3 bucket to store import job artifacts
 ```
+
+The `multipartFormData` wrapper uses the following optional env variables:
+
+```plaintext
+MULTIPART_FORM_FILE_COUNT_LIMIT=Maximum number of files which can be included in a multipart/form-data request (defaults to 1)
+MULTIPART_FORM_MAX_FILE_SIZE_MB=Maximum file size in MB for a single file in a multipart/form-data request (defaults to 20)
+```
