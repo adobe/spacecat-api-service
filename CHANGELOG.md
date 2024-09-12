@@ -1,3 +1,10 @@
+## [1.65.3](https://github.com/adobe/spacecat-api-service/compare/v1.65.2...v1.65.3) (2024-09-12)
+
+
+### Bug Fixes
+
+* add user agent to fetch request ([d5fd9b4](https://github.com/adobe/spacecat-api-service/commit/d5fd9b4c5e39f8235a4442b72021b2e1845a43ad))
+
 ## [1.65.2](https://github.com/adobe/spacecat-api-service/compare/v1.65.1...v1.65.2) (2024-09-12)
 
 
