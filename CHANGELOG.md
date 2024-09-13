@@ -1,3 +1,10 @@
+## [1.65.4](https://github.com/adobe/spacecat-api-service/compare/v1.65.3...v1.65.4) (2024-09-13)
+
+
+### Bug Fixes
+
+* slack psi run command link ([#492](https://github.com/adobe/spacecat-api-service/issues/492)) ([13fa995](https://github.com/adobe/spacecat-api-service/commit/13fa9959f244b532bb101b5776e0e30f1d771212))
+
 ## [1.65.3](https://github.com/adobe/spacecat-api-service/compare/v1.65.2...v1.65.3) (2024-09-12)
 
 
