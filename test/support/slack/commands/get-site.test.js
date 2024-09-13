@@ -74,11 +74,8 @@ describe('GetSiteCommand', () => {
         getGitHubURL: () => '',
         isLive: () => true,
         getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
-        getAuditConfig: () => ({
-          auditsDisabled: () => false,
-          getAuditTypeConfig: () => ({ disabled: () => false }),
-        }),
       }),
+      getConfiguration: sinon.stub().resolves({ isHandlerEnabledForSite: () => true }),
       getAuditsForSite: sinon.stub(),
     };
     context = { dataAccess: dataAccessStub, log: console };
