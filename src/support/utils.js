@@ -191,7 +191,7 @@ export const triggerImportRun = async (
 export async function isHelixSite(url, edgeConfig = {}) {
   let resp;
   try {
-    resp = await fetch(url);
+    resp = await fetch(url, { headers: { 'User-Agent': 'curl/7.88.1' } });
   } catch (e) {
     return {
       isHelix: false,

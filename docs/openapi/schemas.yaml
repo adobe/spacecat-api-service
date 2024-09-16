@@ -26,6 +26,7 @@ AuditType:
     - 'broken-backlinks'
     - 'canonical'
     - 'sitemap'
+    - 'structured-data'
     - 'costs'
   example: 'cwv'
 URL:
@@ -403,6 +404,18 @@ Audit:
       $ref: '#/AuditResult'
     previousAuditResult:
       $ref: '#/AuditResult'
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    auditedAt: '2024-01-20T12:00:00Z'
+    expiresAt: '2024-07-20T12:00:00Z'
+    auditType: 'cwv'
+    isError: false
+    deliveryType: 'aem_edge'
+    fullAuditRef: 'https://some-audit-system/full-report/1234'
+    auditResult:
+      someProperty: 'someValue'
+    previousAuditResult:
+      someProperty: 'somePreviousValue'
 AuditResult:
   description: The result of an audit, which is dependent on the audit type.
   oneOf:
@@ -428,6 +441,10 @@ AuditResult:
           description: |
             A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
           type: string
+    - type: array
+      description: Information about the provided URLs in the Google index.
+      items:
+        $ref: './schemas.yaml#/StructuredData'
     - type: object
       description: |
         The result of costs audit.
@@ -447,10 +464,53 @@ AuditResult:
               description: |
                 A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
               type: string
+    - type: object
+      description: The result of CWV audit
+      properties:
+        cwv:
+          type: array
+          description: A list of CWV metrics per url.
+          items:
+            $ref: './schemas.yaml#/CWVResult'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
+CWVResult:
+  type: object
+  properties:
+    url:
+      $ref: '#/URL'
+    pageviews:
+      type: integer
+      example: 349900
+    lcp:
+      type: number
+      format: float
+      example: 3303.300000000745
+    lcpCount:
+      type: integer
+      example: 4873
+    cls:
+      type: number
+      format: float
+      example: 0.0138671875
+    clsCount:
+      type: integer
+      example: 4216
+    inp:
+      type: integer
+      example: 72
+    inpCount:
+      type: integer
+      example: 1952
+    ttfb:
+      type: number
+      format: float
+      example: 732.0500007271767
+    ttfbCount:
+      type: integer
+      example: 5678
 ExperimentationOpportunity:
   type: object
   readOnly: true
@@ -495,6 +555,77 @@ ExperimentationOpportunity:
       description: The metrics for the experimentation opportunity
       items:
         type: object
+StructuredData:
+  type: object
+  readOnly: true
+  properties:
+    inspectionUrl:
+      type: string
+      description: The URL that was inspected
+    indexStatusResult:
+      type: object
+      description: Result of the index status analysis.
+      properties:
+        verdict:
+          $ref: '#/Verdict'
+        lastCrawlTime:
+          $ref: '#/DateTime'
+    richResults:
+      type: object
+      description: Result of the Rich Results analysis. Absent if there are no rich results found.
+      properties:
+        verdict:
+          $ref: '#/Verdict'
+        detectedItemTypes:
+          type: array
+          description: A list of zero or more rich result types detected on this page.
+          items:
+            type: string
+            example: 'Product snippets'
+        detectedIssues:
+          type: array
+          description: A list of zero or more rich results errors detected on this page.
+          items:
+            type: object
+            properties:
+              richResultType:
+                type: string
+                description: Rich Results type detected on this page.
+                example: 'Product snippets'
+              items:
+                type: array
+                description: List of Rich Results items that have issues.
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: The user-provided name of this item.
+                      example: 'Product name'
+                    issues:
+                      type: array
+                      description: A list of rich result issues found for this instance.
+                      items:
+                        type: object
+                        properties:
+                          issueMessage:
+                            type: string
+                            description: Rich Results issue type.
+                            example: 'Missing field "image"'
+                          severity:
+                            type: string
+                            description: Severity of this issue.
+                            example: 'ERROR'
+
+Verdict:
+  type: string
+  description: High-level verdict about whether the URL is indexed.
+  enum:
+    - 'VERDICT_UNSPECIFIED'
+    - 'PASS'
+    - 'PARTIAL'
+    - 'FAIL'
+    - 'NEUTRAL'
 HoolihanHeaders:
   type: object
   properties:
@@ -1124,25 +1255,15 @@ SiteMetricList:
 ImportOptions:
   type: object
   properties:
-    pageLoadTimeoutMs:
+    pageLoadTimeout:
       description: The time in milliseconds to wait for the page to load
       type: integer
     enableJavascript:
       description: Whether to enable JavaScript on the page
       type: boolean
-    scrollToBottom:
-      description: Whether to scroll to the bottom of the page
-      type: boolean
-    customHeaders:
-      description: Custom headers to send with each HTTP request
-      type: object
-      additionalProperties: true
   example:
-    pageLoadTimeoutMs: 100
-    enableJavaScript: true
-    scrollToBottom: true
-    customHeaders:
-      example-header-name: 'example-header-value'
+    pageLoadTimeout: 100
+    enableJavascript: true
 ImportJobRequest:
   type: object
   required:
@@ -1159,14 +1280,19 @@ ImportJobRequest:
     importScript:
       description: Optional import.js mapping file
       type: string
-      format: base64
+      format: binary
+    customHeaders:
+      description: Optional custom headers to send with each HTTP request
+      type: object
   example:
     urls:
       - 'https://example.com/en/page1'
       - 'https://example.com/fr/page2'
     options:
       enableJavascript: true
-      scrollToBottom: true
+    importScript: (binary data)
+    customHeaders:
+      example-header-name: 'example-header-value'
 ImportJobStatus:
   type: object
   properties:

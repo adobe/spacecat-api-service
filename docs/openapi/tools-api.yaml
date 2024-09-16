@@ -5,9 +5,9 @@ import:
     summary: Create a new import job
     description: |
       This endpoint can be used to start a new import job with a set of URLs, import API key,
-      and an optional import.js mapping file. The import job will be processed asynchronously and 
-      the status of the job can be queried at the /tools/import/jobs/{jobId} endpoint. If there is no 
-      import queue available at the time of the request, a 503 Service Unavailable response will 
+      optional import.js mapping file, and optional custom headers. The import job will be processed 
+      asynchronously and the status of the job can be queried at the /tools/import/jobs/{jobId} endpoint.
+      If there is no import queue available at the time of the request, a 503 Service Unavailable response will
       be returned. A single import job per client is permitted, otherwise a 429 Too Many Requests
       response will be returned.
     operationId: startImportJob
@@ -24,7 +24,7 @@ import:
     requestBody:
       required: true
       content:
-        application/json:
+        multipart/form-data:
           schema:
             $ref: './schemas.yaml#/ImportJobRequest'
     responses:
@@ -38,6 +38,8 @@ import:
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '429':
+        $ref: './responses.yaml#/429'
       '500':
         $ref: './responses.yaml#/500'
       '503':
