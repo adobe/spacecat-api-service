@@ -70,6 +70,7 @@ describe('getRouteHandlers', () => {
     createImportJob: sinon.stub(),
     getImportJobStatus: sinon.stub(),
     getImportJobResult: sinon.stub(),
+    getImportJobProgress: sinon.stub(),
     getImportJobsByDateRange: sinon.stub(),
   };
 
@@ -146,6 +147,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /tools/import/jobs/:jobId',
       'POST /tools/import/jobs/:jobId/result',
+      'GET /tools/import/jobs/:jobId/progress',
       'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
     );
 

@@ -18,6 +18,7 @@ import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
+import { ImportUrlStatus } from '@adobe/spacecat-shared-data-access/src/models/importer/import-constants.js';
 import { createImportJob } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
 import { createImportUrl } from '@adobe/spacecat-shared-data-access/src/models/importer/import-url.js';
 import fs from 'fs';
@@ -101,6 +102,8 @@ describe('ImportController tests', () => {
       createNewImportJob: (data) => createImportJob(data),
       createNewImportUrl: (data) => createImportUrl(data),
       getImportJobByID: sandbox.stub(),
+      getImportJobProgress: sandbox.stub(),
+      getImportUrlsByJobId: sandbox.stub().resolves([]),
       getApiKeyByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
     };
 
@@ -343,8 +346,6 @@ describe('ImportController tests', () => {
 
       expect(importJob.options).to.deep.equal({
         enableJavascript: true,
-        hasCustomHeaders: true,
-        hasCustomImportJs: true,
       });
     });
 
@@ -378,6 +379,84 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
+    });
+  });
+
+  describe('getImportJobProgress', () => {
+    it('should respond with an expected progress response', async () => {
+      baseContext.dataAccess.getImportJobProgress = sandbox.stub().resolves([
+        createImportJob({
+          ...exampleJob,
+          hashedApiKey: '123',
+        }),
+      ]);
+
+      // only need to provide enough import url data to satisfy the import-supervisor, no need
+      // for all the other properties of a ImportUrl object.
+      baseContext.dataAccess.getImportUrlsByJobId = sandbox.stub().resolves([
+        { state: { status: ImportUrlStatus.COMPLETE } },
+        { state: { status: ImportUrlStatus.COMPLETE } },
+        { state: { status: ImportUrlStatus.RUNNING } },
+        { state: { status: ImportUrlStatus.PENDING } },
+        { state: { status: ImportUrlStatus.REDIRECT } },
+        { state: { status: ImportUrlStatus.FAILED } },
+      ]);
+
+      baseContext.params.jobId = exampleJob.id;
+      importController = ImportController(baseContext);
+      const response = await importController.getImportJobProgress(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const progress = await response.json();
+      expect(progress).to.deep.equal({
+        pending: 1,
+        redirect: 1,
+        running: 1,
+        completed: 2,
+        failed: 1,
+      });
+    });
+
+    it('should respond a job not found for non existent jobs', async () => {
+      baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(null);
+      baseContext.params.jobId = 'does-not-exist';
+
+      importController = ImportController(baseContext);
+      const response = await importController.getImportJobProgress(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(404);
+    });
+
+    it('should return default values when no import urls are available', async () => {
+      baseContext.dataAccess.getImportJobProgress = sandbox.stub().resolves([
+        createImportJob({ ...exampleJob, hashedApiKey: '123' }),
+      ]);
+
+      baseContext.params.jobId = exampleJob.id;
+      importController = ImportController(baseContext);
+
+      const response = await importController.getImportJobProgress(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+
+      const progress = await response.json();
+      expect(progress).to.deep.equal({
+        pending: 0,
+        redirect: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+    });
+
+    it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
+      baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
+      baseContext.params.jobId = exampleJob.id;
+      const response = await importController.getImportJobProgress(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(404);
+      expect(response.headers.get('x-error')).to.equal('Not found');
     });
   });
 
@@ -418,7 +497,6 @@ describe('ImportController tests', () => {
       expect(jobStatus.id).to.equal('f91afda0-afc8-467e-bfa3-fdbeba3037e8');
       expect(jobStatus.apiKey).to.be.undefined;
       expect(jobStatus.baseURL).to.equal('https://www.example.com');
-      expect(jobStatus.importQueueId).to.equal('spacecat-import-queue-1');
       expect(jobStatus.status).to.equal('RUNNING');
       expect(jobStatus.options).to.deep.equal({});
     });
