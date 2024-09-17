@@ -26,6 +26,5 @@ export const ImportJobDto = {
     duration: importJob.getDuration(),
     status: importJob.getStatus(),
     initiatedBy: importJob.getInitiatedBy(),
-    progress: importJob.getProgress(),
   }),
 };
