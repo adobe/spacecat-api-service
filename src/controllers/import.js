@@ -32,10 +32,23 @@ import { ImportJobDto } from '../dto/import-job.js';
  * @constructor
  */
 function ImportController(context) {
+  /**
+   * The import controller has a number of scopes that are required to access different parts of the
+   * import functionality. These scopes are used to validate the authenticated user has the required
+   * level of access.
+   * The scopes are:
+   * READ: 'imports.read' - allows users to view import jobs
+   * WRITE: 'imports.write' - allows users to create new import jobs
+   * READ_ALL: 'imports.read_all' - allows users to view all import jobs
+   * WRITE_ALL_DOMAINS: 'imports.write_all_domains' - allows users to import across any domain
+   * @type {{READ: 'imports.read', WRITE_ALL_DOMAINS: 'imports.write_all_domains',
+   * READ_ALL: 'imports.read_all', WRITE: 'imports.write'}}
+   */
   const SCOPE = {
     READ: 'imports.read',
     WRITE: 'imports.write',
     READ_ALL: 'imports.read_all',
+    WRITE_ALL_DOMAINS: 'imports.write_all_domains',
   };
 
   const {
