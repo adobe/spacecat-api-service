@@ -539,7 +539,7 @@ ExperimentationOpportunity:
     trackedKPISiteAverage:
       type: number
       description: The average value of KPI tracked across the site.
-      example: 0.75
+      example: 0.45
     pageviews:
       type: integer
       description: The total number of views this webpage has received
