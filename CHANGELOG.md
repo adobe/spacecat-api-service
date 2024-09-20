@@ -1,3 +1,10 @@
+## [1.65.9](https://github.com/adobe/spacecat-api-service/compare/v1.65.8...v1.65.9) (2024-09-20)
+
+
+### Bug Fixes
+
+* Improve granularity of experimentation opportunities ([#503](https://github.com/adobe/spacecat-api-service/issues/503)) ([50027e8](https://github.com/adobe/spacecat-api-service/commit/50027e80fa6abb07dda22dcff2428b002d1a96c4))
+
 ## [1.65.8](https://github.com/adobe/spacecat-api-service/compare/v1.65.7...v1.65.8) (2024-09-20)
 
 
