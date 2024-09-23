@@ -1,3 +1,45 @@
+## [1.65.12](https://github.com/adobe/spacecat-api-service/compare/v1.65.11...v1.65.12) (2024-09-22)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#506](https://github.com/adobe/spacecat-api-service/issues/506)) ([2644bd4](https://github.com/adobe/spacecat-api-service/commit/2644bd47af5d6903d7392b6e65cdb6c9dbbfa7fe))
+
+## [1.65.11](https://github.com/adobe/spacecat-api-service/compare/v1.65.10...v1.65.11) (2024-09-21)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#505](https://github.com/adobe/spacecat-api-service/issues/505)) ([53f8c5f](https://github.com/adobe/spacecat-api-service/commit/53f8c5f419ae82751db8bb5983b4c879ba72d324))
+
+## [1.65.10](https://github.com/adobe/spacecat-api-service/compare/v1.65.9...v1.65.10) (2024-09-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.9.2 ([#504](https://github.com/adobe/spacecat-api-service/issues/504)) ([d69d2d5](https://github.com/adobe/spacecat-api-service/commit/d69d2d51b3d18bab3a31e36231334fce47158355))
+
+## [1.65.9](https://github.com/adobe/spacecat-api-service/compare/v1.65.8...v1.65.9) (2024-09-20)
+
+
+### Bug Fixes
+
+* Improve granularity of experimentation opportunities ([#503](https://github.com/adobe/spacecat-api-service/issues/503)) ([50027e8](https://github.com/adobe/spacecat-api-service/commit/50027e80fa6abb07dda22dcff2428b002d1a96c4))
+
+## [1.65.8](https://github.com/adobe/spacecat-api-service/compare/v1.65.7...v1.65.8) (2024-09-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.20.1 ([#502](https://github.com/adobe/spacecat-api-service/issues/502)) ([c458819](https://github.com/adobe/spacecat-api-service/commit/c4588198a969f5496f70b640d89fb0e0a383969b))
+
+## [1.65.7](https://github.com/adobe/spacecat-api-service/compare/v1.65.6...v1.65.7) (2024-09-19)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#501](https://github.com/adobe/spacecat-api-service/issues/501)) ([0055b44](https://github.com/adobe/spacecat-api-service/commit/0055b44bd8c45b28a0f79d5313bb4df5f1469b5b))
+
 ## [1.65.6](https://github.com/adobe/spacecat-api-service/compare/v1.65.5...v1.65.6) (2024-09-16)
 
 
