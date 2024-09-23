@@ -77,6 +77,39 @@ import-job-status:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
+import-job-progress:
+  get:
+    tags:
+      - import
+    summary: Query the progress of an import job
+    description: |
+      This endpoint can be used to query the progress of an import job, given its jobId.
+    operationId: getImportJobProgress
+    security:
+      - api_key: [ ]
+    parameters:
+      - $ref: './parameters.yaml#/jobId/progress'
+      - in: header
+        name: x-api-key
+        schema:
+          type: string
+        description: |
+          Client-specific import API key. Must match the key used to start the import job.
+    responses:
+      '200':
+        description: The current progress of the import job.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ImportJobProgress'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
 import-job-result:
   post:
     tags:

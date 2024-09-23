@@ -1307,19 +1307,22 @@ ImportJobStatus:
         - 'COMPLETE'
         - 'FAILED'
     startTime:
-      description: The date and time when the import job started
+      description: The date and time when the import job started.
       $ref: '#/DateTime'
     endTime:
-      description: The date and time when the import job ended, if finished
+      description: The date and time when the import job ended, if finished.
       $ref: '#/DateTime'
     urlCount:
-      description: The total number of URLs in the job
+      description: The total number of URLs in the job.
       type: integer
     successCount:
-      description: The number of URLs successfully imported
+      description: The number of URLs successfully imported.
       type: integer
     failedCount:
-      description: The number of URLs that failed to import
+      description: The number of URLs that failed to import.
+      type: integer
+    redirectCount:
+      description: The number of URLs that were redirected.
       type: integer
   example:
     id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
@@ -1328,6 +1331,30 @@ ImportJobStatus:
     urlCount: 25
     successCount: 15
     failedCount: 0
+ImportJobProgress:
+  type: object
+  properties:
+    pending:
+      type: integer
+      description: The number of pending url jobs still to process.
+    redirect:
+      type: integer
+      description: The number of urls that resulted in a redirect.
+    running:
+      type: integer
+      description: The number of url jobs that are running.
+    completed:
+      type: integer
+      description: The number of url jobs that have completed.
+    failed:
+      type: integer
+      description: The number of url jobs that have failed.
+  example:
+    pending: 0
+    redirect: 0
+    running: 0
+    completed: 1
+    failed: 0
 ImportJobArchive:
   type: object
   properties:
