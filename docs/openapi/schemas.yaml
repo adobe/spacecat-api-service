@@ -530,12 +530,16 @@ ExperimentationOpportunity:
       example: "https://space.cat/screenshots/some-cool-page.png"
     trackedPageKPIName:
       type: string
-      description: The name of KPI tracked for this experiment.
+      description: The name of KPI tracked.
       example: 'Bounce rate'
     trackedPageKPIValue:
       type: number
-      description: The value of KPI tracked for this experiment.
+      description: The value of KPI tracked for this page.
       example: 0.80
+    trackedKPISiteAverage:
+      type: number
+      description: The average value of KPI tracked across the site.
+      example: 0.45
     pageviews:
       type: integer
       description: The total number of views this webpage has received
@@ -1255,25 +1259,15 @@ SiteMetricList:
 ImportOptions:
   type: object
   properties:
-    pageLoadTimeoutMs:
+    pageLoadTimeout:
       description: The time in milliseconds to wait for the page to load
       type: integer
     enableJavascript:
       description: Whether to enable JavaScript on the page
       type: boolean
-    scrollToBottom:
-      description: Whether to scroll to the bottom of the page
-      type: boolean
-    customHeaders:
-      description: Custom headers to send with each HTTP request
-      type: object
-      additionalProperties: true
   example:
-    pageLoadTimeoutMs: 100
-    enableJavaScript: true
-    scrollToBottom: true
-    customHeaders:
-      example-header-name: 'example-header-value'
+    pageLoadTimeout: 100
+    enableJavascript: true
 ImportJobRequest:
   type: object
   required:
@@ -1290,14 +1284,19 @@ ImportJobRequest:
     importScript:
       description: Optional import.js mapping file
       type: string
-      format: base64
+      format: binary
+    customHeaders:
+      description: Optional custom headers to send with each HTTP request
+      type: object
   example:
     urls:
       - 'https://example.com/en/page1'
       - 'https://example.com/fr/page2'
     options:
       enableJavascript: true
-      scrollToBottom: true
+    importScript: (binary data)
+    customHeaders:
+      example-header-name: 'example-header-value'
 ImportJobStatus:
   type: object
   properties:

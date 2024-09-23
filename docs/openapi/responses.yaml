@@ -131,6 +131,11 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'429':
+  description: Too many requests.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '500':
   description: Internal server error.
   headers:

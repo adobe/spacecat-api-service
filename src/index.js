@@ -51,6 +51,7 @@ import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
+import { multipartFormData } from './support/multipart-form-data.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -127,8 +128,9 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 export const main = wrap(run)
   .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler] })
   .with(dataAccess)
-  .with(enrichPathInfo)
   .with(bodyData)
+  .with(multipartFormData)
+  .with(enrichPathInfo)
   .with(sqs)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
