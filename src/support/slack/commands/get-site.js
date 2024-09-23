@@ -134,13 +134,16 @@ function GetSiteCommand(context) {
         return;
       }
 
-      const audits = await dataAccess.getAuditsForSite(site.getId(), `lhs-${psiStrategy}`, false);
+      const auditType = `lhs-${psiStrategy}`;
+      const audits = await dataAccess.getAuditsForSite(site.getId(), auditType, false);
+      const configuration = await dataAccess.getConfiguration();
+      const isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
       const latestAudit = audits.length > 0 ? audits[0] : null;
 
       const textSections = [{
         text: `
 *Site Status for ${site.getBaseURL()}*
-${printSiteDetails(site, psiStrategy, latestAudit)}
+${printSiteDetails(site, isAuditEnabled, psiStrategy, latestAudit)}
 
 _Audits of *${psiStrategy}* strategy, sorted by date descending:_
 ${formatAudits(audits)}
