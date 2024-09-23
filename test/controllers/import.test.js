@@ -396,6 +396,9 @@ describe('ImportController tests', () => {
       baseContext.dataAccess.getImportUrlsByJobId = sandbox.stub().resolves([
         { state: { status: ImportUrlStatus.COMPLETE } },
         { state: { status: ImportUrlStatus.COMPLETE } },
+        // setting a status to RUNNING should not affect the result
+        // as no process will flip a ImportUrl status to running at this time, therefore
+        // the code will ignore running in the results
         { state: { status: ImportUrlStatus.RUNNING } },
         { state: { status: ImportUrlStatus.PENDING } },
         { state: { status: ImportUrlStatus.REDIRECT } },
@@ -411,7 +414,6 @@ describe('ImportController tests', () => {
       expect(progress).to.deep.equal({
         pending: 1,
         redirect: 1,
-        running: 1,
         completed: 2,
         failed: 1,
       });
@@ -444,7 +446,6 @@ describe('ImportController tests', () => {
       expect(progress).to.deep.equal({
         pending: 0,
         redirect: 0,
-        running: 0,
         completed: 0,
         failed: 0,
       });

@@ -40,7 +40,7 @@ function ImportController(context) {
    * READ_ALL: 'imports.read_all', WRITE: 'imports.write'}}
    */
   const SCOPE = {
-    READ: 'imports.read', // allows users to view import jobs
+    READ: 'imports.read', // allows users to read the import jobs created with their API key
     WRITE: 'imports.write', // allows users to create new import jobs
     READ_ALL: 'imports.read_all', // allows users to view all import jobs
     WRITE_ALL_DOMAINS: 'imports.write_all_domains', // allows users to import across any domain
@@ -262,9 +262,8 @@ function ImportController(context) {
    * - failed: URLs that have failed to import.
    * - pending: URLs that are still being processed.
    * - redirected: URLs that have been redirected.
-   * - running - URLs that are currently being imported.
    * @param requestContext - Context of the request.
-   * @return {Promise<Response|*>} 200 OK with a JSON representation of the import job progress.
+   * @return {Promise<Response>} 200 OK with a JSON representation of the import job progress.
    */
   async function getImportJobProgress(requestContext) {
     const { jobId, importApiKey } = parseRequestContext(requestContext);

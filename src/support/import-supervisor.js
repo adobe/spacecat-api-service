@@ -255,10 +255,9 @@ function ImportSupervisor(services, config) {
 
   /**
    * Get the progress of an import job.
-   * @param jobId
-   * @param importApiKey
-   * @returns {Promise<{pending: number, redirect: number, running: number, completed: number,
-   * failed: number}>}
+   * @param {string} jobId - The ID of the job.
+   * @param {string} importApiKey - API key that was provided to start the job.
+   * @returns {Promise<{pending: number, redirect: number, completed: number, failed: number}>}
    */
   async function getImportJobProgress(jobId, importApiKey) {
     // verify that the job exists
@@ -269,6 +268,7 @@ function ImportSupervisor(services, config) {
 
     // merge all url entries into a single object
     return urls.reduce((acc, url) => {
+      // intentionally ignore RUNNING as currently no code will flip the url to a running state
       // eslint-disable-next-line default-case
       switch (url.state.status) {
         case ImportUrlStatus.PENDING:
@@ -276,9 +276,6 @@ function ImportSupervisor(services, config) {
           break;
         case ImportUrlStatus.REDIRECT:
           acc.redirect += 1;
-          break;
-        case ImportUrlStatus.RUNNING:
-          acc.running += 1;
           break;
         case ImportUrlStatus.COMPLETE:
           acc.completed += 1;
@@ -291,7 +288,6 @@ function ImportSupervisor(services, config) {
     }, {
       pending: 0,
       redirect: 0,
-      running: 0,
       completed: 0,
       failed: 0,
     });
