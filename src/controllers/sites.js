@@ -16,7 +16,7 @@ import {
   badRequest,
   noContent,
   notFound,
-  ok,
+  ok, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -26,6 +26,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 
+import { ContentClient } from '@adobe/spacecat-shared-content-client';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -34,10 +35,12 @@ import { KeyEventDto } from '../dto/key-event.js';
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
  * @param {DataAccess} dataAccess - Data access.
+ * @param env
+ * @param log
  * @returns {object} Sites controller.
  * @constructor
  */
-function SitesController(dataAccess) {
+function SitesController(dataAccess, env, log) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -352,6 +355,39 @@ function SitesController(dataAccess) {
     return ok(metrics);
   };
 
+  const updateRedirects = async (context) => {
+    // eslint-disable-next-line no-unused-vars
+    const siteId = context.params?.siteId;
+    const { redirects } = context.data;
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    const contentClient = ContentClient.createFrom({ env, log }, site);
+    try {
+      await contentClient.updateRedirects(redirects);
+      return ok(JSON.stringify(redirects));
+    } catch (e) {
+      return internalServerError(`Failed to update redirects: ${e.message}`);
+    }
+  };
+
+  const updateMetadata = async (context) => {
+    const siteId = context.params?.siteId;
+    const { path, metadata } = context.data;
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    const contentClient = ContentClient.createFrom({ env, log }, site);
+    try {
+      await contentClient.updatePageMetadata(path, new Map(metadata));
+      return ok(JSON.stringify(metadata));
+    } catch (e) {
+      return internalServerError(`Failed to update page ${path} metadata: ${e.message}`);
+    }
+  };
+
   return {
     createSite,
     getAll,
@@ -372,6 +408,10 @@ function SitesController(dataAccess) {
 
     // site metrics
     getSiteMetricsBySource,
+
+    // content client ops
+    updateRedirects,
+    updateMetadata,
   };
 }
 

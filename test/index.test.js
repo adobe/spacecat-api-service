@@ -83,6 +83,7 @@ describe('Index Tests', () => {
             getSlackConfig: () => {},
             getHandlers: () => {},
             getImports: () => [],
+            getHlxContentConfig: () => {},
           }),
         }),
         getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),

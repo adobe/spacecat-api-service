@@ -364,6 +364,7 @@ describe('Audits Controller', () => {
           getHandlerConfig: (type) => ({ [type]: {} }),
           getSlackConfig: () => {},
           getImports: () => [],
+          getHlxContentConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
         }),
         updateConfig: sinon.stub(),
@@ -403,6 +404,7 @@ describe('Audits Controller', () => {
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
           getImports: () => [],
+          getHlxContentConfig: () => {},
         }),
         updateConfig: sinon.stub(),
       };
@@ -442,6 +444,7 @@ describe('Audits Controller', () => {
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
           getImports: () => [],
+          getHlxContentConfig: () => {},
         }),
         updateConfig: sinon.stub(),
       };
@@ -484,6 +487,7 @@ describe('Audits Controller', () => {
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
           getImports: () => [],
+          getHlxContentConfig: () => {},
         }),
         updateConfig: sinon.stub(),
       };
@@ -571,6 +575,7 @@ describe('Audits Controller', () => {
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
           getImports: () => [],
+          getHlxContentConfig: () => {},
         }),
         updateConfig: sinon.stub(),
       };
@@ -614,6 +619,7 @@ describe('Audits Controller', () => {
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
           getImports: () => [],
+          getHlxContentConfig: () => {},
         }),
         updateConfig: sinon.stub(),
       };
@@ -657,6 +663,7 @@ describe('Audits Controller', () => {
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
           getImports: () => [],
+          getHlxContentConfig: () => {},
         }),
         updateConfig: sinon.stub(),
       };
@@ -698,6 +705,7 @@ describe('Audits Controller', () => {
           getSlackConfig: () => {},
           getHandlers: () => (({ [auditType]: {} })),
           getImports: () => [],
+          getHlxContentConfig: () => {},
         }),
         updateConfig: sinon.stub(),
       };

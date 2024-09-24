@@ -94,6 +94,8 @@ describe('Sites Controller', () => {
     'getByID',
     'removeSite',
     'updateSite',
+    'updateMetadata',
+    'updateRedirects',
     'createKeyEvent',
     'getKeyEventsBySiteID',
     'removeKeyEvent',
