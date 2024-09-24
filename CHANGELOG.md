@@ -1,3 +1,10 @@
+## [1.66.1](https://github.com/adobe/spacecat-api-service/compare/v1.66.0...v1.66.1) (2024-09-24)
+
+
+### Bug Fixes
+
+* SITES-25634 [Importer] Expose hasCustomImportJs and hasCustomHeaders as two new fields on a import job ([#509](https://github.com/adobe/spacecat-api-service/issues/509)) ([a0fef34](https://github.com/adobe/spacecat-api-service/commit/a0fef34f211eabd1702424e8ce5889611640f79b))
+
 # [1.66.0](https://github.com/adobe/spacecat-api-service/compare/v1.65.12...v1.66.0) (2024-09-24)
 
 
