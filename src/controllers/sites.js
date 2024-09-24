@@ -16,7 +16,7 @@ import {
   badRequest,
   noContent,
   notFound,
-  ok,
+  ok, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -34,11 +34,12 @@ import { KeyEventDto } from '../dto/key-event.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
- * @param {DataAccess} dataAccess - Data access.
+ * @param {UniversalContext} lambdaContext - Lambda function context.
  * @returns {object} Sites controller.
  * @constructor
  */
-function SitesController(dataAccess) {
+function SitesController(lambdaContext) {
+  const { dataAccess } = lambdaContext;
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -353,29 +354,37 @@ function SitesController(dataAccess) {
     return ok(metrics);
   };
 
-  // eslint-disable-next-line consistent-return
   const updateRedirects = async (context) => {
     // eslint-disable-next-line no-unused-vars
     const siteId = context.params?.siteId;
+    const { redirects } = context.data;
     const site = await dataAccess.getSiteByID(siteId);
     if (!site) {
       return notFound('Site not found');
+    }
+    const contentClient = ContentClient.createFrom(lambdaContext, site);
+    try {
+      await contentClient.updateRedirects(redirects);
+      return ok(JSON.stringify(redirects));
+    } catch (e) {
+      return internalServerError(`Failed to update redirects: ${e.message}`);
     }
   };
 
-  // eslint-disable-next-line consistent-return
   const updateMetadata = async (context) => {
     const siteId = context.params?.siteId;
-    // eslint-disable-next-line no-unused-vars
-    const path = context.params?.path;
+    const { path, metadata } = context.data;
     const site = await dataAccess.getSiteByID(siteId);
     if (!site) {
       return notFound('Site not found');
     }
-    // eslint-disable-next-line no-unused-vars
-    const { metadata } = context.data;
-    const contentClient = ContentClient.createFrom(context, site);
-    await contentClient.updatePageMetadata(path, new Map([['Alina', 'Zambila'], ['title', 'Site']]));
+    const contentClient = ContentClient.createFrom(lambdaContext, site);
+    try {
+      await contentClient.updatePageMetadata(path, new Map(metadata));
+      return ok(JSON.stringify(metadata));
+    } catch (e) {
+      return internalServerError(`Failed to update page ${path} metadata: ${e.message}`);
+    }
   };
 
   return {
