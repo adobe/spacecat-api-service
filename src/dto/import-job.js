@@ -30,5 +30,7 @@ export const ImportJobDto = {
     successCount: importJob.getSuccessCount(),
     failedCount: importJob.getFailedCount(),
     redirectCount: importJob.getFailedCount(),
+    hasCustomHeaders: importJob.hasCustomHeaders(),
+    hasCustomImportJs: importJob.hasCustomImportJs(),
   }),
 };
