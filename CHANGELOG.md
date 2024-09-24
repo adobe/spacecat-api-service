@@ -1,3 +1,10 @@
+# [1.66.0](https://github.com/adobe/spacecat-api-service/compare/v1.65.12...v1.66.0) (2024-09-24)
+
+
+### Features
+
+* SITES-23133 [Importer] Report on the progress of a import job via a new jobs endpoint ([#508](https://github.com/adobe/spacecat-api-service/issues/508)) ([78ef726](https://github.com/adobe/spacecat-api-service/commit/78ef7261189a888edde53f770321519ec4ba8da4))
+
 ## [1.65.12](https://github.com/adobe/spacecat-api-service/compare/v1.65.11...v1.65.12) (2024-09-22)
 
 
