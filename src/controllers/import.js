@@ -32,6 +32,20 @@ import { ImportJobDto } from '../dto/import-job.js';
  * @constructor
  */
 function ImportController(context) {
+  /**
+   * The import controller has a number of scopes that are required to access different parts of the
+   * import functionality. These scopes are used to validate the authenticated user has the required
+   * level of access.
+   * @type {{READ: 'imports.read', WRITE_ALL_DOMAINS: 'imports.write_all_domains',
+   * READ_ALL: 'imports.read_all', WRITE: 'imports.write'}}
+   */
+  const SCOPE = {
+    READ: 'imports.read', // allows users to read the import jobs created with their API key
+    WRITE: 'imports.write', // allows users to create new import jobs
+    READ_ALL: 'imports.read_all', // allows users to view all import jobs
+    WRITE_ALL_DOMAINS: 'imports.write_all_domains', // allows users to import across any domain
+  };
+
   const {
     dataAccess, sqs, s3, log, env, auth, attributes,
   } = context;
@@ -85,7 +99,11 @@ function ImportController(context) {
     }
   }
 
-  function validateImportApiKey(importApiKey, scopes) {
+  /**
+   * Verify that the authenticated user has the required level of access scope.
+   * @param scopes a list of scopes to validate the user has access to.
+   */
+  function validateAccessScopes(scopes) {
     log.debug(`validating scopes: ${scopes}`);
 
     try {
@@ -120,7 +138,7 @@ function ImportController(context) {
 
     try {
       // The API scope imports.write is required to create a new import job
-      validateImportApiKey(importApiKey, ['imports.write']);
+      validateAccessScopes([SCOPE.WRITE]);
       validateRequestData(multipartFormData);
 
       const { authInfo: { profile } } = attributes;
@@ -137,10 +155,14 @@ function ImportController(context) {
       const {
         urls, options, importScript, customHeaders,
       } = multipartFormData;
+
+      // Merge the import configuration options with the request options allowing the user options
+      // to override the defaults
       const mergedOptions = {
         ...importConfiguration.options,
         ...options,
       };
+
       const job = await importSupervisor.startNewJob(
         urls,
         importApiKey,
@@ -174,11 +196,11 @@ function ImportController(context) {
    * @returns {Promise<Response>} 200 OK with a JSON representation of the import jobs.
    */
   async function getImportJobsByDateRange(requestContext) {
-    const { startDate, endDate, importApiKey } = parseRequestContext(requestContext);
+    const { startDate, endDate } = parseRequestContext(requestContext);
     log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}.`);
 
     try {
-      validateImportApiKey(importApiKey, ['imports.read_all']);
+      validateAccessScopes([SCOPE.READ_ALL]);
       validateIsoDates(startDate, endDate);
       const jobs = await importSupervisor.getImportJobsByDateRange(startDate, endDate);
       return ok(jobs.map((job) => ImportJobDto.toJSON(job)));
@@ -200,7 +222,7 @@ function ImportController(context) {
 
     try {
       // The API scope imports.read is required to get the import job status
-      validateImportApiKey(importApiKey, ['imports.read']);
+      validateAccessScopes([SCOPE.READ]);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       return ok(ImportJobDto.toJSON(job));
     } catch (error) {
@@ -221,7 +243,7 @@ function ImportController(context) {
 
     try {
       // The API scope imports.read is required to get the import job status
-      validateImportApiKey(importApiKey, ['imports.read']);
+      validateAccessScopes([SCOPE.READ]);
       const job = await importSupervisor.getImportJob(jobId, importApiKey);
       const downloadUrl = await importSupervisor.getJobArchiveSignedUrl(job);
       return ok({
@@ -234,10 +256,33 @@ function ImportController(context) {
     }
   }
 
+  /**
+   * Get the progress of an import job. Results are broken down into the following:
+   * - complete: URLs that have been successfully imported.
+   * - failed: URLs that have failed to import.
+   * - pending: URLs that are still being processed.
+   * - redirected: URLs that have been redirected.
+   * @param requestContext - Context of the request.
+   * @return {Promise<Response>} 200 OK with a JSON representation of the import job progress.
+   */
+  async function getImportJobProgress(requestContext) {
+    const { jobId, importApiKey } = parseRequestContext(requestContext);
+
+    try {
+      validateAccessScopes([SCOPE.READ]);
+      const progress = await importSupervisor.getImportJobProgress(jobId, importApiKey);
+      return ok(progress);
+    } catch (error) {
+      log.error(`Failed to fetch the import job progress: ${error.message}`);
+      return createErrorResponse(error);
+    }
+  }
+
   return {
     createImportJob,
     getImportJobStatus,
     getImportJobResult,
+    getImportJobProgress,
     getImportJobsByDateRange,
   };
 }

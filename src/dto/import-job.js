@@ -26,9 +26,9 @@ export const ImportJobDto = {
     duration: importJob.getDuration(),
     status: importJob.getStatus(),
     urlCount: importJob.getUrlCount(),
+    initiatedBy: importJob.getInitiatedBy(),
     successCount: importJob.getSuccessCount(),
     failedCount: importJob.getFailedCount(),
-    importQueueId: importJob.getImportQueueId(),
-    initiatedBy: importJob.getInitiatedBy(),
+    redirectCount: importJob.getFailedCount(),
   }),
 };

@@ -121,6 +121,8 @@ paths:
     $ref: './tools-api.yaml#/import'
   /tools/import/jobs/{jobId}:
     $ref: './tools-api.yaml#/import-job-status'
+  /tools/import/jobs/{jobId}/progress:
+    $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
 
