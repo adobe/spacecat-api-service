@@ -94,9 +94,19 @@ function ImportSupervisor(services, config) {
    * @param {string} hashedApiKey - API key used to authenticate the import job request.
    * @param {object} options - Client provided options for the import job.
    * @param initiatedBy - Details about the initiator of the import job.
+   * @param {boolean} hasCustomHeaders - Whether custom headers are provided. Defaults to false.
+   * @param {boolean} hasCustomImportJs - Whether custom import JS is provided. Defaults to false.
    * @returns {Promise<ImportJob>}
    */
-  async function createNewImportJob(urls, importQueueId, hashedApiKey, options, initiatedBy) {
+  async function createNewImportJob(
+    urls,
+    importQueueId,
+    hashedApiKey,
+    options,
+    initiatedBy,
+    hasCustomHeaders = false,
+    hasCustomImportJs = false,
+  ) {
     const newJob = {
       id: crypto.randomUUID(),
       baseURL: determineBaseURL(urls),
@@ -106,6 +116,8 @@ function ImportSupervisor(services, config) {
       urlCount: urls.length,
       status: ImportJobStatus.RUNNING,
       initiatedBy,
+      hasCustomHeaders,
+      hasCustomImportJs,
     };
     return dataAccess.createNewImportJob(newJob);
   }
@@ -126,6 +138,7 @@ function ImportSupervisor(services, config) {
    * asynchronously.
    * @param {Array<string>} urls - Array of URL records to queue.
    * @param {object} importJob - The import job record.
+   * @param {object} customHeaders - Optional custom headers to be sent with each request.
    */
   async function queueUrlsForImportWorker(urls, importJob, customHeaders) {
     log.info(`Starting a new import job of baseUrl: ${importJob.getBaseURL()} with ${urls.length}`
@@ -159,8 +172,8 @@ function ImportSupervisor(services, config) {
    * @param {string} importApiKey - The API key to use for the import job.
    * @param {object} options - Optional configuration params for the import job.
    * @param {string} importScript - Optional custom Base64 encoded import script.
-   * @param initiatedBy - Details about the initiator of the import job.
-   * @param customHeaders - Optional custom headers to be sent with each request.
+   * @param {object} initiatedBy - Details about the initiator of the import job.
+   * @param {object} customHeaders - Optional custom headers to be sent with each request.
    * @returns {Promise<ImportJob>}
    */
   async function startNewJob(
@@ -184,6 +197,8 @@ function ImportSupervisor(services, config) {
       hashedApiKey,
       options,
       initiatedBy,
+      !!customHeaders,
+      !!importScript,
     );
 
     log.info('New import job created:\n'
