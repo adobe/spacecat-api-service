@@ -107,7 +107,7 @@ function ImportSupervisor(services, config) {
     hasCustomHeaders = false,
     hasCustomImportJs = false,
   ) {
-    const newJob = {
+    return dataAccess.createNewImportJob({
       id: crypto.randomUUID(),
       baseURL: determineBaseURL(urls),
       importQueueId,
@@ -118,8 +118,7 @@ function ImportSupervisor(services, config) {
       initiatedBy,
       hasCustomHeaders,
       hasCustomImportJs,
-    };
-    return dataAccess.createNewImportJob(newJob);
+    });
   }
 
   /**
