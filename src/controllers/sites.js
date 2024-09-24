@@ -35,10 +35,12 @@ import { KeyEventDto } from '../dto/key-event.js';
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
  * @param {DataAccess} dataAccess - Data access.
+ * @param env
+ * @param log
  * @returns {object} Sites controller.
  * @constructor
  */
-function SitesController(dataAccess, env) {
+function SitesController(dataAccess, env, log) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -361,7 +363,7 @@ function SitesController(dataAccess, env) {
     if (!site) {
       return notFound('Site not found');
     }
-    const contentClient = ContentClient.createFrom(env, site);
+    const contentClient = ContentClient.createFrom({ env, log }, site);
     try {
       await contentClient.updateRedirects(redirects);
       return ok(JSON.stringify(redirects));
@@ -377,7 +379,7 @@ function SitesController(dataAccess, env) {
     if (!site) {
       return notFound('Site not found');
     }
-    const contentClient = ContentClient.createFrom(env, site);
+    const contentClient = ContentClient.createFrom({ env, log }, site);
     try {
       await contentClient.updatePageMetadata(path, new Map(metadata));
       return ok(JSON.stringify(metadata));
