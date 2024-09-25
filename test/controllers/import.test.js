@@ -209,6 +209,13 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Missing domain information');
     });
 
+    it('should create an import job for the user scope imports.write', async () => {
+      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.write', domains: ['https://www.example.com'] }, { name: 'imports.read', domains: ['https://www.example.com'] }];
+      const response = await importController.createImportJob(baseContext);
+
+      expect(response.status).to.equal(202);
+    });
+
     it('should create an import job for the user scope imports.write_all_domains', async () => {
       baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.write_all_domains', domains: [] }];
       const response = await importController.createImportJob(baseContext);
