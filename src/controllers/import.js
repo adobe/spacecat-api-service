@@ -157,12 +157,12 @@ function ImportController(context) {
   }
 
   /**
-   * Validate the URLs by domain.
+   * Check if the URLs in the request belong to the allowed domains.
    * @param urls
    * @param scopes
    */
   function validateUrlsByDomain(urls, scopes) {
-    // We do not need to check the domains for users with the write_all_domains scope
+    // We do not need to check the domains for users with scope: write_all_domains
     if (scopes.some((scope) => scope.name === SCOPE.WRITE_ALL_DOMAINS)) {
       return;
     }
