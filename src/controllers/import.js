@@ -15,6 +15,7 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import psl from 'psl';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -70,6 +71,7 @@ function ImportController(context) {
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
   const STATUS_ACCEPTED = 202;
+  const STATUS_UNAUTHORIZED = 401;
 
   function validateRequestData(data) {
     if (!isObject(data)) {
@@ -126,6 +128,63 @@ function ImportController(context) {
   }
 
   /**
+   * Extract the domain from a URL.
+   * @param inputUrl
+   * @return domain
+   */
+  function getDomain(inputUrl) {
+    const parsedUrl = new URL(inputUrl);
+    const parsedDomain = psl.parse(parsedUrl.hostname);
+    return parsedDomain.domain; // Extracts the full domain (e.g., example.co.uk)
+  }
+
+  /**
+   * Check if the URLs in urlList belong to any of the base domains.
+   * @param urlList
+   * @param baseDomainList
+   * @return {true} if all URLs belong to an allowed base domain
+   * @throws {ErrorWithStatusCode} if any URL does not belong to an allowed base domain
+   */
+  function isUrlInBaseDomains(urlList, baseDomainList) {
+    return urlList.every((inputUrl) => {
+      const urlDomain = getDomain(inputUrl);
+      const belongsToBaseDomain = baseDomainList.some((baseDomain) => urlDomain === baseDomain);
+      if (!belongsToBaseDomain) {
+        throw new ErrorWithStatusCode(`Invalid request: URL: ${inputUrl} not allowed`, STATUS_BAD_REQUEST);
+      }
+      return true;
+    });
+  }
+
+  /**
+   * Validate the URLs by domain.
+   * @param urls
+   * @param scopes
+   */
+  function validateUrlsByDomain(urls, scopes) {
+    // We do not need to check the domains for users with the write_all_domains scope
+    if (scopes.some((scope) => scope.name === SCOPE.WRITE_ALL_DOMAINS)) {
+      return;
+    }
+
+    const allowedDomains = scopes
+      .filter((scope) => {
+        if (scope.name === SCOPE.WRITE) {
+          if (!scope.domains || scope.domains.length === 0) {
+            throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
+          }
+          return true;
+        }
+        return false;
+      })
+      .map((scope) => scope.domains.map(getDomain))
+      .flat();
+
+    // Checks if a URL belongs to any of the base domains, throws an error otherwise
+    isUrlInBaseDomains(urls, allowedDomains);
+  }
+
+  /**
    * Create and start a new import job.
    * @param {UniversalContext} requestContext - The context of the universal serverless function.
    * @param {object} requestContext.multipartFormData - Parsed multipart/form-data request data.
@@ -137,8 +196,15 @@ function ImportController(context) {
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
 
     try {
-      // The API scope imports.write is required to create a new import job
-      validateAccessScopes([SCOPE.WRITE]);
+      try {
+        // The API scope imports.write is required to create a new import job
+        validateAccessScopes([SCOPE.WRITE]);
+      } catch (error) {
+        log.error(`Missing imports.write scope for creating a new import job: ${error.message}`);
+        // Check if the user has the write_all_domains API scope.
+        // This scope is restricted to a few users.
+        validateAccessScopes([SCOPE.WRITE_ALL_DOMAINS]);
+      }
       validateRequestData(multipartFormData);
 
       const { authInfo: { profile } } = attributes;
@@ -155,6 +221,10 @@ function ImportController(context) {
       const {
         urls, options, importScript, customHeaders,
       } = multipartFormData;
+
+      validateUrlsByDomain(urls, profile.getScopes());
+
+      log.debug(`Creating a new import job with ${urls.length} URLs.`);
 
       // Merge the import configuration options with the request options allowing the user options
       // to override the defaults
