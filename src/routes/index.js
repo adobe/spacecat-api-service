@@ -52,6 +52,7 @@ function isStaticRoute(routePattern) {
  * @param {Function} triggerHandler - The trigger handler function.
  * @param {Object} fulfillmentController - The fulfillment controller.
  * @param {Object} importController - The import controller.
+ * @param {Object} sitesAuditsController - The sites audits controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -65,6 +66,7 @@ export default function getRouteHandlers(
   triggerHandler,
   fulfillmentController,
   importController,
+  sitesAuditsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -99,6 +101,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
+    'PATCH /sites/audits': sitesAuditsController.update,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
     'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
     'POST /sites/:siteId/key-events': sitesController.createKeyEvent,

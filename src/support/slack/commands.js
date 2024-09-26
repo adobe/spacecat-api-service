@@ -20,6 +20,7 @@ import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
 import setLiveStatus from './commands/set-live-status.js';
 import help from './commands/help.js';
+import updateSitesAudits from './commands/update-sites-audits.js';
 
 /**
  * Returns all commands.
@@ -38,4 +39,5 @@ export default (context) => [
   runImport(context),
   setLiveStatus(context),
   help(context),
+  updateSitesAudits(context),
 ];

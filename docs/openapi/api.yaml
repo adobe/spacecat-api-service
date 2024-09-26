@@ -113,6 +113,8 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
+  /sites/audits:
+    $ref: '/sites-audits-api.yaml#/update'
   /slack/channels/invite-by-user-id:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
