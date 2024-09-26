@@ -157,8 +157,8 @@ function ImportController(context) {
 
   /**
    * Check if the URLs in urlList belong to any of the base domains.
-   * @param urlList
-   * @param baseDomainList
+   * @param urlList the list of URLs to check.
+   * @param baseDomainList the list of base domains to check against.
    * @return {true} if all URLs belong to an allowed base domain
    * @throws {ErrorWithStatusCode} if any URL does not belong to an allowed base domain
    */
