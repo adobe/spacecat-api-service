@@ -205,8 +205,8 @@ describe('ImportController tests', () => {
       baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.write', domains: [] }];
       const response = await importController.createImportJob(baseContext);
 
-      expect(response.status).to.equal(401);
-      expect(response.headers.get('x-error')).to.equal('Missing domain information');
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: URLs not allowed: https://example.com/page1, https://example.com/page2, https://example.com/page3');
     });
 
     it('should create an import job for the user scope imports.write', async () => {
@@ -216,8 +216,8 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(202);
     });
 
-    it('should create an import job for the user scope imports.write_all_domains', async () => {
-      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.write_all_domains', domains: [] }];
+    it('should create an import job for the user scope imports.all_domains', async () => {
+      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.all_domains', domains: [] }, { name: 'imports.write', domains: [] }];
       const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(202);

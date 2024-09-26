@@ -37,14 +37,14 @@ function ImportController(context) {
    * The import controller has a number of scopes that are required to access different parts of the
    * import functionality. These scopes are used to validate the authenticated user has the required
    * level of access.
-   * @type {{READ: 'imports.read', WRITE_ALL_DOMAINS: 'imports.write_all_domains',
+   * @type {{READ: 'imports.read', ALL_DOMAINS: 'imports.all_domains',
    * READ_ALL: 'imports.read_all', WRITE: 'imports.write'}}
    */
   const SCOPE = {
     READ: 'imports.read', // allows users to read the import jobs created with their API key
     WRITE: 'imports.write', // allows users to create new import jobs
     READ_ALL: 'imports.read_all', // allows users to view all import jobs
-    WRITE_ALL_DOMAINS: 'imports.write_all_domains', // allows users to import across any domain
+    ALL_DOMAINS: 'imports.all_domains', // allows users to import across any domain
   };
 
   const {
@@ -58,6 +58,7 @@ function ImportController(context) {
     env,
   };
 
+  const { authInfo: { profile } } = attributes;
   let importConfiguration = {};
   try {
     importConfiguration = JSON.parse(env.IMPORT_CONFIGURATION);
@@ -112,24 +113,8 @@ function ImportController(context) {
     try {
       auth.checkScopes(scopes);
     } catch (error) {
-      throw new ErrorWithStatusCode('Missing required scopes', 401);
+      throw new ErrorWithStatusCode('Missing required scopes', STATUS_UNAUTHORIZED);
     }
-
-    const { authInfo: { profile } } = attributes;
-
-    // Retrieving the scopes from the user profile
-    const apiKeyScopes = profile.getScopes();
-
-    // For scope WRITE, we need to check if
-    // the user's API key has the allowed domain information
-    apiKeyScopes.forEach((apiKeyScope) => {
-      if (apiKeyScope.name === SCOPE.WRITE) {
-        if (!apiKeyScope.domains || apiKeyScope.domains.length === 0) {
-          throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
-        }
-      }
-    });
-    return profile;
   }
 
   function createErrorResponse(error) {
@@ -185,17 +170,9 @@ function ImportController(context) {
   async function createImportJob(requestContext) {
     const { multipartFormData, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
-    let profile;
     try {
-      try {
-        // The API scope imports.write is required to create a new import job
-        profile = validateAccessScopes([SCOPE.WRITE]);
-      } catch (error) {
-        log.error(`Missing imports.write scope for creating a new import job: ${error.message}`);
-        // Check if the user has the write_all_domains API scope.
-        // This scope is restricted to a few users.
-        profile = validateAccessScopes([SCOPE.WRITE_ALL_DOMAINS]);
-      }
+      // The API scope imports.write is required to create a new import job
+      validateAccessScopes([SCOPE.WRITE]);
       validateRequestData(multipartFormData);
 
       let initiatedBy = {};
@@ -212,12 +189,16 @@ function ImportController(context) {
         urls, options, importScript, customHeaders,
       } = multipartFormData;
 
-      const scopes = profile.getScopes().filter((scope) => scope.name === SCOPE.WRITE);
+      const scopes = profile.getScopes();
 
       // We only check if the URLs belong to the allowed domains if the user has the write scope
-      // We do not need to check the domains for users with scope: write_all_domains
-      if (scopes && scopes.length > 0) {
-        isUrlInBaseDomains(urls, scopes.map((scope) => scope.domains.map(getDomain)).flat());
+      // We do not need to check the domains for users with scope: all_domains
+      if (!scopes.some((scope) => scope.name === SCOPE.ALL_DOMAINS)) {
+        const allowedDomains = scopes
+          .filter((scope) => scope.name === SCOPE.WRITE)
+          .map((scope) => scope.domains.map(getDomain))
+          .flat();
+        isUrlInBaseDomains(urls, allowedDomains);
       }
 
       log.info(`Creating a new import job with ${urls.length} URLs.`);
