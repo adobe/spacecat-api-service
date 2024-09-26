@@ -197,7 +197,12 @@ function ImportController(context) {
       if (!scopes.some((scope) => scope.name === SCOPE.ALL_DOMAINS)) {
         const allowedDomains = scopes
           .filter((scope) => scope.name === SCOPE.WRITE)
-          .map((scope) => scope.domains.map(getDomain))
+          .map((scope) => {
+            if (!scope.domains || scope.domains.length === 0) {
+              throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
+            }
+            return scope.domains.map(getDomain);
+          })
           .flat();
         isUrlInBaseDomains(urls, allowedDomains);
       }
