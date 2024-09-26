@@ -104,6 +104,7 @@ function ImportController(context) {
   /**
    * Verify that the authenticated user has the required level of access scope.
    * @param scopes a list of scopes to validate the user has access to.
+   * @return {object} the user profile.
    */
   function validateAccessScopes(scopes) {
     log.debug(`validating scopes: ${scopes}`);
@@ -113,6 +114,22 @@ function ImportController(context) {
     } catch (error) {
       throw new ErrorWithStatusCode('Missing required scopes', 401);
     }
+
+    const { authInfo: { profile } } = attributes;
+
+    // Retrieving the scopes from the user profile
+    const apiKeyScopes = profile.getScopes();
+
+    // For scope WRITE, we need to check if
+    // the user's API key has the allowed domain information
+    apiKeyScopes.forEach((apiKeyScope) => {
+      if (apiKeyScope.name === SCOPE.WRITE) {
+        if (!apiKeyScope.domains || apiKeyScope.domains.length === 0) {
+          throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
+        }
+      }
+    });
+    return profile;
   }
 
   function createErrorResponse(error) {
@@ -129,8 +146,8 @@ function ImportController(context) {
 
   /**
    * Extract the domain from a URL.
-   * @param inputUrl
-   * @return domain
+   * @param inputUrl the URL to extract the domain from.
+   * @return {string} the domain extracted from the URL.
    */
   function getDomain(inputUrl) {
     const parsedUrl = new URL(inputUrl);
@@ -146,42 +163,16 @@ function ImportController(context) {
    * @throws {ErrorWithStatusCode} if any URL does not belong to an allowed base domain
    */
   function isUrlInBaseDomains(urlList, baseDomainList) {
-    return urlList.every((inputUrl) => {
+    const invalidUrls = urlList.filter((inputUrl) => {
       const urlDomain = getDomain(inputUrl);
-      const belongsToBaseDomain = baseDomainList.some((baseDomain) => urlDomain === baseDomain);
-      if (!belongsToBaseDomain) {
-        throw new ErrorWithStatusCode(`Invalid request: URL: ${inputUrl} not allowed`, STATUS_BAD_REQUEST);
-      }
-      return true;
+      return !baseDomainList.some((baseDomain) => urlDomain === baseDomain);
     });
-  }
 
-  /**
-   * Check if the URLs in the request belong to the allowed domains.
-   * @param urls
-   * @param scopes
-   */
-  function validateUrlsByDomain(urls, scopes) {
-    // We do not need to check the domains for users with scope: write_all_domains
-    if (scopes.some((scope) => scope.name === SCOPE.WRITE_ALL_DOMAINS)) {
-      return;
+    if (invalidUrls.length > 0) {
+      throw new ErrorWithStatusCode(`Invalid request: URLs not allowed: ${invalidUrls.join(', ')}`, STATUS_BAD_REQUEST);
     }
 
-    const allowedDomains = scopes
-      .filter((scope) => {
-        if (scope.name === SCOPE.WRITE) {
-          if (!scope.domains || scope.domains.length === 0) {
-            throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
-          }
-          return true;
-        }
-        return false;
-      })
-      .map((scope) => scope.domains.map(getDomain))
-      .flat();
-
-    // Checks if a URL belongs to any of the base domains, throws an error otherwise
-    isUrlInBaseDomains(urls, allowedDomains);
+    return true;
   }
 
   /**
@@ -194,20 +185,19 @@ function ImportController(context) {
   async function createImportJob(requestContext) {
     const { multipartFormData, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': importApiKey, 'user-agent': userAgent } = headers;
-
+    let profile;
     try {
       try {
         // The API scope imports.write is required to create a new import job
-        validateAccessScopes([SCOPE.WRITE]);
+        profile = validateAccessScopes([SCOPE.WRITE]);
       } catch (error) {
         log.error(`Missing imports.write scope for creating a new import job: ${error.message}`);
         // Check if the user has the write_all_domains API scope.
         // This scope is restricted to a few users.
-        validateAccessScopes([SCOPE.WRITE_ALL_DOMAINS]);
+        profile = validateAccessScopes([SCOPE.WRITE_ALL_DOMAINS]);
       }
       validateRequestData(multipartFormData);
 
-      const { authInfo: { profile } } = attributes;
       let initiatedBy = {};
       if (profile) {
         initiatedBy = {
@@ -222,9 +212,15 @@ function ImportController(context) {
         urls, options, importScript, customHeaders,
       } = multipartFormData;
 
-      validateUrlsByDomain(urls, profile.getScopes());
+      const scopes = profile.getScopes().filter((scope) => scope.name === SCOPE.WRITE);
 
-      log.debug(`Creating a new import job with ${urls.length} URLs.`);
+      // We only check if the URLs belong to the allowed domains if the user has the write scope
+      // We do not need to check the domains for users with scope: write_all_domains
+      if (scopes && scopes.length > 0) {
+        isUrlInBaseDomains(urls, scopes.map((scope) => scope.domains.map(getDomain)).flat());
+      }
+
+      log.info(`Creating a new import job with ${urls.length} URLs.`);
 
       // Merge the import configuration options with the request options allowing the user options
       // to override the defaults

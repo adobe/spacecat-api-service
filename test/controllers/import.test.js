@@ -198,7 +198,7 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: URL: https://test.com/page1 not allowed');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: URLs not allowed: https://test.com/page1');
     });
 
     it('should fail when there are no domains listed for the user scope imports.write', async () => {
