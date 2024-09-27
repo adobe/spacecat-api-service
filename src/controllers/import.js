@@ -196,14 +196,14 @@ function ImportController(context) {
       // We do not need to check the domains for users with scope: all_domains
       if (!scopes.some((scope) => scope.name === SCOPE.ALL_DOMAINS)) {
         const allowedDomains = scopes
-          .filter((scope) => scope.name === SCOPE.WRITE)
-          .map((scope) => {
-            if (!scope.domains || scope.domains.length === 0) {
-              throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
-            }
-            return scope.domains.map(getDomain);
-          })
-          .flat();
+          .filter((scope) => scope.name === SCOPE.WRITE
+              && scope.domains && scope.domains.length > 0)
+          .flatMap((scope) => scope.domains.map(getDomain));
+
+        if (allowedDomains.length === 0) {
+          throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
+        }
+
         isUrlInBaseDomains(urls, allowedDomains);
       }
 
