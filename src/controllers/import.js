@@ -15,6 +15,7 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import psl from 'psl';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -36,14 +37,14 @@ function ImportController(context) {
    * The import controller has a number of scopes that are required to access different parts of the
    * import functionality. These scopes are used to validate the authenticated user has the required
    * level of access.
-   * @type {{READ: 'imports.read', WRITE_ALL_DOMAINS: 'imports.write_all_domains',
+   * @type {{READ: 'imports.read', ALL_DOMAINS: 'imports.all_domains',
    * READ_ALL: 'imports.read_all', WRITE: 'imports.write'}}
    */
   const SCOPE = {
     READ: 'imports.read', // allows users to read the import jobs created with their API key
     WRITE: 'imports.write', // allows users to create new import jobs
     READ_ALL: 'imports.read_all', // allows users to view all import jobs
-    WRITE_ALL_DOMAINS: 'imports.write_all_domains', // allows users to import across any domain
+    ALL_DOMAINS: 'imports.all_domains', // allows users to import across any domain
   };
 
   const {
@@ -57,6 +58,7 @@ function ImportController(context) {
     env,
   };
 
+  const { authInfo: { profile } } = attributes;
   let importConfiguration = {};
   try {
     importConfiguration = JSON.parse(env.IMPORT_CONFIGURATION);
@@ -70,6 +72,7 @@ function ImportController(context) {
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
   const STATUS_ACCEPTED = 202;
+  const STATUS_UNAUTHORIZED = 401;
 
   function validateRequestData(data) {
     if (!isObject(data)) {
@@ -102,6 +105,7 @@ function ImportController(context) {
   /**
    * Verify that the authenticated user has the required level of access scope.
    * @param scopes a list of scopes to validate the user has access to.
+   * @return {object} the user profile.
    */
   function validateAccessScopes(scopes) {
     log.debug(`validating scopes: ${scopes}`);
@@ -109,7 +113,7 @@ function ImportController(context) {
     try {
       auth.checkScopes(scopes);
     } catch (error) {
-      throw new ErrorWithStatusCode('Missing required scopes', 401);
+      throw new ErrorWithStatusCode('Missing required scopes', STATUS_UNAUTHORIZED);
     }
   }
 
@@ -123,6 +127,37 @@ function ImportController(context) {
     if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
       throw new ErrorWithStatusCode('Invalid request: startDate and endDate must be in ISO 8601 format', STATUS_BAD_REQUEST);
     }
+  }
+
+  /**
+   * Extract the domain from a URL.
+   * @param {string} inputUrl the URL to extract the domain from.
+   * @return {string} the domain extracted from the URL.
+   */
+  function getDomain(inputUrl) {
+    const parsedUrl = new URL(inputUrl);
+    const parsedDomain = psl.parse(parsedUrl.hostname);
+    return parsedDomain.domain; // Extracts the full domain (e.g., example.co.uk)
+  }
+
+  /**
+   * Check if the URLs in urlList belong to any of the base domains.
+   * @param {string[]} urlList the list of URLs to check.
+   * @param {string[]} baseDomainList the list of base domains to check against.
+   * @return {true} if all URLs belong to an allowed base domain
+   * @throws {ErrorWithStatusCode} if any URL does not belong to an allowed base domain
+   */
+  function isUrlInBaseDomains(urlList, baseDomainList) {
+    const invalidUrls = urlList.filter((inputUrl) => {
+      const urlDomain = getDomain(inputUrl);
+      return !baseDomainList.some((baseDomain) => urlDomain === baseDomain);
+    });
+
+    if (invalidUrls.length > 0) {
+      throw new ErrorWithStatusCode(`Invalid request: URLs not allowed: ${invalidUrls.join(', ')}`, STATUS_BAD_REQUEST);
+    }
+
+    return true;
   }
 
   /**
@@ -141,7 +176,6 @@ function ImportController(context) {
       validateAccessScopes([SCOPE.WRITE]);
       validateRequestData(multipartFormData);
 
-      const { authInfo: { profile } } = attributes;
       let initiatedBy = {};
       if (profile) {
         initiatedBy = {
@@ -155,6 +189,25 @@ function ImportController(context) {
       const {
         urls, options, importScript, customHeaders,
       } = multipartFormData;
+
+      const scopes = profile.getScopes();
+
+      // We only check if the URLs belong to the allowed domains if the user has the write scope
+      // We do not need to check the domains for users with scope: all_domains
+      if (!scopes.some((scope) => scope.name === SCOPE.ALL_DOMAINS)) {
+        const allowedDomains = scopes
+          .filter((scope) => scope.name === SCOPE.WRITE
+              && scope.domains && scope.domains.length > 0)
+          .flatMap((scope) => scope.domains.map(getDomain));
+
+        if (allowedDomains.length === 0) {
+          throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
+        }
+
+        isUrlInBaseDomains(urls, allowedDomains);
+      }
+
+      log.info(`Creating a new import job with ${urls.length} URLs.`);
 
       // Merge the import configuration options with the request options allowing the user options
       // to override the defaults
