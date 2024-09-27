@@ -1,3 +1,10 @@
+# [1.67.0](https://github.com/adobe/spacecat-api-service/compare/v1.66.3...v1.67.0) (2024-09-27)
+
+
+### Features
+
+* Restrict importing URLs which are not allowlisted (by domain) for the API key ([#511](https://github.com/adobe/spacecat-api-service/issues/511)) ([f8c7a84](https://github.com/adobe/spacecat-api-service/commit/f8c7a84aa6288396abed2881f8a0e70540f3e7f8))
+
 ## [1.66.3](https://github.com/adobe/spacecat-api-service/compare/v1.66.2...v1.66.3) (2024-09-27)
 
 
