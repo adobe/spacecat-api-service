@@ -131,7 +131,7 @@ function ImportController(context) {
 
   /**
    * Extract the domain from a URL.
-   * @param inputUrl the URL to extract the domain from.
+   * @param {string} inputUrl the URL to extract the domain from.
    * @return {string} the domain extracted from the URL.
    */
   function getDomain(inputUrl) {
@@ -142,8 +142,8 @@ function ImportController(context) {
 
   /**
    * Check if the URLs in urlList belong to any of the base domains.
-   * @param urlList the list of URLs to check.
-   * @param baseDomainList the list of base domains to check against.
+   * @param {string[]} urlList the list of URLs to check.
+   * @param {string[]} baseDomainList the list of base domains to check against.
    * @return {true} if all URLs belong to an allowed base domain
    * @throws {ErrorWithStatusCode} if any URL does not belong to an allowed base domain
    */
