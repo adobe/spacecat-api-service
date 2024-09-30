@@ -1,3 +1,10 @@
+## [1.67.2](https://github.com/adobe/spacecat-api-service/compare/v1.67.1...v1.67.2) (2024-09-30)
+
+
+### Bug Fixes
+
+* spacecat bot ([297b98f](https://github.com/adobe/spacecat-api-service/commit/297b98f09d226ba2bbfd309510d6ed5955e81ef3))
+
 ## [1.67.1](https://github.com/adobe/spacecat-api-service/compare/v1.67.0...v1.67.1) (2024-09-28)
 
 
