@@ -58,7 +58,6 @@ function ImportController(context) {
     env,
   };
 
-  const { authInfo: { profile } } = attributes;
   let importConfiguration = {};
   try {
     importConfiguration = JSON.parse(env.IMPORT_CONFIGURATION);
@@ -176,6 +175,7 @@ function ImportController(context) {
       validateAccessScopes([SCOPE.WRITE]);
       validateRequestData(multipartFormData);
 
+      const { authInfo: { profile } } = attributes;
       let initiatedBy = {};
       if (profile) {
         initiatedBy = {
