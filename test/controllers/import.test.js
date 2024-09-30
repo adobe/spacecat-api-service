@@ -18,6 +18,7 @@ import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
+import { ImportUrlStatus } from '@adobe/spacecat-shared-data-access/src/models/importer/import-constants.js';
 import { createImportJob } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
 import { createImportUrl } from '@adobe/spacecat-shared-data-access/src/models/importer/import-url.js';
 import fs from 'fs';
@@ -92,6 +93,7 @@ describe('ImportController tests', () => {
           getName: () => 'Test User',
           getImsOrgId: () => 'TestOrgId',
           getImsUserId: () => 'TestUserId',
+          getScopes: () => [{ name: 'imports.write', domains: ['https://www.example.com'] }],
         },
       },
     };
@@ -101,6 +103,8 @@ describe('ImportController tests', () => {
       createNewImportJob: (data) => createImportJob(data),
       createNewImportUrl: (data) => createImportUrl(data),
       getImportJobByID: sandbox.stub(),
+      getImportJobProgress: sandbox.stub(),
+      getImportUrlsByJobId: sandbox.stub().resolves([]),
       getApiKeyByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
     };
 
@@ -187,6 +191,45 @@ describe('ImportController tests', () => {
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
+    });
+
+    it('should fail when url is not part of the allowed domains', async () => {
+      baseContext.multipartFormData.urls = ['https://test.com/page1'];
+      const response = await importController.createImportJob(baseContext);
+
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: URLs not allowed: https://test.com/page1');
+    });
+
+    it('should fail when there are no domains listed for the user scope imports.write', async () => {
+      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.write', domains: [] }];
+      const response = await importController.createImportJob(baseContext);
+
+      expect(response.status).to.equal(401);
+      expect(response.headers.get('x-error')).to.equal('Missing domain information');
+    });
+
+    it('should create an import job for the user scope imports.write', async () => {
+      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.write', domains: ['https://www.example.com'] }, { name: 'imports.read', domains: ['https://www.example.com'] }];
+      const response = await importController.createImportJob(baseContext);
+
+      expect(response.status).to.equal(202);
+    });
+
+    it('should create an import job for the user scope imports.all_domains', async () => {
+      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.all_domains' }, { name: 'imports.write' }];
+      const response = await importController.createImportJob(baseContext);
+
+      expect(response.status).to.equal(202);
+    });
+
+    it('should fail when the domains listed for imports.write do not match the URL', async () => {
+      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.read', domains: ['https://www.example.com'] }, { name: 'imports.write', domains: ['https://www.test.com'] }];
+
+      const response = await importController.createImportJob(baseContext);
+
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: URLs not allowed: https://example.com/page1, https://example.com/page2, https://example.com/page3');
     });
 
     it('should respond with an error code when custom header is not an object', async () => {
@@ -343,8 +386,6 @@ describe('ImportController tests', () => {
 
       expect(importJob.options).to.deep.equal({
         enableJavascript: true,
-        hasCustomHeaders: true,
-        hasCustomImportJs: true,
       });
     });
 
@@ -378,6 +419,85 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
+    });
+  });
+
+  describe('getImportJobProgress', () => {
+    it('should respond with an expected progress response', async () => {
+      baseContext.dataAccess.getImportJobProgress = sandbox.stub().resolves([
+        createImportJob({
+          ...exampleJob,
+          hashedApiKey: '123',
+        }),
+      ]);
+
+      // only need to provide enough import url data to satisfy the import-supervisor, no need
+      // for all the other properties of a ImportUrl object.
+      baseContext.dataAccess.getImportUrlsByJobId = sandbox.stub().resolves([
+        { state: { status: ImportUrlStatus.COMPLETE } },
+        { state: { status: ImportUrlStatus.COMPLETE } },
+        // setting a status to RUNNING should not affect the result
+        // as no process will flip a ImportUrl status to running at this time, therefore
+        // the code will ignore running in the results
+        { state: { status: ImportUrlStatus.RUNNING } },
+        { state: { status: ImportUrlStatus.PENDING } },
+        { state: { status: ImportUrlStatus.REDIRECT } },
+        { state: { status: ImportUrlStatus.FAILED } },
+      ]);
+
+      baseContext.params.jobId = exampleJob.id;
+      importController = ImportController(baseContext);
+      const response = await importController.getImportJobProgress(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const progress = await response.json();
+      expect(progress).to.deep.equal({
+        pending: 1,
+        redirect: 1,
+        completed: 2,
+        failed: 1,
+      });
+    });
+
+    it('should respond a job not found for non existent jobs', async () => {
+      baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(null);
+      baseContext.params.jobId = 'does-not-exist';
+
+      importController = ImportController(baseContext);
+      const response = await importController.getImportJobProgress(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(404);
+    });
+
+    it('should return default values when no import urls are available', async () => {
+      baseContext.dataAccess.getImportJobProgress = sandbox.stub().resolves([
+        createImportJob({ ...exampleJob, hashedApiKey: '123' }),
+      ]);
+
+      baseContext.params.jobId = exampleJob.id;
+      importController = ImportController(baseContext);
+
+      const response = await importController.getImportJobProgress(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+
+      const progress = await response.json();
+      expect(progress).to.deep.equal({
+        pending: 0,
+        redirect: 0,
+        completed: 0,
+        failed: 0,
+      });
+    });
+
+    it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
+      baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
+      baseContext.params.jobId = exampleJob.id;
+      const response = await importController.getImportJobProgress(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(404);
+      expect(response.headers.get('x-error')).to.equal('Not found');
     });
   });
 
@@ -418,7 +538,6 @@ describe('ImportController tests', () => {
       expect(jobStatus.id).to.equal('f91afda0-afc8-467e-bfa3-fdbeba3037e8');
       expect(jobStatus.apiKey).to.be.undefined;
       expect(jobStatus.baseURL).to.equal('https://www.example.com');
-      expect(jobStatus.importQueueId).to.equal('spacecat-import-queue-1');
       expect(jobStatus.status).to.equal('RUNNING');
       expect(jobStatus.options).to.deep.equal({});
     });

@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { ImportJobStatus } from '@adobe/spacecat-shared-data-access';
+import { ImportJobStatus, ImportUrlStatus } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'crypto';
 import { hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
@@ -91,12 +91,23 @@ function ImportSupervisor(services, config) {
    * metadata, and setting the job status to 'RUNNING'.
    * @param {Array<string>} urls - The list of URLs to import.
    * @param {string} importQueueId - Name of the queue to use for this import job.
-   * @param {string} apiKey - API key used to authenticate the import job request.
+   * @param {string} hashedApiKey - API key used to authenticate the import job request.
    * @param {object} options - Client provided options for the import job.
+   * @param initiatedBy - Details about the initiator of the import job.
+   * @param {boolean} hasCustomHeaders - Whether custom headers are provided. Defaults to false.
+   * @param {boolean} hasCustomImportJs - Whether custom import JS is provided. Defaults to false.
    * @returns {Promise<ImportJob>}
    */
-  async function createNewImportJob(urls, importQueueId, hashedApiKey, options, initiatedBy) {
-    const newJob = {
+  async function createNewImportJob(
+    urls,
+    importQueueId,
+    hashedApiKey,
+    options,
+    initiatedBy,
+    hasCustomHeaders = false,
+    hasCustomImportJs = false,
+  ) {
+    return dataAccess.createNewImportJob({
       id: crypto.randomUUID(),
       baseURL: determineBaseURL(urls),
       importQueueId,
@@ -105,8 +116,9 @@ function ImportSupervisor(services, config) {
       urlCount: urls.length,
       status: ImportJobStatus.RUNNING,
       initiatedBy,
-    };
-    return dataAccess.createNewImportJob(newJob);
+      hasCustomHeaders,
+      hasCustomImportJs,
+    });
   }
 
   /**
@@ -125,6 +137,7 @@ function ImportSupervisor(services, config) {
    * asynchronously.
    * @param {Array<string>} urls - Array of URL records to queue.
    * @param {object} importJob - The import job record.
+   * @param {object} customHeaders - Optional custom headers to be sent with each request.
    */
   async function queueUrlsForImportWorker(urls, importJob, customHeaders) {
     log.info(`Starting a new import job of baseUrl: ${importJob.getBaseURL()} with ${urls.length}`
@@ -158,6 +171,8 @@ function ImportSupervisor(services, config) {
    * @param {string} importApiKey - The API key to use for the import job.
    * @param {object} options - Optional configuration params for the import job.
    * @param {string} importScript - Optional custom Base64 encoded import script.
+   * @param {object} initiatedBy - Details about the initiator of the import job.
+   * @param {object} customHeaders - Optional custom headers to be sent with each request.
    * @returns {Promise<ImportJob>}
    */
   async function startNewJob(
@@ -174,23 +189,15 @@ function ImportSupervisor(services, config) {
     // Hash the API Key to ensure it is not stored in plain text
     const hashedApiKey = hashWithSHA256(importApiKey);
 
-    let updatedOptions = { ...options };
-
-    if (importScript) {
-      updatedOptions = { ...updatedOptions, hasCustomImportJs: true };
-    }
-
-    if (customHeaders) {
-      updatedOptions = { ...updatedOptions, hasCustomHeaders: true };
-    }
-
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(
       urls,
       importQueueId,
       hashedApiKey,
-      updatedOptions,
+      options,
       initiatedBy,
+      !!customHeaders,
+      !!importScript,
     );
 
     log.info('New import job created:\n'
@@ -199,8 +206,8 @@ function ImportSupervisor(services, config) {
       + `- apiKeyName: ${initiatedBy.apiKeyName}\n`
       + `- jobId: ${newImportJob.getId()}\n`
       + `- importQueueId: ${importQueueId}\n`
-      + `- hasCustomImportJs: ${updatedOptions.hasCustomImportJs}\n`
-      + `- hasCustomHeaders: ${updatedOptions.hasCustomHeaders}`);
+      + `- hasCustomImportJs: ${!!importScript}\n`
+      + `- hasCustomHeaders: ${!!customHeaders}`);
 
     // Write the import script to S3, if provided
     if (importScript) {
@@ -260,11 +267,52 @@ function ImportSupervisor(services, config) {
     }
   }
 
+  /**
+   * Get the progress of an import job.
+   * @param {string} jobId - The ID of the job.
+   * @param {string} importApiKey - API key that was provided to start the job.
+   * @returns {Promise<{pending: number, redirect: number, completed: number, failed: number}>}
+   */
+  async function getImportJobProgress(jobId, importApiKey) {
+    // verify that the job exists
+    const job = await getImportJob(jobId, importApiKey);
+
+    // get the url entries for the job
+    const urls = await dataAccess.getImportUrlsByJobId(job.getId());
+
+    // merge all url entries into a single object
+    return urls.reduce((acc, url) => {
+      // intentionally ignore RUNNING as currently no code will flip the url to a running state
+      // eslint-disable-next-line default-case
+      switch (url.state.status) {
+        case ImportUrlStatus.PENDING:
+          acc.pending += 1;
+          break;
+        case ImportUrlStatus.REDIRECT:
+          acc.redirect += 1;
+          break;
+        case ImportUrlStatus.COMPLETE:
+          acc.completed += 1;
+          break;
+        case ImportUrlStatus.FAILED:
+          acc.failed += 1;
+          break;
+      }
+      return acc;
+    }, {
+      pending: 0,
+      redirect: 0,
+      completed: 0,
+      failed: 0,
+    });
+  }
+
   return {
     startNewJob,
     getImportJob,
     getJobArchiveSignedUrl,
     getImportJobsByDateRange,
+    getImportJobProgress,
   };
 }
 

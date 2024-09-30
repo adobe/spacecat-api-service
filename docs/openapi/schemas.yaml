@@ -530,12 +530,16 @@ ExperimentationOpportunity:
       example: "https://space.cat/screenshots/some-cool-page.png"
     trackedPageKPIName:
       type: string
-      description: The name of KPI tracked for this experiment.
+      description: The name of KPI tracked.
       example: 'Bounce rate'
     trackedPageKPIValue:
       type: number
-      description: The value of KPI tracked for this experiment.
+      description: The value of KPI tracked for this page.
       example: 0.80
+    trackedKPISiteAverage:
+      type: number
+      description: The average value of KPI tracked across the site.
+      example: 0.45
     pageviews:
       type: integer
       description: The total number of views this webpage has received
@@ -1255,25 +1259,15 @@ SiteMetricList:
 ImportOptions:
   type: object
   properties:
-    pageLoadTimeoutMs:
+    pageLoadTimeout:
       description: The time in milliseconds to wait for the page to load
       type: integer
     enableJavascript:
       description: Whether to enable JavaScript on the page
       type: boolean
-    scrollToBottom:
-      description: Whether to scroll to the bottom of the page
-      type: boolean
-    customHeaders:
-      description: Custom headers to send with each HTTP request
-      type: object
-      additionalProperties: true
   example:
-    pageLoadTimeoutMs: 100
-    enableJavaScript: true
-    scrollToBottom: true
-    customHeaders:
-      example-header-name: 'example-header-value'
+    pageLoadTimeout: 100
+    enableJavascript: true
 ImportJobRequest:
   type: object
   required:
@@ -1317,19 +1311,22 @@ ImportJobStatus:
         - 'COMPLETE'
         - 'FAILED'
     startTime:
-      description: The date and time when the import job started
+      description: The date and time when the import job started.
       $ref: '#/DateTime'
     endTime:
-      description: The date and time when the import job ended, if finished
+      description: The date and time when the import job ended, if finished.
       $ref: '#/DateTime'
     urlCount:
-      description: The total number of URLs in the job
+      description: The total number of URLs in the job.
       type: integer
     successCount:
-      description: The number of URLs successfully imported
+      description: The number of URLs successfully imported.
       type: integer
     failedCount:
-      description: The number of URLs that failed to import
+      description: The number of URLs that failed to import.
+      type: integer
+    redirectCount:
+      description: The number of URLs that were redirected.
       type: integer
   example:
     id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
@@ -1338,6 +1335,30 @@ ImportJobStatus:
     urlCount: 25
     successCount: 15
     failedCount: 0
+ImportJobProgress:
+  type: object
+  properties:
+    pending:
+      type: integer
+      description: The number of pending url jobs still to process.
+    redirect:
+      type: integer
+      description: The number of urls that resulted in a redirect.
+    running:
+      type: integer
+      description: The number of url jobs that are running.
+    completed:
+      type: integer
+      description: The number of url jobs that have completed.
+    failed:
+      type: integer
+      description: The number of url jobs that have failed.
+  example:
+    pending: 0
+    redirect: 0
+    running: 0
+    completed: 1
+    failed: 0
 ImportJobArchive:
   type: object
   properties:
