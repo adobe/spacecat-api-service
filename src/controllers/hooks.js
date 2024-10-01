@@ -188,7 +188,11 @@ async function getContentSource(hlxConfig, log) {
 
     const parsedContent = yaml.load(fstabContent);
 
-    const url = Object.entries(parsedContent.mountpoints)[0][1];
+    const url = Object.entries(parsedContent?.mountpoints)?.[0]?.[1];
+    if (!url) {
+      log.error(`No content source found for ${owner}/${repo}`);
+      return null;
+    }
     const type = url.contains('drive.google') ? 'drive.google' : 'onedrive';
     return { source: { type, url } };
   } else {
