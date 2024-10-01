@@ -511,6 +511,30 @@ describe('Hooks Controller', () => {
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
+    it('CDN candidate is processed even with error status for helix config and fstab request', async () => {
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(500, '', { 'x-error': 'test-error' });
+
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
+      nock('https://raw.githubusercontent.com')
+        .get('/some-owner/some-site/main/fstab.yaml')
+        .replyWithError('test-error');
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(context.log.error.getCall(0)).to.have.been.calledWith('Error fetching fstab.yaml for some-owner/some-site. Status: 404');
+      expect(resp).to.equal('CDN site candidate is successfully processed');
+    });
+
     it('CDN candidate is processed even when fetch throws for helix config request', async () => {
       context.data = {
         hlxVersion: 5,
@@ -528,7 +552,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error).to.have.been.calledWith('Error fetching hlx config for some-owner/some-site');
+      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('Error fetching hlx config for some-owner/some-site'));
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 

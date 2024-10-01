@@ -13,18 +13,12 @@
 import wrap from '@adobe/helix-shared-wrap';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import {
-  badRequest,
-  internalServerError,
-  notFound,
-  ok,
+  badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  composeBaseURL,
-  deepEqual,
-  hasText, isInteger,
-  isNonEmptyObject,
-  isObject,
+  composeBaseURL, deepEqual, hasText, isInteger, isNonEmptyObject, isObject,
 } from '@adobe/spacecat-shared-utils';
+import yaml from 'js-yaml';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import {
@@ -184,6 +178,25 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
   return null;
 }
 
+async function getContentSource(hlxConfig, log) {
+  const ref = hlxConfig.rso?.ref || 'main';
+  const repo = hlxConfig?.rso?.site;
+  const owner = hlxConfig?.rso?.owner;
+  const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
+  if (fstabResponse.status === 200) {
+    const fstabContent = await fstabResponse.text();
+
+    const parsedContent = yaml.load(fstabContent);
+
+    const url = Object.entries(parsedContent.mountpoints)[0][1];
+    const type = url.contains('drive.google') ? 'drive.google' : 'onedrive';
+    return { source: { type, url } };
+  } else {
+    log.error(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
+    return null;
+  }
+}
+
 /**
  * Extracts the hlx config from the given list of domains.
  * @param {string[]} domains - The list of domains (as extracted from the x-forwarded-host header)
@@ -212,6 +225,12 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
         hlxConfig.content = content;
         hlxConfig.hlxVersion = 5;
         log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`);
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        const content = await getContentSource(hlxConfig, log);
+        if (content) {
+          hlxConfig.content = content;
+        }
       }
       break;
     }
