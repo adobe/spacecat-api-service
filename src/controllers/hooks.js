@@ -16,7 +16,7 @@ import {
   badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  composeBaseURL, deepEqual, hasText, isInteger, isNonEmptyObject, isObject,
+  composeBaseURL, deepEqual, hasText, isInteger, isNonEmptyObject, isObject, isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import yaml from 'js-yaml';
 
@@ -180,7 +180,7 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
 
 async function getContentSource(hlxConfig, log) {
   const { ref, site: repo, owner } = hlxConfig?.rso || {};
-  
+
   if (!hasText(ref) || !hasText(repo) || !hasText(owner)) {
     log.error('Invalid hlxConfig. Missing ref, repo, or owner.');
     return null;
@@ -195,12 +195,12 @@ async function getContentSource(hlxConfig, log) {
 
   const fstabContent = await fstabResponse.text();
   const parsedContent = yaml.load(fstabContent);
-  
+
   const url = parsedContent?.mountpoints
     ? Object.entries(parsedContent.mountpoints)?.[0]?.[1]
     : null;
-    
-  if (!isValidURL(url)) {
+
+  if (!isValidUrl(url)) {
     log.error(`No content source found for ${owner}/${repo} in fstab.yaml`);
     return null;
   }
@@ -241,7 +241,7 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
         try {
           // eslint-disable-next-line no-await-in-loop
           const content = await getContentSource(hlxConfig, log);
-          if (content) {
+          if (isObject(content)) {
             hlxConfig.content = content;
           }
         } catch (e) {
