@@ -40,6 +40,7 @@ describe('Sites Audits Controller', () => {
   beforeEach(() => {
     mockConfiguration = {
       enableHandlerForSite: sandbox.stub(),
+      disableHandlerForSite: sandbox.stub(),
       getVersion: sandbox.stub(),
       getJobs: sandbox.stub(),
       getHandlers: sandbox.stub(),
@@ -106,6 +107,9 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsController.update({ data: {} });
       const error = await response.json();
 
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(response.status).to.equal(400);
       expect(error).to.have.property('message', 'Base URLs are required');
     });
@@ -114,6 +118,9 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsController.update({ data: { baseURLs: ['wrong_format'] } });
       const error = await response.json();
 
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(response.status).to.equal(400);
       expect(error).to.have.property('message', 'Invalid URL format: wrong_format');
     });
@@ -128,7 +135,7 @@ describe('Sites Audits Controller', () => {
 
     it('returns bad request when auditTypes has wrong format', async () => {
       const response = await sitesAuditsController.update({
-        data: { baseURLs: ['https://site1.com'], auditTypes: "not_array" },
+        data: { baseURLs: ['https://site1.com'], auditTypes: 'not_array' },
       });
       const error = await response.json();
 
@@ -142,16 +149,22 @@ describe('Sites Audits Controller', () => {
       });
       const error = await response.json();
 
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(response.status).to.equal(400);
       expect(error).to.have.property('message', 'enableAudits is required');
     });
 
     it('returns bad request when enableAudits has wrong format', async () => {
       const response = await sitesAuditsController.update({
-        data: { baseURLs: ['https://site1.com'], auditTypes: ['type1'], enableAudits: "not_boolean" },
+        data: { baseURLs: ['https://site1.com'], auditTypes: ['type1'], enableAudits: 'not_boolean' },
       });
       const error = await response.json();
 
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(response.status).to.equal(400);
       expect(error).to.have.property('message', 'enableAudits is required');
     });
@@ -164,6 +177,9 @@ describe('Sites Audits Controller', () => {
       });
       const responses = await response.json();
 
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(responses).to.be.an('array').with.lengthOf(1);
       expect(responses[0].baseURL).to.equal('https://site1.com');
       expect(responses[0].response.status).to.equal(404);

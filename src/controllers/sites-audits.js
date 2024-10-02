@@ -37,6 +37,9 @@ export default (dataAccess) => {
     }
 
     for (const baseURL of baseURLs) {
+      if (baseURL.length === 0) {
+        throw new Error('Invalid URL format');
+      }
       if (!isValidUrl(baseURL)) {
         throw new Error(`Invalid URL format: ${baseURL}`);
       }
@@ -62,6 +65,7 @@ export default (dataAccess) => {
     }
 
     try {
+      let needToUpdateConfiguration = false;
       const configuration = await dataAccess.getConfiguration();
 
       const responses = await Promise.all(
@@ -76,12 +80,12 @@ export default (dataAccess) => {
               },
             };
           }
-
+          needToUpdateConfiguration = true;
           for (const auditType of auditTypes) {
             if (enableAudits === true) {
-              await configuration.enableHandlerForSite(auditType, site);
+              configuration.enableHandlerForSite(auditType, site);
             } else {
-              await configuration.disableHandlerForSite(auditType, site);
+              configuration.disableHandlerForSite(auditType, site);
             }
           }
 
@@ -92,7 +96,9 @@ export default (dataAccess) => {
         }),
       );
 
-      await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+      if (needToUpdateConfiguration === true) {
+        await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+      }
 
       return createResponse(responses, 207);
     } catch (error) {

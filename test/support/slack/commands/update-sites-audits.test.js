@@ -13,128 +13,165 @@
 /* eslint-env mocha */
 
 import sinon from 'sinon';
+import { expect } from 'chai';
 import UpdateSitesAuditsCommand from '../../../../src/support/slack/commands/update-sites-audits.js';
+import { SiteDto } from '../../../../src/dto/site.js';
 
 describe('UpdateSitesAuditsCommand', () => {
-  let context;
-  let slackContext;
-  let getSiteByBaseURLStub;
-  let updateSiteStub;
-  let updateOrganizationStub;
+  const sandbox = sinon.createSandbox();
+
+  const sites = [
+    { id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' },
+    { id: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge' },
+  ].map((site) => SiteDto.fromJson(site));
+
+  let mockConfiguration;
+  let mockDataAccess;
+  let mockContext;
+  let mockSlackContext;
 
   beforeEach(async () => {
-    getSiteByBaseURLStub = sinon.stub();
-    updateSiteStub = sinon.stub();
-    updateOrganizationStub = sinon.stub();
-    context = {
+    mockConfiguration = {
+      enableHandlerForSite: sandbox.stub(),
+      disableHandlerForSite: sandbox.stub(),
+      getVersion: sandbox.stub(),
+      getJobs: sandbox.stub(),
+      getHandlers: sandbox.stub(),
+      getQueues: sandbox.stub(),
+    };
+
+    mockDataAccess = {
+      getConfiguration: sandbox.stub().resolves(mockConfiguration),
+      getSiteByBaseURL: sandbox.stub(),
+      updateConfiguration: sandbox.stub(),
+    };
+
+    mockContext = {
       log: {
         error: sinon.stub(),
       },
-      dataAccess: {
-        getSiteByBaseURL: getSiteByBaseURLStub,
-        getOrganizationByID: sinon.stub(),
-        updateSite: updateSiteStub,
-        updateOrganization: updateOrganizationStub,
-      },
+      dataAccess: mockDataAccess,
     };
 
-    slackContext = {
+    mockSlackContext = {
       say: sinon.stub(),
     };
   });
+
   afterEach(() => {
-    sinon.restore();
+    sandbox.restore();
   });
 
-  it('should handle successful execution  with multiple sites with default organization', async () => {
-    const args = ['enable', 'site1.com,site2.com', 'auditType1,auditType2'];
-    const site = {
-      getOrganizationId: () => 'default',
-      getAuditConfig: () => ({
-        updateAuditTypeConfig: sinon.stub(),
-      }),
-    };
+  it('successful execution with multiple sites', async () => {
+    mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[0]);
+    mockDataAccess.getSiteByBaseURL.withArgs('https://site2.com').resolves(sites[1]);
 
-    getSiteByBaseURLStub.resolves(site);
-    updateSiteStub.resolves();
+    const command = UpdateSitesAuditsCommand(mockContext);
+    const args = ['enable', 'http://site1.com,https://site2.com', 'cwv,404'];
+    await command.handleExecution(args, mockSlackContext);
 
-    const command = UpdateSitesAuditsCommand(context);
-    await command.handleExecution(args, slackContext);
+    expect(mockDataAccess.getSiteByBaseURL.calledTwice).to.be.true;
+    expect(mockDataAccess.updateConfiguration.called).to.be.true;
 
-    sinon.assert.calledWith(getSiteByBaseURLStub, 'https://site1.com');
-    sinon.assert.calledWith(getSiteByBaseURLStub, 'https://site2.com');
-    sinon.assert.calledTwice(updateSiteStub);
+    expect(mockConfiguration.enableHandlerForSite.callCount).to.equal(4);
+    expect(mockConfiguration.enableHandlerForSite.calledWith('cwv', sites[0])).to.be.true;
+    expect(mockConfiguration.enableHandlerForSite.calledWith('cwv', sites[1])).to.be.true;
+
+    expect(mockConfiguration.enableHandlerForSite.calledWith('404', sites[0])).to.be.true;
+    expect(mockConfiguration.enableHandlerForSite.calledWith('404', sites[1])).to.be.true;
+
+    expect(mockSlackContext.say.calledWith('Bulk update completed with the following responses:\n'
+        + 'https://site1.com: successfully updated\n'
+        + 'https://site2.com: successfully updated\n')).to.be.true;
   });
 
-  it('should handle successful execution with multiple sites belonging to organization', async () => {
-    const args = ['enable', 'site1.com,site2.com', 'auditType1'];
-    const site1 = {
-      getOrganizationId: () => 'organizationId',
-      getAuditConfig: () => ({
-        updateAuditTypeConfig: sinon.stub(),
-      }),
-    };
-    const site2 = {
-      getOrganizationId: () => 'organizationId',
-      getAuditConfig: () => ({
-        updateAuditTypeConfig: sinon.stub(),
-      }),
-    };
-    const organization = {
-      getAuditConfig: () => ({
-        updateAuditTypeConfig: sinon.stub(),
-      }),
-    };
-    getSiteByBaseURLStub.withArgs('https://site1.com').resolves(site1);
-    getSiteByBaseURLStub.withArgs('https://site2.com').resolves(site2);
-    context.dataAccess.getOrganizationByID.withArgs('organizationId').resolves(organization);
-    updateSiteStub.resolves();
-    updateOrganizationStub.resolves();
-    const command = UpdateSitesAuditsCommand(context);
-    await command.handleExecution(args, slackContext);
-    sinon.assert.calledTwice(updateSiteStub);
-    sinon.assert.calledOnce(updateOrganizationStub);
+  describe('bad requests', () => {
+    it('returns bad request when baseURLs is not provided', async () => {
+      const command = UpdateSitesAuditsCommand(mockContext);
+      const args = ['enable', '', 'cwv,404'];
+      await command.handleExecution(args, mockSlackContext);
+
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
+      expect(mockSlackContext.say.calledWith('Base URLs are required')).to.be.true;
+    });
+
+    it('returns bad request when baseURLs has wrong format', async () => {
+      const command = UpdateSitesAuditsCommand(mockContext);
+      const args = ['enable', 'wrong_format', 'cwv,404'];
+      await command.handleExecution(args, mockSlackContext);
+
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
+      expect(mockSlackContext.say.calledWith('Invalid URL format: wrong_format')).to.be.true;
+    });
+
+    it('returns bad request when auditTypes is not provided', async () => {
+      const command = UpdateSitesAuditsCommand(mockContext);
+      const args = ['enable', 'http://site1.com,https://site2.com', ''];
+      await command.handleExecution(args, mockSlackContext);
+
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
+      expect(mockSlackContext.say.calledWith('Audit types are required')).to.be.true;
+    });
+
+    it('returns bad request when enableAudits is not provided', async () => {
+      const command = UpdateSitesAuditsCommand(mockContext);
+      const args = ['', 'http://site1.com,https://site2.com', 'cwv,404'];
+      await command.handleExecution(args, mockSlackContext);
+
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
+      expect(mockSlackContext.say.calledWith('enable/disable value is required')).to.be.true;
+    });
+
+    it('returns bad request when enableAudits has wrong format', async () => {
+      const command = UpdateSitesAuditsCommand(mockContext);
+      const args = ['wrong_format', 'http://site1.com,https://site2.com', 'cwv,404'];
+      await command.handleExecution(args, mockSlackContext);
+
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
+      expect(mockSlackContext.say.calledWith('Invalid enable/disable value: wrong_format')).to.be.true;
+    });
+
+    it('returns not found when site is not found', async () => {
+      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(null);
+
+      const command = UpdateSitesAuditsCommand(mockContext);
+      const args = ['enable', 'http://site1.com', 'cwv,404'];
+      await command.handleExecution(args, mockSlackContext);
+
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
+
+      expect(mockSlackContext.say.calledWith('Bulk update completed with the following responses:\n'
+          + 'Cannot update site with baseURL: http://site1.com, site not found\n')).to.be.true;
+    });
   });
 
-  it('should handle site not found situation', async () => {
-    const args = ['enable', 'site1.com', 'auditType1,auditType2'];
+  describe('errors', () => {
+    it('error during execution', async () => {
+      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[0]);
 
-    getSiteByBaseURLStub.resolves(null);
+      const error = new Error('Test error');
+      mockDataAccess.updateConfiguration.rejects(error);
 
-    const command = UpdateSitesAuditsCommand(context);
-    await command.handleExecution(args, slackContext);
+      const command = UpdateSitesAuditsCommand(mockContext);
+      const args = ['enable', 'http://site1.com', 'cwv,404'];
+      await command.handleExecution(args, mockSlackContext);
 
-    sinon.assert.calledWith(getSiteByBaseURLStub, 'https://site1.com');
-    sinon.assert.notCalled(updateSiteStub);
-    sinon.assert.calledWith(slackContext.say, 'Bulk update completed with the following responses:\nCannot update site with baseURL: https://site1.com, site not found\n');
-  });
-
-  it('should handle organization not found error', async () => {
-    const args = ['enable', 'site1.com', 'auditType1,auditType2'];
-    const site = {
-      getOrganizationId: () => 'organizationId',
-    };
-
-    getSiteByBaseURLStub.resolves(site);
-
-    const command = UpdateSitesAuditsCommand(context);
-    await command.handleExecution(args, slackContext);
-
-    sinon.assert.calledWith(getSiteByBaseURLStub, 'https://site1.com');
-    sinon.assert.notCalled(updateSiteStub);
-    sinon.assert.calledWith(slackContext.say, 'Bulk update completed with the following responses:\nError updating site with baseURL: https://site1.com belonging organization with id: organizationId not found\n');
-  });
-
-  it('should handle error during execution', async () => {
-    const args = ['enable', 'site1.com,site2.com', 'auditType1,auditType2'];
-    const error = new Error('Test error');
-
-    getSiteByBaseURLStub.rejects(error);
-
-    const command = UpdateSitesAuditsCommand(context);
-    await command.handleExecution(args, slackContext);
-
-    sinon.assert.calledWith(context.log.error, error);
-    sinon.assert.calledWith(slackContext.say, `Error during bulk update: ${error.message}`);
+      expect(mockContext.log.error.calledWith(error)).to.be.true;
+      expect(
+        mockSlackContext.say.calledWith(':nuclear-warning: Failed to enable audits for all provided sites: Test error'),
+      ).to.be.true;
+    });
   });
 });

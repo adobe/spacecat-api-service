@@ -9,8 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
-import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
+import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { ConfigurationDto } from '../../../dto/configuration.js';
 
 const PHRASES = ['audits'];
@@ -26,65 +27,86 @@ export default (context) => {
 
   const { log, dataAccess } = context;
 
-  const isValidEnableDisable = (input) => {
-    const normalizedInput = input.toLowerCase();
-    return ['enable', 'disable'].includes(normalizedInput);
-  };
+  const validateInput = ({ baseURLs, enableAudits, auditTypes }) => {
+    if (!Array.isArray(baseURLs) || baseURLs.length === 0) {
+      throw new Error('Base URLs are required');
+    }
 
-  // Utility function to update a single site based on the audits
-  const updateSiteAudits = async (enableAudits, site, auditTypes, configuration) => {
-    try {
-      auditTypes.forEach((auditType) => {
-        enableAudits
-          ? configuration.enableHandlerForSite(auditType, site)
-          : configuration.disableHandlerForSite(auditType, site);
-      });
-      return { payload: `${site.getBaseURL()}: successfully updated` };
-    } catch (error) {
-      return { payload: `Error updating ${site.getBaseURL()}: ${error.message}` };
+    for (const baseURL of baseURLs) {
+      if (baseURL.length === 0) {
+        throw new Error('Invalid URL format');
+      }
+      if (!isValidUrl(baseURL)) {
+        throw new Error(`Invalid URL format: ${baseURL}`);
+      }
+    }
+
+    if (!Array.isArray(auditTypes) || auditTypes.length === 0) {
+      throw new Error('Audit types are required');
+    }
+
+    if (enableAudits.length === 0) {
+      throw new Error('enable/disable value is required');
+    }
+
+    if (['enable', 'disable'].includes(enableAudits) === false) {
+      throw new Error(`Invalid enable/disable value: ${enableAudits}`);
     }
   };
 
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
+    const [enableAuditsInput, baseURLsInput, auditTypesInput] = args;
+
+    const enableAudits = enableAuditsInput.toLowerCase();
+    const baseURLs = baseURLsInput.length > 0 ? baseURLsInput.split(',') : [];
+    const auditTypes = auditTypesInput.length > 0 ? auditTypesInput.split(',') : [];
 
     try {
-      const [enableDisableInput, baseURLsInput, auditTypesInput] = args;
+      validateInput({ baseURLs, enableAudits, auditTypes });
+    } catch (error) {
+      await say(error.message || 'An error occurred during the request');
+      return;
+    }
 
-      if (!isValidEnableDisable(enableDisableInput)) {
-        await say(`Invalid enable/disable command: ${enableDisableInput}`);
-        return;
-      }
-
-      const baseURLs = baseURLsInput.split(',');
-      const auditTypes = auditTypesInput.split(',');
-
-      const enableAudits = enableDisableInput.toLowerCase() === 'enable';
+    try {
+      let needToUpdateConfiguration = false;
       const configuration = await dataAccess.getConfiguration();
 
-      const siteResponses = await Promise.all(
-        baseURLs.map(async (baseURLInput) => {
-          const baseURL = extractURLFromSlackInput(baseURLInput);
-          const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const responses = await Promise.all(
+        baseURLs
+          .map(async (baseURL) => {
+            const site = await dataAccess.getSiteByBaseURL(extractURLFromSlackInput(baseURL));
 
-          if (!site) {
-            return { payload: `Cannot update site with baseURL: ${baseURL}, site not found` };
-          }
+            if (!site) {
+              return { payload: `Cannot update site with baseURL: ${baseURL}, site not found` };
+            }
 
-          return await updateSiteAudits(enableAudits, site, auditTypes, configuration);
-        }),
+            needToUpdateConfiguration = true;
+            for (const auditType of auditTypes) {
+              if (enableAudits === 'enable') {
+                configuration.enableHandlerForSite(auditType, site);
+              } else {
+                configuration.disableHandlerForSite(auditType, site);
+              }
+            }
+
+            return { payload: `${site.getBaseURL()}: successfully updated` };
+          }),
       );
 
-      await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+      if (needToUpdateConfiguration === true) {
+        await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+      }
 
-      const message = `Bulk update completed with the following responses:\n${siteResponses
+      const message = `Bulk update completed with the following responses:\n${responses
         .map((response) => response.payload)
         .join('\n')}\n`;
 
       await say(message);
     } catch (error) {
       log.error(error);
-      await postErrorMessage(say, `Error during bulk update: ${error.message}`);
+      await say(`:nuclear-warning: Failed to enable audits for all provided sites: ${error.message}`);
     }
   };
 
