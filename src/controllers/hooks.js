@@ -188,12 +188,13 @@ async function getContentSource(hlxConfig, log) {
 
     const parsedContent = yaml.load(fstabContent);
 
-    const url = Object.entries(parsedContent?.mountpoints)?.[0]?.[1];
+    const url = parsedContent?.mountpoints
+      ? Object.entries(parsedContent.mountpoints)?.[0]?.[1] : null;
     if (!url) {
-      log.error(`No content source found for ${owner}/${repo}`);
+      log.error(`No content source found for ${owner}/${repo} in fstab.yaml`);
       return null;
     }
-    const type = url.contains('drive.google') ? 'drive.google' : 'onedrive';
+    const type = url.includes('drive.google') ? 'drive.google' : 'onedrive';
     return { source: { type, url } };
   } else {
     log.error(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
@@ -230,10 +231,14 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
         hlxConfig.hlxVersion = 5;
         log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`);
       } else {
-        // eslint-disable-next-line no-await-in-loop
-        const content = await getContentSource(hlxConfig, log);
-        if (content) {
-          hlxConfig.content = content;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const content = await getContentSource(hlxConfig, log);
+          if (content) {
+            hlxConfig.content = content;
+          }
+        } catch (e) {
+          log.error(`Error fetching fstab.yaml for ${rso.owner}/${rso.site}. Error: ${e.message}`);
         }
       }
       break;
