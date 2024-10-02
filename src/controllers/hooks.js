@@ -179,27 +179,34 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
 }
 
 async function getContentSource(hlxConfig, log) {
-  const ref = hlxConfig.rso?.ref;
-  const repo = hlxConfig?.rso?.site;
-  const owner = hlxConfig?.rso?.owner;
+  const { ref, site: repo, owner } = hlxConfig?.rso || {};
+  
+  if (!hasText(ref) || !hasText(repo) || !hasText(owner)) {
+    log.error('Invalid hlxConfig. Missing ref, repo, or owner.');
+    return null;
+  }
+
   const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
-  if (fstabResponse.status === 200) {
-    const fstabContent = await fstabResponse.text();
 
-    const parsedContent = yaml.load(fstabContent);
-
-    const url = parsedContent?.mountpoints
-      ? Object.entries(parsedContent.mountpoints)?.[0]?.[1] : null;
-    if (!url) {
-      log.error(`No content source found for ${owner}/${repo} in fstab.yaml`);
-      return null;
-    }
-    const type = url.includes('drive.google') ? 'drive.google' : 'onedrive';
-    return { source: { type, url } };
-  } else {
+  if (fstabResponse.status !== 200) {
     log.error(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
     return null;
   }
+
+  const fstabContent = await fstabResponse.text();
+  const parsedContent = yaml.load(fstabContent);
+  
+  const url = parsedContent?.mountpoints
+    ? Object.entries(parsedContent.mountpoints)?.[0]?.[1]
+    : null;
+    
+  if (!isValidURL(url)) {
+    log.error(`No content source found for ${owner}/${repo} in fstab.yaml`);
+    return null;
+  }
+
+  const type = url.includes('drive.google') ? 'drive.google' : 'onedrive';
+  return { source: { type, url } };
 }
 
 /**
