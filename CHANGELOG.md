@@ -1,3 +1,10 @@
+# [1.68.0](https://github.com/adobe/spacecat-api-service/compare/v1.67.2...v1.68.0) (2024-10-02)
+
+
+### Features
+
+* compute content source for helix 4 config ([#520](https://github.com/adobe/spacecat-api-service/issues/520)) ([c236ab6](https://github.com/adobe/spacecat-api-service/commit/c236ab65841b4972c9568b02e55e4e6911de9c98))
+
 ## [1.67.2](https://github.com/adobe/spacecat-api-service/compare/v1.67.1...v1.67.2) (2024-09-30)
 
 
