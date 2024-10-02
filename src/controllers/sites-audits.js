@@ -31,18 +31,13 @@ export default (dataAccess) => {
     throw new Error('Data access required');
   }
 
-  const validateInput = ({ baseURLs, enableAudits, auditTypes }) => {
-    if (!Array.isArray(baseURLs) || baseURLs.length === 0) {
-      throw new Error('Base URLs are required');
+  const validateInput = ({ baseURL, enableAudits, auditTypes }) => {
+    if (!baseURL || baseURL.length === 0) {
+      throw new Error('Base URL is required');
     }
 
-    for (const baseURL of baseURLs) {
-      if (baseURL.length === 0) {
-        throw new Error('Invalid URL format');
-      }
-      if (!isValidUrl(baseURL)) {
-        throw new Error(`Invalid URL format: ${baseURL}`);
-      }
+    if (!isValidUrl(baseURL)) {
+      throw new Error(`Invalid Base URL format: ${baseURL}`);
     }
 
     if (!Array.isArray(auditTypes) || auditTypes.length === 0) {
@@ -56,10 +51,12 @@ export default (dataAccess) => {
   };
 
   const update = async (context) => {
-    const { baseURLs, enableAudits, auditTypes } = context.data;
+    const sitesConfigurations = context.data;
 
     try {
-      validateInput(context.data);
+      for (const siteConfiguration of sitesConfigurations) {
+        validateInput(siteConfiguration);
+      }
     } catch (error) {
       return badRequest(error.message || 'An error occurred during the request');
     }
@@ -69,7 +66,7 @@ export default (dataAccess) => {
       const configuration = await dataAccess.getConfiguration();
 
       const responses = await Promise.all(
-        baseURLs.map(async (baseURL) => {
+        sitesConfigurations.map(async ({ baseURL, auditTypes, enableAudits }) => {
           const site = await dataAccess.getSiteByBaseURL(baseURL);
           if (!site) {
             return {
@@ -91,7 +88,7 @@ export default (dataAccess) => {
 
           return {
             baseURL: site.getBaseURL(),
-            response: { body: SiteDto.toJSON(site), status: 200 },
+            response: { site: SiteDto.toJSON(site), status: 200 },
           };
         }),
       );

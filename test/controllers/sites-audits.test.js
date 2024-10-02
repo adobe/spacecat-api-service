@@ -73,80 +73,108 @@ describe('Sites Audits Controller', () => {
   });
 
   it('updates multiple sites and returns their responses', async () => {
-    const requestData = {
-      baseURLs: ['https://site1.com', 'https://site2.com'],
-      auditTypes: ['cwv'],
-      enableAudits: true,
-    };
-
     mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[0]);
     mockDataAccess.getSiteByBaseURL.withArgs('https://site2.com').resolves(sites[1]);
 
+    const requestData = [
+      { baseURL: 'https://site1.com', auditTypes: ['cwv'], enableAudits: true },
+      { baseURL: 'https://site1.com', auditTypes: ['404'], enableAudits: true },
+      { baseURL: 'https://site2.com', auditTypes: ['cwv'], enableAudits: false },
+      { baseURL: 'https://site2.com', auditTypes: ['404'], enableAudits: false },
+    ];
     const response = await sitesAuditsController.update({
       data: requestData,
     });
 
-    expect(mockDataAccess.getSiteByBaseURL.calledTwice).to.be.true;
+    expect(mockDataAccess.getSiteByBaseURL.callCount).to.equal(4);
     expect(mockDataAccess.updateConfiguration.called).to.be.true;
 
     expect(mockConfiguration.enableHandlerForSite.calledTwice).to.be.true;
     expect(mockConfiguration.enableHandlerForSite.calledWith('cwv', sites[0])).to.be.true;
-    expect(mockConfiguration.enableHandlerForSite.calledWith('cwv', sites[1])).to.be.true;
+    expect(mockConfiguration.enableHandlerForSite.calledWith('404', sites[0])).to.be.true;
+
+    expect(mockConfiguration.enableHandlerForSite.calledTwice).to.be.true;
+    expect(mockConfiguration.disableHandlerForSite.calledWith('cwv', sites[1])).to.be.true;
+    expect(mockConfiguration.disableHandlerForSite.calledWith('404', sites[1])).to.be.true;
 
     expect(response.status).to.equal(207);
     const multiResponse = await response.json();
-    expect(multiResponse).to.be.an('array').with.lengthOf(2);
+
+    expect(multiResponse).to.be.an('array').with.lengthOf(4);
     expect(multiResponse[0].baseURL).to.equal('https://site1.com');
     expect(multiResponse[0].response.status).to.equal(200);
-    expect(multiResponse[1].baseURL).to.equal('https://site2.com');
+    expect(multiResponse[1].baseURL).to.equal('https://site1.com');
     expect(multiResponse[1].response.status).to.equal(200);
+
+    expect(multiResponse[2].baseURL).to.equal('https://site2.com');
+    expect(multiResponse[2].response.status).to.equal(200);
+    expect(multiResponse[3].baseURL).to.equal('https://site2.com');
+    expect(multiResponse[3].response.status).to.equal(200);
   });
 
   describe('bad requests', () => {
-    it('returns bad request when baseURLs is not provided', async () => {
-      const response = await sitesAuditsController.update({ data: {} });
+    it('returns bad request when baseURL is not provided', async () => {
+      const requestData = [
+        { auditTypes: ['cwv'], enableAudits: true },
+      ];
+
+      const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
       expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
       expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
       expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(response.status).to.equal(400);
-      expect(error).to.have.property('message', 'Base URLs are required');
+      expect(error).to.have.property('message', 'Base URL is required');
     });
 
-    it('returns bad request when baseURLs has wrong format', async () => {
-      const response = await sitesAuditsController.update({ data: { baseURLs: ['wrong_format'] } });
+    it('returns bad request when baseURL has wrong format', async () => {
+      const requestData = [
+        { baseURL: 'wrong_format', auditTypes: ['cwv'], enableAudits: true },
+      ];
+      const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
       expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
       expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
       expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(response.status).to.equal(400);
-      expect(error).to.have.property('message', 'Invalid URL format: wrong_format');
+      expect(error).to.have.property('message', 'Invalid Base URL format: wrong_format');
     });
 
     it('returns bad request when auditTypes is not provided', async () => {
-      const response = await sitesAuditsController.update({ data: { baseURLs: ['https://site1.com'] } });
+      const requestData = [
+        { baseURL: 'https://site1.com', enableAudits: true },
+      ];
+      const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(response.status).to.equal(400);
       expect(error).to.have.property('message', 'Audit types are required');
     });
 
     it('returns bad request when auditTypes has wrong format', async () => {
-      const response = await sitesAuditsController.update({
-        data: { baseURLs: ['https://site1.com'], auditTypes: 'not_array' },
-      });
+      const requestData = [
+        { baseURL: 'https://site1.com', auditTypes: 'not_array', enableAudits: true },
+      ];
+      const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
+      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+      expect(mockDataAccess.updateConfiguration.called).to.be.false;
       expect(response.status).to.equal(400);
       expect(error).to.have.property('message', 'Audit types are required');
     });
 
     it('returns bad request when enableAudits is not provided', async () => {
-      const response = await sitesAuditsController.update({
-        data: { baseURLs: ['https://site1.com'], auditTypes: ['type1'] },
-      });
+      const requestData = [
+        { baseURL: 'https://site1.com', auditTypes: ['cwv'] },
+      ];
+      const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
       expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
@@ -157,9 +185,10 @@ describe('Sites Audits Controller', () => {
     });
 
     it('returns bad request when enableAudits has wrong format', async () => {
-      const response = await sitesAuditsController.update({
-        data: { baseURLs: ['https://site1.com'], auditTypes: ['type1'], enableAudits: 'not_boolean' },
-      });
+      const requestData = [
+        { baseURL: 'https://site1.com', auditTypes: ['cwv'], enableAudits: 'not_boolean' },
+      ];
+      const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
       expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
@@ -172,9 +201,10 @@ describe('Sites Audits Controller', () => {
     it('returns not found when site is not found', async () => {
       mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(null);
 
-      const response = await sitesAuditsController.update({
-        data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
-      });
+      const requestData = [
+        { baseURL: 'https://site1.com', auditTypes: ['cwv'], enableAudits: true },
+      ];
+      const response = await sitesAuditsController.update({ data: requestData });
       const responses = await response.json();
 
       expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
@@ -197,10 +227,11 @@ describe('Sites Audits Controller', () => {
         id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge',
       }));
       mockDataAccess.updateConfiguration.rejects(new Error('Update operation failed'));
-      const response = await sitesAuditsController.update({
-        data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
-      });
 
+      const requestData = [
+        { baseURL: 'https://site1.com', auditTypes: ['cwv'], enableAudits: true },
+      ];
+      const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
       expect(response.status).to.equal(500);
