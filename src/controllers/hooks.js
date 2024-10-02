@@ -179,12 +179,7 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
 }
 
 async function getContentSource(hlxConfig, log) {
-  const { ref, site: repo, owner } = hlxConfig?.rso || {};
-
-  if (!hasText(ref) || !hasText(repo) || !hasText(owner)) {
-    log.error('Invalid hlxConfig. Missing ref, repo, or owner.');
-    return null;
-  }
+  const { ref, site: repo, owner } = hlxConfig.rso;
 
   const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
 
