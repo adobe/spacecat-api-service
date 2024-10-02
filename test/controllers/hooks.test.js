@@ -330,7 +330,7 @@ describe('Hooks Controller', () => {
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
 
-    it('hlx 4 config is updated from fstab when accessible', async () => {
+    it('hlx 4 config is updated from fstab when accessible with drive.google', async () => {
       context.dataAccess.siteCandidateExists.resolves(false);
       context.dataAccess.upsertSiteCandidate.resolves();
       context.data = {
@@ -376,6 +376,60 @@ describe('Hooks Controller', () => {
         .once()
         .reply(200, 'mountpoints:\n'
               + '  /: https://drive.google.com/drive/folders/1KmAPZ9bsFnma4cyMXewWKw63OPJaOIvH');
+
+      await (await hooksController.processCDNHook(context)).json();
+      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
+      expect(
+        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
+      ).to.deep.equal(expectedConfig);
+    });
+
+    it('hlx 4 config is updated from fstab when accessible with onedrive', async () => {
+      context.dataAccess.siteCandidateExists.resolves(false);
+      context.dataAccess.upsertSiteCandidate.resolves();
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
+      };
+
+      const hlxConfig = {
+        content: {
+          source: {
+            type: 'onedrive',
+            url: 'https://onedrive.test.com',
+          },
+        },
+        hlxVersion: 4,
+      };
+
+      const expectedConfig = {
+        ...hlxConfig,
+        rso: {
+          ref: 'main',
+          site: 'some-site',
+          owner: 'some-owner',
+          tld: 'hlx.live',
+        },
+      };
+
+      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
+        baseURL: 'https://some-domain.com',
+        isLive: true,
+        deliveryType: 'aem_edge',
+        hlxConfig: {
+          hlxVersion: 4,
+          rso: {
+            ref: 'main',
+            site: 'some-site',
+            owner: 'some-owner',
+          },
+        },
+      }));
+      nock('https://raw.githubusercontent.com')
+        .get('/some-owner/some-site/main/fstab.yaml')
+        .once()
+        .reply(200, 'mountpoints:\n'
+              + '  /: https://onedrive.test.com');
 
       await (await hooksController.processCDNHook(context)).json();
       expect(context.dataAccess.updateSite.calledOnce).to.be.true;
