@@ -33,19 +33,25 @@ describe('Sites Audits Controller', () => {
     'update',
   ];
 
-  const mockDataAccess = {
-    getAuditsForSite: sandbox.stub(),
-    getLatestAudits: sandbox.stub(),
-    getLatestAuditsForSite: sandbox.stub(),
-    getLatestAuditForSite: sandbox.stub(),
-    patchAuditForSite: sandbox.stub(),
-    getSiteByID: sandbox.stub(),
-    updateSite: sandbox.stub(),
-  };
-
+  let mockConfiguration;
+  let mockDataAccess;
   let sitesAuditsController;
 
   beforeEach(() => {
+    mockConfiguration = {
+      enableHandlerForSite: sandbox.stub(),
+      getVersion: sandbox.stub(),
+      getJobs: sandbox.stub(),
+      getHandlers: sandbox.stub(),
+      getQueues: sandbox.stub(),
+    };
+
+    mockDataAccess = {
+      getConfiguration: sandbox.stub().resolves(mockConfiguration),
+      getSiteByBaseURL: sandbox.stub(),
+      updateConfiguration: sandbox.stub(),
+    };
+
     sitesAuditsController = SitesAuditsController(mockDataAccess);
   });
 
@@ -65,63 +71,51 @@ describe('Sites Audits Controller', () => {
     });
   });
 
-  it('throws an error if data access is not an object', () => {
-    expect(() => SitesAuditsController()).to.throw('Data access required');
+  it('updates multiple sites and returns their responses', async () => {
+    const requestData = {
+      baseURLs: ['https://site1.com', 'https://site2.com'],
+      auditTypes: ['cwv'],
+      enableAudits: true,
+    };
+
+    mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[0]);
+    mockDataAccess.getSiteByBaseURL.withArgs('https://site2.com').resolves(sites[1]);
+
+    const response = await sitesAuditsController.update({
+      data: requestData,
+    });
+
+    expect(mockDataAccess.getSiteByBaseURL.calledTwice).to.be.true;
+    expect(mockDataAccess.updateConfiguration.called).to.be.true;
+
+    expect(mockConfiguration.enableHandlerForSite.calledTwice).to.be.true;
+    expect(mockConfiguration.enableHandlerForSite.calledWith('cwv', sites[0])).to.be.true;
+    expect(mockConfiguration.enableHandlerForSite.calledWith('cwv', sites[1])).to.be.true;
+
+    expect(response.status).to.equal(207);
+    const multiResponse = await response.json();
+    expect(multiResponse).to.be.an('array').with.lengthOf(2);
+    expect(multiResponse[0].baseURL).to.equal('https://site1.com');
+    expect(multiResponse[0].response.status).to.equal(200);
+    expect(multiResponse[1].baseURL).to.equal('https://site2.com');
+    expect(multiResponse[1].response.status).to.equal(200);
   });
 
-  it('updateSitesAudits', () => {
-    let mockDataAccess;
-    let sitesAuditsController;
-
-    beforeEach(() => {
-      mockDataAccess = {
-        addSite: sandbox.stub().resolves(sites[0]),
-        updateSite: sandbox.stub().resolves(sites[0]),
-        removeSite: sandbox.stub().resolves(),
-        getSites: sandbox.stub().resolves(sites),
-        getSitesByDeliveryType: sandbox.stub().resolves(sites),
-        getSiteByBaseURL: sandbox.stub().resolves(sites[0]),
-        getSiteByID: sandbox.stub().resolves(sites[0]),
-        createKeyEvent: sandbox.stub(),
-        getKeyEventsForSite: sandbox.stub(),
-        removeKeyEvent: sandbox.stub(),
-      };
-
-      sitesAuditsController = SitesAuditsController(mockDataAccess);
-    });
-
-    it('updates multiple sites and returns their responses', async () => {
-      const baseURLs = ['https://site1.com', 'https://site2.com'];
-      const enableAudits = true;
-      const auditTypes = ['type1', 'type2'];
-
-      const site1 = SiteDto.fromJson({ id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' });
-      const site2 = SiteDto.fromJson({ id: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge' });
-
-      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(site1);
-      mockDataAccess.getSiteByBaseURL.withArgs('https://site2.com').resolves(site2);
-
-      const response = await sitesAuditsController.update({
-        data: { baseURLs, enableAudits, auditTypes },
-      });
-
-      expect(mockDataAccess.getSiteByBaseURL.calledTwice).to.be.true;
-      expect(mockDataAccess.updateSite.calledTwice).to.be.true;
-      expect(response.status).to.equal(207);
-      const multiResponse = await response.json();
-      expect(multiResponse).to.be.an('array').with.lengthOf(2);
-      expect(multiResponse[0].baseURL).to.equal('https://site1.com');
-      expect(multiResponse[0].response.status).to.equal(200);
-      expect(multiResponse[1].baseURL).to.equal('https://site2.com');
-      expect(multiResponse[1].response.status).to.equal(200);
-    });
-
+  describe('bad requests', () => {
     it('returns bad request when baseURLs is not provided', async () => {
       const response = await sitesAuditsController.update({ data: {} });
       const error = await response.json();
 
       expect(response.status).to.equal(400);
       expect(error).to.have.property('message', 'Base URLs are required');
+    });
+
+    it('returns bad request when baseURLs has wrong format', async () => {
+      const response = await sitesAuditsController.update({ data: { baseURLs: ['wrong_format'] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error).to.have.property('message', 'Invalid URL format: wrong_format');
     });
 
     it('returns bad request when auditTypes is not provided', async () => {
@@ -132,8 +126,30 @@ describe('Sites Audits Controller', () => {
       expect(error).to.have.property('message', 'Audit types are required');
     });
 
+    it('returns bad request when auditTypes has wrong format', async () => {
+      const response = await sitesAuditsController.update({
+        data: { baseURLs: ['https://site1.com'], auditTypes: "not_array" },
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error).to.have.property('message', 'Audit types are required');
+    });
+
     it('returns bad request when enableAudits is not provided', async () => {
-      const response = await sitesAuditsController.update({ data: { baseURLs: ['https://site1.com'], auditTypes: ['type1'] } });
+      const response = await sitesAuditsController.update({
+        data: { baseURLs: ['https://site1.com'], auditTypes: ['type1'] },
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error).to.have.property('message', 'enableAudits is required');
+    });
+
+    it('returns bad request when enableAudits has wrong format', async () => {
+      const response = await sitesAuditsController.update({
+        data: { baseURLs: ['https://site1.com'], auditTypes: ['type1'], enableAudits: "not_boolean" },
+      });
       const error = await response.json();
 
       expect(response.status).to.equal(400);
@@ -153,57 +169,26 @@ describe('Sites Audits Controller', () => {
       expect(responses[0].response.status).to.equal(404);
       expect(responses[0].response.message).to.equal('Site with baseURL: https://site1.com not found');
     });
+  });
 
-    it('returns 500 when org is not found', async () => {
-      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(SiteDto.fromJson({
-        id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge', organizationId: '12345678',
-      }));
-      mockDataAccess.getOrganizationByID.resolves(null);
-
-      const response = await sitesAuditsController.update({
-        data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
-      });
-      const responses = await response.json();
-
-      expect(responses).to.be.an('array').with.lengthOf(1);
-      expect(responses[0].baseURL).to.equal('https://site1.com');
-      expect(responses[0].response.status).to.equal(500);
-      expect(responses[0].response.message).to.equal('Error updating site  with baseURL: https://site1.com, organization with id: 12345678 organization not found');
+  describe('errors', () => {
+    it('throws an error if data access is not an object', () => {
+      expect(() => SitesAuditsController()).to.throw('Data access required');
     });
 
     it('return 500 when site cannot be updated', async () => {
       mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(SiteDto.fromJson({
         id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge',
       }));
-      mockDataAccess.updateSite.rejects(new Error('Update site operation failed'));
-      const response = await sitesController.updateSitesAudits({
+      mockDataAccess.updateConfiguration.rejects(new Error('Update operation failed'));
+      const response = await sitesAuditsController.update({
         data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
       });
 
-      const responses = await response.json();
+      const error = await response.json();
 
-      expect(responses).to.be.an('array').with.lengthOf(1);
-      expect(responses[0].baseURL).to.equal('https://site1.com');
-      expect(responses[0].response.status).to.equal(500);
-      expect(responses[0].response.message).to.equal('Error updating site with with baseURL: https://site1.com, update site operation failed');
-    });
-
-    it('return 500 when site organization cannot be updated', async () => {
-      mockDataAccess.getSiteByBaseURL.withArgs('https://site1.com').resolves(SiteDto.fromJson({
-        id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge', organizationId: '12345678',
-      }));
-      mockDataAccess.getOrganizationByID.resolves(OrganizationDto.fromJson({ name: 'Org1' }));
-      mockDataAccess.updateOrganization.rejects(new Error('Update organization operation failed'));
-      const response = await sitesController.update({
-        data: { baseURLs: ['https://site1.com'], enableAudits: true, auditTypes: ['type1'] },
-      });
-
-      const responses = await response.json();
-
-      expect(responses).to.be.an('array').with.lengthOf(1);
-      expect(responses[0].baseURL).to.equal('https://site1.com');
-      expect(responses[0].response.status).to.equal(500);
-      expect(responses[0].response.message).to.equal('Error updating site with baseURL: https://site1.com, update site organization with id: 12345678 failed');
+      expect(response.status).to.equal(500);
+      expect(error).to.have.property('message', 'Update operation failed');
     });
   });
 });

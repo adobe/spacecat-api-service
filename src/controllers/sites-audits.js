@@ -68,7 +68,13 @@ export default (dataAccess) => {
         baseURLs.map(async (baseURL) => {
           const site = await dataAccess.getSiteByBaseURL(baseURL);
           if (!site) {
-            return { baseURL, errorMessage: `Site with baseURL: ${baseURL} not found`, status: 404 };
+            return {
+              baseURL,
+              response: {
+                message: `Site with baseURL: ${baseURL} not found`,
+                status: 404,
+              },
+            };
           }
 
           for (const auditType of auditTypes) {
