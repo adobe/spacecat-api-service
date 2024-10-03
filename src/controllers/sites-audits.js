@@ -45,8 +45,12 @@ export default (dataAccess) => {
     }
     // @todo: check audit types
 
+    if (typeof enableAudits === 'undefined') {
+      throw new Error('The "enableAudits" flag is required');
+    }
+
     if (typeof enableAudits !== 'boolean') {
-      throw new Error('enableAudits is required');
+      throw new Error('The "enableAudits" flag should be boolean');
     }
   };
 

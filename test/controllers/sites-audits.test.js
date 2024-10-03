@@ -37,6 +37,14 @@ describe('Sites Audits Controller', () => {
   let mockDataAccess;
   let sitesAuditsController;
 
+  const checkBadRequestFailure = (response, error, errorMessage) => {
+    expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
+    expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
+    expect(mockDataAccess.updateConfiguration.called).to.be.false;
+    expect(response.status).to.equal(400);
+    expect(error).to.have.property('message', errorMessage);
+  };
+
   beforeEach(() => {
     mockConfiguration = {
       enableHandlerForSite: sandbox.stub(),
@@ -112,7 +120,7 @@ describe('Sites Audits Controller', () => {
     expect(multiResponse[3].response.status).to.equal(200);
   });
 
-  describe('bad requests', () => {
+  describe('bad request errors', () => {
     it('returns bad request when baseURL is not provided', async () => {
       const requestData = [
         { auditTypes: ['cwv'], enableAudits: true },
@@ -135,11 +143,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
-      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
-      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
-      expect(mockDataAccess.updateConfiguration.called).to.be.false;
-      expect(response.status).to.equal(400);
-      expect(error).to.have.property('message', 'Invalid Base URL format: wrong_format');
+      checkBadRequestFailure(response, error, 'Invalid Base URL format: wrong_format');
     });
 
     it('returns bad request when auditTypes is not provided', async () => {
@@ -149,11 +153,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
-      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
-      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
-      expect(mockDataAccess.updateConfiguration.called).to.be.false;
-      expect(response.status).to.equal(400);
-      expect(error).to.have.property('message', 'Audit types are required');
+      checkBadRequestFailure(response, error, 'Audit types are required');
     });
 
     it('returns bad request when auditTypes has wrong format', async () => {
@@ -163,11 +163,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
-      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
-      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
-      expect(mockDataAccess.updateConfiguration.called).to.be.false;
-      expect(response.status).to.equal(400);
-      expect(error).to.have.property('message', 'Audit types are required');
+      checkBadRequestFailure(response, error, 'Audit types are required');
     });
 
     it('returns bad request when enableAudits is not provided', async () => {
@@ -177,11 +173,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
-      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
-      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
-      expect(mockDataAccess.updateConfiguration.called).to.be.false;
-      expect(response.status).to.equal(400);
-      expect(error).to.have.property('message', 'enableAudits is required');
+      checkBadRequestFailure(response, error, 'The "enableAudits" flag is required');
     });
 
     it('returns bad request when enableAudits has wrong format', async () => {
@@ -191,11 +183,13 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsController.update({ data: requestData });
       const error = await response.json();
 
-      expect(mockConfiguration.enableHandlerForSite.called).to.be.false;
-      expect(mockConfiguration.disableHandlerForSite.called).to.be.false;
-      expect(mockDataAccess.updateConfiguration.called).to.be.false;
-      expect(response.status).to.equal(400);
-      expect(error).to.have.property('message', 'enableAudits is required');
+      checkBadRequestFailure(response, error, 'The "enableAudits" flag should be boolean');
+    });
+  });
+
+  describe('misc errors', () => {
+    it('throws an error if data access is not an object', () => {
+      expect(() => SitesAuditsController()).to.throw('Data access required');
     });
 
     it('returns not found when site is not found', async () => {
@@ -214,12 +208,6 @@ describe('Sites Audits Controller', () => {
       expect(responses[0].baseURL).to.equal('https://site1.com');
       expect(responses[0].response.status).to.equal(404);
       expect(responses[0].response.message).to.equal('Site with baseURL: https://site1.com not found');
-    });
-  });
-
-  describe('errors', () => {
-    it('throws an error if data access is not an object', () => {
-      expect(() => SitesAuditsController()).to.throw('Data access required');
     });
 
     it('return 500 when site cannot be updated', async () => {
