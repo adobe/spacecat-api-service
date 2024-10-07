@@ -38,6 +38,7 @@ describe('RunScrapeCommand', () => {
     };
     dataAccessStub.getConfiguration.returns(getConfigStub);
     logStub = {
+      info: sinon.stub(),
       error: sinon.stub(),
     };
     sqsStub = {
