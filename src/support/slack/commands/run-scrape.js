@@ -92,7 +92,7 @@ function RunScrapeCommand(context) {
         slackContext,
         context,
       );
-      await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - total ${urls.length} URLs)`);
+      await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` — Total ${urls.length} URLs`);
 
       const message = `:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` — Total URLs: ${urls.length}`;
 
