@@ -54,6 +54,7 @@ function RunScrapeCommand(context) {
   const handleExecution = async (args, slackContext) => {
     const { say, user } = slackContext;
     const config = await dataAccess.getConfiguration();
+    log.info('Slack roles:', config.getSlackRoles());
     const slackRoles = JSON.parse(config.getSlackRoles() || '{}');
     const admins = slackRoles?.scrape || [];
 
