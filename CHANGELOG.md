@@ -1,3 +1,31 @@
+## [1.68.3](https://github.com/adobe/spacecat-api-service/compare/v1.68.2...v1.68.3) (2024-10-05)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#522](https://github.com/adobe/spacecat-api-service/issues/522)) ([dad5c3b](https://github.com/adobe/spacecat-api-service/commit/dad5c3b685ed923866412eafcfa21cd2eeba2d2f))
+
+## [1.68.2](https://github.com/adobe/spacecat-api-service/compare/v1.68.1...v1.68.2) (2024-10-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.46.0 ([#521](https://github.com/adobe/spacecat-api-service/issues/521)) ([83e571e](https://github.com/adobe/spacecat-api-service/commit/83e571e7b7172e7c5be4536bcd190b6019ea0ee7))
+
+## [1.68.1](https://github.com/adobe/spacecat-api-service/compare/v1.68.0...v1.68.1) (2024-10-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.45.6 ([#518](https://github.com/adobe/spacecat-api-service/issues/518)) ([01ef12f](https://github.com/adobe/spacecat-api-service/commit/01ef12fa59436bf708120fb1caef37cc17d14fb3))
+
+# [1.68.0](https://github.com/adobe/spacecat-api-service/compare/v1.67.2...v1.68.0) (2024-10-02)
+
+
+### Features
+
+* compute content source for helix 4 config ([#520](https://github.com/adobe/spacecat-api-service/issues/520)) ([c236ab6](https://github.com/adobe/spacecat-api-service/commit/c236ab65841b4972c9568b02e55e4e6911de9c98))
+
 ## [1.67.2](https://github.com/adobe/spacecat-api-service/compare/v1.67.1...v1.67.2) (2024-09-30)
 
 

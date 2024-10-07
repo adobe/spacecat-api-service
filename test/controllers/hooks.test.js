@@ -330,6 +330,114 @@ describe('Hooks Controller', () => {
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
 
+    it('hlx 4 config is updated from fstab when accessible with drive.google', async () => {
+      context.dataAccess.siteCandidateExists.resolves(false);
+      context.dataAccess.upsertSiteCandidate.resolves();
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
+      };
+
+      const hlxConfig = {
+        content: {
+          source: {
+            type: 'drive.google',
+            url: 'https://drive.google.com/drive/folders/1KmAPZ9bsFnma4cyMXewWKw63OPJaOIvH',
+          },
+        },
+        hlxVersion: 4,
+      };
+
+      const expectedConfig = {
+        ...hlxConfig,
+        rso: {
+          ref: 'main',
+          site: 'some-site',
+          owner: 'some-owner',
+          tld: 'hlx.live',
+        },
+      };
+
+      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
+        baseURL: 'https://some-domain.com',
+        isLive: true,
+        deliveryType: 'aem_edge',
+        hlxConfig: {
+          hlxVersion: 4,
+          rso: {
+            ref: 'main',
+            site: 'some-site',
+            owner: 'some-owner',
+          },
+        },
+      }));
+      nock('https://raw.githubusercontent.com')
+        .get('/some-owner/some-site/main/fstab.yaml')
+        .once()
+        .reply(200, 'mountpoints:\n'
+              + '  /: https://drive.google.com/drive/folders/1KmAPZ9bsFnma4cyMXewWKw63OPJaOIvH');
+
+      await (await hooksController.processCDNHook(context)).json();
+      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
+      expect(
+        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
+      ).to.deep.equal(expectedConfig);
+    });
+
+    it('hlx 4 config is updated from fstab when accessible with onedrive', async () => {
+      context.dataAccess.siteCandidateExists.resolves(false);
+      context.dataAccess.upsertSiteCandidate.resolves();
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
+      };
+
+      const hlxConfig = {
+        content: {
+          source: {
+            type: 'onedrive',
+            url: 'https://onedrive.test.com',
+          },
+        },
+        hlxVersion: 4,
+      };
+
+      const expectedConfig = {
+        ...hlxConfig,
+        rso: {
+          ref: 'main',
+          site: 'some-site',
+          owner: 'some-owner',
+          tld: 'hlx.live',
+        },
+      };
+
+      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
+        baseURL: 'https://some-domain.com',
+        isLive: true,
+        deliveryType: 'aem_edge',
+        hlxConfig: {
+          hlxVersion: 4,
+          rso: {
+            ref: 'main',
+            site: 'some-site',
+            owner: 'some-owner',
+          },
+        },
+      }));
+      nock('https://raw.githubusercontent.com')
+        .get('/some-owner/some-site/main/fstab.yaml')
+        .once()
+        .reply(200, 'mountpoints:\n'
+              + '  /: https://onedrive.test.com');
+
+      await (await hooksController.processCDNHook(context)).json();
+      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
+      expect(
+        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
+      ).to.deep.equal(expectedConfig);
+    });
+
     it('while candidate is disregarded, hlx config is updated if different from site', async () => {
       context.dataAccess.siteCandidateExists.resolves(false);
       context.dataAccess.upsertSiteCandidate.resolves();
@@ -528,7 +636,79 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error).to.have.been.calledWith('Error fetching hlx config for some-owner/some-site');
+      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('Error fetching hlx config for some-owner/some-site'));
+      expect(resp).to.equal('CDN site candidate is successfully processed');
+    });
+
+    it('CDN candidate is processed even with error status for helix config and fstab request', async () => {
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(500, '', { 'x-error': 'test-error' });
+
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
+      nock('https://raw.githubusercontent.com')
+        .get('/some-owner/some-site/main/fstab.yaml')
+        .replyWithError('test-error');
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Error: test-error'));
+      expect(resp).to.equal('CDN site candidate is successfully processed');
+    });
+
+    it('CDN candidate is processed even with error status for helix config and 404 for fstab request', async () => {
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(500, '', { 'x-error': 'test-error' });
+
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
+      nock('https://raw.githubusercontent.com')
+        .get('/some-owner/some-site/main/fstab.yaml')
+        .reply(404, 'test-error');
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Status: 404'));
+      expect(resp).to.equal('CDN site candidate is successfully processed');
+    });
+
+    it('CDN candidate is processed even with error status for helix config and malformed fstab', async () => {
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, some-fw-domain.com, main--some-site--some-owner.hlx.live',
+      };
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(500, '', { 'x-error': 'test-error' });
+
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
+      nock('https://raw.githubusercontent.com')
+        .get('/some-owner/some-site/main/fstab.yaml')
+        .reply(200, 'malformed-fstab');
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+
+      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('No content source found for some-owner/some-site in fstab.yaml'));
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
