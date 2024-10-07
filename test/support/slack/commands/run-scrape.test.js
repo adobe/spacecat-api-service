@@ -31,10 +31,10 @@ describe('RunScrapeCommand', () => {
       getTopPagesForSite: sinon.stub(),
     };
     const getConfigStub = {
-      getSlackRoles: sinon.stub().returns(JSON.stringify({
+      getSlackRoles: sinon.stub().returns({
         admin: ['USER123'],
         scrape: ['USER123'],
-      })),
+      }),
     };
     dataAccessStub.getConfiguration.returns(getConfigStub);
     logStub = {
@@ -83,7 +83,7 @@ describe('RunScrapeCommand', () => {
     });
 
     it('parses SLACK_IDS_RUN_IMPORT correctly when present', async () => {
-      dataAccessStub.getConfiguration.resolves({ getSlackRoles: () => (JSON.stringify({ scrape: ['USER123', 'USER456'] })) });
+      dataAccessStub.getConfiguration.resolves({ getSlackRoles: () => ({ scrape: ['USER123', 'USER456'] }) });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], slackContext);
       expect(slackContext.say.calledWith(':error: Only selected SpaceCat fluid team members can run scraper.')).to.be.false;
