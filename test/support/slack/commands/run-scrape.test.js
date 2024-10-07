@@ -26,9 +26,17 @@ describe('RunScrapeCommand', () => {
 
   beforeEach(() => {
     dataAccessStub = {
+      getConfiguration: sinon.stub(),
       getSiteByBaseURL: sinon.stub(),
       getTopPagesForSite: sinon.stub(),
     };
+    const getConfigStub = {
+      getSlackRoles: sinon.stub().returns(JSON.stringify({
+        admin: ['USER123'],
+        scrape: ['USER123'],
+      })),
+    };
+    dataAccessStub.getConfiguration.returns(getConfigStub);
     logStub = {
       error: sinon.stub(),
     };
@@ -39,7 +47,7 @@ describe('RunScrapeCommand', () => {
       dataAccess: dataAccessStub,
       log: logStub,
       sqs: sqsStub,
-      env: { SLACK_IDS_RUN_IMPORT: JSON.stringify(['USER123']) },
+      env: { SCRAPING_JOBS_QUEUE_URL: 'https://example.com' },
     };
     slackContext = {
       say: sinon.spy(),
@@ -74,14 +82,14 @@ describe('RunScrapeCommand', () => {
     });
 
     it('parses SLACK_IDS_RUN_IMPORT correctly when present', async () => {
-      context.env.SLACK_IDS_RUN_IMPORT = JSON.stringify(['USER123', 'USER456']);
+      dataAccessStub.getConfiguration.resolves({ getSlackRoles: () => (JSON.stringify({ scrape: ['USER123', 'USER456'] })) });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], slackContext);
       expect(slackContext.say.calledWith(':error: Only selected SpaceCat fluid team members can run scraper.')).to.be.false;
     });
 
     it('handles missing SLACK_IDS_RUN_IMPORT', async () => {
-      delete context.env.SLACK_IDS_RUN_IMPORT;
+      dataAccessStub.getConfiguration.resolves({ getSlackRoles: () => null });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], { ...slackContext, user: 'ANYUSER' });
       expect(slackContext.say.calledWith(':error: Only selected SpaceCat fluid team members can run scraper.')).to.be.true;
