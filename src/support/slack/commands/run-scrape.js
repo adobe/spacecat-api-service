@@ -18,7 +18,6 @@ import {
   postErrorMessage,
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
-import { isValidDateInterval } from '../../../utils/date-utils.js';
 
 const PHRASES = ['run scrape'];
 
@@ -34,11 +33,10 @@ function RunScrapeCommand(context) {
     id: 'run-scrape',
     name: 'Run Scrape',
     description: 'Runs the specified scrape type for the site identified with its id, and optionally for a date range.'
-            + '\nOnly selected SpaceCat fluid team members can run scraper.'
-            + '\nCurrently this will run the scraper for all sources and all destinations configured for the site, hence be aware of costs'
-            + ' (source: ahrefs) when choosing the date range.',
+            + '\nOnly members of role "scrape" can run this command.'
+            + '\nCurrently this will run the scraper for all sources and all destinations configured for the site, hence be aware of costs.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {baseURL} {startDate} {endDate}`,
+    usageText: `${PHRASES[0]} {baseURL}`,
   });
 
   const { dataAccess, log } = context;
@@ -58,23 +56,16 @@ function RunScrapeCommand(context) {
     const admins = slackRoles?.scrape || [];
 
     if (!admins.includes(user)) {
-      await say(':error: Only selected SpaceCat fluid team members can run scraper.');
+      await say(':error: Only members of role "scrape" can run this command.');
       return;
     }
 
     try {
-      const [baseURLInput, startDate, endDate] = args;
+      const [baseURLInput] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!hasText(baseURL)) {
         await say(baseCommand.usage());
-        return;
-      }
-
-      if ((startDate || endDate) && !isValidDateInterval(startDate, endDate)) {
-        await say(':error: Invalid date interval. '
-            + 'Please provide valid dates in the format YYYY-MM-DD. '
-            + 'The end date must be after the start date and within a two-year range.');
         return;
       }
 
@@ -87,26 +78,25 @@ function RunScrapeCommand(context) {
       const result = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
       const topPages = result || [];
 
-      if (topPages.length > 0) {
-        const urls = topPages.map((page) => ({ url: page.getURL() }));
-        await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
-
-        const jobId = site.getId();
-        await triggerScraperRun(
-          jobId,
-          urls,
-          slackContext,
-          context,
-        );
-        await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - total ${urls.length} URLs)`);
-
-        const message = `:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`
-            + `Total URLs: ${urls.length}`;
-
-        await say(message);
-      } else {
+      if (topPages.length === 0) {
         await say(`:warning: No top pages found for site \`${baseURL}\``);
+        return;
       }
+      const urls = topPages.map((page) => ({ url: page.getURL() }));
+      await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
+
+      const jobId = site.getId();
+      await triggerScraperRun(
+        jobId,
+        urls,
+        slackContext,
+        context,
+      );
+      await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` - total ${urls.length} URLs)`);
+
+      const message = `:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` — Total URLs: ${urls.length}`;
+
+      await say(message);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);

@@ -86,39 +86,14 @@ describe('RunScrapeCommand', () => {
       dataAccessStub.getConfiguration.resolves({ getSlackRoles: () => ({ scrape: ['USER123', 'USER456'] }) });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], slackContext);
-      expect(slackContext.say.calledWith(':error: Only selected SpaceCat fluid team members can run scraper.')).to.be.false;
+      expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.false;
     });
 
     it('handles missing SLACK_IDS_RUN_IMPORT', async () => {
       dataAccessStub.getConfiguration.resolves({ getSlackRoles: () => null });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], { ...slackContext, user: 'ANYUSER' });
-      expect(slackContext.say.calledWith(':error: Only selected SpaceCat fluid team members can run scraper.')).to.be.true;
-    });
-
-    it('rejects invalid date interval', async () => {
-      const command = RunScrapeCommand(context);
-      await command.handleExecution(['https://example.com', '2023-12-31', '2023-01-01'], slackContext);
-      expect(slackContext.say.calledWith(sinon.match(':error: Invalid date interval.'))).to.be.true;
-    });
-    it('informs user when date interval is invalid', async () => {
-      const command = RunScrapeCommand(context);
-      await command.handleExecution(['https://example.com', '2023-12-31', '2023-01-01'], slackContext);
-
-      expect(slackContext.say.calledOnce).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':error: Invalid date interval.');
-      expect(slackContext.say.firstCall.args[0]).to.include('Please provide valid dates in the format YYYY-MM-DD.');
-      expect(slackContext.say.firstCall.args[0]).to.include('The end date must be after the start date and within a two-year range.');
-    });
-
-    it('informs user when date interval is too long', async () => {
-      const command = RunScrapeCommand(context);
-      await command.handleExecution(['https://example.com', '2020-01-01', '2023-01-01'], slackContext);
-
-      expect(slackContext.say.calledOnce).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':error: Invalid date interval.');
-      expect(slackContext.say.firstCall.args[0]).to.include('Please provide valid dates in the format YYYY-MM-DD.');
-      expect(slackContext.say.firstCall.args[0]).to.include('The end date must be after the start date and within a two-year range.');
+      expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.true;
     });
     it('triggers a scrape for a valid site with top pages', async () => {
       dataAccessStub.getSiteByBaseURL.resolves({
@@ -130,11 +105,12 @@ describe('RunScrapeCommand', () => {
       ]);
       const command = RunScrapeCommand(context);
 
-      await command.handleExecution(['https://example.com', '2023-01-01', '2023-12-31'], slackContext);
+      await command.handleExecution(['https://example.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Found top pages for site `https://example.com`');
       expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Triggered scrape run for site `https://example.com`');
+      expect(slackContext.say.thirdCall.args[0]).to.include('white_check_mark: Completed triggering scrape runs for site `https://example.com` — Total URLs: 2');
     });
 
     it('does not trigger a scrape when user is not authorized', async () => {
@@ -143,7 +119,7 @@ describe('RunScrapeCommand', () => {
 
       await command.handleExecution(['https://example.com'], slackContext);
 
-      expect(slackContext.say.calledWith(':error: Only selected SpaceCat fluid team members can run scraper.')).to.be.true;
+      expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.true;
     });
 
     it('responds with a warning for an invalid site url', async () => {
