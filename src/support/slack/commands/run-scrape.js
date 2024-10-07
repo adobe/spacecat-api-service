@@ -53,11 +53,13 @@ function RunScrapeCommand(context) {
      */
   const handleExecution = async (args, slackContext) => {
     const { say, user } = slackContext;
-    const admins = JSON.parse(context?.env?.SLACK_IDS_RUN_IMPORT || '[]');
+    const config = await dataAccess.getConfiguration();
+    const slackRoles = config.getSlackRoles();
+    const admins = JSON.parse(slackRoles?.scrape || '[]');
 
     if (!admins.includes(user)) {
       await say(':error: Only selected SpaceCat fluid team members can run scraper.');
-      // return;
+      return;
     }
 
     try {
