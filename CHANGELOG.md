@@ -1,3 +1,10 @@
+## [1.69.1](https://github.com/adobe/spacecat-api-service/compare/v1.69.0...v1.69.1) (2024-10-08)
+
+
+### Bug Fixes
+
+* Change the getter for redirectCount ([#526](https://github.com/adobe/spacecat-api-service/issues/526)) ([c36c9cb](https://github.com/adobe/spacecat-api-service/commit/c36c9cb51468dec4b3518eada0f3a4e10c2c7cf4))
+
 # [1.69.0](https://github.com/adobe/spacecat-api-service/compare/v1.68.4...v1.69.0) (2024-10-08)
 
 
