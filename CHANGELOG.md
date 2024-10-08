@@ -1,3 +1,73 @@
+# [1.69.0](https://github.com/adobe/spacecat-api-service/compare/v1.68.4...v1.69.0) (2024-10-08)
+
+
+### Features
+
+* slackbot command for scraping top-pages  ([#470](https://github.com/adobe/spacecat-api-service/issues/470)) ([0a7b37b](https://github.com/adobe/spacecat-api-service/commit/0a7b37b7dd78722367236fbc14eda1b20415518d))
+
+## [1.68.4](https://github.com/adobe/spacecat-api-service/compare/v1.68.3...v1.68.4) (2024-10-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.47.1 ([#524](https://github.com/adobe/spacecat-api-service/issues/524)) ([3666cde](https://github.com/adobe/spacecat-api-service/commit/3666cde4ce2e25466e4c22a00d2451e658977abd))
+
+## [1.68.3](https://github.com/adobe/spacecat-api-service/compare/v1.68.2...v1.68.3) (2024-10-05)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#522](https://github.com/adobe/spacecat-api-service/issues/522)) ([dad5c3b](https://github.com/adobe/spacecat-api-service/commit/dad5c3b685ed923866412eafcfa21cd2eeba2d2f))
+
+## [1.68.2](https://github.com/adobe/spacecat-api-service/compare/v1.68.1...v1.68.2) (2024-10-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.46.0 ([#521](https://github.com/adobe/spacecat-api-service/issues/521)) ([83e571e](https://github.com/adobe/spacecat-api-service/commit/83e571e7b7172e7c5be4536bcd190b6019ea0ee7))
+
+## [1.68.1](https://github.com/adobe/spacecat-api-service/compare/v1.68.0...v1.68.1) (2024-10-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.45.6 ([#518](https://github.com/adobe/spacecat-api-service/issues/518)) ([01ef12f](https://github.com/adobe/spacecat-api-service/commit/01ef12fa59436bf708120fb1caef37cc17d14fb3))
+
+# [1.68.0](https://github.com/adobe/spacecat-api-service/compare/v1.67.2...v1.68.0) (2024-10-02)
+
+
+### Features
+
+* compute content source for helix 4 config ([#520](https://github.com/adobe/spacecat-api-service/issues/520)) ([c236ab6](https://github.com/adobe/spacecat-api-service/commit/c236ab65841b4972c9568b02e55e4e6911de9c98))
+
+## [1.67.2](https://github.com/adobe/spacecat-api-service/compare/v1.67.1...v1.67.2) (2024-09-30)
+
+
+### Bug Fixes
+
+* spacecat bot ([297b98f](https://github.com/adobe/spacecat-api-service/commit/297b98f09d226ba2bbfd309510d6ed5955e81ef3))
+
+## [1.67.1](https://github.com/adobe/spacecat-api-service/compare/v1.67.0...v1.67.1) (2024-09-28)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#514](https://github.com/adobe/spacecat-api-service/issues/514)) ([fa41d84](https://github.com/adobe/spacecat-api-service/commit/fa41d843e49a1e83f3e0907606d1730856a90bc7))
+
+# [1.67.0](https://github.com/adobe/spacecat-api-service/compare/v1.66.3...v1.67.0) (2024-09-27)
+
+
+### Features
+
+* Restrict importing URLs which are not allowlisted (by domain) for the API key ([#511](https://github.com/adobe/spacecat-api-service/issues/511)) ([f8c7a84](https://github.com/adobe/spacecat-api-service/commit/f8c7a84aa6288396abed2881f8a0e70540f3e7f8))
+
+## [1.66.3](https://github.com/adobe/spacecat-api-service/compare/v1.66.2...v1.66.3) (2024-09-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.45.3 ([#513](https://github.com/adobe/spacecat-api-service/issues/513)) ([ac1312e](https://github.com/adobe/spacecat-api-service/commit/ac1312e892115162675ea00e6e28b491635926af))
+
 ## [1.66.2](https://github.com/adobe/spacecat-api-service/compare/v1.66.1...v1.66.2) (2024-09-25)
 
 
