@@ -1,3 +1,10 @@
+# [1.69.0](https://github.com/adobe/spacecat-api-service/compare/v1.68.4...v1.69.0) (2024-10-08)
+
+
+### Features
+
+* slackbot command for scraping top-pages  ([#470](https://github.com/adobe/spacecat-api-service/issues/470)) ([0a7b37b](https://github.com/adobe/spacecat-api-service/commit/0a7b37b7dd78722367236fbc14eda1b20415518d))
+
 ## [1.68.4](https://github.com/adobe/spacecat-api-service/compare/v1.68.3...v1.68.4) (2024-10-07)
 
 
