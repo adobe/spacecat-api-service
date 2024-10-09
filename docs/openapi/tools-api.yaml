@@ -151,6 +151,8 @@ import-assistant:
       - import
     summary: Send a prompt to the import assistant
     description: |
+      Note: Not implemented yet.
+      
       This endpoint can be used to send prompts to the import assistant. 
       Each prompt will make use of AI to analyze a URL and return
       choices as a result of the request.
