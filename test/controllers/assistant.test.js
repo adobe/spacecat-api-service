@@ -22,17 +22,23 @@ use(sinonChai);
 use(chaiAsPromised);
 
 describe('AssistantController tests', () => {
+  let baseContext;
   let assistantController;
 
   beforeEach(() => {
-    assistantController = AssistantController();
+    baseContext = {
+      params: {},
+      data: {},
+    };
+    assistantController = AssistantController(baseContext);
   });
 
   describe('processImportAssistant', () => {
     it('should throw a not implemented error', async () => {
-      const response = await assistantController.processImportAssistant();
+      const response = await assistantController.processImportAssistant({ ...baseContext, data: { command: 'test' } });
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(501);
+      expect(response.headers.get('x-error')).to.equal('Assistant command not implemented: test');
     });
   });
 });

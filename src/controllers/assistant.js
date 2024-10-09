@@ -13,19 +13,31 @@
 import {
   createResponse,
 } from '@adobe/spacecat-shared-http-utils';
+import { ErrorWithStatusCode } from '../support/utils.js';
 
 /**
- * Assistant controller. Provides methods to perform AI operations by using Firefall.
+ * Assistant controller. Provides methods to perform Firefall AI operations.
  * @returns {object} Import assistant controller.
  * @constructor
  */
 function AssistantController() {
+  const HEADER_ERROR = 'x-error';
+
+  function createErrorResponse(error) {
+    return createResponse({}, error.status, {
+      [HEADER_ERROR]: error.message,
+    });
+  }
+
   /**
    * Send an import assistant request to Firefall.
+   * @param {object} context - Context of the request.
    * @returns {Promise<Response>} 200 OK with a list of Firefall choices.
    */
-  async function processImportAssistant() {
-    return createResponse({}, 501);
+  async function processImportAssistant(context) {
+    const { command } = context.data;
+    const error = new ErrorWithStatusCode(`Assistant command not implemented: ${command}`, 501);
+    return createErrorResponse(error);
   }
 
   return {
