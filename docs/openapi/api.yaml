@@ -125,6 +125,8 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
+  /tools/import/assistant/prompt:
+    $ref: './tools-api.yaml#/import-assistant'
 
 components:
   securitySchemes:
