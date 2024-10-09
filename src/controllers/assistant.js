@@ -36,8 +36,11 @@ function AssistantController() {
    */
   async function processImportAssistant(context) {
     const { command } = context.data;
-    const error = new ErrorWithStatusCode(`Assistant command not implemented: ${command}`, 501);
-    return createErrorResponse(error);
+    if (command) {
+      const error = new ErrorWithStatusCode(`Assistant command not implemented: ${command}`, 501);
+      return createErrorResponse(error);
+    }
+    return createResponse({}, 501);
   }
 
   return {

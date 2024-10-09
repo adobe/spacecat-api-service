@@ -35,6 +35,11 @@ describe('AssistantController tests', () => {
 
   describe('processImportAssistant', () => {
     it('should throw a not implemented error', async () => {
+      const response = await assistantController.processImportAssistant({ ...baseContext });
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(501);
+    });
+    it('should throw a not implemented error with invalid command', async () => {
       const response = await assistantController.processImportAssistant({ ...baseContext, data: { command: 'test' } });
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(501);
