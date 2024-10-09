@@ -1518,5 +1518,3 @@ ImportAssistantResponse:
               content:
                 description: The content of the message.
                 type: string
-
-

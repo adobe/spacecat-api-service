@@ -155,7 +155,7 @@ import-assistant:
       
       This endpoint can be used to send prompts to the import assistant. 
       Each prompt will make use of AI to analyze a URL and return
-      choices as a result of the request.
+      choices in response to the request.
     operationId: processImportAssistant
     security:
       - api_key: [ ]

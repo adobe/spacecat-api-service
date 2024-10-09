@@ -16,7 +16,7 @@ import {
 import { ErrorWithStatusCode } from '../support/utils.js';
 
 /**
- * Assistant controller. Provides methods to perform Firefall AI operations.
+ * Assistant controller. Provides methods to perform AI assisted operations.
  * @returns {object} Import assistant controller.
  * @constructor
  */
@@ -30,9 +30,9 @@ function AssistantController() {
   }
 
   /**
-   * Send an import assistant request to Firefall.
+   * Send an import assistant request to the model.
    * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} 200 OK with a list of Firefall choices.
+   * @returns {Promise<Response>} 200 OK with a list of options from the model.
    */
   async function processImportAssistant(context) {
     const { command } = context.data;
