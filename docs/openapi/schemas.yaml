@@ -380,6 +380,28 @@ UpdateHandlerTypeConfig:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+SitesAudits:
+  type: array
+  items:
+    type: object
+    properties:
+      baseURL:
+        type: string
+        description: The base URL of the site
+      response:
+        type: object
+        description: The response for operation
+        properties:
+          status:
+            type: string
+            description: The status of the operation
+          message:
+            type: string
+            description: The message of the operation
+          site:
+            $ref: './schemas.yaml#/SiteList'
+        required:
+          - status
 Audit:
   type: object
   readOnly: true

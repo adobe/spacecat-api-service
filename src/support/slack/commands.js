@@ -21,6 +21,7 @@ import runImport from './commands/run-import.js';
 import runScrape from './commands/run-scrape.js';
 import setLiveStatus from './commands/set-live-status.js';
 import help from './commands/help.js';
+import updateSitesAudits from './commands/update-sites-audits.js';
 
 /**
  * Returns all commands.
@@ -40,4 +41,5 @@ export default (context) => [
   runScrape(context),
   setLiveStatus(context),
   help(context),
+  updateSitesAudits(context),
 ];
