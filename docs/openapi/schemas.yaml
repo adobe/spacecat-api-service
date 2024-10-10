@@ -1494,11 +1494,9 @@ ImportAssistantRequest:
       description: Optional configuration options required by the command.
       type: object
   example:
-    - url: 'https://example.com/en/page1'
-      command: 'start'
-    - url: 'https://example.com/en/page2'
-      command: 'cleanup'
-      prompt: 'breadcrumbs'
+    url: 'https://example.com/en/page2'
+    command: 'cleanup'
+    prompt: 'breadcrumbs'
 ImportAssistantResponse:
   type: object
   properties:
@@ -1508,9 +1506,6 @@ ImportAssistantResponse:
       items:
         type: object
         properties:
-          finish_reason:
-            description: The reason for finishing the assistant command.
-            type: string
           message:
             description: The message from the assistant command.
             type: object
@@ -1518,3 +1513,7 @@ ImportAssistantResponse:
               content:
                 description: The content of the message.
                 type: string
+  example:
+    choices:
+      - message:
+          content: '.breadcrumbs'
