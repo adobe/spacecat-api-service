@@ -50,6 +50,7 @@ import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import ImportController from './controllers/import.js';
+import AssistantController from './controllers/assistant.js';
 import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
 
@@ -95,6 +96,7 @@ async function run(request, context) {
       trigger,
       FulfillmentController(context),
       ImportController(context),
+      AssistantController(context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
