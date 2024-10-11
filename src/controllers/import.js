@@ -12,6 +12,7 @@
 
 import {
   createResponse,
+  noContent,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
@@ -45,6 +46,7 @@ function ImportController(context) {
     WRITE: 'imports.write', // allows users to create new import jobs
     READ_ALL: 'imports.read_all', // allows users to view all import jobs
     ALL_DOMAINS: 'imports.all_domains', // allows users to import across any domain
+    DELETE: 'imports.delete', // access to delete import jobs
   };
 
   const {
@@ -331,12 +333,33 @@ function ImportController(context) {
     }
   }
 
+  /**
+   * Delete an import job.
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.jobId - The ID of the job to delete.
+   * @return {Promise<Response>} 204 No Content if successful, 4xx or 5xx otherwise.
+   */
+  async function deleteImportJob(requestContext) {
+    const { jobId, importApiKey } = parseRequestContext(requestContext);
+
+    try {
+      validateAccessScopes([SCOPE.DELETE]);
+      await importSupervisor.deleteImportJob(jobId, importApiKey);
+
+      return noContent();
+    } catch (error) {
+      log.error(`Failed to delete the import job: ${error.message}`);
+      return createErrorResponse(error);
+    }
+  }
+
   return {
     createImportJob,
     getImportJobStatus,
     getImportJobResult,
     getImportJobProgress,
     getImportJobsByDateRange,
+    deleteImportJob,
   };
 }
 
