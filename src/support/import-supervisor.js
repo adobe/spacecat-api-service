@@ -311,12 +311,13 @@ function ImportSupervisor(services, config) {
   /**
    * Delete an import job and all associated URLs.
    * @param {string} jobId - The ID of the job.
-   * @param {object} importApiKey - API key provided to the delete request.
+   * @param {string} importApiKey - API key provided to the delete request.
    * @returns {Promise<void>} Resolves once the deletion is complete.
    */
   async function deleteImportJob(jobId, importApiKey) {
     // Fetch the job. This also confirms the API key matches the one used to start the job.
     const job = await getImportJob(jobId, importApiKey);
+    log.info(`Deletion of import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)}`);
 
     return dataAccess.removeImportJob(job);
   }

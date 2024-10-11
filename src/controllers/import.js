@@ -348,7 +348,7 @@ function ImportController(context) {
 
       return noContent();
     } catch (error) {
-      log.error(`Failed to delete the import job: ${error.message}`);
+      log.error(`Failed to delete import jobId: ${jobId} : ${error.message}`);
       return createErrorResponse(error);
     }
   }
