@@ -16,7 +16,7 @@ import {
   badRequest,
   noContent,
   notFound,
-  ok,
+  ok, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -30,6 +30,7 @@ import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
+import { ConfigurationDto } from '../dto/configuration.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -101,6 +102,44 @@ function SitesController(dataAccess) {
     const sites = (await dataAccess.getSitesWithLatestAudit(auditType, ascending))
       .map((site) => SiteDto.toJSON(site));
     return ok(sites);
+  };
+
+  /** Bulk update audit configuration for multiple sites.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>}  Array of sites response.
+   */
+  const bulkUpdateSitesConfig = async (context) => {
+    const { baseURLs, enableAudits, auditTypes } = context.data;
+
+    if (!Array.isArray(baseURLs) || baseURLs.length === 0) {
+      return badRequest('Base URLs are required');
+    }
+    if (!Array.isArray(auditTypes) || auditTypes.length === 0) {
+      return badRequest('Audit types are required');
+    }
+    if (!isBoolean(enableAudits)) {
+      return badRequest('enableAudits is required');
+    }
+    const configuration = await dataAccess.getConfiguration();
+
+    const responses = await Promise.all(baseURLs.map(async (baseURL) => {
+      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      if (!site) {
+        return { baseURL, errorMessage: `Site with baseURL: ${baseURL} not found`, status: 404 };
+      }
+      auditTypes.forEach((auditType) => (
+        enableAudits ? configuration.enableHandlerForSite(auditType, site)
+          : configuration.disableHandlerForSite(auditType, site)));
+
+      return { baseURL: site.getBaseURL(), response: { body: SiteDto.toJSON(site), status: 200 } };
+    }));
+    try {
+      await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return internalServerError('Failed to enable audits for all provided sites');
+    }
+
+    return createResponse(responses, 207);
   };
 
   /**
@@ -361,6 +400,7 @@ function SitesController(dataAccess) {
     getAuditForSite,
     getByBaseURL,
     getAllByDeliveryType,
+    bulkUpdateSitesConfig,
     getByID,
     removeSite,
     updateSite,
