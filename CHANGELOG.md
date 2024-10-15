@@ -1,3 +1,17 @@
+# [1.70.0](https://github.com/adobe/spacecat-api-service/compare/v1.69.2...v1.70.0) (2024-10-15)
+
+
+### Features
+
+* Support import job deletion ([#530](https://github.com/adobe/spacecat-api-service/issues/530)) ([c13788a](https://github.com/adobe/spacecat-api-service/commit/c13788a1bb28062f0e33312b48d5a9a3add38883))
+
+## [1.69.2](https://github.com/adobe/spacecat-api-service/compare/v1.69.1...v1.69.2) (2024-10-12)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#531](https://github.com/adobe/spacecat-api-service/issues/531)) ([41d2ae8](https://github.com/adobe/spacecat-api-service/commit/41d2ae872bf81345a27ed342a0db334f94df522e))
+
 ## [1.69.1](https://github.com/adobe/spacecat-api-service/compare/v1.69.0...v1.69.1) (2024-10-08)
 
 

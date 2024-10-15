@@ -106,6 +106,7 @@ describe('ImportController tests', () => {
       getImportJobProgress: sandbox.stub(),
       getImportUrlsByJobId: sandbox.stub().resolves([]),
       getApiKeyByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
+      removeImportJob: sandbox.stub().resolves(),
     };
 
     mockDataAccess.getImportJobByID.callsFake(async (jobId) => {
@@ -625,6 +626,44 @@ describe('ImportController tests', () => {
         apiKeyName: 'Test key',
       });
       expect(responseResult[0].baseURL).to.equal('https://www.example.com');
+    });
+  });
+
+  describe('deleteImportJob', () => {
+    it('should fail when api key does not have the correct scopes', async () => {
+      baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
+      baseContext.params.jobId = exampleJob.id;
+      const response = await importController.deleteImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(401);
+      expect(response.headers.get('x-error')).to.equal('Missing required scopes');
+
+      expect(mockDataAccess.removeImportJob).to.not.have.been.called;
+    });
+
+    it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
+      baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
+      baseContext.params.jobId = exampleJob.id;
+      const response = await importController.deleteImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(404);
+      expect(response.headers.get('x-error')).to.equal('Not found');
+
+      expect(mockDataAccess.removeImportJob).to.not.have.been.called;
+    });
+
+    it('should delete the specified job', async () => {
+      baseContext.params.jobId = exampleJob.id;
+      const response = await importController.deleteImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(204);
+
+      // Check that removeImportJob was invoked with the expected jobId
+      expect(mockDataAccess.removeImportJob).to.have.been.calledOnce;
+      expect(mockDataAccess.removeImportJob.getCall(0).args[0].getId()).to.equal(exampleJob.id);
     });
   });
 });
