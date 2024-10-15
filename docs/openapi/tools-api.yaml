@@ -77,6 +77,38 @@ import-job-status:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
+  delete:
+    tags:
+      - import
+    summary: Delete an import job
+    description: |
+      This endpoint can be used to delete an import job, given its jobId. This operation will remove
+      all import URL entities in addition to the import job itself. The `imports.delete` scope is 
+      required on the API key used to delete the import job, and only jobs created by the provided
+      key can be deleted.
+    operationId: deleteImportJob
+    security:
+      - api_key: [ ]
+    parameters:
+      - $ref: './parameters.yaml#/jobId'
+      - in: header
+        name: x-api-key
+        schema:
+          type: string
+        description: |
+          Client-specific import API key. Must match the key used to start the import job, and
+          include the imports.delete scope.
+    responses:
+      '204':
+        description: Import job deleted successfully.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
 import-job-progress:
   get:
     tags:
