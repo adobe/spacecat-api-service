@@ -38,7 +38,7 @@ describe('CreateGoogleLinkCommand', () => {
   });
 
   describe('Initialization and BaseCommand integration', () => {
-    it('handles valid input and retrieves site status', async () => {
+    it('handles valid input and compiles the google link command correctly', async () => {
       const command = CreateGoogleLinkCommand(context);
       expect(command.id)
         .to
@@ -81,7 +81,7 @@ describe('CreateGoogleLinkCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
+      expect(slackContext.say.calledWith('Usage: _get google auth link {baseURL}_')).to.be.true;
     });
 
     it('notifies when no site is found', async () => {
