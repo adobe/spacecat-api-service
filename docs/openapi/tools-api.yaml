@@ -190,7 +190,7 @@ import-assistant:
       choices in response to the request.
     operationId: processImportAssistant
     security:
-      - api_key: [ ]
+      - scoped_api_key: [ ]
     requestBody:
       content:
         application/json:

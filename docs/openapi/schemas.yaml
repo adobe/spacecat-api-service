@@ -1485,7 +1485,7 @@ ImportAssistantRequest:
       description: The URL to analyze
       $ref: '#/URL'
     command:
-      description: Assistant command to execute.
+      description: Assistant command to execute. Examples are 'start', 'cleanup', 'block', 'cells'.
       type: string
     prompt:
       description: Optional prompt to provide context for the analysis.
