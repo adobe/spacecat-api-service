@@ -31,7 +31,7 @@ function CreateGoogleLinkCommand(context) {
     id: 'create-google-link',
     name: 'Create Google Authentication Link',
     description: 'Creates a Google authentication link for the specified site.'
-    + '\n This link can then be sent to a customer to obtain Google Search Console API access.',
+    + '\n This link can be sent to a customer to obtain Google Search Console API access.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {baseURL}`,
   });
@@ -56,7 +56,9 @@ function CreateGoogleLinkCommand(context) {
       }
 
       const siteId = site.getId();
-      const message = `https://spacecat.experiencecloud.live/api/v1/auth/google/${siteId}`;
+      const funcVersion = context.func?.version;
+      const isDev = /^ci\d*$/i.test(funcVersion);
+      const message = `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}/auth/google/${siteId}`;
       await say(message);
     } catch (error) {
       log.error(error);
