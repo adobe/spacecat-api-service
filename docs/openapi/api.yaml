@@ -134,7 +134,7 @@ components:
       type: apiKey
       in: header
       name: x-api-key
-      description: "DEPRECATED, use scoped_api_key or ims_key. For read-only operations."
+      description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read-only operations.)"
     scoped_api_key:
       type: apiKey
       in: header
@@ -143,13 +143,13 @@ components:
     ims_key:
       type: apiKey
       in: header
-      name: x-api-key
+      name: authentication
       description: "Value must be a valid IMS user token which will be offline-validated."
     admin_key:
       type: apiKey
       in: header
       name: x-api-key
-      description: "DEPRECATED, use scoped_api_key or ims_key. For read and write operations."
+      description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)"
   schemas:
     $ref: './schemas.yaml'
   examples:
