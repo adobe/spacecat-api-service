@@ -12,7 +12,7 @@ import:
       response will be returned.
     operationId: startImportJob
     security:
-      - api_key: [ ]
+      - scoped_api_key: [ ]
     parameters:
       - in: header
         name: x-api-key
@@ -53,7 +53,7 @@ import-job-status:
       This endpoint can be used to query the status of an import job, given its jobId.
     operationId: getImportJobStatus
     security:
-      - api_key: [ ]
+      - scoped_api_key: [ ]
     parameters:
       - $ref: './parameters.yaml#/jobId'
       - in: header
@@ -88,7 +88,7 @@ import-job-status:
       key can be deleted.
     operationId: deleteImportJob
     security:
-      - api_key: [ ]
+      - scoped_api_key: [ ]
     parameters:
       - $ref: './parameters.yaml#/jobId'
       - in: header
@@ -118,7 +118,7 @@ import-job-progress:
       This endpoint can be used to query the progress of an import job, given its jobId.
     operationId: getImportJobProgress
     security:
-      - api_key: [ ]
+      - scoped_api_key: [ ]
     parameters:
       - $ref: './parameters.yaml#/jobId'
       - in: header
@@ -153,7 +153,7 @@ import-job-result:
       include the import-report.xlsx file, which contains a summary of the import job.
     operationId: getImportJobArchive
     security:
-      - api_key: [ ]
+      - scoped_api_key: [ ]
     parameters:
       - $ref: './parameters.yaml#/jobId'
       - in: header
