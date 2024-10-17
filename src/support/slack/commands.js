@@ -20,6 +20,7 @@ import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
 import runScrape from './commands/run-scrape.js';
 import setLiveStatus from './commands/set-live-status.js';
+import getGoogleLink from './commands/create-google-link.js';
 import help from './commands/help.js';
 
 /**
@@ -39,5 +40,6 @@ export default (context) => [
   runImport(context),
   runScrape(context),
   setLiveStatus(context),
+  getGoogleLink(context),
   help(context),
 ];
