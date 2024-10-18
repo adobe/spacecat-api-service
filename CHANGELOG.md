@@ -1,3 +1,10 @@
+# [1.72.0](https://github.com/adobe/spacecat-api-service/compare/v1.71.0...v1.72.0) (2024-10-18)
+
+
+### Features
+
+* introduce slack command to get google auth url ([#534](https://github.com/adobe/spacecat-api-service/issues/534)) ([188c21e](https://github.com/adobe/spacecat-api-service/commit/188c21e0a94e536f9745ef57502890f84a16c581))
+
 # [1.71.0](https://github.com/adobe/spacecat-api-service/compare/v1.70.0...v1.71.0) (2024-10-17)
 
 
