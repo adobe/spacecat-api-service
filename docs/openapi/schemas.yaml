@@ -1475,3 +1475,45 @@ BrokenBacklink:
     url_suggested:
       description: The URL suggested for redirecting from the broken backlink.
       $ref: '#/URL'
+ImportAssistantRequest:
+  type: object
+  required:
+    - url
+    - command
+  properties:
+    url:
+      description: The URL to analyze
+      $ref: '#/URL'
+    command:
+      description: Assistant command to execute. Examples are 'start', 'cleanup', 'block', 'cells'.
+      type: string
+    prompt:
+      description: Optional prompt to provide context for the analysis.
+      type: string
+    options:
+      description: Optional configuration options required by the command.
+      type: object
+  example:
+    url: 'https://example.com/en/page2'
+    command: 'cleanup'
+    prompt: 'breadcrumbs'
+ImportAssistantResponse:
+  type: object
+  properties:
+    choices:
+      description: The choices available from the assistant command.
+      type: array
+      items:
+        type: object
+        properties:
+          message:
+            description: The message from the assistant command.
+            type: object
+            properties:
+              content:
+                description: The content of the message.
+                type: string
+  example:
+    choices:
+      - message:
+          content: '.breadcrumbs'

@@ -1,3 +1,10 @@
+# [1.71.0](https://github.com/adobe/spacecat-api-service/compare/v1.70.0...v1.71.0) (2024-10-17)
+
+
+### Features
+
+* SITES-26077: [Import Assistant] Define API schema ([#527](https://github.com/adobe/spacecat-api-service/issues/527)) ([ad9c4f6](https://github.com/adobe/spacecat-api-service/commit/ad9c4f63d8fdc3a1edb8fcf4fe749e3bd4b29d21))
+
 # [1.70.0](https://github.com/adobe/spacecat-api-service/compare/v1.69.2...v1.70.0) (2024-10-15)
 
 

@@ -1,5 +1,7 @@
 scrape:
   post:
+    tags:
+      - scrape
     summary: Scrape a set of URLs
     description: |
       Warning: prototype endpoint. 

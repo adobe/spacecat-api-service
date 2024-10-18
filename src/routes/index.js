@@ -52,6 +52,7 @@ function isStaticRoute(routePattern) {
  * @param {Function} triggerHandler - The trigger handler function.
  * @param {Object} fulfillmentController - The fulfillment controller.
  * @param {Object} importController - The import controller.
+ * @param {Object} assistantController - The assistant controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -65,6 +66,7 @@ export default function getRouteHandlers(
   triggerHandler,
   fulfillmentController,
   importController,
+  assistantController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -117,6 +119,7 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/:jobId/progress': importController.getImportJobProgress,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
+    'POST /tools/import/assistant/prompt': assistantController.processImportAssistant,
   };
 
   // Initialization of static and dynamic routes
