@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Adobe. All rights reserved.
+ * Copyright 2024 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -10,15 +10,16 @@
  * governing permissions and limitations under the License.
  */
 
-module.exports = {
-  root: true,
-  extends: '@adobe/helix',
-  overrides: [
-    {
-      files: ['*.test.js', 'test/e2e/*'],
-      rules: {
-        'no-unused-expressions': 'off',
-      },
-    },
-  ],
+export const expectedJob1Result = {
+  baseURL: 'https://business.adobe.com',
+  options: {
+    enableJavascript: false
+  },
+  status: 'COMPLETE',
+  urlCount: 2,
+  successCount: 2,
+  failedCount: 0,
+  redirectCount: 0,
+  hasCustomHeaders: false,
+  hasCustomImportJs: false
 };

@@ -13,6 +13,7 @@
 import { Blob } from 'buffer';
 import path from 'path';
 import fs from 'fs';
+import { expect } from 'chai';
 import { apiKey, apiUrl } from './config.js';
 
 /* eslint-disable no-await-in-loop */
@@ -87,4 +88,15 @@ export async function pollUntilJobIsComplete(jobId) {
   }
 
   return job;
+}
+
+export function expectJobsToMatch(expectedJob, actualJob) {
+  const propertiesToIgnore = ['id', 'startTime', 'endTime', 'duration'];
+
+  for (const key of Object.keys(expectedJob)) {
+    if (!propertiesToIgnore.includes(key)) {
+      // Compare all props except for the ones we are ignoring
+      expect(expectedJob[key]).to.deep.equal(actualJob[key]);
+    }
+  }
 }
