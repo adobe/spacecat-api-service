@@ -43,6 +43,7 @@ import SitesController from './controllers/sites.js';
 import ExperimentsController from './controllers/experiments.js';
 import HooksController from './controllers/hooks.js';
 import SlackController from './controllers/slack.js';
+import SitesAuditsController from './controllers/sites-audits.js';
 import trigger from './controllers/trigger.js';
 
 // prevents webpack build error
@@ -97,6 +98,7 @@ async function run(request, context) {
       FulfillmentController(context),
       ImportController(context),
       AssistantController(context),
+      SitesAuditsController(context.dataAccess),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

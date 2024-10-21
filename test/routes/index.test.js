@@ -78,6 +78,10 @@ describe('getRouteHandlers', () => {
     processImportAssistant: sinon.stub(),
   };
 
+  const mockSitesAuditsController = {
+    update: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -91,6 +95,7 @@ describe('getRouteHandlers', () => {
       mockFulfillmentController,
       mockImportController,
       mockAssistantController,
+      mockSitesAuditsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -110,6 +115,7 @@ describe('getRouteHandlers', () => {
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/import/jobs',
       'POST /tools/import/assistant/prompt',
+      'PATCH /sites/audits',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
