@@ -17,8 +17,8 @@ import {
   makeRequest,
   pollUntilJobIsComplete,
 } from './utils.js';
-import { apiKey, apiUrl } from './config.js';
-import { expectedJob1Result } from './fixtures/jobs.js';
+import { apiKey, apiUrl } from '../config/config.js';
+import { expectedJob1Result } from '../fixtures/jobs.js';
 
 const log = console;
 
@@ -71,4 +71,31 @@ export async function deleteJobs(jobIdsToCleanUp) {
     // Remove from the array
     jobIdsToCleanUp.splice(jobIdsToCleanUp.indexOf(jobId), 1);
   }
+}
+
+export async function getPreSignedZipUrl(jobId) {
+  const response = await makeRequest({
+    url: `${apiUrl}/${jobId}/result`,
+    method: 'POST',
+    key: apiKey,
+  });
+
+  expect(response.ok).to.be.true;
+  expect(response.status).to.equal(200);
+
+  const { downloadUrl } = await response.json();
+
+  expect(downloadUrl).to.be.a('string');
+  // Should look like a pre-signed S3 URL
+  expect(downloadUrl).to.match(/^https:\/\/.*\.s3\..*\.amazonaws\.com\/.*import-result\.zip/);
+
+  return downloadUrl;
+}
+
+export async function downloadZipFile(url) {
+  const response = await fetch(url);
+  expect(response.ok).to.be.true;
+
+  // Convert response to binary data (ArrayBuffer)
+  return response.arrayBuffer();
 }

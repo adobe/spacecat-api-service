@@ -14,7 +14,7 @@ import { Blob } from 'buffer';
 import path from 'path';
 import fs from 'fs';
 import { expect } from 'chai';
-import { apiKey, apiUrl } from './config.js';
+import { apiKey, apiUrl } from '../config/config.js';
 
 /* eslint-disable no-await-in-loop */
 export async function makeRequest({

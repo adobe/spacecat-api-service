@@ -15,8 +15,13 @@
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
-import { getNewImportJobRequestData, makeRequest } from './utils.js';
-import { createAndValidateNewImportJob, deleteJobs } from './request-helpers.js';
+import { getNewImportJobRequestData, makeRequest } from './utils/utils.js';
+import {
+  createAndValidateNewImportJob,
+  deleteJobs, downloadZipFile,
+  getPreSignedZipUrl,
+} from './utils/request-helpers.js';
+import { extractDocxContent, extractZip } from './utils/zip-helpers.js';
 
 use(sinonChai);
 use(chaiAsPromised);
@@ -25,9 +30,15 @@ use(chaiAsPromised);
 
 describe('Import as a Service end-to-end tests', async () => {
   const jobIdsToCleanUp = [];
+  const log = console;
 
   beforeEach(() => {
     // Set up the environment
+  });
+
+  afterEach(async () => {
+    // Delete all jobs that were created
+    await deleteJobs(jobIdsToCleanUp);
   });
 
   describe('Create import job - negative tests', async () => {
@@ -49,8 +60,23 @@ describe('Import as a Service end-to-end tests', async () => {
       const { id: jobId } = await createAndValidateNewImportJob();
       jobIdsToCleanUp.push(jobId);
 
-      // Delete all jobs that were created
-      await deleteJobs(jobIdsToCleanUp);
+      // Download the archive
+      const presignedZipUrl = await getPreSignedZipUrl(jobId);
+      const zipData = await downloadZipFile(presignedZipUrl);
+
+      // Extract and examine the files
+      const extractedFiles = await extractZip(zipData);
+
+      // Look for a specific .docx file and examine its contents
+      const docxFileName = 'docx/products/experience-manager/sites/aem-sites.docx';
+      if (extractedFiles[docxFileName]) {
+        const docxContent = await extractDocxContent(extractedFiles[docxFileName]);
+        log.info(docxContent);
+        // console.log('done!');
+        // TODO: verify contents
+      } else {
+        throw new Error('A .docx was file missing from the archive');
+      }
     });
   });
 });
