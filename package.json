@@ -75,7 +75,7 @@
     "@aws-sdk/client-s3": "3.675.0",
     "@aws-sdk/client-sqs": "3.675.0",
     "@aws-sdk/s3-request-presigner": "3.675.0",
-    "@slack/bolt": "3.22.0",
+    "@slack/bolt": "4.0.1",
     "busboy": "1.6.0",
     "js-yaml": "4.1.0",
     "psl": "1.9.0",
