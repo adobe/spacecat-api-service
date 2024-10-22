@@ -22,12 +22,16 @@ import { expectedJob1Result } from '../fixtures/jobs.js';
 
 const log = console;
 
-export async function createAndValidateNewImportJob() {
+export async function createAndValidateNewImportJob({
+  bundledImportJsPath,
+  expectedJobResult = expectedJob1Result,
+} = {}) {
   const data = getNewImportJobRequestData({
     urls: [
       'https://business.adobe.com/products/experience-manager/sites/aem-sites.html',
       'https://business.adobe.com/products/experience-manager/sites/site-performance.html',
     ],
+    bundledImportJsPath,
   });
 
   const response = await makeRequest({
@@ -49,7 +53,7 @@ export async function createAndValidateNewImportJob() {
 
   // Poll until COMPLETE
   const completeJob = await pollUntilJobIsComplete(newJob.id);
-  expectJobsToMatch(expectedJob1Result, completeJob);
+  expectJobsToMatch(expectedJobResult, completeJob);
 
   return completeJob;
 }

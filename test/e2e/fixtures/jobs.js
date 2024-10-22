@@ -23,3 +23,17 @@ export const expectedJob1Result = {
   hasCustomHeaders: false,
   hasCustomImportJs: false
 };
+
+export const expectedJob2ResultCustomImportJs = {
+  baseURL: 'https://business.adobe.com',
+  options: {
+    enableJavascript: false
+  },
+  status: 'COMPLETE',
+  urlCount: 2,
+  successCount: 2,
+  failedCount: 0,
+  redirectCount: 0,
+  hasCustomHeaders: false,
+  hasCustomImportJs: true
+};

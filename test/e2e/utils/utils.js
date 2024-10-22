@@ -56,7 +56,6 @@ export function getNewImportJobRequestData({
 
   if (bundledImportJsPath) {
     // Conditionally include the custom (bundled) import.js, when provided
-    // Read the provided file into a variable
     const bundledCode = fs.readFileSync(bundledImportJsPath, 'utf8');
     const bundledScriptBlob = new Blob([bundledCode], { type: 'application/javascript' });
     requestBody.append('importScript', bundledScriptBlob, path.basename(bundledImportJsPath));

@@ -12,6 +12,7 @@
 
 import JSZip from 'jszip';
 import { DOMParser } from '@xmldom/xmldom';
+import { expect } from 'chai';
 
 export async function extractZip(data) {
   const zip = await JSZip.loadAsync(data);
@@ -44,4 +45,14 @@ export async function extractDocxContent(docxBuffer) {
   }
 
   return text.trim(); // Return the extracted text
+}
+
+export async function extractAndVerifyDocxContent(extractedFiles, pathToDocxFile, textToVerify) {
+  if (extractedFiles[pathToDocxFile]) {
+    const docxContent = await extractDocxContent(extractedFiles[pathToDocxFile]);
+    // Verify contents of the .docx file
+    expect(docxContent).to.include(textToVerify);
+  } else {
+    throw new Error('The .docx was file missing from the archive');
+  }
 }
