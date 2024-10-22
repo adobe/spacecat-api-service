@@ -1,3 +1,7 @@
+/**
+ * This fixture is a pre-bundled import.js transformation file which replaces the content of any
+ * page that it processes with "Importer as a Service - custom import.js test content".
+ */
 var CustomImportScript = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;

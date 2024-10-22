@@ -16,6 +16,11 @@ import fs from 'fs';
 import { expect } from 'chai';
 import { apiKey, apiUrl } from '../config/config.js';
 
+const defaultUrls = [
+  'https://business.adobe.com/products/experience-manager/sites/aem-sites.html',
+  'https://www.adobe.com/products/photoshop.html',
+];
+
 /* eslint-disable no-await-in-loop */
 export async function makeRequest({
   url = apiUrl, method, data, key = apiKey,
@@ -37,11 +42,6 @@ export async function makeRequest({
     body: data,
   });
 }
-
-const defaultUrls = [
-  'https://business.adobe.com/products/experience-manager/sites/aem-sites.html',
-  'https://www.adobe.com/products/photoshop.html',
-];
 
 export function getNewImportJobRequestData({
   urls = defaultUrls, options, bundledImportJsPath,
