@@ -227,7 +227,7 @@ api-keys:
       Note: Not implemented yet.
       
       This endpoint can be used to create a new API key with a set of scopes. The scoped API key will be
-      returned in the response only once. The scoped API key can be used to authenticate the spacecat APIs by 
+      returned in the response only once. The scoped API key can be used to authenticate the Spacecat APIs by 
       including it in the x-api-key header.
     operationId: createApiKey
     security:
