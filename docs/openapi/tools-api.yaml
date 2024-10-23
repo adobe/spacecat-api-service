@@ -221,7 +221,6 @@ import-assistant:
 api-keys:
   post:
     tags:
-      - tools
       - api-keys
     summary: Create a new API key
     description: |
@@ -262,7 +261,6 @@ api-keys:
         $ref: './responses.yaml#/500'
   get:
     tags:
-      - tools
       - api-keys
     summary: Get all API keys
     description: |
@@ -297,7 +295,6 @@ api-keys:
 api-key-deletion:
   delete:
     tags:
-      - tools
       - api-keys
     summary: Delete an API key
     description: |
