@@ -1,3 +1,10 @@
+# [1.73.0](https://github.com/adobe/spacecat-api-service/compare/v1.72.5...v1.73.0) (2024-10-23)
+
+
+### Features
+
+* Build end-to-end test suite which will be run daily ([#542](https://github.com/adobe/spacecat-api-service/issues/542)) ([6a721b4](https://github.com/adobe/spacecat-api-service/commit/6a721b4a5a8faa985ae83b209fafc5ab0696a58a))
+
 ## [1.72.5](https://github.com/adobe/spacecat-api-service/compare/v1.72.4...v1.72.5) (2024-10-23)
 
 
