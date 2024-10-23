@@ -117,6 +117,10 @@ paths:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'
+  /tools/api-keys:
+    $ref: './tools-api.yaml#/api-keys'
+  /tools/api-keys/{apiKeyId}:
+    $ref: './tools-api.yaml#/api-key-deletion'
   /tools/import/jobs:
     $ref: './tools-api.yaml#/import'
   /tools/import/jobs/{jobId}:

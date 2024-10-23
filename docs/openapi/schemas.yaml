@@ -40,6 +40,9 @@ Domain:
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
+ImsUserId:
+  type: string
+  example: '8G5129DA63CE4CD98A495EAD@8053114e63a16b59485e3c.e'
 ImsUserAccessToken:
   type: string
   example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
@@ -1517,3 +1520,93 @@ ImportAssistantResponse:
     choices:
       - message:
           content: '.breadcrumbs'
+ApiKeyRequest:
+  type: object
+  required:
+    - name
+    - feature
+    - domains
+  properties:
+    name:
+      description: The name of the API key
+      type: string
+    feature:
+      description: The feature the API key is for
+      type: string
+    domains:
+      description: The domains the API key is allowed to access
+      type: array
+      items:
+        type: string
+  example:
+    name: 'Example API Key'
+    feature: 'imports'
+    domains:
+      - 'example.com'
+ApiKeyResponse:
+  type: object
+  properties:
+    id:
+      description: The ID of the API key
+      $ref: '#/Id'
+    name:
+      description: The name of the API key
+      type: string
+    apiKey:
+      description: The API key
+      type: string
+    scopes:
+      description: The scopes of the API key
+      type: array
+      items:
+        type: string
+    domains:
+      description: The domains the API key is allowed to access
+      type: array
+      items:
+        type: string
+    imsOrgId:
+      description: The IMS organization ID
+      $ref: '#/ImsOrganizationId'
+    imsUserId:
+      description: The IMS user ID
+      $ref: '#/ImsUserId'
+    createdAt:
+      description: The date and time when the API key was created
+      $ref: '#/DateTime'
+    expiresAt:
+      description: The date and time when the API key expires
+      $ref: '#/DateTime'
+ApiKeyMetadataResponse:
+  type: object
+  properties:
+    id:
+      description: The ID of the API key
+      $ref: '#/Id'
+    name:
+      description: The name of the API key
+      type: string
+    scopes:
+      description: The scopes of the API key
+      type: array
+      items:
+        type: string
+    domains:
+      description: The domains the API key is allowed to access
+      type: array
+      items:
+        type: string
+    imsOrgId:
+      description: The IMS organization ID
+      $ref: '#/ImsOrganizationId'
+    imsUserId:
+      description: The IMS user ID
+      $ref: '#/ImsUserId'
+    createdAt:
+      description: The date and time when the API key was created
+      $ref: '#/DateTime'
+    expiresAt:
+      description: The date and time when the API key expires
+      $ref: '#/DateTime'
+
+
