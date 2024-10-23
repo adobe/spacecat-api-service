@@ -53,10 +53,22 @@ describe('ApiKeyController tests', () => {
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(501);
     });
+
+    it('should throw a not implemented error when data is null', async () => {
+      requestContext.data = null;
+      const response = await apiKeyController.createApiKey({ ...requestContext });
+      expect(response.status).to.equal(501);
+    });
   });
 
   describe('deleteApiKey', () => {
     it('should throw a not implemented error', async () => {
+      const response = await apiKeyController.deleteApiKey({ ...requestContext });
+      expect(response.status).to.equal(501);
+    });
+
+    it('should throw a not implemented error when id is null', async () => {
+      requestContext.params.id = null;
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
       expect(response.status).to.equal(501);
     });
