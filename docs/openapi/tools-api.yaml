@@ -262,7 +262,7 @@ api-keys:
   get:
     tags:
       - api-keys
-    summary: Get all API keys
+    summary: Get all API keys owned by the given IMS client
     description: |
       Note: Not implemented yet.
       
