@@ -66,6 +66,10 @@ const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
  */
 async function run(request, context) {
   const { log, pathInfo } = context;
+
+  // TODO: for debugging/illustration purposes only. NOT TO BE MERGED
+  log.debug(`Request: ${JSON.stringify(request)}`);
+
   const { route, suffix, method } = pathInfo;
 
   if (!hasText(route)) {
