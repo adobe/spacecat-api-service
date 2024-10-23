@@ -15,7 +15,7 @@ module.exports = {
   extends: '@adobe/helix',
   overrides: [
     {
-      files: ['*.test.js'],
+      files: ['*.test.js', 'test/e2e/**/*'],
       rules: {
         'no-unused-expressions': 'off',
       },
