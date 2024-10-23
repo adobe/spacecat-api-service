@@ -1608,5 +1608,3 @@ ApiKeyMetadataResponse:
     expiresAt:
       description: The date and time when the API key expires
       $ref: '#/DateTime'
-
-
