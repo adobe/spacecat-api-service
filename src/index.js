@@ -68,7 +68,7 @@ async function run(request, context) {
   const { log, pathInfo } = context;
 
   // TODO: for debugging/illustration purposes only. NOT TO BE MERGED
-  log.debug(`Request: ${JSON.stringify(request)}`);
+  log.debug('Inspecting request', request);
 
   const { route, suffix, method } = pathInfo;
 
