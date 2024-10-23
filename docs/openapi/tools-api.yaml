@@ -248,9 +248,9 @@ api-keys:
       '201':
         description: API key created successfully.
         content:
-        application/json:
-          schema:
-          $ref: './schemas.yaml#/ApiKeyResponse'
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ApiKeyResponse'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -306,6 +306,7 @@ api-key-deletion:
     security:
       - ims_key: [ ]
     parameters:
+      - $ref: './parameters.yaml#/apiKeyId'
       - in: header
         name: x-gw-ims-org-id
         schema:
