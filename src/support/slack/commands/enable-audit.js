@@ -30,7 +30,7 @@ export default (context) => {
     const latestConfiguration = await dataAccess.getConfiguration();
     const specificVersionConfiguration = await dataAccess.getConfigurationByVersion('v10');
 
-    await say(`Latest Configuration Version: ${latestConfiguration.getVersion}, \n\n but we have : ${specificVersionConfiguration.getVersion()}`);
+    await say(`Latest Configuration Version: ${latestConfiguration.getVersion()}, \n\n but we have : ${specificVersionConfiguration.getVersion()}`);
   };
 
   baseCommand.init(context);
