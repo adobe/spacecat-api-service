@@ -50,8 +50,8 @@ export default (context) => {
     // newConfigurationData.version = incrementVersion(latestConfiguration?.getVersion());
     // const newConfiguration = createConfiguration(newConfigurationData);
 
-    const siteAudits = site.getAudits();
-    await say(`Site audits \n\n ${JSON.stringify(siteAudits)}`);
+    // const siteAudits = site.getAudits();
+    // await say(`Site audits \n\n ${JSON.stringify(siteAudits)}`);
 
     // After update
     isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
