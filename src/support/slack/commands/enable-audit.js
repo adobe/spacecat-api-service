@@ -53,19 +53,19 @@ export default (context) => {
     await dataAccess.updateConfiguration(configurationData);
 
     // Emulate logic from dataAccess
-    const newConfigurationData = { ...configurationData };
-    const latestConfiguration = await dataAccess.getConfiguration();
-    newConfigurationData.version = incrementVersion(latestConfiguration?.getVersion());
-    const newConfiguration = createConfiguration(newConfigurationData);
-    const configurationDynamoItem = DynamoConfigurationDto.toDynamoItem(newConfiguration);
-    await say(`Dynamo configuration item: \n\n ${JSON.stringify(configurationDynamoItem)}`);
+    // const newConfigurationData = { ...configurationData };
+    // const latestConfiguration = await dataAccess.getConfiguration();
+    // newConfigurationData.version = incrementVersion(latestConfiguration?.getVersion());
+    // const newConfiguration = createConfiguration(newConfigurationData);
+    // const configurationDynamoItem = DynamoConfigurationDto.toDynamoItem(newConfiguration);
+    // await say(`Dynamo configuration item: \n\n ${JSON.stringify(configurationDynamoItem)}`);
 
     // After update
     isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
     await say(`[After update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Version: ${configuration.getVersion()}`);
 
     // Reload
-    const reloadedConfiguration = await dataAccess.getConfiguration();
+    const reloadedConfiguration = await dataAccess.getConfigurationByVersion('v10');
     const handler = reloadedConfiguration.getHandlers()['broken-backlinks-external'];
     await say(`Reloaded configuration "broken-backlinks-external" handler: \n\n ${JSON.stringify(handler)}`);
 
