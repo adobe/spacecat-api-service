@@ -36,7 +36,7 @@ export default (context) => {
 
     // Before update
     let isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
-    await say(`[Before update]: Is audit enabled: ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
+    await say(`[Before update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
 
     // Update
     configuration.enableHandlerForSite(auditType, site);
@@ -46,12 +46,12 @@ export default (context) => {
 
     // After update
     isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
-    await say(`[After update]: Is audit enabled: ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
+    await say(`[After update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
 
     // Reload
     const reloadedConfiguration = await dataAccess.getConfiguration();
     isAuditEnabled = reloadedConfiguration.isHandlerEnabledForSite(auditType, site);
-    await say(`[After reload]: Is audit enabled: ${isAuditEnabled}. Configuration version: ${reloadedConfiguration.getVersion()}`);
+    await say(`[After reload]: Is audit enabled: ${auditType} ${isAuditEnabled}. Configuration version: ${reloadedConfiguration.getVersion()}`);
   };
 
   baseCommand.init(context);
