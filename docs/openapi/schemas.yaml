@@ -37,12 +37,17 @@ Domain:
   type: string
   format: domain
   example: 'www.example.com'
+ScopeName:
+  type: string
+  enum:
+    - 'imports.write'
+    - 'imports.read'
+    - 'imports.all_domains'
+    - 'imports.read_all'
+    - 'imports.delete'
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
-ImsUserId:
-  type: string
-  example: '123abc456def789fgh@09876543e12a345e6.e'
 ImsUserAccessToken:
   type: string
   example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
@@ -1543,40 +1548,6 @@ ApiKeyRequest:
     feature: 'imports'
     domains:
       - 'example.com'
-ApiKeyResponse:
-  type: object
-  properties:
-    id:
-      description: The ID of the API key
-      $ref: '#/Id'
-    name:
-      description: The name of the API key
-      type: string
-    apiKey:
-      description: The API key
-      type: string
-    scopes:
-      description: The scopes of the API key
-      type: array
-      items:
-        type: string
-    domains:
-      description: The domains the API key is allowed to access
-      type: array
-      items:
-        type: string
-    imsOrgId:
-      description: The IMS organization ID
-      $ref: '#/ImsOrganizationId'
-    imsUserId:
-      description: The IMS user ID
-      $ref: '#/ImsUserId'
-    createdAt:
-      description: The date and time when the API key was created
-      $ref: '#/DateTime'
-    expiresAt:
-      description: The date and time when the API key expires
-      $ref: '#/DateTime'
 ApiKeyMetadataResponse:
   type: object
   properties:
@@ -1588,23 +1559,28 @@ ApiKeyMetadataResponse:
       type: string
     scopes:
       description: The scopes of the API key
-      type: array
-      items:
-        type: string
-    domains:
-      description: The domains the API key is allowed to access
-      type: array
-      items:
-        type: string
-    imsOrgId:
-      description: The IMS organization ID
-      $ref: '#/ImsOrganizationId'
-    imsUserId:
-      description: The IMS user ID
-      $ref: '#/ImsUserId'
+      type: object
+      properties:
+        name:
+          description: The name of the scope
+          type: string
+          $ref: '#/ScopeName'
+        domains:
+          description: The domains the scope is allowed to access
+          type: array
+          items:
+            $ref: '#/Domain'
     createdAt:
       description: The date and time when the API key was created
       $ref: '#/DateTime'
     expiresAt:
       description: The date and time when the API key expires
       $ref: '#/DateTime'
+ApiKeyResponse:
+  allOf:
+    - $ref: '#/ApiKeyMetadataResponse'
+    - type: object
+      properties:
+        apiKey:
+          description: The API key
+          type: string

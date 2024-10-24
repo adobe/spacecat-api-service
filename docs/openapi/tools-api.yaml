@@ -313,12 +313,6 @@ api-key-deletion:
           type: string
         description: |
           IMS Organization Id of the client.
-      - in: header
-        name: x-api-key
-        schema:
-          type: string
-        description: |
-          API key to be deleted.
     responses:
       '204':
         description: API key deleted successfully.
