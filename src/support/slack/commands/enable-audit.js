@@ -9,19 +9,21 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { createConfiguration } from '@adobe/spacecat-shared-data-access/src/models/configuration.js';
-import { ConfigurationDto as DynamoConfigurationDto } from '@adobe/spacecat-shared-data-access/src/dto/configuration.js';
+// import { createConfiguration }
+// from '@adobe/spacecat-shared-data-access/src/models/configuration.js';
+// import { ConfigurationDto as DynamoConfigurationDto }
+// from '@adobe/spacecat-shared-data-access/src/dto/configuration.js';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { ConfigurationDto } from '../../../dto/configuration.js';
 
 const PHRASES = ['enable-audit'];
 
-function incrementVersion(version) {
-  if (!version) return 'v1';
-  const versionNumber = parseInt(version.substring(1), 10);
-  return `v${versionNumber + 1}`;
-}
+// function incrementVersion(version) {
+//   if (!version) return 'v1';
+//   const versionNumber = parseInt(version.substring(1), 10);
+//   return `v${versionNumber + 1}`;
+// }
 
 export default (context) => {
   const baseCommand = BaseCommand({
