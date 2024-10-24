@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import { createConfiguration } from '@adobe/spacecat-shared-data-access/src/models/configuration.js';
+import { ConfigurationDto as DynamoConfigurationDto } from '@adobe/spacecat-shared-data-access/src/dto/configuration.js';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { ConfigurationDto } from '../../../dto/configuration.js';
@@ -56,7 +57,8 @@ export default (context) => {
     const latestConfiguration = await dataAccess.getConfiguration();
     newConfigurationData.version = incrementVersion(latestConfiguration?.getVersion());
     const newConfiguration = createConfiguration(newConfigurationData);
-    await say(`Conf after re-creating: \n\n ${JSON.stringify(newConfiguration)}`);
+    const configurationDynamoItem = DynamoConfigurationDto.toDynamoItem(newConfiguration);
+    await say(`Dynamo configuration item: \n\n ${JSON.stringify(configurationDynamoItem)}`);
 
     // After update
     isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
