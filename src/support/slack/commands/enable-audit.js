@@ -55,7 +55,7 @@ export default (context) => {
     const configurationJson = ConfigurationDto.toJSON(reloadedConfiguration);
     const handlerJson = configurationJson.handlers;
 
-    await say(`Reloaded configuration handlers: ${handler}, \n\n ${handlerJson}`);
+    await say(`Reloaded configuration handlers: ${JSON.stringify(handler)}, \n\n ${JSON.stringify(handlerJson)}`);
 
     isAuditEnabled = reloadedConfiguration.isHandlerEnabledForSite(auditType, site);
     await say(`[After reload]: Is audit enabled: ${auditType} ${isAuditEnabled}. Version: ${reloadedConfiguration.getVersion()}`);
