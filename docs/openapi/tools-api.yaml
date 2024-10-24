@@ -279,7 +279,7 @@ api-keys:
           IMS Organization Id of the client.
     responses:
       '200':
-        description: API keys returned successfully.
+        description: API key metadata returned successfully. Note that the API key itself will not be included in this list, as it's only displayed once (at creation).
         content:
           application/json:
             schema:
