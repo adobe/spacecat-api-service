@@ -28,8 +28,9 @@ export default (context) => {
 
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
-    const [baseURLInput, auditType] = args;
+    const [baseURLInput] = args;
     const baseURL = extractURLFromSlackInput(baseURLInput);
+    const auditType = 'broken-backlinks';
 
     const configuration = await dataAccess.getConfiguration();
     const site = await dataAccess.getSiteByBaseURL(extractURLFromSlackInput(baseURL));
@@ -39,9 +40,9 @@ export default (context) => {
     await say(`[Before update]: Is audit enabled: ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
 
     // Update
-    await say(`[Configuration before enabling]: ${JSON.stringify(ConfigurationDto.toJSON(configuration))}`);
+    await say(`[Configuration before enabling]: ${JSON.stringify(ConfigurationDto.toJSON(configuration).handlers)}`);
     configuration.enableHandlerForSite(auditType, site);
-    await say(`[Configuration before enabling]: ${JSON.stringify(ConfigurationDto.toJSON(configuration))}`);
+    await say(`[Configuration after enabling]: ${JSON.stringify(ConfigurationDto.toJSON(configuration).handlers)}`);
 
     const configurationData = ConfigurationDto.toJSON(configuration);
     await dataAccess.updateConfiguration(configurationData);
