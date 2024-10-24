@@ -50,10 +50,10 @@ export default (context) => {
 
     // Reload
     const reloadedConfiguration = await dataAccess.getConfiguration();
-    const handler = reloadedConfiguration.getHandlers()['broken-backlinks-external'];
+    const handler = reloadedConfiguration.getHandlers();
 
     const configurationJson = ConfigurationDto.toJSON(reloadedConfiguration);
-    const handlerJson = configurationJson.handlers['broken-backlinks-external'];
+    const handlerJson = configurationJson.handlers;
 
     await say(`Reloaded configuration handlers: ${handler}, \n\n ${handlerJson}`);
 
