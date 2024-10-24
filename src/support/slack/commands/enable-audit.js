@@ -39,7 +39,10 @@ export default (context) => {
     await say(`[Before update]: Is audit enabled: ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
 
     // Update
+    await say(`[Configuration before enabling]: ${ConfigurationDto.toJSON(configuration)}`);
     configuration.enableHandlerForSite(auditType, site);
+    await say(`[Configuration before enabling]: ${ConfigurationDto.toJSON(configuration)}`);
+
     const configurationData = ConfigurationDto.toJSON(configuration);
     await dataAccess.updateConfiguration(configurationData);
 
