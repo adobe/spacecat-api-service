@@ -42,9 +42,6 @@ ScopeName:
   enum:
     - 'imports.write'
     - 'imports.read'
-    - 'imports.all_domains'
-    - 'imports.read_all'
-    - 'imports.delete'
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
@@ -1535,17 +1532,20 @@ ApiKeyRequest:
     name:
       description: The name of the API key
       type: string
-    feature:
-      description: The feature the API key is for
-      type: string
+    features:
+      description: The features the API key is for
+      type: array
+      items:
+        type: string
     domains:
       description: The domains the API key is allowed to access
       type: array
       items:
         type: string
+        $ref: '#/Domain'
   example:
     name: 'Example API Key'
-    feature: 'imports'
+    features: [ 'imports' ]
     domains:
       - 'example.com'
 ApiKeyMetadataResponse:
@@ -1559,17 +1559,19 @@ ApiKeyMetadataResponse:
       type: string
     scopes:
       description: The scopes of the API key
-      type: object
-      properties:
-        name:
-          description: The name of the scope
-          type: string
-          $ref: '#/ScopeName'
-        domains:
-          description: The domains the scope is allowed to access
-          type: array
-          items:
-            $ref: '#/Domain'
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            description: The name of the scope
+            type: string
+            $ref: '#/ScopeName'
+          domains:
+            description: The domains the scope is allowed to access
+            type: array
+            items:
+              $ref: '#/Domain'
     createdAt:
       description: The date and time when the API key was created
       $ref: '#/DateTime'

@@ -309,10 +309,7 @@ api-key-deletion:
       - $ref: './parameters.yaml#/apiKeyId'
       - in: header
         name: x-gw-ims-org-id
-        schema:
-          type: string
-        description: |
-          IMS Organization Id of the client.
+        $ref: './parameters.yaml#/imsOrgId'
     responses:
       '204':
         description: API key deleted successfully.
