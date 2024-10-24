@@ -22,6 +22,7 @@ import runScrape from './commands/run-scrape.js';
 import setLiveStatus from './commands/set-live-status.js';
 import getGoogleLink from './commands/create-google-link.js';
 import help from './commands/help.js';
+import enableAuditTest from './commands/enable-audit.js';
 
 /**
  * Returns all commands.
@@ -42,4 +43,5 @@ export default (context) => [
   setLiveStatus(context),
   getGoogleLink(context),
   help(context),
+  enableAuditTest(context),
 ];
