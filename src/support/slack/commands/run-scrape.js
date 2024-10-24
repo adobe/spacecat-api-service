@@ -50,16 +50,17 @@ function RunScrapeCommand(context) {
      * @returns {Promise} A promise that resolves when the operation is complete.
      */
   const handleExecution = async (args, slackContext) => {
-    const { say, user } = slackContext;
-    const config = await dataAccess.getConfiguration();
-    const slackRoles = config.getSlackRoles() || {};
-    const admins = slackRoles?.scrape || [];
+    // const { say, user } = slackContext;
+    // const config = await dataAccess.getConfiguration();
+    // const slackRoles = config.getSlackRoles() || {};
+    // const admins = slackRoles?.scrape || [];
 
-    if (!admins.includes(user)) {
-      await say(':error: Only members of role "scrape" can run this command.');
-      return;
-    }
+    // if (!admins.includes(user)) {
+    //   await say(':error: Only members of role "scrape" can run this command.');
+    //   return;
+    // }
 
+    const { say } = slackContext;
     try {
       const [baseURLInput] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
