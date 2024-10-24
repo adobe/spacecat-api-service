@@ -41,6 +41,8 @@ tags:
     description: Webhooks for receiving events
   - name: slack
     description: Slack channel management
+  - name: api-keys
+    description: API key management
   - name: import
     description: APIs for importing content to Edge Delivery Services
   - name: scrape
@@ -117,6 +119,10 @@ paths:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'
+  /tools/api-keys:
+    $ref: './tools-api.yaml#/api-keys'
+  /tools/api-keys/{apiKeyId}:
+    $ref: './tools-api.yaml#/api-key-deletion'
   /tools/import/jobs:
     $ref: './tools-api.yaml#/import'
   /tools/import/jobs/{jobId}:
