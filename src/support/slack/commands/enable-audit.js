@@ -50,15 +50,12 @@ export default (context) => {
 
     // Reload
     const reloadedConfiguration = await dataAccess.getConfiguration();
-    const handlers = reloadedConfiguration.getHandlers();
-    await say(`Reloaded configuration handlers: ${JSON.stringify(handlers)}`);
+    const handler = reloadedConfiguration.getHandlers()['broken-backlinks-external'];
 
-    const configurationJson = ConfigurationDto.toJSON(configuration);
-    let handler = 'not_exist';
-    if (configurationJson.handlers && configurationJson.handlers[auditType]) {
-      handler = configurationJson.handlers[auditType];
-    }
-    await say(`Site id: "${site.getId()}", Audit type: "${auditType}", handler object: ${JSON.stringify(handler)}`);
+    const configurationJson = ConfigurationDto.toJSON(reloadedConfiguration);
+    const handlerJson = configurationJson.handlers['broken-backlinks-external'];
+
+    await say(`Reloaded configuration handlers: ${handler}, \n\n ${handlerJson}`);
 
     isAuditEnabled = reloadedConfiguration.isHandlerEnabledForSite(auditType, site);
     await say(`[After reload]: Is audit enabled: ${auditType} ${isAuditEnabled}. Version: ${reloadedConfiguration.getVersion()}`);
