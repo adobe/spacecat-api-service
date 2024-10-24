@@ -120,9 +120,9 @@ jobId:
   schema:
     $ref: './schemas.yaml#/Id'
 apiKeyId:
-    name: apiKeyId
-    description: The API key ID in uuid format
-    in: path
-    required: true
-    schema:
-        $ref: './schemas.yaml#/Id'
+  name: apiKeyId
+  description: The API key ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
