@@ -9,11 +9,18 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { createConfiguration } from '@adobe/spacecat-shared-data-access/src/models/configuration.js';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { ConfigurationDto } from '../../../dto/configuration.js';
 
 const PHRASES = ['enable-audit'];
+
+function incrementVersion(version) {
+  if (!version) return 'v1';
+  const versionNumber = parseInt(version.substring(1), 10);
+  return `v${versionNumber + 1}`;
+}
 
 export default (context) => {
   const baseCommand = BaseCommand({
@@ -45,13 +52,11 @@ export default (context) => {
     await dataAccess.updateConfiguration(configurationData);
 
     // Emulate logic from dataAccess
-    // const newConfigurationData = { ...configurationData };
-    // const latestConfiguration = await dataAccess.getConfiguration();
-    // newConfigurationData.version = incrementVersion(latestConfiguration?.getVersion());
-    // const newConfiguration = createConfiguration(newConfigurationData);
-
-    // const siteAudits = site.getAudits();
-    // await say(`Site audits \n\n ${JSON.stringify(siteAudits)}`);
+    const newConfigurationData = { ...configurationData };
+    const latestConfiguration = await dataAccess.getConfiguration();
+    newConfigurationData.version = incrementVersion(latestConfiguration?.getVersion());
+    const newConfiguration = createConfiguration(newConfigurationData);
+    await say(`Conf after re-creating: \n\n ${JSON.stringify(newConfiguration)}`);
 
     // After update
     isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
