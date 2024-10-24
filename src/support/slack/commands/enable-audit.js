@@ -39,7 +39,9 @@ export default (context) => {
     await say(`[Before update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
 
     // Update
+    await say(`[Configuration before enabling]: ${JSON.stringify(ConfigurationDto.toJSON(configuration).handlers)}`);
     configuration.enableHandlerForSite(auditType, site);
+    await say(`[Configuration after enabling]: ${JSON.stringify(ConfigurationDto.toJSON(configuration).handlers)}`);
 
     const configurationData = ConfigurationDto.toJSON(configuration);
     await dataAccess.updateConfiguration(configurationData);
@@ -52,6 +54,7 @@ export default (context) => {
     const reloadedConfiguration = await dataAccess.getConfiguration();
     isAuditEnabled = reloadedConfiguration.isHandlerEnabledForSite(auditType, site);
     await say(`[After reload]: Is audit enabled: ${auditType} ${isAuditEnabled}. Configuration version: ${reloadedConfiguration.getVersion()}`);
+    await say(`[Configuration after reloading]: ${JSON.stringify(ConfigurationDto.toJSON(configuration).handlers)}`);
   };
 
   baseCommand.init(context);
