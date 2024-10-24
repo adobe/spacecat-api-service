@@ -50,6 +50,8 @@ export default (context) => {
 
     // Reload
     const reloadedConfiguration = await dataAccess.getConfiguration();
+    const handlers = reloadedConfiguration.getHandlers();
+    await say(`Reloaded configuration handlers: ${JSON.stringify(handlers)}`);
 
     const configurationJson = ConfigurationDto.toJSON(configuration);
     let handler = 'not_exist';
