@@ -36,25 +36,26 @@ export default (context) => {
 
     // Before update
     let isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
-    await say(`[Before update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
+    await say(`[Before update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Version: ${configuration.getVersion()}`);
 
     // Update
-    await say(`[Configuration before enabling]: ${JSON.stringify(ConfigurationDto.toJSON(configuration).handlers)}`);
     configuration.enableHandlerForSite(auditType, site);
-    await say(`[Configuration after enabling]: ${JSON.stringify(ConfigurationDto.toJSON(configuration).handlers)}`);
 
     const configurationData = ConfigurationDto.toJSON(configuration);
     await dataAccess.updateConfiguration(configurationData);
 
     // After update
     isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
-    await say(`[After update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Configuration version: ${configuration.getVersion()}`);
+    await say(`[After update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Version: ${configuration.getVersion()}`);
 
     // Reload
     const reloadedConfiguration = await dataAccess.getConfiguration();
+
+    const handler = configuration.handlers[auditType];
+    await say(`Site id: "${site.getId()}", Audit type: "${auditType}", handler object: ${JSON.stringify(handler)}`);
+
     isAuditEnabled = reloadedConfiguration.isHandlerEnabledForSite(auditType, site);
-    await say(`[After reload]: Is audit enabled: ${auditType} ${isAuditEnabled}. Configuration version: ${reloadedConfiguration.getVersion()}`);
-    await say(`[Configuration after reloading]: ${JSON.stringify(ConfigurationDto.toJSON(configuration).handlers)}`);
+    await say(`[After reload]: Is audit enabled: ${auditType} ${isAuditEnabled}. Version: ${reloadedConfiguration.getVersion()}`);
   };
 
   baseCommand.init(context);
