@@ -300,7 +300,7 @@ api-key-deletion:
     description: |
       Note: Not implemented yet.
       
-      This endpoint can be used to delete an API key. The API key will be deleted from the system and
+      This endpoint can be used to delete an API key. The API key will be marked as deleted in the system and
       will no longer be valid for authentication. Only keys created by this IMS client can be deleted by it.
     operationId: deleteApiKey
     security:
