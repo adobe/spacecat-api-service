@@ -38,6 +38,9 @@ describe('IsAuditEnabledCommand', () => {
       getHandlers: sandbox.stub(),
       getQueues: sandbox.stub(),
       isHandlerEnabledForSite: sandbox.stub(),
+      handlers: {
+        'broken-backlinks': {},
+      },
     };
 
     mockDataAccess = {
