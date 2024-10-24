@@ -44,6 +44,15 @@ export default (context) => {
     const configurationData = ConfigurationDto.toJSON(configuration);
     await dataAccess.updateConfiguration(configurationData);
 
+    // Emulate logic from dataAccess
+    // const newConfigurationData = { ...configurationData };
+    // const latestConfiguration = await dataAccess.getConfiguration();
+    // newConfigurationData.version = incrementVersion(latestConfiguration?.getVersion());
+    // const newConfiguration = createConfiguration(newConfigurationData);
+
+    const siteAudits = site.getAudits();
+    await say(`Site audits \n\n ${JSON.stringify(siteAudits)}`);
+
     // After update
     isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
     await say(`[After update]: Is audit enabled: ${auditType} ${isAuditEnabled}. Version: ${configuration.getVersion()}`);
