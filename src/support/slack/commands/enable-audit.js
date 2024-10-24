@@ -52,11 +52,9 @@ export default (context) => {
     const reloadedConfiguration = await dataAccess.getConfiguration();
 
     const configurationJson = ConfigurationDto.toJSON(configuration);
-    let handler;
+    let handler = 'not_exist';
     if (configurationJson.handlers && configurationJson.handlers[auditType]) {
       handler = configurationJson.handlers[auditType];
-    } else {
-      handler = 'not_exist';
     }
     await say(`Site id: "${site.getId()}", Audit type: "${auditType}", handler object: ${JSON.stringify(handler)}`);
 
