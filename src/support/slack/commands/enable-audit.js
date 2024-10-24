@@ -51,7 +51,13 @@ export default (context) => {
     // Reload
     const reloadedConfiguration = await dataAccess.getConfiguration();
 
-    const handler = ConfigurationDto.toJSON(configuration).handlers[auditType];
+    const configurationJson = ConfigurationDto.toJSON(configuration);
+    let handler;
+    if (configurationJson.handlers && configurationJson.handlers[auditType]) {
+      handler = configurationJson.handlers[auditType];
+    } else {
+      handler = 'not_exist';
+    }
     await say(`Site id: "${site.getId()}", Audit type: "${auditType}", handler object: ${JSON.stringify(handler)}`);
 
     isAuditEnabled = reloadedConfiguration.isHandlerEnabledForSite(auditType, site);
