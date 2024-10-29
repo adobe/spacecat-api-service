@@ -16,7 +16,7 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  hasText,
+  isInteger,
   isObject,
 } from '@adobe/spacecat-shared-utils';
 
@@ -45,8 +45,8 @@ function ConfigurationController(dataAccess) {
   const getByVersion = async (context) => {
     const configurationVersion = context.params?.version;
 
-    if (!hasText(configurationVersion)) {
-      return badRequest('Configuration version required');
+    if (!isInteger(configurationVersion)) {
+      return badRequest('Configuration version required to be an integer');
     }
 
     const configuration = await dataAccess.getConfigurationByVersion(configurationVersion);
