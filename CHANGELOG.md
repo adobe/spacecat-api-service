@@ -1,3 +1,10 @@
+## [1.73.4](https://github.com/adobe/spacecat-api-service/compare/v1.73.3...v1.73.4) (2024-10-29)
+
+
+### Bug Fixes
+
+* update configuration model ([83750f7](https://github.com/adobe/spacecat-api-service/commit/83750f756a3e54098b986f8b5b6435936f19085c))
+
 ## [1.73.3](https://github.com/adobe/spacecat-api-service/compare/v1.73.2...v1.73.3) (2024-10-26)
 
 
