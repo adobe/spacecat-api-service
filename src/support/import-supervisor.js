@@ -238,6 +238,7 @@ function ImportSupervisor(services, config) {
     if (job) {
       hashedApiKey = hashWithSHA256(importApiKey);
     }
+
     // Job must exist, and the import API key must match the one provided
     if (!job || job.getHashedApiKey() !== hashedApiKey) {
       throw new ErrorWithStatusCode('Not found', 404);
@@ -307,12 +308,27 @@ function ImportSupervisor(services, config) {
     });
   }
 
+  /**
+   * Delete an import job and all associated URLs.
+   * @param {string} jobId - The ID of the job.
+   * @param {string} importApiKey - API key provided to the delete request.
+   * @returns {Promise<void>} Resolves once the deletion is complete.
+   */
+  async function deleteImportJob(jobId, importApiKey) {
+    // Fetch the job. This also confirms the API key matches the one used to start the job.
+    const job = await getImportJob(jobId, importApiKey);
+    log.info(`Deletion of import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)}`);
+
+    return dataAccess.removeImportJob(job);
+  }
+
   return {
     startNewJob,
     getImportJob,
     getJobArchiveSignedUrl,
     getImportJobsByDateRange,
     getImportJobProgress,
+    deleteImportJob,
   };
 }
 

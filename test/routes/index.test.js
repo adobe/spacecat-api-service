@@ -74,6 +74,10 @@ describe('getRouteHandlers', () => {
     getImportJobsByDateRange: sinon.stub(),
   };
 
+  const mockAssistantController = {
+    processImportAssistant: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -86,6 +90,7 @@ describe('getRouteHandlers', () => {
       mockTrigger,
       mockFulfillmentController,
       mockImportController,
+      mockAssistantController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -104,6 +109,7 @@ describe('getRouteHandlers', () => {
       'POST /event/fulfillment',
       'POST /slack/channels/invite-by-user-id',
       'POST /tools/import/jobs',
+      'POST /tools/import/assistant/prompt',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -149,6 +155,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs/:jobId/result',
       'GET /tools/import/jobs/:jobId/progress',
       'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
+      'DELETE /tools/import/jobs/:jobId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

@@ -1,0 +1,32 @@
+name: End-to-end API Tests
+
+on:
+  schedule:
+    - cron: "0 14 * * *" # Runs daily at 14:00 UTC
+  workflow_dispatch: # Allows us to manually trigger the workflow if needed
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [prod] # We can add dev here to run tests on both ci & v1 endpoints
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.16
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+          AEM_E2E_IMPORT_API_KEY_PROD: ${{ secrets.AEM_E2E_IMPORT_API_KEY_PROD }}
+          AEM_E2E_IMPORT_API_KEY_DEV: ${{ secrets.AEM_E2E_IMPORT_API_KEY_DEV }}
+        run: npm run test-e2e
