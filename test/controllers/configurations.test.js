@@ -25,7 +25,7 @@ describe('Configurations Controller', () => {
   const sandbox = sinon.createSandbox();
   const configurations = [
     {
-      version: 'v1',
+      version: 1,
       jobs: [{
         group: 'reports',
         type: 'test',
@@ -34,7 +34,7 @@ describe('Configurations Controller', () => {
       queues: { reports: 'sqs://some-reports-queue' },
     },
     {
-      version: 'v2',
+      version: 2,
       jobs: [{
         group: 'reports',
         type: 'test',
@@ -88,7 +88,7 @@ describe('Configurations Controller', () => {
       getConfiguration: sandbox.stub()
         .resolves(configurations[1]),
       getConfigurationByVersion: sandbox.stub()
-        .resolves(configurations.find((config) => config.getVersion() === 'v1')),
+        .resolves(configurations.find((config) => config.getVersion() === 1)),
     };
 
     configurationsController = ConfigurationsController(mockDataAccess);
@@ -153,7 +153,7 @@ describe('Configurations Controller', () => {
   });
 
   it('gets an configuration by version', async () => {
-    const result = await configurationsController.getByVersion({ params: { version: 'v1' } });
+    const result = await configurationsController.getByVersion({ params: { version: 1 } });
     const configuration = await result.json();
 
     expect(mockDataAccess.getConfigurationByVersion.calledOnce).to.be.true;
@@ -165,7 +165,7 @@ describe('Configurations Controller', () => {
   it('returns not found when a configuration is not found by version', async () => {
     mockDataAccess.getConfigurationByVersion.resolves(null);
 
-    const result = await configurationsController.getByVersion({ params: { version: 'v4' } });
+    const result = await configurationsController.getByVersion({ params: { version: 4 } });
     const error = await result.json();
 
     expect(result.status).to.equal(404);
@@ -177,6 +177,6 @@ describe('Configurations Controller', () => {
     const error = await result.json();
 
     expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Configuration version required');
+    expect(error).to.have.property('message', 'Configuration version required to be an integer');
   });
 });
