@@ -1526,7 +1526,7 @@ ApiKeyRequest:
   type: object
   required:
     - name
-    - feature
+    - features
     - domains
   properties:
     name:
