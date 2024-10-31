@@ -1,3 +1,10 @@
+# [1.74.0](https://github.com/adobe/spacecat-api-service/compare/v1.73.5...v1.74.0) (2024-10-31)
+
+
+### Features
+
+* [Sites-25915] API spec for api key management ([#545](https://github.com/adobe/spacecat-api-service/issues/545)) ([eaf7b6c](https://github.com/adobe/spacecat-api-service/commit/eaf7b6c38f1857488d594330deaec4f36abd732a))
+
 ## [1.73.5](https://github.com/adobe/spacecat-api-service/compare/v1.73.4...v1.73.5) (2024-10-29)
 
 
