@@ -53,6 +53,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} fulfillmentController - The fulfillment controller.
  * @param {Object} importController - The import controller.
  * @param {Object} assistantController - The assistant controller.
+ * @param {Object} apiKeyController - The API key controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -67,6 +68,7 @@ export default function getRouteHandlers(
   fulfillmentController,
   importController,
   assistantController,
+  apiKeyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -113,6 +115,9 @@ export default function getRouteHandlers(
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
+    'POST /tools/api-keys': apiKeyController.createApiKey,
+    'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
+    'GET /tools/api-keys': apiKeyController.getApiKeys,
     'POST /tools/import/jobs': importController.createImportJob,
     'GET /tools/import/jobs/:jobId': importController.getImportJobStatus,
     'DELETE /tools/import/jobs/:jobId': importController.deleteImportJob,
