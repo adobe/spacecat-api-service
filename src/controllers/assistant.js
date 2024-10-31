@@ -13,15 +13,24 @@
 import {
   createResponse,
 } from '@adobe/spacecat-shared-http-utils';
+import { isObject } from '@adobe/spacecat-shared-utils';
+import { AssistantDto } from '../dto/assistant-response.js';
+import { commandConfig, getFirefallCompletion } from '../support/assistant-support.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
 /**
  * Assistant controller. Provides methods to perform AI assisted operations.
+ * There are certain commands that can be executed by the assistant. Depending on the command
+ * has to be certain parameters such as prompt, htmlContent, imageUrl.  A call is made
+ * to Firefall, and the response is returned.
  * @returns {object} Import assistant controller.
  * @constructor
  */
-function AssistantController() {
+function AssistantController(context) {
   const HEADER_ERROR = 'x-error';
+  const STATUS_BAD_REQUEST = 400;
+  const STATUS_OK = 200;
+  const { log } = context;
 
   function createErrorResponse(error) {
     return createResponse({}, error.status, {
@@ -29,18 +38,92 @@ function AssistantController() {
     });
   }
 
+  function isBase64UrlImage(base64String) {
+    return base64String.startsWith('data:image/') && base64String.endsWith('=') && base64String.includes('base64');
+  }
+
+  function validateRequestData(data) {
+    const {
+      command, prompt, htmlContent, imageUrl,
+    } = data;
+
+    // Validate 'command'
+    if (!command) {
+      throw new ErrorWithStatusCode('Invalid request: command is required.', STATUS_BAD_REQUEST);
+    }
+    const currentCommandConfig = commandConfig[command];
+    if (!currentCommandConfig) {
+      throw new ErrorWithStatusCode(`Invalid request: command not implemented: ${command}`, STATUS_BAD_REQUEST);
+    }
+
+    if (currentCommandConfig.parameters.includes('prompt') && !prompt) {
+      throw new ErrorWithStatusCode('Invalid request: prompt is required.', STATUS_BAD_REQUEST);
+    }
+
+    if (currentCommandConfig.parameters.includes('htmlContent')) {
+      if (!htmlContent) {
+        throw new ErrorWithStatusCode('Invalid request: HTML content is required.', STATUS_BAD_REQUEST);
+      }
+      if (!htmlContent.includes('</html>')) {
+        throw new ErrorWithStatusCode('Invalid request: HTML content is invalid or incomplete.', STATUS_BAD_REQUEST);
+      }
+    }
+
+    if (currentCommandConfig.parameters.includes('imageUrl')) {
+      if (!imageUrl) {
+        throw new ErrorWithStatusCode('Invalid request: Image url is required.', STATUS_BAD_REQUEST);
+      }
+      // Only base64 images for now.
+      if (!isBase64UrlImage(imageUrl)) {
+        throw new ErrorWithStatusCode('Invalid request: Image url is not a base64 encoded image.', STATUS_BAD_REQUEST);
+      }
+    }
+  }
+
+  function parseRequestContext(requestContext) {
+    if (!requestContext || !isObject(requestContext)) {
+      throw new ErrorWithStatusCode('Invalid request: missing request context.', STATUS_BAD_REQUEST);
+    }
+    if (!requestContext.data || !requestContext.attributes) {
+      throw new ErrorWithStatusCode('Invalid request: invalid request context format.', STATUS_BAD_REQUEST);
+    }
+    const { data, attributes } = requestContext;
+    const { htmlContent, imageUrl, ...options } = data?.options || {};
+    const { authInfo: { profile } } = attributes;
+    const requestData = {
+      command: data.command,
+      prompt: data.prompt,
+      htmlContent,
+      imageUrl,
+      importApiKey: requestContext.pathInfo.headers['x-api-key'],
+      apiKeyName: profile?.getName(),
+      imsOrgId: profile?.getImsOrgId() ?? requestContext.pathInfo.headers['x-gw-ims-org-id'],
+      imsUserId: profile?.getImsUserId(),
+      options,
+    };
+
+    validateRequestData(requestData);
+
+    return requestData;
+  }
+
   /**
    * Send an import assistant request to the model.
-   * @param {object} context - Context of the request.
+   * @param {object} requestContext - Context of the request.
    * @returns {Promise<Response>} 200 OK with a list of options from the model.
    */
-  async function processImportAssistant(context) {
-    const { command } = context.data;
-    if (command) {
-      const error = new ErrorWithStatusCode(`Assistant command not implemented: ${command}`, 501);
+  async function processImportAssistant(requestContext) {
+    try {
+      const requestData = parseRequestContext(requestContext);
+
+      // Call the assistant model.
+      const firefallResponse = await getFirefallCompletion(requestData, log);
+      const firefallDto = AssistantDto.toJSON(firefallResponse);
+      return createResponse(firefallDto, STATUS_OK);
+    } catch (error) {
+      log.error(`Failed to run assistant command: ${error.message}`);
       return createErrorResponse(error);
     }
-    return createResponse({}, 501);
   }
 
   return {
