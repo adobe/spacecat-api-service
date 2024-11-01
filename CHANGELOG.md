@@ -1,3 +1,38 @@
+## [1.74.1](https://github.com/adobe/spacecat-api-service/compare/v1.74.0...v1.74.1) (2024-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.22.0 ([#553](https://github.com/adobe/spacecat-api-service/issues/553)) ([586d60f](https://github.com/adobe/spacecat-api-service/commit/586d60f0c1d12a135f3fe0f0e0330df4aa258106))
+
+# [1.74.0](https://github.com/adobe/spacecat-api-service/compare/v1.73.5...v1.74.0) (2024-10-31)
+
+
+### Features
+
+* [Sites-25915] API spec for api key management ([#545](https://github.com/adobe/spacecat-api-service/issues/545)) ([eaf7b6c](https://github.com/adobe/spacecat-api-service/commit/eaf7b6c38f1857488d594330deaec4f36abd732a))
+
+## [1.73.5](https://github.com/adobe/spacecat-api-service/compare/v1.73.4...v1.73.5) (2024-10-29)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.49.3 ([#550](https://github.com/adobe/spacecat-api-service/issues/550)) ([72667d4](https://github.com/adobe/spacecat-api-service/commit/72667d429c7724318d2636e0939065e0a6bc45b8))
+
+## [1.73.4](https://github.com/adobe/spacecat-api-service/compare/v1.73.3...v1.73.4) (2024-10-29)
+
+
+### Bug Fixes
+
+* update configuration model ([83750f7](https://github.com/adobe/spacecat-api-service/commit/83750f756a3e54098b986f8b5b6435936f19085c))
+
+## [1.73.3](https://github.com/adobe/spacecat-api-service/compare/v1.73.2...v1.73.3) (2024-10-26)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#548](https://github.com/adobe/spacecat-api-service/issues/548)) ([057a06b](https://github.com/adobe/spacecat-api-service/commit/057a06b0b8380df811d492742b720077e12daa08))
+
 ## [1.73.2](https://github.com/adobe/spacecat-api-service/compare/v1.73.1...v1.73.2) (2024-10-24)
 
 

@@ -54,6 +54,7 @@ import ImportController from './controllers/import.js';
 import AssistantController from './controllers/assistant.js';
 import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
+import ApiKeyController from './controllers/api-key.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -98,6 +99,7 @@ async function run(request, context) {
       FulfillmentController(context),
       ImportController(context),
       AssistantController(context),
+      ApiKeyController(context),
       SitesAuditsController(context.dataAccess),
     );
 
