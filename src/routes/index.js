@@ -54,6 +54,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} importController - The import controller.
  * @param {Object} assistantController - The assistant controller.
  * @param {Object} apiKeyController - The API key controller.
+ * @param {Object} sitesAuditsController - The sites audits controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -69,6 +70,7 @@ export default function getRouteHandlers(
   importController,
   assistantController,
   apiKeyController,
+  sitesAuditsToggleController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -79,6 +81,7 @@ export default function getRouteHandlers(
     'GET /configurations/latest': configurationController.getLatest,
     'PUT /configurations/latest': configurationController.updateConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
+    'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,

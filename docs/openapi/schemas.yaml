@@ -385,6 +385,18 @@ UpdateHandlerTypeConfig:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+ConfigurationSitesAuditsUpdateResult:
+  type: object
+  properties:
+    status:
+      type: integer
+      description: The HTTP status code of the operation (e.g., 200 for success)
+    message:
+      type: string
+      description: A message indicating the result of the operation
+  required:
+    - status
+    - message
 Audit:
   type: object
   readOnly: true

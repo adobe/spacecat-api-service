@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable import/no-unresolved */
 import JSZip from 'jszip';
 import { DOMParser } from '@xmldom/xmldom';
 import { expect } from 'chai';
