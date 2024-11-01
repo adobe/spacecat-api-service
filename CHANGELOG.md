@@ -1,3 +1,10 @@
+# [1.75.0](https://github.com/adobe/spacecat-api-service/compare/v1.74.1...v1.75.0) (2024-11-01)
+
+
+### Features
+
+* SITES-25573 Enable/Disable domains for CWV audit via API/slack command ([5575af2](https://github.com/adobe/spacecat-api-service/commit/5575af2a0427fb08700cabe31c1fc3d161d29387))
+
 ## [1.74.1](https://github.com/adobe/spacecat-api-service/compare/v1.74.0...v1.74.1) (2024-10-31)
 
 
