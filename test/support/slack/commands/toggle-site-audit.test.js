@@ -17,6 +17,7 @@ import { expect } from 'chai';
 import ToggleSiteAuditCommand from '../../../../src/support/slack/commands/toggle-site-audit.js';
 import { SiteDto } from '../../../../src/dto/site.js';
 
+const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
 const ERROR_MESSAGE_PREFIX = ':x: ';
 
 describe('UpdateSitesAuditsCommand', () => {
@@ -99,7 +100,7 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.enableHandlerForSite to be called with "some_audit" and site, but it was not',
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith('"some_audit" has been enabled for "https://site1.com".'),
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *enabled* for the "https://site1.com".`),
       'Expected Slack message to be sent confirming "some_audit" was enabled for "https://site1.com", but it was not',
     ).to.be.true;
   });
@@ -124,7 +125,7 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.disableHandlerForSite to be called with "some_audit" and site, but it was not',
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith('"some_audit" has been disabled for "https://site1.com".'),
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *disabled* for the "https://site1.com".`),
       'Expected Slack message to be sent confirming "some_audit" was disabled for "https://site1.com", but it was not',
     ).to.be.true;
   });
@@ -149,7 +150,7 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.disableHandlerForSite to be called with "some_audit" and site, but it was not',
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith('"some_audit" has been disabled for "https://site1.com".'),
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *disabled* for the "https://site1.com".`),
       'Expected Slack message to be sent confirming "some_audit" was disabled for "https://site1.com", but it was not',
     ).to.be.true;
   });

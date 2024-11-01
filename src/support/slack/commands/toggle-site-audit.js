@@ -15,6 +15,7 @@ import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { ConfigurationDto } from '../../../dto/configuration.js';
 
 const PHRASE = 'audit';
+const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
 const ERROR_MESSAGE_PREFIX = ':x: ';
 
 export default (context) => {
@@ -69,10 +70,10 @@ export default (context) => {
       let successMessage;
       if (enableAudit === 'enable') {
         configuration.enableHandlerForSite(auditType, site);
-        successMessage = `"${auditType}" has been enabled for "${site.getBaseURL()}".`;
+        successMessage = `${SUCCESS_MESSAGE_PREFIX}The audit "${auditType}" has been *enabled* for the "${site.getBaseURL()}".`;
       } else {
         configuration.disableHandlerForSite(auditType, site);
-        successMessage = `"${auditType}" has been disabled for "${site.getBaseURL()}".`;
+        successMessage = `${SUCCESS_MESSAGE_PREFIX}The audit "${auditType}" has been *disabled* for the "${site.getBaseURL()}".`;
       }
 
       await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
