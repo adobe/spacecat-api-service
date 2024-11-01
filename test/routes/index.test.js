@@ -84,8 +84,8 @@ describe('getRouteHandlers', () => {
     getApiKeys: sinon.stub(),
   };
 
-  const mockSitesAuditsController = {
-    update: sinon.stub(),
+  const mockSitesAuditsToggleController = {
+    execute: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -102,13 +102,14 @@ describe('getRouteHandlers', () => {
       mockImportController,
       mockAssistantController,
       mockApiKeyController,
-      mockSitesAuditsController,
+      mockSitesAuditsToggleController,
     );
 
     expect(staticRoutes).to.have.all.keys(
       'GET /configurations',
       'GET /configurations/latest',
       'PUT /configurations/latest',
+      'PATCH /configurations/sites/audits',
       'GET /organizations',
       'POST /organizations',
       'GET /sites',
@@ -124,12 +125,12 @@ describe('getRouteHandlers', () => {
       'GET /tools/api-keys',
       'POST /tools/import/jobs',
       'POST /tools/import/assistant/prompt',
-      'PATCH /sites/audits',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PUT /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
+    expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);
     expect(staticRoutes['GET /sites']).to.equal(mockSitesController.getAll);

@@ -1,10 +1,10 @@
-update-sites-audits:
+configurations-sites-audits-toggle:
   patch:
     tags:
-      - site-audit
-    summary: Enable/Disable audits for multiple sites
+      - configurations-sites-audits
+    summary: Enable or disable audits for sites
     description: |
-      This endpoint is useful for enabling or disabling audit types for multiple sites.
+      Use this endpoint to enable or disable specific audit types for your sites.
     operationId: update
     requestBody:
       required: true
@@ -17,28 +17,27 @@ update-sites-audits:
               properties:
                 baseURL:
                   $ref: './schemas.yaml#/URL'
-                auditTypes:
-                  type: array
-                  items:
-                    type: string
+                auditType:
+                  type: string
+                  description: The type of audit to be enabled or disabled.
                   examples:
+                    - cwv
                     - 404
                     - broken-backlinks
-                    - organic-traffic
-                enableAudits:
+                enable:
                   type: boolean
-                  description: Set to true to enable audits, or false to disable them.
+                  description: Set to true to enable the audit, or false to disable it.
               required:
                 - baseURL
-                - auditTypes
-                - enableAudits
+                - auditType
+                - enable
     responses:
       '207':
         description: A list of baseURL, the status of the update, and the corresponding site if successful, or the error message if failed.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SitesAuditsUpdateResult'
+              $ref: './schemas.yaml#/ConfigurationSitesAuditsUpdateResult'
       '401':
         $ref: './responses.yaml#/401'
       '500':

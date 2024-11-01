@@ -11,10 +11,10 @@
  */
 
 import { badRequest, createResponse, internalServerError } from '@adobe/spacecat-shared-http-utils';
-import { isObject, isValidUrl, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
-
+import {
+  isObject, isValidUrl, isNonEmptyObject, isString,
+} from '@adobe/spacecat-shared-utils';
 import { ConfigurationDto } from '../dto/configuration.js';
-import { SiteDto } from '../dto/site.js';
 
 /**
  * @param {DataAccess} dataAccess - Data access.
@@ -26,8 +26,8 @@ export default (dataAccess) => {
     throw new Error('Data access required');
   }
 
-  const validateInput = ({ baseURL, enableAudits, auditTypes }) => {
-    if (!baseURL) {
+  const validateInput = ({ baseURL, auditType, enable }) => {
+    if (isString(baseURL) === false || baseURL.length === 0) {
       throw new Error('Site URL is required.');
     }
 
@@ -35,24 +35,22 @@ export default (dataAccess) => {
       throw new Error(`Invalid Site URL format: "${baseURL}".`);
     }
 
-    if (!Array.isArray(auditTypes)) {
-      throw new Error('The audit types parameter must be a list (array) of valid audits.');
+    if (isString(auditType) === false || auditType.length === 0) {
+      throw new Error('Audit type is required.');
     }
 
-    if (auditTypes.length === 0) {
-      throw new Error('At least one audit type must be provided.');
-    }
-
-    if (typeof enableAudits === 'undefined') {
-      throw new Error('The "enableAudits" parameter is required and must be set to a boolean value: true or false.');
-    }
-
-    if (typeof enableAudits !== 'boolean') {
-      throw new Error('The "enableAudits" parameter is required and must be set to a boolean value: true or false.');
+    if (typeof enable !== 'boolean') {
+      throw new Error('The "enable" parameter is required and must be set to a boolean value: true or false.');
     }
   };
 
-  const update = async (context) => {
+  /**
+   * One public operation per controller
+   *
+   * @param {object} context
+   * @returns {Promise<Response|*>}
+   */
+  const execute = async (context) => {
     if (!isNonEmptyObject(context)) {
       return internalServerError('An error occurred while trying to enable or disable audits.');
     }
@@ -68,43 +66,32 @@ export default (dataAccess) => {
       const configuration = await dataAccess.getConfiguration();
 
       const responses = await Promise.all(
-        requestBody.map(async ({ baseURL, auditTypes, enableAudits }) => {
+        requestBody.map(async ({ baseURL, auditType, enable }) => {
           try {
-            validateInput({ baseURL, auditTypes, enableAudits });
+            validateInput({ baseURL, auditType, enable });
           } catch (error) {
             return {
-              baseURL,
-              response: {
-                message: error.message,
-                status: 400,
-              },
+              message: error.message,
+              status: 400,
             };
           }
 
           const site = await dataAccess.getSiteByBaseURL(baseURL);
-          if (!site) {
-            return {
-              baseURL,
-              response: {
-                message: `Site with baseURL: ${baseURL} not found`,
-                status: 404,
-              },
-            };
+          if (site === null) {
+            return { status: 404, message: `Site with baseURL: ${baseURL} not found.` };
           }
 
           hasUpdates = true;
-          for (const auditType of auditTypes) {
-            if (enableAudits === true) {
-              configuration.enableHandlerForSite(auditType, site);
-            } else {
-              configuration.disableHandlerForSite(auditType, site);
-            }
+          let successMessage;
+          if (enable === true) {
+            configuration.enableHandlerForSite(auditType, site);
+            successMessage = `The audit "${auditType}" has been enabled for the "${site.getBaseURL()}".`;
+          } else {
+            configuration.disableHandlerForSite(auditType, site);
+            successMessage = `The audit "${auditType}" has been disabled for the "${site.getBaseURL()}".`;
           }
 
-          return {
-            baseURL: site.getBaseURL(),
-            response: { site: SiteDto.toJSON(site), status: 200 },
-          };
+          return { status: 200, message: successMessage };
         }),
       );
 
@@ -120,6 +107,6 @@ export default (dataAccess) => {
   };
 
   return {
-    update,
+    execute,
   };
 };

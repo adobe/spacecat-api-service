@@ -23,7 +23,7 @@ const ERROR_MESSAGE_PREFIX = ':x: ';
 describe('UpdateSitesAuditsCommand', () => {
   const sandbox = sinon.createSandbox();
 
-  const site = SiteDto.fromJson({ id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' });
+  const site = SiteDto.fromJson({ id: 'site0', baseURL: 'https://site0.com', deliveryType: 'aem_edge' });
 
   let configurationMock;
   let dataAccessMock;
@@ -81,15 +81,15 @@ describe('UpdateSitesAuditsCommand', () => {
   });
 
   it('enable an audit type for a site', async () => {
-    dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(site);
+    dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
 
     const command = ToggleSiteAuditCommand(contextMock);
-    const args = ['enable', 'https://site1.com', 'some_audit'];
+    const args = ['enable', 'https://site0.com', 'some_audit'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      dataAccessMock.getSiteByBaseURL.calledWith('https://site1.com'),
-      'Expected dataAccess.getSiteByBaseURL to be called with "https://site1.com", but it was not',
+      dataAccessMock.getSiteByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
     ).to.be.true;
     expect(
       dataAccessMock.updateConfiguration.called,
@@ -100,21 +100,21 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.enableHandlerForSite to be called with "some_audit" and site, but it was not',
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *enabled* for the "https://site1.com".`),
-      'Expected Slack message to be sent confirming "some_audit" was enabled for "https://site1.com", but it was not',
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *enabled* for the "https://site0.com".`),
+      'Expected Slack message to be sent confirming "some_audit" was enabled for "https://site0.com", but it was not',
     ).to.be.true;
   });
 
   it('disable an audit type for a site', async () => {
-    dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(site);
+    dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
 
     const command = ToggleSiteAuditCommand(contextMock);
-    const args = ['disable', 'https://site1.com', 'some_audit'];
+    const args = ['disable', 'https://site0.com', 'some_audit'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      dataAccessMock.getSiteByBaseURL.calledWith('https://site1.com'),
-      'Expected dataAccess.getSiteByBaseURL to be called with "https://site1.com", but it was not',
+      dataAccessMock.getSiteByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
     ).to.be.true;
     expect(
       dataAccessMock.updateConfiguration.called,
@@ -125,21 +125,21 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.disableHandlerForSite to be called with "some_audit" and site, but it was not',
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *disabled* for the "https://site1.com".`),
-      'Expected Slack message to be sent confirming "some_audit" was disabled for "https://site1.com", but it was not',
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *disabled* for the "https://site0.com".`),
+      'Expected Slack message to be sent confirming "some_audit" was disabled for "https://site0.com", but it was not',
     ).to.be.true;
   });
 
   it('if site base URL without scheme should be added "https://"', async () => {
-    dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(site);
+    dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
 
     const command = ToggleSiteAuditCommand(contextMock);
-    const args = ['disable', 'site1.com', 'some_audit'];
+    const args = ['disable', 'site0.com', 'some_audit'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      dataAccessMock.getSiteByBaseURL.calledWith('https://site1.com'),
-      'Expected dataAccess.getSiteByBaseURL to be called with "site1.com", but it was not',
+      dataAccessMock.getSiteByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.getSiteByBaseURL to be called with "site0.com", but it was not',
     ).to.be.true;
     expect(
       dataAccessMock.updateConfiguration.called,
@@ -150,20 +150,20 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.disableHandlerForSite to be called with "some_audit" and site, but it was not',
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *disabled* for the "https://site1.com".`),
-      'Expected Slack message to be sent confirming "some_audit" was disabled for "https://site1.com", but it was not',
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *disabled* for the "https://site0.com".`),
+      'Expected Slack message to be sent confirming "some_audit" was disabled for "https://site0.com", but it was not',
     ).to.be.true;
   });
 
   describe('Internal errors', () => {
     it('error during execution', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(site);
+      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
 
       const error = new Error('Test error');
       dataAccessMock.updateConfiguration.rejects(error);
 
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['enable', 'http://site1.com', 'some_audit'];
+      const args = ['enable', 'http://site0.com', 'some_audit'];
       await command.handleExecution(args, slackContextMock);
 
       expect(
@@ -180,7 +180,7 @@ describe('UpdateSitesAuditsCommand', () => {
   describe('Bad Request Errors', () => {
     it('if "enableAudit" parameter is missed', async () => {
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['', 'http://site1.com', 'some_audit'];
+      const args = ['', 'http://site0.com', 'some_audit'];
 
       await command.handleExecution(args, slackContextMock);
 
@@ -193,7 +193,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
     it('if "enableAudits" parameter has wrong value', async () => {
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['wrong_value', 'http://site1.com', 'some_audit'];
+      const args = ['wrong_value', 'http://site0.com', 'some_audit'];
 
       await command.handleExecution(args, slackContextMock);
 
@@ -231,23 +231,23 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('if a site is not found', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(null);
+      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(null);
 
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['enable', 'https://site1.com', 'some_audit'];
+      const args = ['enable', 'https://site0.com', 'some_audit'];
 
       await command.handleExecution(args, slackContextMock);
 
       exceptsAtBadRequest();
       expect(
-        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}Cannot update site with baseURL: "https://site1.com", site not found.`),
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}Cannot update site with baseURL: "https://site0.com", site not found.`),
         'Expected slackContextMock.say to be called with the specified error message, but it was not.',
       ).to.be.true;
     });
 
     it('if "auditType" parameter is missing', async () => {
       const command = ToggleSiteAuditCommand(contextMock);
-      const args = ['enable', 'http://site1.com', ''];
+      const args = ['enable', 'http://site0.com', ''];
       await command.handleExecution(args, slackContextMock);
 
       exceptsAtBadRequest();

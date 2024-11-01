@@ -70,7 +70,7 @@ export default function getRouteHandlers(
   importController,
   assistantController,
   apiKeyController,
-  sitesAuditsController,
+  sitesAuditsToggleController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -81,6 +81,7 @@ export default function getRouteHandlers(
     'GET /configurations/latest': configurationController.getLatest,
     'PUT /configurations/latest': configurationController.updateConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
+    'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
@@ -105,7 +106,6 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
-    'PATCH /sites/audits': sitesAuditsController.update,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
     'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
     'POST /sites/:siteId/key-events': sitesController.createKeyEvent,

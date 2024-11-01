@@ -32,7 +32,7 @@ tags:
   - name: audit
     description: Audit operations
   - name: site-audit
-    description: Site-audit links operations
+    description: Site-audit operations
   - name: auth
     description: Init authentication against 3rd party services
   - name: organization
@@ -61,6 +61,8 @@ paths:
     $ref: './configuration-api.yaml#/latest-configuration'
   /configurations/{version}:
     $ref: './configuration-api.yaml#/configuration'
+  /configurations/sites/audits:
+    $ref: './configurations-sites-audits-api.yaml#/configurations-sites-audits-toggle'
   /event/fulfillment:
     $ref: './event-api.yaml#/process-fulfillment-events'
   /hooks/site-detection/cdn/{hookSecret}:
@@ -103,8 +105,6 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
-  /sites/audits:
-    $ref: './sites-audits-api.yaml#/update-sites-audits'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
