@@ -17,7 +17,6 @@ import { ConfigurationDto } from '../dto/configuration.js';
 import { SiteDto } from '../dto/site.js';
 
 /**
- * Sites Audits controller.
  * @param {DataAccess} dataAccess - Data access.
  * @returns {object} Sites Audits controller.
  * @constructor
