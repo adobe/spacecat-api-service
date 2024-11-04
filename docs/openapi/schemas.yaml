@@ -1598,3 +1598,10 @@ ApiKeyResponse:
         apiKey:
           description: The API key
           type: string
+Opportunity:
+OpportunityCreate:
+OpportunityUpdate:
+Suggestion:
+SuggestionCreate:
+SuggestionUpdate:
+SuggestionStatusUpdate:

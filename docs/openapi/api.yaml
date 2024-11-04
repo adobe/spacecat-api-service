@@ -105,6 +105,20 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
+  /sites/{siteId}/opportunities:
+    $ref: './site-opportunities.yaml#/site-opportunities'
+  /sites/{siteId}/opportunities/by-status/{status}:
+    $ref: './site-opportunities.yaml#/site-opportunities-by-status'
+  /sites/{siteId}/opportunities/{opportunityId}:
+    $ref: './site-opportunities.yaml#/site-opportunity'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/by-status/{status}:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-by-status'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:

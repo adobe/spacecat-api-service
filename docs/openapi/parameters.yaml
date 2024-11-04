@@ -126,3 +126,17 @@ apiKeyId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+opportunityId:
+  name: opportunityId
+  description: The opportunity ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+suggestionId:
+  name: suggestionId
+  description: The suggestion ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
