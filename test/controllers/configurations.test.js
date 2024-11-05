@@ -69,6 +69,12 @@ describe('Configurations Controller', () => {
         reports: 'sqs://some-reports-queue',
         audits: 'sqs://some-audits-queue',
       },
+      slackRoles: {
+        scrape: [
+          'WSVT1K36Z',
+          'S03CR0FDC2V',
+        ],
+      },
     },
   ].map((config) => ConfigurationDto.fromJson(config));
 
