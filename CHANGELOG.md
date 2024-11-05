@@ -1,3 +1,10 @@
+## [1.75.2](https://github.com/adobe/spacecat-api-service/compare/v1.75.1...v1.75.2) (2024-11-05)
+
+
+### Bug Fixes
+
+* configuration should keep slackRoles ([395200e](https://github.com/adobe/spacecat-api-service/commit/395200e995d14e2913f25cc3eeafa3d815a49ead))
+
 ## [1.75.1](https://github.com/adobe/spacecat-api-service/compare/v1.75.0...v1.75.1) (2024-11-02)
 
 
