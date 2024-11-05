@@ -96,6 +96,12 @@
       $ref: './headers.yaml#/xError'
 '401':
   description: Not authenticated.
+'403-max-api-keys-exceeded':
+  description: |
+    Forbidden. The maximum number of API keys that can be created per client has been exceeded.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '404':
   description: Not found.
   headers:

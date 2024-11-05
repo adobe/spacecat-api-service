@@ -37,6 +37,11 @@ Domain:
   type: string
   format: domain
   example: 'www.example.com'
+ScopeName:
+  type: string
+  enum:
+    - 'imports.write'
+    - 'imports.read'
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
@@ -380,6 +385,18 @@ UpdateHandlerTypeConfig:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+ConfigurationSitesAuditsUpdateResult:
+  type: object
+  properties:
+    status:
+      type: integer
+      description: The HTTP status code of the operation (e.g., 200 for success)
+    message:
+      type: string
+      description: A message indicating the result of the operation
+  required:
+    - status
+    - message
 Audit:
   type: object
   readOnly: true
@@ -1517,3 +1534,67 @@ ImportAssistantResponse:
     choices:
       - message:
           content: '.breadcrumbs'
+ApiKeyRequest:
+  type: object
+  required:
+    - name
+    - features
+    - domains
+  properties:
+    name:
+      description: The name of the API key
+      type: string
+    features:
+      description: The features the API key is for
+      type: array
+      items:
+        type: string
+    domains:
+      description: The domains the API key is allowed to access
+      type: array
+      items:
+        type: string
+        $ref: '#/Domain'
+  example:
+    name: 'Example API Key'
+    features: [ 'imports' ]
+    domains:
+      - 'example.com'
+ApiKeyMetadataResponse:
+  type: object
+  properties:
+    id:
+      description: The ID of the API key
+      $ref: '#/Id'
+    name:
+      description: The name of the API key
+      type: string
+    scopes:
+      description: The scopes of the API key
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            description: The name of the scope
+            type: string
+            $ref: '#/ScopeName'
+          domains:
+            description: The domains the scope is allowed to access
+            type: array
+            items:
+              $ref: '#/Domain'
+    createdAt:
+      description: The date and time when the API key was created
+      $ref: '#/DateTime'
+    expiresAt:
+      description: The date and time when the API key expires
+      $ref: '#/DateTime'
+ApiKeyResponse:
+  allOf:
+    - $ref: '#/ApiKeyMetadataResponse'
+    - type: object
+      properties:
+        apiKey:
+          description: The API key
+          type: string
