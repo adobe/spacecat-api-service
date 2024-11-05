@@ -61,6 +61,7 @@ describe('Sites Audits Controller', () => {
       getJobs: sandbox.stub(),
       getHandlers: sandbox.stub(),
       getQueues: sandbox.stub(),
+      getSlackRoles: sandbox.stub(),
     };
 
     dataAccessMock = {

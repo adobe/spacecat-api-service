@@ -28,6 +28,7 @@ export const ConfigurationDto = {
       jobs: jsonObject.jobs,
       ...(jsonObject.handlers ? { handlers: jsonObject.handlers } : {}),
       queues: jsonObject.queues,
+      ...(jsonObject.slackRoles ? { slackRoles: jsonObject.slackRoles } : {}),
     };
 
     return createConfiguration(configurationData);
@@ -44,5 +45,6 @@ export const ConfigurationDto = {
     jobs: configuration.getJobs(),
     ...(configuration.getHandlers() ? { handlers: configuration.getHandlers() } : {}),
     queues: configuration.getQueues(),
+    ...(configuration.getSlackRoles() ? { slackRoles: configuration.getSlackRoles() } : {}),
   }),
 };
