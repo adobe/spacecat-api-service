@@ -30,6 +30,7 @@ describe('Sites Audits Controller', () => {
     { id: 'site0', baseURL: 'https://site0.com', deliveryType: 'aem_edge' },
     { id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' },
   ].map((site) => SiteDto.fromJson(site));
+  const handlers = { 404: {}, cwv: {} };
 
   let configurationMock;
   let dataAccessMock;
@@ -59,7 +60,7 @@ describe('Sites Audits Controller', () => {
       disableHandlerForSite: sandbox.stub(),
       getVersion: sandbox.stub(),
       getJobs: sandbox.stub(),
-      getHandlers: sandbox.stub(),
+      getHandlers: sandbox.stub().returns(handlers),
       getQueues: sandbox.stub(),
       getSlackRoles: sandbox.stub(),
     };
@@ -461,7 +462,7 @@ describe('Sites Audits Controller', () => {
       });
     });
 
-    it('if the site is not found.', async () => {
+    it('if the site is not found', async () => {
       dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(null);
       dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
@@ -488,6 +489,47 @@ describe('Sites Audits Controller', () => {
       ).to.deep.equal({
         status: 404,
         message: 'Site with baseURL: https://site0.com not found.',
+      });
+
+      expect(
+        patchResponse[1],
+        'Expected the status of patchResponse[1] to be 200 and message indicating "404" has been enabled for '
+          + '"https://site0.com", but it was not',
+      ).to.deep.equal({
+        status: 200,
+        message: 'The audit "404" has been enabled for the "https://site1.com".',
+      });
+    });
+
+    it('if an audit type is not present in the configuration', async () => {
+      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+
+      const auditType = 'not_present_in_configuration_audit';
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType, enable: true },
+        { baseURL: 'https://site1.com', auditType: '404', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const patchResponse = await response.json();
+
+      expect(
+        configurationMock.enableHandlerForSite.calledOnceWith('404', sites[1]),
+        'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
+      ).to.be.true;
+      expect(
+        dataAccessMock.updateConfiguration.called,
+        'Expected dataAccess.updateConfiguration to be called, but it was not.',
+      ).to.be.true;
+
+      expect(
+        patchResponse[0],
+        'Expected patchResponse[0] to have a status of 404 and a message indicating that the audit '
+          + 'is not present in the configuration, but it did not match the expected output.',
+      ).to.deep.equal({
+        status: 404,
+        message: `The "${auditType}" is not present in the configuration. List of allowed audit`
+          + ` types: ${Object.keys(handlers).join(', ')}.`,
       });
 
       expect(
