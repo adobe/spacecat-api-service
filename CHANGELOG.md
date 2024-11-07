@@ -1,3 +1,10 @@
+## [1.75.4](https://github.com/adobe/spacecat-api-service/compare/v1.75.3...v1.75.4) (2024-11-07)
+
+
+### Bug Fixes
+
+* added check for audit presence in configuration during enabling/disabling audit for the site ([#559](https://github.com/adobe/spacecat-api-service/issues/559)) ([72ee2c0](https://github.com/adobe/spacecat-api-service/commit/72ee2c0bd773c1830b30a282fdb0111345de26ba))
+
 ## [1.75.3](https://github.com/adobe/spacecat-api-service/compare/v1.75.2...v1.75.3) (2024-11-07)
 
 
