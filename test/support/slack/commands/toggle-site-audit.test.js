@@ -24,6 +24,7 @@ describe('UpdateSitesAuditsCommand', () => {
   const sandbox = sinon.createSandbox();
 
   const site = SiteDto.fromJson({ id: 'site0', baseURL: 'https://site0.com', deliveryType: 'aem_edge' });
+  const handlers = { some_audit: {}, cwv: {} };
 
   let configurationMock;
   let dataAccessMock;
@@ -52,7 +53,7 @@ describe('UpdateSitesAuditsCommand', () => {
       disableHandlerForSite: sandbox.stub(),
       getVersion: sandbox.stub(),
       getJobs: sandbox.stub(),
-      getHandlers: sandbox.stub(),
+      getHandlers: sandbox.stub().returns(handlers),
       getQueues: sandbox.stub(),
       getSlackRoles: sandbox.stub(),
     };
@@ -255,6 +256,23 @@ describe('UpdateSitesAuditsCommand', () => {
       expect(
         slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}The audit type parameter is required.`),
         `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}The audit type parameter is required.", but it was not called with that message.`,
+      ).to.be.true;
+    });
+
+    it('if an audit type is not present in the configuration', async () => {
+      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      const auditType = 'not_present_in_configuration_audit';
+      const args = ['enable', 'https://site0.com', auditType];
+
+      await command.handleExecution(args, slackContextMock);
+
+      exceptsAtBadRequest();
+      expect(
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}The "${auditType}" is not present in the configuration. List of allowed audit`
+          + ` types: ${Object.keys(handlers).join(', ')}.`),
+        'Expected error message was not called',
       ).to.be.true;
     });
   });

@@ -67,6 +67,13 @@ export default (context) => {
         return;
       }
 
+      const validAuditTypes = Object.keys(configuration.getHandlers());
+      if (!validAuditTypes.includes(auditType)) {
+        await say(`${ERROR_MESSAGE_PREFIX}The "${auditType}" is not present in the configuration. List of allowed audit`
+            + ` types: ${validAuditTypes.join(', ')}.`);
+        return;
+      }
+
       let successMessage;
       if (enableAudit === 'enable') {
         configuration.enableHandlerForSite(auditType, site);
