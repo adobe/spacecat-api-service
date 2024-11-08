@@ -1,3 +1,10 @@
+## [1.75.6](https://github.com/adobe/spacecat-api-service/compare/v1.75.5...v1.75.6) (2024-11-08)
+
+
+### Bug Fixes
+
+* engine spec, dynamo query ([#562](https://github.com/adobe/spacecat-api-service/issues/562)) ([341c851](https://github.com/adobe/spacecat-api-service/commit/341c8514c054b32dc60b60e33b5220d25985b384))
+
 ## [1.75.5](https://github.com/adobe/spacecat-api-service/compare/v1.75.4...v1.75.5) (2024-11-08)
 
 
