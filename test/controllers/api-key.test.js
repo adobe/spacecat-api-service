@@ -20,6 +20,14 @@ import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import { createApiKey } from '@adobe/spacecat-shared-data-access/src/models/api-key/api-key.js';
 import ApiKeyController from '../../src/controllers/api-key.js';
+import {
+  SERVER_ERROR,
+  STATUS_BAD_REQUEST,
+  STATUS_CREATED,
+  STATUS_FORBIDDEN,
+  STATUS_NO_CONTENT,
+  STATUS_OK, STATUS_UNAUTHORIZED,
+} from '../../src/utils/constants.js';
 
 use(sinonChai);
 use(chaiAsPromised);
@@ -89,61 +97,61 @@ describe('ApiKeyController tests', () => {
     it('should throw an error if request data is not a valid JSON', async () => {
       requestContext.data = 'invalid-json';
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
     });
 
     it('should throw an error if request data is missing features', async () => {
       requestContext.data = { domains: ['https://example.com'] };
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
     });
 
     it('should throw an error if request data is missing domains', async () => {
       requestContext.data = { features: ['imports'] };
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
     });
 
     it('should throw an error if request data is missing name', async () => {
       requestContext.data = { features: ['imports'], domains: ['https://example.com'] };
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
     });
 
     it('should throw an error if the domain is not valid', async () => {
       requestContext.data.domains = ['invalid-domain'];
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
     });
 
     it('should throw an error if imsOrgId is missing', async () => {
       requestContext.pathInfo.headers['x-ims-gw-org-id'] = '';
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(401);
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
 
     it('should throw an error if the organization is not found', async () => {
       context.imsClient.getImsUserProfile.returns({ organizations: [] });
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(401);
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
 
     it('should throw an error if bearer token is missing', async () => {
       requestContext.pathInfo.headers.Authorization = '';
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(401);
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
 
     it('should create a new API key', async () => {
       context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(201);
+      expect(response.status).to.equal(STATUS_CREATED);
     });
 
     it('should throw an error if the number of domains exceeds the limit', async () => {
       requestContext.data.domains = ['https://example.com', 'https://another.com'];
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(STATUS_FORBIDDEN);
     });
 
     it('should throw an error if the user has reached the maximum number of API keys', async () => {
@@ -151,7 +159,7 @@ describe('ApiKeyController tests', () => {
         .returns([createApiKey(exampleApiKey),
           createApiKey(exampleApiKey), createApiKey(exampleApiKey)]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(STATUS_FORBIDDEN);
     });
   });
 
@@ -164,7 +172,7 @@ describe('ApiKeyController tests', () => {
       });
 
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
-      expect(response.status).to.equal(204);
+      expect(response.status).to.equal(STATUS_NO_CONTENT);
     });
 
     it('should throw an error if the API key is not found', async () => {
@@ -174,7 +182,7 @@ describe('ApiKeyController tests', () => {
       });
 
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(STATUS_FORBIDDEN);
     });
   });
 
@@ -182,13 +190,13 @@ describe('ApiKeyController tests', () => {
     it('should return all the API Keys', async () => {
       context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([createApiKey(exampleApiKey)]);
       const response = await apiKeyController.getApiKeys({ ...requestContext });
-      expect(response.status).to.equal(200);
+      expect(response.status).to.equal(STATUS_OK);
     });
 
     it('should throw an error when getApiKeysByImsUserIdAndImsOrgId fails', async () => {
       context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.throws(new Error('Dynamo Error'));
       const response = await apiKeyController.getApiKeys({ ...requestContext });
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(SERVER_ERROR);
     });
   });
 });
