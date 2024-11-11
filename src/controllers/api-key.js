@@ -52,6 +52,10 @@ function ApiKeyController(context) {
     });
   }
 
+  /**
+   * Validate the request data.
+   * @param data
+   */
   function validateRequestData(data) {
     if (!isObject(data)) {
       throw new ErrorWithStatusCode('Invalid request: missing application/json request data', STATUS_BAD_REQUEST);
@@ -76,6 +80,11 @@ function ApiKeyController(context) {
     }
   }
 
+  /**
+   * Validate the IMS Org ID.
+   * @param imsOrgId
+   * @param imsUserToken
+   */
   function validateImsOrgId(imsOrgId, imsUserToken) {
     if (!imsOrgId) {
       throw new ErrorWithStatusCode('Missing x-ims-gw-org-id header', STATUS_UNAUTHORIZED);
@@ -87,6 +96,11 @@ function ApiKeyController(context) {
     }
   }
 
+  /**
+   * Get the IMS user token from the headers.
+   * @param headers
+   * @returns imsUserToken
+   */
   function getImsUserToken(headers) {
     const authorizationHeader = headers.Authorization;
     if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
@@ -205,9 +219,9 @@ function ApiKeyController(context) {
   }
 
   /**
-   * Retrieve an API key.
+   * Retrieve the API keys created by a user with an imsUserId and an imsOrgId.
    * @param {Object} context - Context of the request.
-   * @returns {Promise<Response>} 200 OK with the list of ApiKey metadata.
+   * @returns {Promise<ApiKey[]>} 200 OK with the list of ApiKey metadata.
    */
   async function getApiKeys(requestContext) {
     const { pathInfo: { headers } } = requestContext;
