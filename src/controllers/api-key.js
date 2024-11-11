@@ -10,33 +10,89 @@
  * governing permissions and limitations under the License.
  */
 
-import { createResponse } from '@adobe/spacecat-shared-http-utils';
+import { createResponse, hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
+import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import crypto from 'crypto';
 import { ErrorWithStatusCode } from '../support/utils.js';
+import {
+  STATUS_BAD_REQUEST,
+  STATUS_CREATED,
+  STATUS_FORBIDDEN,
+  STATUS_NO_CONTENT,
+  STATUS_UNAUTHORIZED,
+} from '../utils/constants.js';
+import { ApiKeyDto } from '../dto/api-key.js';
 
 /**
  * ApiKey Controller. Provides methods for managing API keys such as create, delete, and get.
+ * @param {Object} context - The context the universal serverless function.
+ * @param context.env - Environment details.
+ * @param context.env.API_KEY_CONFIGURATION - Configuration for the API key.
  * @returns {Object} ApiKey Controller
  * @constructor
  */
 function ApiKeyController(context) {
-  // eslint-disable-next-line no-unused-vars
-  const { log } = context;
+  const status = {
+    ACTIVE: 'ACTIVE',
+    INACTIVE: 'INACTIVE',
+  };
+  const {
+    dataAccess, log, env, attributes, imsClient,
+  } = context;
+
+  let apiKeyConfiguration = {};
+  try {
+    apiKeyConfiguration = JSON.parse(env.API_KEY_CONFIGURATION);
+  } catch (error) {
+    log.error(`Failed to parse API Key configuration: ${error.message}`);
+  }
+
+  const { maxDomainsPerApiKey = 1, maxApiKeys = 3 } = apiKeyConfiguration;
   const HEADER_ERROR = 'x-error';
 
   function createErrorResponse(error) {
-    return createResponse({}, error.status, {
+    return createResponse({}, error.status || 500, {
       [HEADER_ERROR]: error.message,
     });
   }
 
-  // eslint-disable-next-line no-unused-vars
   function validateRequestData(data) {
-    // Not implemented yet
+    if (!isObject(data)) {
+      throw new ErrorWithStatusCode('Invalid request: missing application/json request data', STATUS_BAD_REQUEST);
+    }
+
+    if (!Array.isArray(data.features) || data.features.length === 0) {
+      throw new ErrorWithStatusCode('Invalid request: missing features in request data', STATUS_BAD_REQUEST);
+    }
+
+    if (!Array.isArray(data.domains) || data.domains.length === 0) {
+      throw new ErrorWithStatusCode('Invalid request: missing domains in request data', STATUS_BAD_REQUEST);
+    }
+
+    data.urls.forEach((url) => {
+      if (!isValidUrl(url)) {
+        throw new ErrorWithStatusCode(`Invalid request: ${url} is not a valid URL`, STATUS_BAD_REQUEST);
+      }
+    });
+
+    if (!hasText(data.name)) {
+      throw new ErrorWithStatusCode('Invalid request: missing name in request data', STATUS_BAD_REQUEST);
+    }
   }
 
-  // eslint-disable-next-line no-unused-vars
-  function validateImsOrgId(imsOrgId) {
-    // Not implemented yet
+  function validateImsOrgId(imsOrgId, imsUserToken) {
+    if (!imsUserToken || !imsUserToken.startsWith('Bearer ')) {
+      throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
+    }
+    if (!imsOrgId) {
+      throw new ErrorWithStatusCode('Missing x-ims-gw-org-id header', STATUS_UNAUTHORIZED);
+    }
+    const bearerToken = imsUserToken.replace('Bearer ', '');
+    const imsUserProfile = imsClient.getImsUserProfile(bearerToken);
+    const { organizations } = imsUserProfile;
+    if (!organizations.includes(imsOrgId)) {
+      throw new ErrorWithStatusCode('Invalid request: Organization not found', STATUS_UNAUTHORIZED);
+    }
   }
 
   /**
@@ -48,14 +104,76 @@ function ApiKeyController(context) {
     const { data, pathInfo: { headers } } = requestContext;
     const imsOrgId = headers['x-ims-gw-org-id'];
 
-    validateRequestData(data);
-    validateImsOrgId(imsOrgId);
+    try {
+      // Parse out the bearer token here Bearer <token>
+      const imsUserToken = headers.Authorization;
 
-    if (data) {
-      const error = new ErrorWithStatusCode('Create API key not implemented', 501);
+      validateRequestData(data);
+      validateImsOrgId(imsOrgId, imsUserToken);
+
+      // Check if the domains are within the limit
+      if (data.domains.length > maxDomainsPerApiKey) {
+        throw new ErrorWithStatusCode('Invalid request: Exceeds the number of domains allowed', STATUS_FORBIDDEN);
+      }
+
+      const { authInfo: { profile } } = attributes;
+
+      // Currently the email is assigned as the imsUserId
+      const imsUserId = profile.email;
+
+      // Check whether the user has already created the maximum number of
+      // active API keys for the given imsOrgId
+      const apiKeys = dataAccess.getApiKeysByImsOrgIdAndImsUserId(imsUserId, imsOrgId);
+
+      const activeApiKeys = apiKeys.filter(
+        (apiKey) => apiKey.status !== status.INACTIVE
+            || (apiKey.expiresAt && new Date(apiKey.expiresAt) > new Date()),
+      );
+
+      if (activeApiKeys && activeApiKeys.length >= maxApiKeys) {
+        throw new ErrorWithStatusCode('Invalid request: Exceeds the number of API keys allowed', STATUS_FORBIDDEN);
+      }
+
+      // Create the API key
+      const apiKey = crypto.randomUUID();
+      const hashedApiKey = hashWithSHA256(apiKey);
+
+      let scopes = {};
+
+      // We manually set the scopes initially to imports.read and imports.write
+      if (data.features.includes('imports')) {
+        // We need to set the scopes based on the domains.
+        // Initially there will be only 1 domain allowed
+        scopes = [
+          {
+            name: 'imports.read',
+          },
+          ...data.domains.map((domain) => ({
+            name: 'imports.write',
+            domains: domain,
+          })),
+        ];
+      }
+
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + 6);
+
+      const apiKeyEntity = dataAccess.createNewApiKey({
+        name: data.name,
+        scopes,
+        createdAt: new Date().toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        imsOrgId,
+        imsUserId,
+        hashedApiKey,
+        status: status.ACTIVE,
+      });
+
+      return createResponse(ApiKeyDto.toJSON(apiKeyEntity, apiKey), STATUS_CREATED);
+    } catch (error) {
+      log.error(`Failed to create a new api key: ${error.message}`);
       return createErrorResponse(error);
     }
-    return createResponse({}, 501);
   }
 
   /**
@@ -67,12 +185,26 @@ function ApiKeyController(context) {
     const { pathInfo: { headers }, params: { id } } = requestContext;
     const imsOrgId = headers['x-ims-gw-org-id'];
 
-    validateImsOrgId(imsOrgId);
-    if (id) {
-      const error = new ErrorWithStatusCode('Delete API key not implemented', 501);
+    try {
+      validateImsOrgId(imsOrgId);
+      const apiKeyEntity = dataAccess.getApiKeyById(id);
+      const { authInfo: { profile } } = attributes;
+
+      // Currently the email is assigned as the imsUserId
+      const imsUserId = profile.email;
+      if (apiKeyEntity.getImsUserId() !== imsUserId || apiKeyEntity.getImsOrgId() !== imsOrgId) {
+        throw new ErrorWithStatusCode('Invalid request: API key not found', STATUS_FORBIDDEN);
+      }
+
+      apiKeyEntity.updateStatus(status.INACTIVE);
+      apiKeyEntity.setDeletedAt(new Date().toISOString());
+
+      await dataAccess.updateApiKey(apiKeyEntity);
+      return createResponse({}, STATUS_NO_CONTENT);
+    } catch (error) {
+      log.error(`Failed to delete the api key with id: ${id} - ${error.message}`);
       return createErrorResponse(error);
     }
-    return createResponse({}, 501);
   }
 
   /**

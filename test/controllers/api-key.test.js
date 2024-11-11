@@ -12,7 +12,10 @@
 
 /* eslint-env mocha */
 
+/* eslint-env mocha */
+
 import { use, expect } from 'chai';
+import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import ApiKeyController from '../../src/controllers/api-key.js';
@@ -29,13 +32,15 @@ describe('ApiKeyController tests', () => {
     requestContext = {
       pathInfo: {
         headers: {
-          'x-gw-ims-org-id': 'test-org',
+          'x-ims-gw-org-id': 'test-org',
+          Authorization: 'Bearer test-token',
         },
       },
       data: {
         name: 'test-key',
-        feature: 'imports',
+        features: ['imports'],
         domains: ['example.com'],
+        urls: ['https://example.com'],
       },
       params: {
         id: '56hjhkj309r989ra90',
@@ -44,38 +49,88 @@ describe('ApiKeyController tests', () => {
 
     context = {
       log: console,
+      dataAccess: {
+        getApiKeysByImsOrgIdAndImsUserId: sinon.stub(),
+        createApiKey: sinon.stub(),
+        getApiKeyById: sinon.stub(),
+        updateApiKey: sinon.stub(),
+      },
+      env: {
+        API_KEY_CONFIGURATION: JSON.stringify({ maxDomainsPerApiKey: 1, maxApiKeys: 3 }),
+      },
+      attributes: {
+        authInfo: {
+          profile: {
+            email: 'test@example.com',
+          },
+        },
+      },
+      imsClient: {
+        getImsUserProfile: sinon.stub().returns({ organizations: ['test-org'] }),
+      },
     };
     apiKeyController = ApiKeyController(context);
   });
 
   describe('createApiKey', () => {
-    it('should throw a not implemented error', async () => {
+    it('should create a new API key', async () => {
+      context.dataAccess.getApiKeysByImsOrgIdAndImsUserId.returns([]);
+      context.dataAccess.createApiKey.returns({
+        id: 'new-api-key-id',
+        name: 'test-key',
+        scopes: [{ name: 'imports.read' }, { name: 'imports.write', domains: 'example.com' }],
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date().toISOString(),
+        imsOrgId: 'test-org',
+        imsUserId: 'test@example.com',
+        hashedApiKey: 'hashed-api-key',
+        status: 'ACTIVE',
+      });
+
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(501);
+      expect(response.status).to.equal(201);
+      expect(response.body.apiKey).to.exist;
     });
 
-    it('should throw a not implemented error when data is null', async () => {
-      requestContext.data = null;
+    it('should throw an error if the number of domains exceeds the limit', async () => {
+      requestContext.data.domains = ['example.com', 'another.com'];
       const response = await apiKeyController.createApiKey({ ...requestContext });
-      expect(response.status).to.equal(501);
+      expect(response.status).to.equal(403);
+    });
+
+    it('should throw an error if the user has reached the maximum number of API keys', async () => {
+      context.dataAccess.getApiKeysByImsOrgIdAndImsUserId.returns([{ status: 'ACTIVE' }, { status: 'ACTIVE' }, { status: 'ACTIVE' }]);
+      const response = await apiKeyController.createApiKey({ ...requestContext });
+      expect(response.status).to.equal(403);
     });
   });
 
   describe('deleteApiKey', () => {
-    it('should throw a not implemented error', async () => {
+    it('should delete an API key', async () => {
+      context.dataAccess.getApiKeyById.returns({
+        getImsUserId: () => 'test@example.com',
+        getImsOrgId: () => 'test-org',
+        setStatus: sinon.stub(),
+        setDeletedAt: sinon.stub(),
+      });
+
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
-      expect(response.status).to.equal(501);
+      expect(response.status).to.equal(204);
     });
 
-    it('should throw a not implemented error when id is null', async () => {
-      requestContext.params.id = null;
+    it('should throw an error if the API key is not found', async () => {
+      context.dataAccess.getApiKeyById.returns({
+        getImsUserId: () => 'other@example.com',
+        getImsOrgId: () => 'other-org',
+      });
+
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
-      expect(response.status).to.equal(501);
+      expect(response.status).to.equal(403);
     });
   });
 
   describe('getApiKeys', () => {
-    it('should throw a not implemented error', async () => {
+    it('should return a 501 status code', async () => {
       const response = await apiKeyController.getApiKeys({ ...requestContext });
       expect(response.status).to.equal(501);
     });
