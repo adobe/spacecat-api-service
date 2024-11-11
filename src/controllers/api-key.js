@@ -198,7 +198,8 @@ function ApiKeyController(context) {
     const imsOrgId = headers['x-ims-gw-org-id'];
 
     try {
-      validateImsOrgId(imsOrgId);
+      const imsUserToken = getImsUserToken(headers);
+      validateImsOrgId(imsOrgId, imsUserToken);
       const apiKeyEntity = dataAccess.getApiKeyById(id);
       const { authInfo: { profile } } = attributes;
 
@@ -228,7 +229,8 @@ function ApiKeyController(context) {
     const imsOrgId = headers['x-ims-gw-org-id'];
 
     try {
-      validateImsOrgId(imsOrgId);
+      const imsUserToken = getImsUserToken(headers);
+      validateImsOrgId(imsOrgId, imsUserToken);
       const { authInfo: { profile } } = attributes;
 
       // Currently the email is assigned as the imsUserId
