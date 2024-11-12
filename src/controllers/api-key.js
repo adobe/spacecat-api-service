@@ -86,12 +86,12 @@ function ApiKeyController(context) {
    * @param imsOrgId
    * @param imsUserToken
    */
-  function validateImsOrgId(imsOrgId, imsUserToken) {
+  async function validateImsOrgId(imsOrgId, imsUserToken) {
     if (!imsOrgId) {
       throw new ErrorWithStatusCode('Missing x-ims-gw-org-id header', STATUS_UNAUTHORIZED);
     }
-    const imsUserProfile = imsClient.getImsUserProfile(imsUserToken);
-    log.debug(`Retrieved the IMS User Profile: ${JSON.stringify(imsUserProfile)}`);
+    const imsUserProfile = await imsClient.getImsUserProfile(imsUserToken);
+    log.info(`Retrieved the IMS User Profile: ${JSON.stringify(imsUserProfile)}`);
     const { organizations } = imsUserProfile;
     if (!organizations.includes(imsOrgId)) {
       throw new ErrorWithStatusCode('Invalid request: Organization not found', STATUS_UNAUTHORIZED);
@@ -124,7 +124,7 @@ function ApiKeyController(context) {
       const imsUserToken = getImsUserToken(headers);
 
       validateRequestData(data);
-      validateImsOrgId(imsOrgId, imsUserToken);
+      await validateImsOrgId(imsOrgId, imsUserToken);
 
       // Check if the domains are within the limit
       if (data.domains.length > maxDomainsPerApiKey) {
@@ -199,7 +199,7 @@ function ApiKeyController(context) {
 
     try {
       const imsUserToken = getImsUserToken(headers);
-      validateImsOrgId(imsOrgId, imsUserToken);
+      await validateImsOrgId(imsOrgId, imsUserToken);
       const apiKeyEntity = dataAccess.getApiKeyById(id);
       const { authInfo: { profile } } = attributes;
 
@@ -230,7 +230,7 @@ function ApiKeyController(context) {
 
     try {
       const imsUserToken = getImsUserToken(headers);
-      validateImsOrgId(imsOrgId, imsUserToken);
+      await validateImsOrgId(imsOrgId, imsUserToken);
       const { authInfo: { profile } } = attributes;
 
       // Currently the email is assigned as the imsUserId
