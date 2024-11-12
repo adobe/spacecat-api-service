@@ -140,7 +140,7 @@ function ApiKeyController(context) {
       // active API keys for the given imsOrgId.
       const apiKeys = dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
 
-      log.debug('Retrieved the API keys: ', apiKeys);
+      log.debug('Retrieved the API keys for the user: ', apiKeys);
 
       const validApiKeys = apiKeys && apiKeys.filter(
         (apiKey) => apiKey.isValid(),
