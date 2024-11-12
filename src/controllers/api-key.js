@@ -15,6 +15,7 @@ import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import crypto from 'crypto';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import {
+  SERVER_ERROR,
   STATUS_BAD_REQUEST,
   STATUS_CREATED,
   STATUS_FORBIDDEN,
@@ -47,7 +48,7 @@ function ApiKeyController(context) {
   const HEADER_ERROR = 'x-error';
 
   function createErrorResponse(error) {
-    return createResponse({}, error.status || 500, {
+    return createResponse({}, error.status || SERVER_ERROR, {
       [HEADER_ERROR]: error.message,
     });
   }
@@ -62,11 +63,11 @@ function ApiKeyController(context) {
     }
 
     if (!Array.isArray(data.features) || data.features.length === 0) {
-      throw new ErrorWithStatusCode('Invalid request: missing features in request data', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: missing features in the request data', STATUS_BAD_REQUEST);
     }
 
     if (!Array.isArray(data.domains) || data.domains.length === 0) {
-      throw new ErrorWithStatusCode('Invalid request: missing domains in request data', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: missing domains in the request data', STATUS_BAD_REQUEST);
     }
 
     data.domains.forEach((url) => {
@@ -76,7 +77,7 @@ function ApiKeyController(context) {
     });
 
     if (!hasText(data.name)) {
-      throw new ErrorWithStatusCode('Invalid request: missing name in request data', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: missing name in the request data', STATUS_BAD_REQUEST);
     }
   }
 
@@ -154,8 +155,6 @@ function ApiKeyController(context) {
 
       // We manually set the scopes initially to imports.read and imports.write
       if (data.features.includes('imports')) {
-        // We need to set the scopes based on the domains.
-        // Initially there will be only 1 domain allowed
         scopes = [
           {
             name: 'imports.read',
