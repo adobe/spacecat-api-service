@@ -10,6 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
+/**
+ * This file contains HTTP status code constants used throughout the application.
+ */
+
 export const STATUS_BAD_REQUEST = 400;
 export const STATUS_ACCEPTED = 202;
 export const STATUS_UNAUTHORIZED = 401;
