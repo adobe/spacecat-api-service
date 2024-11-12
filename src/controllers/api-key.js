@@ -138,7 +138,7 @@ function ApiKeyController(context) {
 
       // Check whether the user has already created the maximum number of
       // active API keys for the given imsOrgId.
-      const apiKeys = dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
+      const apiKeys = await dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
 
       log.debug('Retrieved the API keys for the user: ', apiKeys);
 
@@ -202,7 +202,7 @@ function ApiKeyController(context) {
     try {
       const imsUserToken = getImsUserToken(headers);
       await validateImsOrgId(imsOrgId, imsUserToken);
-      const apiKeyEntity = dataAccess.getApiKeyById(id);
+      const apiKeyEntity = await dataAccess.getApiKeyById(id);
       const { authInfo: { profile } } = attributes;
 
       // Currently the email is assigned as the imsUserId
@@ -237,7 +237,7 @@ function ApiKeyController(context) {
 
       // Currently the email is assigned as the imsUserId
       const imsUserId = profile.email;
-      const apiKeys = dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
+      const apiKeys = await dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
       return ok(apiKeys.map((apiKey) => ApiKeyDto.toJSON(apiKey)));
     } catch (error) {
       log.error(`Failed to retrieve the api keys - ${error.message}`);
