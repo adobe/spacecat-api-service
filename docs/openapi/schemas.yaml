@@ -42,6 +42,7 @@ ScopeName:
   enum:
     - 'imports.write'
     - 'imports.read'
+    - 'imports.assistant'
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'

@@ -19,7 +19,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import AssistantController from '../../src/controllers/assistant.js';
-import { commandConfig } from '../../src/support/assistant-support.js';
+import { commandConfig, STATUS } from '../../src/support/assistant-support.js';
 
 use(sinonChai);
 use(chaiAsPromised);
@@ -28,6 +28,7 @@ describe('AssistantController tests', () => {
   let sandbox;
   let baseContext;
   let assistantController;
+  let mockAuth;
   const screenshot = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAApgAAAKYB3X3/OAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAANCSURBVEiJtZZPbBtFFMZ/M7ubXdtdb1xSFyeilBapySVU8h8OoFaooFSqiihIVIpQBKci6KEg9Q6H9kovIHoCIVQJJCKE1ENFjnAgcaSGC6rEnxBwA04Tx43t2FnvDAfjkNibxgHxnWb2e/u992bee7tCa00YFsffekFY+nUzFtjW0LrvjRXrCDIAaPLlW0nHL0SsZtVoaF98mLrx3pdhOqLtYPHChahZcYYO7KvPFxvRl5XPp1sN3adWiD1ZAqD6XYK1b/dvE5IWryTt2udLFedwc1+9kLp+vbbpoDh+6TklxBeAi9TL0taeWpdmZzQDry0AcO+jQ12RyohqqoYoo8RDwJrU+qXkjWtfi8Xxt58BdQuwQs9qC/afLwCw8tnQbqYAPsgxE1S6F3EAIXux2oQFKm0ihMsOF71dHYx+f3NND68ghCu1YIoePPQN1pGRABkJ6Bus96CutRZMydTl+TvuiRW1m3n0eDl0vRPcEysqdXn+jsQPsrHMquGeXEaY4Yk4wxWcY5V/9scqOMOVUFthatyTy8QyqwZ+kDURKoMWxNKr2EeqVKcTNOajqKoBgOE28U4tdQl5p5bwCw7BWquaZSzAPlwjlithJtp3pTImSqQRrb2Z8PHGigD4RZuNX6JYj6wj7O4TFLbCO/Mn/m8R+h6rYSUb3ekokRY6f/YukArN979jcW+V/S8g0eT/N3VN3kTqWbQ428m9/8k0P/1aIhF36PccEl6EhOcAUCrXKZXXWS3XKd2vc/TRBG9O5ELC17MmWubD2nKhUKZa26Ba2+D3P+4/MNCFwg59oWVeYhkzgN/JDR8deKBoD7Y+ljEjGZ0sosXVTvbc6RHirr2reNy1OXd6pJsQ+gqjk8VWFYmHrwBzW/n+uMPFiRwHB2I7ih8ciHFxIkd/3Omk5tCDV1t+2nNu5sxxpDFNx+huNhVT3/zMDz8usXC3ddaHBj1GHj/As08fwTS7Kt1HBTmyN29vdwAw+/wbwLVOJ3uAD1wi/dUH7Qei66PfyuRj4Ik9is+hglfbkbfR3cnZm7chlUWLdwmprtCohX4HUtlOcQjLYCu+fzGJH2QRKvP3UNz8bWk1qMxjGTOMThZ3kvgLI5AzFfo379UAAAAASUVORK5CYII=';
   const { info, debug, error } = console;
 
@@ -35,12 +36,17 @@ describe('AssistantController tests', () => {
     sinon.restore();
     sandbox = sinon.createSandbox();
 
+    mockAuth = {
+      checkScopes: sandbox.stub().resolves(true),
+    };
+
     baseContext = {
       log: {
         info,
         debug,
         error: sandbox.stub().callsFake(error),
       },
+      auth: mockAuth,
       params: {},
       data: {},
       pathInfo: {
@@ -76,22 +82,30 @@ describe('AssistantController tests', () => {
       },
     );
     expect(response).to.be.an.instanceOf(Response);
-    expect(response.status).to.equal(400);
+    expect(response.status).to.equal(STATUS.BAD_REQUEST);
     expect(response.headers.get('x-error')).to.equal(errorMessage);
   };
 
   describe('processImportAssistant parameters', () => {
+    it('unauthorized api key test', async () => {
+      baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Kaboom'));
+      const response = await assistantController.processImportAssistant(undefined);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(STATUS.UNAUTHORIZED);
+      expect(response.headers.get('x-error')).to.equal('Missing required scopes.');
+      expect(baseContext.log.error.getCall(0).args[0]).to.include('Missing required scopes.');
+    });
     it('undefined request test', async () => {
       const response = await assistantController.processImportAssistant(undefined);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: missing request context.');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Invalid request: missing request context.');
     });
     it('non-object request test', async () => {
       const response = await assistantController.processImportAssistant('string');
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: missing request context.');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Invalid request: missing request context.');
     });
@@ -100,7 +114,7 @@ describe('AssistantController tests', () => {
       delete datalessContext.data;
       const response = await assistantController.processImportAssistant(datalessContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: invalid request context format.');
     });
     it('missing attributes in request test', async () => {
@@ -108,7 +122,7 @@ describe('AssistantController tests', () => {
       delete datalessContext.attributes;
       const response = await assistantController.processImportAssistant(datalessContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: invalid request context format.');
     });
     it('missing profile in request test', async () => {
@@ -133,20 +147,20 @@ describe('AssistantController tests', () => {
     it('missing command test', async () => {
       const response = await assistantController.processImportAssistant({ ...baseContext });
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: command is required.');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Invalid request: command is required.');
     });
     it('empty command test', async () => {
       const response = await assistantController.processImportAssistant({ ...baseContext, data: { command: '' } });
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: command is required.');
     });
     it('invalid command test', async () => {
       const response = await assistantController.processImportAssistant({ ...baseContext, data: { command: 'test' } });
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: command not implemented: test');
     });
     it('missing prompt test', async () => {
@@ -197,7 +211,7 @@ describe('AssistantController tests', () => {
         },
       );
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: HTML content is invalid or incomplete.');
     });
     it('should throw an invalid request error with nonsense image', async () => {
@@ -215,7 +229,7 @@ describe('AssistantController tests', () => {
         },
       );
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Image url is not a base64 encoded image.');
     });
 
@@ -279,7 +293,7 @@ describe('AssistantController tests', () => {
         },
       );
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(200);
+      expect(response.status).to.equal(STATUS.OK);
       expect(response.headers.get('x-error')).to.equal(null);
       const results = await response.json();
       expect(results).to.not.be.undefined;

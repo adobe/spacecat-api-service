@@ -15,7 +15,13 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { isObject } from '@adobe/spacecat-shared-utils';
 import { AssistantDto } from '../dto/assistant-response.js';
-import { commandConfig, getFirefallCompletion } from '../support/assistant-support.js';
+import {
+  commandConfig,
+  getFirefallCompletion,
+  SCOPE,
+  validateAccessScopes,
+  STATUS,
+} from '../support/assistant-support.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
 /**
@@ -28,9 +34,7 @@ import { ErrorWithStatusCode } from '../support/utils.js';
  */
 function AssistantController(context) {
   const HEADER_ERROR = 'x-error';
-  const STATUS_BAD_REQUEST = 400;
-  const STATUS_OK = 200;
-  const { log } = context;
+  const { auth, log } = context;
 
   function createErrorResponse(error) {
     return createResponse({}, error.status, {
@@ -49,43 +53,43 @@ function AssistantController(context) {
 
     // Validate 'command'
     if (!command) {
-      throw new ErrorWithStatusCode('Invalid request: command is required.', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: command is required.', STATUS.BAD_REQUEST);
     }
     const currentCommandConfig = commandConfig[command];
     if (!currentCommandConfig) {
-      throw new ErrorWithStatusCode(`Invalid request: command not implemented: ${command}`, STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode(`Invalid request: command not implemented: ${command}`, STATUS.BAD_REQUEST);
     }
 
     if (currentCommandConfig.parameters.includes('prompt') && !prompt) {
-      throw new ErrorWithStatusCode('Invalid request: prompt is required.', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: prompt is required.', STATUS.BAD_REQUEST);
     }
 
     if (currentCommandConfig.parameters.includes('htmlContent')) {
       if (!htmlContent) {
-        throw new ErrorWithStatusCode('Invalid request: HTML content is required.', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: HTML content is required.', STATUS.BAD_REQUEST);
       }
       if (!htmlContent.includes('</html>')) {
-        throw new ErrorWithStatusCode('Invalid request: HTML content is invalid or incomplete.', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: HTML content is invalid or incomplete.', STATUS.BAD_REQUEST);
       }
     }
 
     if (currentCommandConfig.parameters.includes('imageUrl')) {
       if (!imageUrl) {
-        throw new ErrorWithStatusCode('Invalid request: Image url is required.', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: Image url is required.', STATUS.BAD_REQUEST);
       }
       // Only base64 images for now.
       if (!isBase64UrlImage(imageUrl)) {
-        throw new ErrorWithStatusCode('Invalid request: Image url is not a base64 encoded image.', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: Image url is not a base64 encoded image.', STATUS.BAD_REQUEST);
       }
     }
   }
 
   function parseRequestContext(requestContext) {
     if (!requestContext || !isObject(requestContext)) {
-      throw new ErrorWithStatusCode('Invalid request: missing request context.', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: missing request context.', STATUS.BAD_REQUEST);
     }
     if (!requestContext.data || !requestContext.attributes) {
-      throw new ErrorWithStatusCode('Invalid request: invalid request context format.', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: invalid request context format.', STATUS.BAD_REQUEST);
     }
     const { data, attributes } = requestContext;
     const { htmlContent, imageUrl, ...options } = data?.options || {};
@@ -114,12 +118,14 @@ function AssistantController(context) {
    */
   async function processImportAssistant(requestContext) {
     try {
+      validateAccessScopes(auth, [SCOPE.ASSISTANT], log);
+
       const requestData = parseRequestContext(requestContext);
 
       // Call the assistant model.
       const firefallResponse = await getFirefallCompletion(requestData, log);
       const firefallDto = AssistantDto.toJSON(firefallResponse);
-      return createResponse(firefallDto, STATUS_OK);
+      return createResponse(firefallDto, STATUS.OK);
     } catch (error) {
       log.error(`Failed to run assistant command: ${error.message}`);
       return createErrorResponse(error);

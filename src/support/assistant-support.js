@@ -19,7 +19,7 @@ import { ErrorWithStatusCode } from './utils.js';
  *  - responseFormat: string : AI response format for the command
  *  - llmModel: string : the LLM Model to use for the command
  */
-export const commandConfig = {
+const commandConfig = {
   findMainContent: {
     parameters: ['htmlContent', 'prompt'],
     llmModel: 'gpt-4-turbo',
@@ -45,7 +45,34 @@ export const commandConfig = {
   },
 };
 
-export const getFirefallCompletion = async (requestData, log) => {
+const SCOPE = {
+  ASSISTANT: 'imports.assistant', // allows users submit prompts with their API key
+};
+
+const STATUS = {
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  OK: 200,
+};
+
+/**
+ * Verify that the authenticated user has the required level of access scope.
+ * @param auth the auth object from the context.
+ * @param scopes a list of scopes to validate the user has access to.
+ * @param log optional logger.
+ * @return {true} if scope is allowed.
+ */
+const validateAccessScopes = (auth, scopes, log) => {
+  log?.debug(`validating scopes: ${scopes}`);
+
+  try {
+    auth.checkScopes(scopes);
+  } catch (error) {
+    throw new ErrorWithStatusCode('Missing required scopes.', STATUS.UNAUTHORIZED);
+  }
+};
+
+const getFirefallCompletion = async (requestData, log) => {
   const context = {
     env: {
       ...process.env,
@@ -70,4 +97,12 @@ export const getFirefallCompletion = async (requestData, log) => {
   } catch (error) {
     throw new ErrorWithStatusCode(`Error fetching insight: ${error.message}`, 500);
   }
+};
+
+export {
+  commandConfig,
+  getFirefallCompletion,
+  validateAccessScopes,
+  STATUS,
+  SCOPE,
 };
