@@ -136,7 +136,7 @@ function ApiKeyController(context) {
       const imsUserId = profile.email;
 
       // Check whether the user has already created the maximum number of
-      // active API keys for the given imsOrgId
+      // active API keys for the given imsOrgId.
       const apiKeys = dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
 
       const validApiKeys = apiKeys.filter(
