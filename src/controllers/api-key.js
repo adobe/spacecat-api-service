@@ -104,7 +104,7 @@ function ApiKeyController(context) {
    */
   function getImsUserToken(headers) {
     const authorizationHeader = headers.Authorization;
-    if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
+    if (!authorizationHeader) {
       throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
     }
     return authorizationHeader.replace('Bearer ', '');
