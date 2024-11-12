@@ -103,7 +103,7 @@ function ApiKeyController(context) {
    * @returns imsUserToken
    */
   function getImsUserToken(headers) {
-    const authorizationHeader = headers.Authorization;
+    const authorizationHeader = headers.authorization;
     if (!authorizationHeader) {
       throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
     }
