@@ -1,3 +1,10 @@
+## [1.75.11](https://github.com/adobe/spacecat-api-service/compare/v1.75.10...v1.75.11) (2024-11-12)
+
+
+### Bug Fixes
+
+* IMS authentication header ([#568](https://github.com/adobe/spacecat-api-service/issues/568)) ([072a10a](https://github.com/adobe/spacecat-api-service/commit/072a10ad85141604ade400e91d65322ed573460e))
+
 ## [1.75.10](https://github.com/adobe/spacecat-api-service/compare/v1.75.9...v1.75.10) (2024-11-11)
 
 
