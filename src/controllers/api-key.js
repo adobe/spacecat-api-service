@@ -91,6 +91,7 @@ function ApiKeyController(context) {
       throw new ErrorWithStatusCode('Missing x-ims-gw-org-id header', STATUS_UNAUTHORIZED);
     }
     const imsUserProfile = imsClient.getImsUserProfile(imsUserToken);
+    log.debug(`Retrieved the IMS User Profile: ${JSON.stringify(imsUserProfile)}`);
     const { organizations } = imsUserProfile;
     if (!organizations.includes(imsOrgId)) {
       throw new ErrorWithStatusCode('Invalid request: Organization not found', STATUS_UNAUTHORIZED);
