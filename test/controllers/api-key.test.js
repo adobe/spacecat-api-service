@@ -41,7 +41,7 @@ describe('ApiKeyController tests', () => {
       pathInfo: {
         headers: {
           'x-ims-gw-org-id': 'test-org',
-          Authorization: 'Bearer test-token',
+          authorization: 'Bearer test-token',
         },
       },
       data: {
@@ -135,7 +135,7 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should throw an error if bearer token is missing', async () => {
-      requestContext.pathInfo.headers.Authorization = '';
+      requestContext.pathInfo.headers.authorization = '';
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
