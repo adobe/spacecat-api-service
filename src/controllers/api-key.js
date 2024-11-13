@@ -101,7 +101,7 @@ function ApiKeyController(context) {
   /**
    * Get the IMS user token from the headers.
    * @param headers
-   * @returns imsUserToken
+   * @returns string imsUserToken
    */
   function getImsUserToken(headers) {
     const authorizationHeader = headers.authorization;
