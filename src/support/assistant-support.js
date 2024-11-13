@@ -76,6 +76,7 @@ const fetchFirefallCompletion = async (requestData, log) => {
   const context = {
     env: {
       ...process.env,
+      FIREFALL_API_ENDPOINT: 'https://firefall-stage.adobe.io',
       FIREFALL_API_KEY: 'aem-import-as-a-service',
       IMS_CLIENT_ID: 'aem-import-as-a-service',
     },
