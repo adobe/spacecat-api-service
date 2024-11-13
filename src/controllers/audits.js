@@ -137,7 +137,7 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    const { excludedURLs, manualOverwrites } = context.data;
+    const { excludedURLs, manualOverwrites, groupedURLs } = context.data;
     let hasUpdates = false;
 
     const site = await dataAccess.getSiteByID(siteId);
@@ -192,6 +192,17 @@ function AuditsController(dataAccess) {
 
       config.updateManualOverwrites(auditType, newManualOverwrites);
     }
+
+    if (Array.isArray(groupedURLs)) {
+      hasUpdates = true;
+
+      const patchedGroupedURLs = groupedURLs.length === 0
+        ? []
+        : Array.from(new Set([...(config.getGroupedURLs(auditType) || []), ...groupedURLs]));
+
+      config.updateGroupedURLs(auditType, patchedGroupedURLs);
+    }
+
     if (hasUpdates) {
       const handlerType = config.getHandlerConfig(auditType);
       const configObj = Config.toDynamoItem(config);

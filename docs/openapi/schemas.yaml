@@ -71,6 +71,18 @@ HandlerConfig:
       items:
         type: string
         format: uri
+    groupedURLs:
+      description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            description: Name of the URL group
+            type: string
+          pattern:
+            description: Pattern representing the URL path structure to group
+            type: string
   patternProperties:
     "^(404|broken-backlinks)$":
       type: object
@@ -78,6 +90,15 @@ HandlerConfig:
         mentions:
           $ref: '#/SlackMentionConfig'
         # Define other properties specific to the alert type here
+  example:
+    excludedURLs:
+      - 'https://www.adobe.com/excluded-page'
+      - 'https://www.adobe.com/another-excluded-page'
+    groupedURLs:
+      - name: 'catalog'
+        pattern: '/products/'
+      - name: 'blog'
+        pattern: '/post/'
 SlackConfig:
   type: object
   additionalProperties: true
@@ -285,6 +306,18 @@ Site:
             items:
               type: string
               format: uri'
+          groupedURLs:
+            description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
+            type: array
+            items:
+              type: object
+              properties:
+                name:
+                  description: Name of the URL group
+                  type: string
+                pattern:
+                  description: Pattern representing the URL path structure to group
+                  type: string
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -377,14 +410,31 @@ UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
-      description: Set of urls to exclude. If empty, will remove previously excluded URLs.
+      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed
       type: array
       items:
         type: string
+    groupedURLs:
+      description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            description: Name of the URL group
+            type: string
+          pattern:
+            description: Pattern representing the URL path structure to group
+            type: string
   example:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+    groupedURLs:
+      - name: 'catalog'
+        pattern: '/products/'
+      - name: 'blog'
+        pattern: '/post/'
 ConfigurationSitesAuditsUpdateResult:
   type: object
   properties:

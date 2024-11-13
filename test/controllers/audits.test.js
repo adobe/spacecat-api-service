@@ -19,6 +19,7 @@ import sinon from 'sinon';
 
 import AuditsController from '../../src/controllers/audits.js';
 import { AuditDto } from '../../src/dto/audit.js';
+import { SiteDto } from '../../src/dto/site.js';
 
 use(chaiAsPromised);
 
@@ -792,6 +793,54 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(400);
       const error = await result.json();
       expect(error).to.have.property('message', 'Manual overwrite must have both brokenTargetURL and targetURL');
+    });
+
+    describe('process groupedURLs parameter', () => {
+      beforeEach(() => {
+        const site = SiteDto.fromJson({
+          id: 'site0',
+          baseURL: 'https://site0.com',
+          deliveryType: 'aem_edge',
+          config: {
+            handlers: {
+              'broken-backlinks': {
+                groupedURLs: undefined,
+              },
+            },
+          },
+        });
+        mockDataAccess.getSiteByID.withArgs('site0').resolves(site);
+      });
+
+      it('returns bad request if groupedURLs is not an array', async () => {
+        const context = {
+          params: { siteId: 'site0', auditType: 'broken-backlinks' },
+          data: { groupedURLs: 'invalid_format' },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(400);
+        const error = await result.json();
+        expect(error).to.have.property('message', 'No updates provided');
+      });
+
+      it('returns bad request if groupedURLs is undefined in the config', async () => {
+        const groupedURLs = [
+          { name: 'catalog', pattern: '/products/' },
+          { name: 'blog', pattern: '/post/' },
+        ];
+        const context = {
+          params: { siteId: 'site0', auditType: 'broken-backlinks' },
+          data: { groupedURLs },
+        };
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(result.status).to.equal(400);
+        const error = await result.json();
+        expect(error).to.have.property('message', 'No updates provided');
+      });
     });
   });
 });
