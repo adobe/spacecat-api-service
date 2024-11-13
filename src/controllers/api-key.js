@@ -172,7 +172,7 @@ function ApiKeyController(context) {
       const expiresAt = new Date();
       expiresAt.setMonth(expiresAt.getMonth() + 6);
 
-      const apiKeyEntity = dataAccess.createNewApiKey({
+      const apiKeyEntity = await dataAccess.createNewApiKey({
         id: crypto.randomUUID(),
         name: data.name,
         scopes,
