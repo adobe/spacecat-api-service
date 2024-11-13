@@ -17,7 +17,7 @@ import { isObject } from '@adobe/spacecat-shared-utils';
 import { AssistantDto } from '../dto/assistant-response.js';
 import {
   commandConfig,
-  getFirefallCompletion,
+  fetchFirefallCompletion,
   SCOPE,
   validateAccessScopes,
   STATUS,
@@ -82,18 +82,17 @@ function AssistantController(context) {
     if (!requestContext.data || !requestContext.attributes) {
       throw new ErrorWithStatusCode('Invalid request: invalid request context format.', STATUS.BAD_REQUEST);
     }
-    const { data, attributes } = requestContext;
-    const { imageUrl, ...options } = data?.options || {};
+    const { data: { command, prompt, options }, attributes } = requestContext;
+    const { imageUrl, ...otherOptions } = options || {};
     const { authInfo: { profile } } = attributes;
     const requestData = {
-      command: data.command,
-      prompt: data.prompt,
+      command,
+      prompt,
       imageUrl,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
       apiKeyName: profile?.getName(),
-      imsOrgId: profile?.getImsOrgId() ?? requestContext.pathInfo.headers['x-gw-ims-org-id'],
-      imsUserId: profile?.getImsUserId(),
-      options,
+      imsOrgId: profile?.getImsOrgId() ?? requestContext.pathInfo.headers['x-gw-ims-org-id'] ?? 'N/A',
+      otherOptions,
     };
 
     validateRequestData(requestData);
@@ -111,9 +110,12 @@ function AssistantController(context) {
       validateAccessScopes(auth, [SCOPE.ASSISTANT], log);
 
       const requestData = parseRequestContext(requestContext);
+      const { command, apiKeyName, imsOrgId } = requestData;
+
+      log.info(`Running assistant command ${command} using key ${apiKeyName} for org ${imsOrgId}.`);
 
       // Call the assistant model.
-      const firefallResponse = await getFirefallCompletion(requestData, log);
+      const firefallResponse = await fetchFirefallCompletion(requestData, log);
       const firefallDto = AssistantDto.toJSON(firefallResponse);
       return createResponse(firefallDto, STATUS.OK);
     } catch (error) {

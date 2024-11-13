@@ -72,7 +72,7 @@ const validateAccessScopes = (auth, scopes, log) => {
   }
 };
 
-const getFirefallCompletion = async (requestData, log) => {
+const fetchFirefallCompletion = async (requestData, log) => {
   const context = {
     env: {
       ...process.env,
@@ -88,11 +88,15 @@ const getFirefallCompletion = async (requestData, log) => {
     throw new ErrorWithStatusCode(`Error creating FirefallClient: ${error.message}`, 500);
   }
 
+  const {
+    prompt, llmModel, responseFormat, imageUrl,
+  } = requestData;
+
   try {
-    return await client.fetchChatCompletion(requestData.prompt, {
-      model: requestData.llmModel,
-      responseFormat: requestData.responseFormat,
-      imageUrls: [requestData.imageUrl],
+    return await client.fetchChatCompletion(prompt, {
+      model: llmModel,
+      responseFormat,
+      imageUrls: [imageUrl],
     });
   } catch (error) {
     throw new ErrorWithStatusCode(`Error fetching insight: ${error.message}`, 500);
@@ -101,7 +105,7 @@ const getFirefallCompletion = async (requestData, log) => {
 
 export {
   commandConfig,
-  getFirefallCompletion,
+  fetchFirefallCompletion,
   validateAccessScopes,
   STATUS,
   SCOPE,
