@@ -22,6 +22,8 @@ export const ApiKeyDto = {
     name: apiKeyEntity.getName(),
     createdAt: apiKeyEntity.getCreatedAt(),
     expiresAt: apiKeyEntity.getExpiresAt(),
+    deletedAt: apiKeyEntity.getDeletedAt(),
+    revokedAt: apiKeyEntity.getRevokedAt(),
     imsUserId: apiKeyEntity.getImsUserId(),
     imsOrgId: apiKeyEntity.getImsOrgId(),
     scopes: apiKeyEntity.getScopes(),
