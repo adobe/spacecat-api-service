@@ -42,7 +42,7 @@ describe('AssistantController tests', () => {
 
     baseContext = {
       log: {
-        info,
+        info: sandbox.stub().callsFake(info),
         debug,
         error: sandbox.stub().callsFake(error),
       },
@@ -71,7 +71,12 @@ describe('AssistantController tests', () => {
     assistantController = AssistantController(baseContext);
   });
 
-  const testParameterWithCommand = async (command, errorMessage, testData = {}) => {
+  const testParameterWithCommand = async (
+    command,
+    errorMessage,
+    testData = {},
+    errorCode = STATUS.BAD_REQUEST,
+  ) => {
     const response = await assistantController.processImportAssistant(
       {
         ...baseContext,
@@ -82,7 +87,7 @@ describe('AssistantController tests', () => {
       },
     );
     expect(response).to.be.an.instanceOf(Response);
-    expect(response.status).to.equal(STATUS.BAD_REQUEST);
+    expect(response.status).to.equal(errorCode);
     expect(response.headers.get('x-error')).to.equal(errorMessage);
   };
 
@@ -125,6 +130,18 @@ describe('AssistantController tests', () => {
       expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: invalid request context format.');
     });
+    it('missing imsOrgId test', async () => {
+      baseContext.attributes.authInfo.profile.getImsOrgId = () => undefined;
+      baseContext.pathInfo.headers['x-gw-ims-org-id'] = undefined;
+      // Check client error - which means the imsOrgId is missing, but it will continue.
+      await testParameterWithCommand(
+        'findMainContent',
+        'Error creating FirefallClient: Context param must include properties: imsHost, clientId, clientCode, and clientSecret.',
+        { prompt: 'nav and some text' },
+        500,
+      );
+      expect(baseContext.log.info.getCall(0).args[0]).to.equal('Running assistant command findMainContent using key testName for org N/A.');
+    });
     it('missing profile in request test', async () => {
       const profilelessContext = { ...baseContext };
       delete profilelessContext.attributes.authInfo.profile;
@@ -160,6 +177,16 @@ describe('AssistantController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: command not implemented: test');
+    });
+    it('commandConfig parameters test', async () => {
+      for (const config of Object.values(commandConfig)) {
+        expect(config.parameters).to.be.an('array');
+        // If an image is required, the prompt and model should be set appropriately.
+        if (config.parameters.includes('imageUrl')) {
+          expect(config.parameters).to.include('prompt');
+          expect(config.llmModel).to.equal('gpt-4-vision');
+        }
+      }
     });
     it('missing prompt test', async () => {
       for (const [command, config] of Object.entries(commandConfig)) {
@@ -202,7 +229,6 @@ describe('AssistantController tests', () => {
       expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Image url is not a base64 encoded image.');
     });
-
     it('should pass validation but fail firefall client', async () => {
       const response = await assistantController.processImportAssistant(
         {
