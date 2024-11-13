@@ -83,6 +83,9 @@ site-opportunity:
           application/json:
             schema:
               $ref: './schemas.yaml#/Opportunity'
+            examples:
+              broken-backlinks-opportunity:
+                $ref: './examples.yaml#/broken-backlinks-opportunity'
     security:
       - api_key: [ ]
 
@@ -238,6 +241,9 @@ site-opportunity-suggestion:
           application/json:
             schema:
               $ref: './schemas.yaml#/Suggestion'
+            examples:
+              broken-backlinks-suggestion:
+                $ref: './examples.yaml#/broken-backlinks-suggestion'
     security:
       - api_key: [ ]
 
@@ -261,5 +267,8 @@ site-opportunity-suggestion:
           application/json:
             schema:
               $ref: './schemas.yaml#/Suggestion'
+            examples:
+              broken-backlinks-suggestion:
+                $ref: './examples.yaml#/broken-backlinks-suggestion'
     security:
       - api_key: [ ]
