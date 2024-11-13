@@ -134,9 +134,7 @@ describe('AssistantController tests', () => {
           data: {
             command: 'findMainContent',
             prompt: 'nav and some text',
-            options: {
-              htmlContent: '<!DOCTYPE html><body><p>this is html</p></body></html>',
-            },
+            options: {},
           },
         },
       );
@@ -172,15 +170,6 @@ describe('AssistantController tests', () => {
         }
       }
     });
-    it('missing htmlContent test', async () => {
-      for (const [command, config] of Object.entries(commandConfig)) {
-        if (config.parameters.includes('htmlContent')) {
-          // For Debugging: console.log(`Testing ${command} for missing htmlContent`);
-          // eslint-disable-next-line no-await-in-loop
-          await testParameterWithCommand(command, 'Invalid request: HTML content is required.', { prompt: 'nav' });
-        }
-      }
-    });
     it('missing image URL test', async () => {
       for (const [command, config] of Object.entries(commandConfig)) {
         if (config.parameters.includes('imageUrl')) {
@@ -191,28 +180,10 @@ describe('AssistantController tests', () => {
             'Invalid request: Image url is required.',
             {
               prompt: 'nav ing',
-              options: { htmlContent: '<html lang="en"><body><p>hello</p></body></html>' },
             },
           );
         }
       }
-    });
-    it('should throw an invalid request error with bad htmlContent', async () => {
-      const response = await assistantController.processImportAssistant(
-        {
-          ...baseContext,
-          data: {
-            command: 'findMainContent',
-            prompt: 'nav and some text',
-            options: {
-              htmlContent: '<p>this is not full html</p',
-            },
-          },
-        },
-      );
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: HTML content is invalid or incomplete.');
     });
     it('should throw an invalid request error with nonsense image', async () => {
       const response = await assistantController.processImportAssistant(
@@ -222,7 +193,6 @@ describe('AssistantController tests', () => {
             command: 'findBlockSelectors',
             prompt: 'nav and some text',
             options: {
-              htmlContent: '<!DOCTYPE html><body>hi</body></html>',
               imageUrl: 'not an image',
             },
           },
@@ -241,7 +211,6 @@ describe('AssistantController tests', () => {
             command: 'findBlockCells',
             prompt: 'nav and some text',
             options: {
-              htmlContent: '<html lang="en"><body>hi</body></html>',
               imageUrl: `data:image/png;base64,${screenshot}`,
             },
           },
@@ -262,7 +231,6 @@ describe('AssistantController tests', () => {
             command: 'findBlockCells',
             prompt: 'nav and some text',
             options: {
-              htmlContent: '<html lang="en"><body>hi</body></html>',
               imageUrl: `data:image/png;base64,${screenshot}`,
             },
           },
@@ -286,7 +254,6 @@ describe('AssistantController tests', () => {
             command: 'findMainContent',
             prompt: 'Analyze the provided HTML document to determine which element most likely represents the main content of the page and provide an appropriate CSS selector for this element. The main content of the page should not include any headers, footers, breadcrumbs or sidebars: {{{content}}}',
             options: {
-              htmlContent: '<html lang="en"><body>hi</body></html>',
               imageUrl: `data:image/png;base64,${screenshot}`,
             },
           },

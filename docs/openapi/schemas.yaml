@@ -1496,25 +1496,24 @@ BrokenBacklink:
 ImportAssistantRequest:
   type: object
   required:
-    - url
     - command
   properties:
-    url:
-      description: The URL to analyze
-      $ref: '#/URL'
     command:
-      description: Assistant command to execute. Examples are 'start', 'cleanup', 'block', 'cells'.
+      description: Assistant command to execute. Examples 'findMainContent', 'findRemovalSelectors', 'findBlockSelectors', 'findBlockCells', 'generatePageTransformation'.
       type: string
     prompt:
       description: Optional prompt to provide context for the analysis.
       type: string
     options:
-      description: Optional configuration options required by the command.
+      description: Optional configuration options required by the command.  Example 'imageUrl'
       type: object
   example:
     url: 'https://example.com/en/page2'
     command: 'cleanup'
     prompt: 'breadcrumbs'
+    options: {
+      imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...='
+    }
 ImportAssistantResponse:
   type: object
   properties:

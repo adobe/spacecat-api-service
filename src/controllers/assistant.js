@@ -27,8 +27,8 @@ import { ErrorWithStatusCode } from '../support/utils.js';
 /**
  * Assistant controller. Provides methods to perform AI assisted operations.
  * There are certain commands that can be executed by the assistant. Depending on the command
- * has to be certain parameters such as prompt, htmlContent, imageUrl.  A call is made
- * to Firefall, and the response is returned.
+ * there has to be certain inputs such as prompt and imageUrl.  A call is made to
+ * Firefall, and the response is returned.
  * @returns {object} Import assistant controller.
  * @constructor
  */
@@ -48,7 +48,7 @@ function AssistantController(context) {
 
   function validateRequestData(data) {
     const {
-      command, prompt, htmlContent, imageUrl,
+      command, prompt, imageUrl,
     } = data;
 
     // Validate 'command'
@@ -62,15 +62,6 @@ function AssistantController(context) {
 
     if (currentCommandConfig.parameters.includes('prompt') && !prompt) {
       throw new ErrorWithStatusCode('Invalid request: prompt is required.', STATUS.BAD_REQUEST);
-    }
-
-    if (currentCommandConfig.parameters.includes('htmlContent')) {
-      if (!htmlContent) {
-        throw new ErrorWithStatusCode('Invalid request: HTML content is required.', STATUS.BAD_REQUEST);
-      }
-      if (!htmlContent.includes('</html>')) {
-        throw new ErrorWithStatusCode('Invalid request: HTML content is invalid or incomplete.', STATUS.BAD_REQUEST);
-      }
     }
 
     if (currentCommandConfig.parameters.includes('imageUrl')) {
@@ -92,12 +83,11 @@ function AssistantController(context) {
       throw new ErrorWithStatusCode('Invalid request: invalid request context format.', STATUS.BAD_REQUEST);
     }
     const { data, attributes } = requestContext;
-    const { htmlContent, imageUrl, ...options } = data?.options || {};
+    const { imageUrl, ...options } = data?.options || {};
     const { authInfo: { profile } } = attributes;
     const requestData = {
       command: data.command,
       prompt: data.prompt,
-      htmlContent,
       imageUrl,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
       apiKeyName: profile?.getName(),

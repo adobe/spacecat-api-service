@@ -21,25 +21,25 @@ import { ErrorWithStatusCode } from './utils.js';
  */
 const commandConfig = {
   findMainContent: {
-    parameters: ['htmlContent', 'prompt'],
+    parameters: [],
     llmModel: 'gpt-4-turbo',
     responseFormat: 'json_object',
   },
   findRemovalSelectors: {
-    parameters: ['htmlContent', 'prompt'],
+    parameters: ['prompt'],
     llmModel: 'gpt-4-turbo',
     responseFormat: 'json_object',
   },
   findBlockSelectors: {
-    parameters: ['htmlContent', 'prompt', 'imageUrl'],
+    parameters: ['prompt', 'imageUrl'],
     llmModel: 'gpt-4-vision',
   },
   findBlockCells: {
-    parameters: ['htmlContent', 'prompt', 'imageUrl'],
+    parameters: ['prompt', 'imageUrl'],
     llmModel: 'gpt-4-vision',
   },
   generatePageTransformation: {
-    parameters: ['htmlContent', 'prompt'],
+    parameters: ['prompt'],
     llmModel: 'gpt-4-turbo',
     responseFormat: 'json_object',
   },
