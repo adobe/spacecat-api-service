@@ -1508,8 +1508,7 @@ ImportAssistantRequest:
       description: Optional configuration options required by the command.  Example 'imageUrl'
       type: object
   example:
-    url: 'https://example.com/en/page2'
-    command: 'cleanup'
+    command: 'findRemovalSelectors'
     prompt: 'breadcrumbs'
     options: {
       imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...='
