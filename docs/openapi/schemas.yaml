@@ -1599,9 +1599,288 @@ ApiKeyResponse:
           description: The API key
           type: string
 Opportunity:
+  type: object
+  properties:
+    id:
+      description: UUID of this opportunity
+      $ref: '#/Id'
+    siteId:
+      description: UUID of the site this opportunity is for
+      $ref: '#/Id'
+    auditId:
+      description: UUID of the audit result that triggered this opportunity
+      $ref: '#/Id'
+    runbook:
+      description: URL to the runbook for this opportunity
+      type: string
+      format: url
+    type:
+      description: Type of opportunity
+      type: string
+      enum:
+        - 'broken-backlinks'
+        - 'broken-internal-links'
+    data:
+      description: Optional map of type-specific data relevant to this opportunity
+      type: object
+      additionalProperties: true
+    origin:
+      description: Origin of opportunity
+      type: string
+      enum:
+        - 'ESS_OPS'
+        - 'AI'
+    title:
+      description: Title of this opportunity
+      type: string
+    description:
+      description: Description of this opportunity
+      type: string
+    status:
+      description: Status of this opportunity
+      type: string
+      enum:
+        - 'NEW'
+        - 'IN_PROGRESS'
+        - 'IGNORED'
+        - 'RESOLVED'
+    guidance:
+      description: Guidance text specific to this opportunity
+      type: object
+      additionalProperties: true
+    tags:
+      type: array
+      items:
+        type: string
+      description: Optional list of tags
+    createdAt:
+      description: UTC timestamp of when the opportunity was created
+      $ref: '#/DateTime'
+    createdBy:
+      type: string
+      description: IMS or other user ID of who created this opportunity
+    updatedAt:
+      description: UTC timestamp of when the opportunity was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: IMS or other user ID of who updated this opportunity
+      type: string
+  required:
+    - id
+    - siteId
+    - auditId
+    - runbook
+    - type
+    - origin
+    - title
+    - status
+    - createdAt
+    - createdBy
+    - updatedAt
+    - updatedBy
+OpportunityList:
+  type: array
+  items:
+    $ref: '#/Opportunity'
 OpportunityCreate:
+  type: object
+  properties:
+    siteId:
+      description: UUID of the site this opportunity is for
+      $ref: '#/Id'
+    auditId:
+      description: UUID of the audit result that triggered this opportunity
+      $ref: '#/Id'
+    runbook:
+      description: URL to the runbook for this opportunity
+      type: string
+      format: url
+    type:
+      description: Type of opportunity
+      type: string
+      enum:
+        - 'broken-backlinks'
+        - 'broken-internal-links'
+    data:
+      description: Optional map of type-specific data relevant to this opportunity
+      type: object
+      additionalProperties: true
+    origin:
+      description: Origin of opportunity
+      type: string
+      enum:
+        - 'ESS_OPS'
+        - 'AI'
+    title:
+      description: Title of this opportunity
+      type: string
+    description:
+      description: Description of this opportunity
+      type: string
+    guidance:
+      description: Guidance text specific to this opportunity
+      type: object
+      additionalProperties: true
+    tags:
+      type: array
+      items:
+        type: string
+      description: Optional list of tags
+  required:
+    - siteId
+    - auditId
+    - runbook
+    - type
+    - origin
+    - title
 OpportunityUpdate:
+  type: object
+  properties:
+    runbook:
+      description: URL to the runbook for this opportunity
+      type: string
+      format: url
+    data:
+      description: Optional map of type-specific data relevant to this opportunity
+      type: object
+      additionalProperties: true
+    title:
+      description: Title of this opportunity
+      type: string
+    description:
+      description: Description of this opportunity
+      type: string
+    status:
+      description: Status of this opportunity
+      type: string
+      enum:
+        - 'NEW'
+        - 'IN_PROGRESS'
+        - 'IGNORED'
+        - 'RESOLVED'
+    guidance:
+      description: Guidance text specific to this opportunity
+      type: object
+      additionalProperties: true
+    tags:
+      type: array
+      items:
+        type: string
+      description: Optional list of tags
+SuggestionStatus:
+  description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
+  type: string
+  enum:
+      - 'NEW'
+      - 'APPROVED'
+      - 'SKIPPED'
+      - 'FIXED'
+      - 'ERROR'
+  example: 'NEW'
 Suggestion:
+  type: object
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    opportunityId:
+      description: UUID of the opportunity this suggestion belongs to
+      $ref: '#/Id'
+    type:
+      description: Type of suggestion
+      type: string
+      enum:
+        - 'type1'
+        - 'type2'
+        - 'type3'
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+    data:
+      description: Map containing type-specific details of what fix is suggested
+      type: object
+      additionalProperties: true
+    kpiDeltas:
+      description: Map containing metrics estimated to experience lifts or losses due to the issue
+      type: object
+      additionalProperties: true
+    status:
+      description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
+      $ref: '#/SuggestionStatus'
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+  required:
+    - id
+    - opportunityId
+    - type
+    - rank
+    - data
+    - status
+    - createdAt
+    - updatedAt
+SuggestionList:
+  type: array
+  items:
+    $ref: '#/Suggestion'
 SuggestionCreate:
+  type: object
+  properties:
+    opportunityId:
+      description: UUID of the opportunity this suggestion belongs to
+      $ref: '#/Id'
+    type:
+      description: Type of suggestion
+      type: string
+      enum:
+        - 'type1'
+        - 'type2'
+        - 'type3'
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+    data:
+      description: Map containing type-specific details of what fix is suggested
+      type: object
+      additionalProperties: true
+    kpiDeltas:
+      description: Map containing metrics estimated to experience lifts or losses due to the issue
+      type: object
+      additionalProperties: true
+  required:
+    - opportunityId
+    - type
+    - rank
+    - data
+SuggestionCreateList:
+  type: array
+  items:
+    $ref: '#/SuggestionCreate'
 SuggestionUpdate:
+  type: object
+  properties:
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+    data:
+      description: Map containing type-specific details of what fix is suggested
+      type: object
+      additionalProperties: true
+    kpiDeltas:
+      description: Map containing metrics estimated to experience lifts or losses due to the issue
+      type: object
+      additionalProperties: true
 SuggestionStatusUpdate:
+  type: array
+  items:
+    type: object
+    properties:
+      id:
+        description: UUID of this suggestion
+        $ref: '#/Id'
+      status:
+        description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
+        $ref: '#/SuggestionStatus'
