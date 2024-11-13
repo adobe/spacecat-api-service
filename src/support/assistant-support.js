@@ -97,7 +97,7 @@ const fetchFirefallCompletion = async (requestData, log) => {
     return await client.fetchChatCompletion(prompt, {
       model: llmModel,
       responseFormat,
-      imageUrls: [imageUrl],
+      imageUrls: imageUrl ? [imageUrl] : undefined,
     });
   } catch (error) {
     throw new ErrorWithStatusCode(`Error fetching insight: ${error.message}`, 500);
