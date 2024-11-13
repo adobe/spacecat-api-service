@@ -100,7 +100,7 @@ const fetchFirefallCompletion = async (requestData, log) => {
       imageUrls: imageUrl ? [imageUrl] : undefined,
     });
   } catch (error) {
-    throw new ErrorWithStatusCode(`Error fetching insight: ${error.message}`, 500);
+    throw new ErrorWithStatusCode(`Error fetching completion: ${error.message}`, 500);
   }
 };
 

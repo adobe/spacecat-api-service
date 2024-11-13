@@ -264,7 +264,34 @@ describe('AssistantController tests', () => {
       );
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
-      expect(response.headers.get('x-error')).to.include('Error fetching insight:');
+      expect(response.headers.get('x-error')).to.include('Error fetching completion:');
+    });
+    it('should succeed with no image url', async () => {
+      sinon.stub(FirefallClient, 'createFrom').callsFake(() => ({
+        fetchChatCompletion: () => Promise.resolve({
+          choices: [{ message: { content: '.breadcrumbs, .footer, .header' } }],
+        }),
+      }));
+
+      const response = await assistantController.processImportAssistant(
+        {
+          ...baseContext,
+          data: {
+            command: 'findRemovalSelectors',
+            prompt: 'Find breadcrumb selector: {{{content}}}',
+          },
+        },
+      );
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(STATUS.OK);
+      expect(response.headers.get('x-error')).to.equal(null);
+      const results = await response.json();
+      expect(results).to.not.be.undefined;
+      expect(results.choices).to.not.be.undefined;
+      expect(results.choices).to.be.an('array').of.length(1);
+      expect(results.choices[0].message).to.not.be.undefined;
+      expect(results.choices[0].message.content).to.not.be.undefined;
+      expect(results.choices[0].message.content).to.equal('.breadcrumbs, .footer, .header');
     });
     it('should succeed', async () => {
       sinon.stub(FirefallClient, 'createFrom').callsFake(() => ({
