@@ -15,7 +15,7 @@ import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import crypto from 'crypto';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import {
-  SERVER_ERROR,
+  STATUS_INTERNAL_SERVER_ERROR,
   STATUS_BAD_REQUEST,
   STATUS_CREATED,
   STATUS_FORBIDDEN,
@@ -52,7 +52,7 @@ function ApiKeyController(context) {
   const HEADER_ERROR = 'x-error';
 
   function createErrorResponse(error) {
-    return createResponse({}, error.status || SERVER_ERROR, {
+    return createResponse({}, error.status || STATUS_INTERNAL_SERVER_ERROR, {
       [HEADER_ERROR]: error.message,
     });
   }
@@ -96,7 +96,7 @@ function ApiKeyController(context) {
    */
   async function validateImsOrgId(imsOrgId, imsUserToken) {
     if (!hasText(imsOrgId)) {
-      throw new ErrorWithStatusCode('Missing x-ims-gw-org-id header', STATUS_UNAUTHORIZED);
+      throw new ErrorWithStatusCode('Missing x-gw-ims-org-id header', STATUS_UNAUTHORIZED);
     }
     const imsUserProfile = await imsClient.getImsUserProfile(imsUserToken);
     const { organizations } = imsUserProfile;
@@ -128,7 +128,7 @@ function ApiKeyController(context) {
    */
   async function createApiKey(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
-    const imsOrgId = headers['x-ims-gw-org-id'];
+    const imsOrgId = headers['x-gw-ims-org-id'];
 
     try {
       const imsUserToken = getImsUserToken(headers);
@@ -209,7 +209,7 @@ function ApiKeyController(context) {
    */
   async function deleteApiKey(requestContext) {
     const { pathInfo: { headers }, params: { id } } = requestContext;
-    const imsOrgId = headers['x-ims-gw-org-id'];
+    const imsOrgId = headers['x-gw-ims-org-id'];
 
     try {
       const imsUserToken = getImsUserToken(headers);
@@ -240,7 +240,7 @@ function ApiKeyController(context) {
    */
   async function getApiKeys(requestContext) {
     const { pathInfo: { headers } } = requestContext;
-    const imsOrgId = headers['x-ims-gw-org-id'];
+    const imsOrgId = headers['x-gw-ims-org-id'];
 
     try {
       const imsUserToken = getImsUserToken(headers);

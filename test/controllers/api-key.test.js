@@ -19,7 +19,7 @@ import chaiAsPromised from 'chai-as-promised';
 import { createApiKey } from '@adobe/spacecat-shared-data-access/src/models/api-key/api-key.js';
 import ApiKeyController from '../../src/controllers/api-key.js';
 import {
-  SERVER_ERROR,
+  STATUS_INTERNAL_SERVER_ERROR,
   STATUS_BAD_REQUEST,
   STATUS_CREATED,
   STATUS_FORBIDDEN,
@@ -40,7 +40,7 @@ describe('ApiKeyController tests', () => {
     requestContext = {
       pathInfo: {
         headers: {
-          'x-ims-gw-org-id': 'test-org',
+          'x-gw-ims-org-id': 'test-org',
           authorization: 'Bearer test-token',
         },
       },
@@ -123,7 +123,7 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should throw an error if imsOrgId is missing', async () => {
-      requestContext.pathInfo.headers['x-ims-gw-org-id'] = '';
+      requestContext.pathInfo.headers['x-gw-ims-org-id'] = '';
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_UNAUTHORIZED);
     });
@@ -194,7 +194,7 @@ describe('ApiKeyController tests', () => {
     it('should throw an error when getApiKeysByImsUserIdAndImsOrgId fails', async () => {
       context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.throws(new Error('Dynamo Error'));
       const response = await apiKeyController.getApiKeys({ ...requestContext });
-      expect(response.status).to.equal(SERVER_ERROR);
+      expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
     });
   });
 });
