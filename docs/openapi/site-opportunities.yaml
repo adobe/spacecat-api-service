@@ -16,7 +16,7 @@ site-opportunities:
             schema:
               $ref: './schemas.yaml#/OpportunityList'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
   post:
     summary: |
       Not implemented yet.
@@ -38,7 +38,7 @@ site-opportunities:
             schema:
               $ref: './schemas.yaml#/Opportunity'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
 site-opportunities-by-status:
   parameters:
@@ -63,7 +63,7 @@ site-opportunities-by-status:
             schema:
               $ref: './schemas.yaml#/OpportunityList'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
 site-opportunity:
   parameters:
@@ -87,7 +87,7 @@ site-opportunity:
               broken-backlinks-opportunity:
                 $ref: './examples.yaml#/broken-backlinks-opportunity'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
   patch:
     summary: |
@@ -110,7 +110,7 @@ site-opportunity:
             schema:
               $ref: './schemas.yaml#/Opportunity'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
   delete:
     summary: |
@@ -123,7 +123,7 @@ site-opportunity:
       '204':
         description: Opportunity deleted
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
 site-opportunity-suggestions:
   parameters:
@@ -144,7 +144,7 @@ site-opportunity-suggestions:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
   post:
     summary: |
@@ -167,7 +167,7 @@ site-opportunity-suggestions:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
 site-opportunity-suggestions-by-status:
   parameters:
@@ -193,7 +193,7 @@ site-opportunity-suggestions-by-status:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
 site-opportunity-suggestions-status:
   parameters:
@@ -220,7 +220,7 @@ site-opportunity-suggestions-status:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
 site-opportunity-suggestion:
   parameters:
@@ -245,7 +245,7 @@ site-opportunity-suggestion:
               broken-backlinks-suggestion:
                 $ref: './examples.yaml#/broken-backlinks-suggestion'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
 
   patch:
     summary: |
@@ -271,4 +271,4 @@ site-opportunity-suggestion:
               broken-backlinks-suggestion:
                 $ref: './examples.yaml#/broken-backlinks-suggestion'
     security:
-      - api_key: [ ]
+      - ims_key: [ ]
