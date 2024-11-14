@@ -159,7 +159,7 @@ function ApiKeyController(context) {
       // Check if the user has reached the maximum number of API keys.
       // Currently, we only allow 3 API keys per user.
       if (validApiKeys && validApiKeys.length >= maxApiKeys) {
-        throw new ErrorWithStatusCode('Invalid request: Exceeds the number of API keys allowed', STATUS_FORBIDDEN);
+        throw new ErrorWithStatusCode(`Invalid request: You have exceeded the maximum number of API keys allowed (${maxApiKeys})`, STATUS_FORBIDDEN);
       }
 
       // Create the API key
