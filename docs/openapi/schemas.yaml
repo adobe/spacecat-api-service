@@ -1649,6 +1649,8 @@ Opportunity:
       description: Optional map of type-specific data relevant to this opportunity
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksOpportunityData'
     origin:
       $ref: '#/OpportunityOrigin'
     title:
@@ -1666,6 +1668,8 @@ Opportunity:
       description: Guidance text specific to this opportunity
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksGuidance'
     tags:
       type: array
       items:
@@ -1730,6 +1734,8 @@ OpportunityCreate:
       description: Optional map of type-specific data relevant to this opportunity
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksOpportunityData'
     origin:
       description: Origin of opportunity
       $ref: '#/OpportunityOrigin'
@@ -1745,6 +1751,8 @@ OpportunityCreate:
       description: Guidance text specific to this opportunity
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksGuidance'
     tags:
       type: array
       items:
@@ -1771,6 +1779,8 @@ OpportunityUpdate:
       description: Optional map of type-specific data relevant to this opportunity
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksOpportunityData'
     title:
       description: Title of this opportunity
       type: string
@@ -1786,6 +1796,8 @@ OpportunityUpdate:
       description: Guidance text specific to this opportunity
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksGuidance'
     tags:
       type: array
       items:
@@ -1828,10 +1840,14 @@ Suggestion:
       description: Map containing type-specific details of what fix is suggested
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksRedirectData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksKpiDeltas'
     status:
       description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
       $ref: '#/SuggestionStatus'
@@ -1870,10 +1886,14 @@ SuggestionCreate:
       description: Map containing type-specific details of what fix is suggested
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksRedirectData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksKpiDeltas'
   required:
     - opportunityId
     - type
@@ -1894,10 +1914,14 @@ SuggestionUpdate:
       description: Map containing type-specific details of what fix is suggested
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksRedirectData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksKpiDeltas'
 SuggestionStatusUpdate:
   type: array
   items:
@@ -1909,3 +1933,46 @@ SuggestionStatusUpdate:
       status:
         description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
         $ref: '#/SuggestionStatus'
+BrokenBacklinksRedirectData:
+  description: Data specific to redirect suggestion for broken backlinks opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    referringPageTitle:
+      description: The title of the referring page
+      type: string
+    referringURL:
+      description: The URL of the referring page
+      type: string
+    brokenTargetURL:
+      description: The URL of the broken target page
+      type: string
+    proposedTargetURLs:
+      description: The proposed target URLs to redirect the broken backlink to
+      type: array
+      items:
+        type: string
+    manualOverrideURL:
+      description: The URL to manually override the proposed target URL
+      type: string
+    referringPageTraffic:
+      description: The estimated monthly organic traffic to the referring page
+      type: number
+BrokenBacklinksKpiDeltas:
+  description: KPI deltas specific to redirect suggestion for broken backlinks opportunity
+  type: object
+  additionalProperties: true
+BrokenBacklinksOpportunityData:
+  description: Data specific to broken backlinks opportunity
+  type: object
+  additionalProperties: true
+BrokenBacklinksGuidance:
+  description: Guidance specific to broken backlinks opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    steps:
+      description: The steps to resolve the broken backlinks opportunity
+      type: array
+      items:
+        type: string
