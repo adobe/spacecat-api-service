@@ -26,10 +26,14 @@ import { ApiKeyDto } from '../dto/api-key.js';
 
 /**
  * ApiKey Controller. Provides methods for managing API keys such as create, delete, and get.
- * @param {Object} context - The context the universal serverless function.
- * @param context.env - Environment details.
- * @param context.env.API_KEY_CONFIGURATION - Configuration for the API key.
- * @returns {Object} ApiKey Controller
+ * @param {object} context - The context of the universal serverless function.
+ * @param {object} context.env - Environment details.
+ * @param {object} context.env.API_KEY_CONFIGURATION - Configuration for the API key controller.
+ * @param {DataAccess} context.dataAccess - Data access.
+ * @param {Logger} context.log - Logger.
+ * @param {object} context.attributes - Attributes that include the user's profile details
+ * @param {ImsClient} context.imsClient - IMS Client.
+ * @returns {object} ApiKey Controller
  * @constructor
  */
 function ApiKeyController(context) {
@@ -55,7 +59,9 @@ function ApiKeyController(context) {
 
   /**
    * Validate the request data.
-   * @param data
+   * @type {{features: string[], domains: string[], name: string}}
+   * @param {object} data - The request data.
+   * @throws {ErrorWithStatusCode} If the request data is invalid.
    */
   function validateRequestData(data) {
     if (!isObject(data)) {
@@ -83,38 +89,42 @@ function ApiKeyController(context) {
 
   /**
    * Validate the IMS Org ID.
-   * @param imsOrgId
-   * @param imsUserToken
+   * @param {string} imsOrgId - The IMS Organization ID of the user.
+   * @param {string} imsUserToken - The IMS User access token provided by the user.
+   * @throws {ErrorWithStatusCode} If the IMS Org ID is invalid or
+   * if the user does not belong to the given imsOrg.
    */
   async function validateImsOrgId(imsOrgId, imsUserToken) {
-    if (!imsOrgId) {
+    if (!hasText(imsOrgId)) {
       throw new ErrorWithStatusCode('Missing x-ims-gw-org-id header', STATUS_UNAUTHORIZED);
     }
     const imsUserProfile = await imsClient.getImsUserProfile(imsUserToken);
-    log.debug(`Retrieved the IMS User Profile: ${JSON.stringify(imsUserProfile)}`);
     const { organizations } = imsUserProfile;
     if (!organizations.includes(imsOrgId)) {
-      throw new ErrorWithStatusCode('Invalid request: Organization not found', STATUS_UNAUTHORIZED);
+      throw new ErrorWithStatusCode('Invalid request: Unable to find a reference to the Organization provided.', STATUS_UNAUTHORIZED);
     }
   }
 
   /**
    * Get the IMS user token from the headers.
-   * @param headers
-   * @returns string imsUserToken
+   * @param {object} headers - The headers of the request.
+   * @returns {string} imsUserToken - The IMS User access token.
+   * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
    */
   function getImsUserToken(headers) {
     const authorizationHeader = headers.authorization;
-    if (!authorizationHeader) {
+    const BEARER_PREFIX = 'Bearer ';
+    if (!hasText(authorizationHeader)) {
       throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
     }
-    return authorizationHeader.replace('Bearer ', '');
+    return authorizationHeader.startsWith(BEARER_PREFIX)
+      ? authorizationHeader.substring(BEARER_PREFIX.length) : authorizationHeader;
   }
 
   /**
    * Create a new API key.
    * @param {Object} requestContext - Context of the request.
-   * @returns {Promise<ApiKey>} 201 Created with the new API key.
+   * @returns {Promise<ApiKey>} - 201 Created with the new API key.
    */
   async function createApiKey(requestContext) {
     const { data, pathInfo: { headers } } = requestContext;
@@ -126,7 +136,7 @@ function ApiKeyController(context) {
       validateRequestData(data);
       await validateImsOrgId(imsOrgId, imsUserToken);
 
-      // Check if the domains are within the limit
+      // Check if the domains are within the limit. Currently, we only allow one domain per API key.
       if (data.domains.length > maxDomainsPerApiKey) {
         throw new ErrorWithStatusCode('Invalid request: Exceeds the number of domains allowed', STATUS_FORBIDDEN);
       }
@@ -142,10 +152,12 @@ function ApiKeyController(context) {
 
       log.debug('Retrieved the API keys for the user: ', apiKeys);
 
-      const validApiKeys = apiKeys && apiKeys.filter(
+      const validApiKeys = apiKeys.filter(
         (apiKey) => apiKey.isValid(),
       );
 
+      // Check if the user has reached the maximum number of API keys.
+      // Currently, we only allow 3 API keys per user.
       if (validApiKeys && validApiKeys.length >= maxApiKeys) {
         throw new ErrorWithStatusCode('Invalid request: Exceeds the number of API keys allowed', STATUS_FORBIDDEN);
       }
@@ -193,7 +205,7 @@ function ApiKeyController(context) {
   /**
    * Delete an API key.
    * @param {Object} requestContext - Context of the request.
-   * @returns {Promise<Response>} 204 No Content.
+   * @returns {Promise<Response>} - 204 No Content.
    */
   async function deleteApiKey(requestContext) {
     const { pathInfo: { headers }, params: { id } } = requestContext;
@@ -224,7 +236,7 @@ function ApiKeyController(context) {
   /**
    * Retrieve the API keys created by a user with an imsUserId and an imsOrgId.
    * @param {Object} context - Context of the request.
-   * @returns {Promise<ApiKey[]>} 200 OK with the list of ApiKey metadata.
+   * @returns {Promise<ApiKey[]>} - 200 OK with the list of ApiKey metadata.
    */
   async function getApiKeys(requestContext) {
     const { pathInfo: { headers } } = requestContext;
