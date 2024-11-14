@@ -234,7 +234,7 @@ function ApiKeyController(context) {
   }
 
   /**
-   * Retrieve the API keys created by a user with an imsUserId and an imsOrgId.
+   * Retrieve the API keys relating to a specific imsUserId and imsOrgId combination.
    * @param {Object} context - Context of the request.
    * @returns {Promise<ApiKey[]>} - 200 OK with the list of ApiKey metadata.
    */
