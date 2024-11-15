@@ -86,11 +86,11 @@ function AssistantController(context) {
     }
 
     let assistantConfiguration;
-    if (!requestContext.env.ASSISTANT_CONFIGURATION) {
+    if (!context.env.ASSISTANT_CONFIGURATION) {
       throw new ErrorWithStatusCode('The Assistant Configuration is not defined.', STATUS.SYS_ERROR);
     }
     try {
-      assistantConfiguration = JSON.parse(requestContext.env.ASSISTANT_CONFIGURATION);
+      assistantConfiguration = JSON.parse(context.env.ASSISTANT_CONFIGURATION);
     } catch (error) {
       throw new ErrorWithStatusCode(`Could not parse the Assistant Configuration: ${error.message}`, STATUS.SYS_ERROR);
     }

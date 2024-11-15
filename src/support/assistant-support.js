@@ -90,6 +90,9 @@ const fetchFirefallCompletion = async (requestData, log) => {
   } = requestData;
 
   try {
+    const imageCnt = imageUrl?.length || 0;
+    log.info(`Calling chat completions with model ${llmModel}, format ${responseFormat || 'none'} and ${imageCnt} imageUrls.`);
+
     return await client.fetchChatCompletion(prompt, {
       model: llmModel,
       responseFormat,
