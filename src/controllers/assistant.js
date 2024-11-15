@@ -36,18 +36,7 @@ import { ErrorWithStatusCode } from '../support/utils.js';
  */
 function AssistantController(context) {
   const HEADER_ERROR = 'x-error';
-  const { auth, env, log } = context;
-
-  let assistantConfiguration;
-  if (!env?.ASSISTANT_CONFIGURATION) {
-    log.error('The Assistant Configuration is not defined.');
-  } else {
-    try {
-      assistantConfiguration = JSON.parse(env.ASSISTANT_CONFIGURATION);
-    } catch (error) {
-      log.error(`Could not parse the Assistant Configuration: ${error.message}`);
-    }
-  }
+  const { auth, log } = context;
 
   function createErrorResponse(error) {
     return createResponse({}, error.status, {
@@ -95,9 +84,17 @@ function AssistantController(context) {
     if (!requestContext.data || !requestContext.attributes) {
       throw new ErrorWithStatusCode('Invalid request: invalid request context format.', STATUS.BAD_REQUEST);
     }
-    if (!assistantConfiguration) {
-      throw new ErrorWithStatusCode('Assistant Configuration is not defined.', STATUS.SYS_ERROR);
+
+    let assistantConfiguration;
+    if (!requestContext.env.ASSISTANT_CONFIGURATION) {
+      throw new ErrorWithStatusCode('The Assistant Configuration is not defined.', STATUS.SYS_ERROR);
     }
+    try {
+      assistantConfiguration = JSON.parse(requestContext.env.ASSISTANT_CONFIGURATION);
+    } catch (error) {
+      throw new ErrorWithStatusCode(`Could not parse the Assistant Configuration: ${error.message}`, STATUS.SYS_ERROR);
+    }
+
     const { data: { command, prompt, options }, attributes } = requestContext;
     const { imageUrl, ...otherOptions } = options || {};
     const { authInfo: { profile } } = attributes;

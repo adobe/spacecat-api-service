@@ -106,7 +106,7 @@ describe('AssistantController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(STATUS.SYS_ERROR);
       expect(baseContext.log.error.getCall(0).args[0]).to.include('The Assistant Configuration is not defined.');
-      expect(response.headers.get('x-error')).to.equal('Assistant Configuration is not defined.');
+      expect(response.headers.get('x-error')).to.include('Assistant Configuration is not defined.');
     });
     it('Non parsable ASSISTANT_CONFIGURATION test', async () => {
       baseContext.env.ASSISTANT_CONFIGURATION = 'I am just a string, not JSON.';
@@ -114,7 +114,7 @@ describe('AssistantController tests', () => {
       const response = await assistantController.processImportAssistant(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(STATUS.SYS_ERROR);
-      expect(response.headers.get('x-error')).to.equal('Assistant Configuration is not defined.');
+      expect(response.headers.get('x-error')).to.include('Could not parse the Assistant Configuration:');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Could not parse the Assistant Configuration:');
     });
     it('unauthorized api key test', async () => {
