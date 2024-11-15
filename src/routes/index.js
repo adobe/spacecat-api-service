@@ -55,6 +55,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} assistantController - The assistant controller.
  * @param {Object} apiKeyController - The API key controller.
  * @param {Object} sitesAuditsController - The sites audits controller.
+ * @param {Object} opportunitiesController - The opportunities controller.
+ * @param {Object} suggestionsController - The suggestions controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -71,6 +73,8 @@ export default function getRouteHandlers(
   assistantController,
   apiKeyController,
   sitesAuditsToggleController,
+  opportunitiesController,
+  suggestionsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -113,7 +117,19 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
-    'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
+    'GET /sites/with-latest-audit/:auditTye': sitesController.getAllWithLatestAudit,
+    'GET /sites/:siteId/opportunities': opportunitiesController.getAllOpportunities,
+    'GET /sites/:siteId/opportunities/by-status/:status': opportunitiesController.getByStatus,
+    'GET /sites/:siteId/opportunities/:opportunityId': opportunitiesController.getByID,
+    'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
+    'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
+    'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.getAllForOpportunity,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': suggestionsController.getByStatus,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.getByID,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,
+    'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
+    'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
