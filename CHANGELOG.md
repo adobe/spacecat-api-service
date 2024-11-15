@@ -1,3 +1,10 @@
+## [1.75.16](https://github.com/adobe/spacecat-api-service/compare/v1.75.15...v1.75.16) (2024-11-15)
+
+
+### Bug Fixes
+
+* update shared utils ([0fab66f](https://github.com/adobe/spacecat-api-service/commit/0fab66fb6db50c0fcdd89082831a8001a0412cca))
+
 ## [1.75.15](https://github.com/adobe/spacecat-api-service/compare/v1.75.14...v1.75.15) (2024-11-15)
 
 
