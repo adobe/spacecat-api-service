@@ -107,6 +107,8 @@ function AssistantController(context) {
       command,
       prompt,
       imageUrl,
+      llmModel: commandConfig[command]?.llmModel,
+      responseFormat: commandConfig[command]?.responseFormat,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
       apiKeyName: profile?.getName(),
       imsOrgId: profile?.getImsOrgId() ?? requestContext.pathInfo.headers['x-gw-ims-org-id'] ?? 'N/A',
