@@ -63,6 +63,13 @@ describe('AssistantController tests', () => {
           },
         },
       },
+      env: {
+        ASSISTANT_CONFIGURATION: JSON.stringify({
+          IMS_CLIENT_ID: 'test_client_id',
+          IMS_CLIENT_SECRET: 'ssshhhhh',
+          IMS_CLIENT_CODE: 'big_long_string_of_testy_client_code',
+        }),
+      },
     };
     if (Math.random() > 0.7) {
       // Occasionally use the x-gw-ims-org-id instead.
@@ -92,6 +99,24 @@ describe('AssistantController tests', () => {
   };
 
   describe('processImportAssistant parameters', () => {
+    it('missing ASSISTANT_CONFIGURATION test', async () => {
+      delete baseContext.env.ASSISTANT_CONFIGURATION;
+      assistantController = AssistantController(baseContext);
+      const response = await assistantController.processImportAssistant(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(STATUS.SYS_ERROR);
+      expect(baseContext.log.error.getCall(0).args[0]).to.include('The Assistant Configuration is not defined.');
+      expect(response.headers.get('x-error')).to.equal('Assistant Configuration is not defined.');
+    });
+    it('Non parsable ASSISTANT_CONFIGURATION test', async () => {
+      baseContext.env.ASSISTANT_CONFIGURATION = 'I am just a string, not JSON.';
+      assistantController = AssistantController(baseContext);
+      const response = await assistantController.processImportAssistant(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(STATUS.SYS_ERROR);
+      expect(response.headers.get('x-error')).to.equal('Assistant Configuration is not defined.');
+      expect(baseContext.log.error.getCall(0).args[0]).to.include('Could not parse the Assistant Configuration:');
+    });
     it('unauthorized api key test', async () => {
       baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Kaboom'));
       const response = await assistantController.processImportAssistant(undefined);

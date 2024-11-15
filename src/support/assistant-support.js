@@ -50,9 +50,10 @@ const SCOPE = {
 };
 
 const STATUS = {
+  OK: 200,
   BAD_REQUEST: 400,
   UNAUTHORIZED: 401,
-  OK: 200,
+  SYS_ERROR: 500,
 };
 
 /**
@@ -74,19 +75,14 @@ const validateAccessScopes = (auth, scopes, log) => {
 
 const fetchFirefallCompletion = async (requestData, log) => {
   const context = {
-    env: {
-      ...process.env,
-      FIREFALL_API_ENDPOINT: 'https://firefall-stage.adobe.io',
-      FIREFALL_API_KEY: 'aem-import-as-a-service',
-      IMS_CLIENT_ID: 'aem-import-as-a-service',
-    },
+    ...requestData,
     log,
   };
   let client;
   try {
     client = FirefallClient.createFrom(context);
   } catch (error) {
-    throw new ErrorWithStatusCode(`Error creating FirefallClient: ${error.message}`, 500);
+    throw new ErrorWithStatusCode(`Error creating FirefallClient: ${error.message}`, STATUS.SYS_ERROR);
   }
 
   const {
@@ -100,7 +96,7 @@ const fetchFirefallCompletion = async (requestData, log) => {
       imageUrls: imageUrl ? [imageUrl] : undefined,
     });
   } catch (error) {
-    throw new ErrorWithStatusCode(`Error fetching completion: ${error.message}`, 500);
+    throw new ErrorWithStatusCode(`Error fetching completion: ${error.message}`, STATUS.SYS_ERROR);
   }
 };
 

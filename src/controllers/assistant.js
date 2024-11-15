@@ -29,12 +29,25 @@ import { ErrorWithStatusCode } from '../support/utils.js';
  * There are certain commands that can be executed by the assistant. Depending on the command
  * there has to be certain inputs such as prompt and imageUrl.  A call is made to
  * Firefall, and the response is returned.
+ * @param {UniversalContext} context - The context of the universal serverless function.
+ * @param {string} context.env.ASSISTANT_CONFIGURATION - Configuration params, as a JSON string.
  * @returns {object} Import assistant controller.
  * @constructor
  */
 function AssistantController(context) {
   const HEADER_ERROR = 'x-error';
-  const { auth, log } = context;
+  const { auth, env, log } = context;
+
+  let assistantConfiguration;
+  if (!env?.ASSISTANT_CONFIGURATION) {
+    log.error('The Assistant Configuration is not defined.');
+  } else {
+    try {
+      assistantConfiguration = JSON.parse(env.ASSISTANT_CONFIGURATION);
+    } catch (error) {
+      log.error(`Could not parse the Assistant Configuration: ${error.message}`);
+    }
+  }
 
   function createErrorResponse(error) {
     return createResponse({}, error.status, {
@@ -82,10 +95,18 @@ function AssistantController(context) {
     if (!requestContext.data || !requestContext.attributes) {
       throw new ErrorWithStatusCode('Invalid request: invalid request context format.', STATUS.BAD_REQUEST);
     }
+    if (!assistantConfiguration) {
+      throw new ErrorWithStatusCode('Assistant Configuration is not defined.', STATUS.SYS_ERROR);
+    }
     const { data: { command, prompt, options }, attributes } = requestContext;
     const { imageUrl, ...otherOptions } = options || {};
     const { authInfo: { profile } } = attributes;
     const requestData = {
+      env: {
+        ...context.env,
+        ...assistantConfiguration,
+        FIREFALL_API_KEY: assistantConfiguration.IMS_CLIENT_ID,
+      },
       command,
       prompt,
       imageUrl,
@@ -103,7 +124,9 @@ function AssistantController(context) {
   /**
    * Send an import assistant request to the model.
    * @param {object} requestContext - Context of the request.
-   * @returns {Promise<Response>} 200 OK with a list of options from the model.
+   * @param {object} requestContext.data application/json - Parsed application/json request data.
+   * @param {object} requestContext.pathInfo.headers - HTTP request headers.
+   * @returns {Promise<Response>} 200 OK with a list of options, 4xx or 5xx otherwise.
    */
   async function processImportAssistant(requestContext) {
     try {
