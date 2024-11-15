@@ -1,3 +1,24 @@
+## [1.75.16](https://github.com/adobe/spacecat-api-service/compare/v1.75.15...v1.75.16) (2024-11-15)
+
+
+### Bug Fixes
+
+* update shared utils ([0fab66f](https://github.com/adobe/spacecat-api-service/commit/0fab66fb6db50c0fcdd89082831a8001a0412cca))
+
+## [1.75.15](https://github.com/adobe/spacecat-api-service/compare/v1.75.14...v1.75.15) (2024-11-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.53.0 ([#576](https://github.com/adobe/spacecat-api-service/issues/576)) ([306945d](https://github.com/adobe/spacecat-api-service/commit/306945d6114c93061405f36c31d05ec087ed2621))
+
+## [1.75.14](https://github.com/adobe/spacecat-api-service/compare/v1.75.13...v1.75.14) (2024-11-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.7.0 ([#575](https://github.com/adobe/spacecat-api-service/issues/575)) ([e936546](https://github.com/adobe/spacecat-api-service/commit/e93654668fa702ffc6982393b60356b7bf122f01))
+
 ## [1.75.13](https://github.com/adobe/spacecat-api-service/compare/v1.75.12...v1.75.13) (2024-11-13)
 
 
