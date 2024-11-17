@@ -31,6 +31,8 @@ tags:
     description: Site operations
   - name: audit
     description: Audit operations
+  - name: site-audit
+    description: Site-audit operations
   - name: auth
     description: Init authentication against 3rd party services
   - name: organization
@@ -41,6 +43,8 @@ tags:
     description: Webhooks for receiving events
   - name: slack
     description: Slack channel management
+  - name: api-keys
+    description: API key management
   - name: import
     description: APIs for importing content to Edge Delivery Services
   - name: scrape
@@ -57,6 +61,8 @@ paths:
     $ref: './configuration-api.yaml#/latest-configuration'
   /configurations/{version}:
     $ref: './configuration-api.yaml#/configuration'
+  /configurations/sites/audits:
+    $ref: './configurations-sites-audits-api.yaml#/configurations-sites-audits-toggle'
   /event/fulfillment:
     $ref: './event-api.yaml#/process-fulfillment-events'
   /hooks/site-detection/cdn/{hookSecret}:
@@ -117,6 +123,10 @@ paths:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
     $ref: './trigger-api.yaml#/trigger'
+  /tools/api-keys:
+    $ref: './tools-api.yaml#/api-keys'
+  /tools/api-keys/{apiKeyId}:
+    $ref: './tools-api.yaml#/api-key-deletion'
   /tools/import/jobs:
     $ref: './tools-api.yaml#/import'
   /tools/import/jobs/{jobId}:
@@ -143,7 +153,7 @@ components:
     ims_key:
       type: apiKey
       in: header
-      name: authentication
+      name: authorization
       description: "Value must be a valid IMS user token which will be offline-validated."
     admin_key:
       type: apiKey

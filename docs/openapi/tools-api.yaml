@@ -218,3 +218,112 @@ import-assistant:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
+api-keys:
+  post:
+    tags:
+      - api-keys
+    summary: Create a new API key
+    description: |
+      Note: Not implemented yet.
+      
+      This endpoint can be used to create a new API key with a set of scopes. The scoped API key will be
+      returned in the response only once. The scoped API key can be used to authenticate the Spacecat APIs by 
+      including it in the x-api-key header.
+    operationId: createApiKey
+    security:
+      - ims_key: [ ]
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/ApiKeyRequest'
+    parameters:
+      - in: header
+        name: x-gw-ims-org-id
+        schema:
+          type: string
+        description: |
+          IMS Organization Id of the client.
+        example: '1234567890ABCDEF12345678@AdobeOrg'
+    responses:
+      '201':
+        description: API key created successfully.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ApiKeyResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-max-api-keys-exceeded'
+      '500':
+        $ref: './responses.yaml#/500'
+  get:
+    tags:
+      - api-keys
+    summary: Get all API keys owned by the given IMS client
+    description: |
+      Note: Not implemented yet.
+      
+      This endpoint can be used to list all the API keys created by the client.
+    operationId: getApiKeys
+    security:
+      - ims_key: [ ]
+    parameters:
+      - in: header
+        name: x-gw-ims-org-id
+        schema:
+          type: string
+        description: |
+          IMS Organization Id of the client.
+        example: '1234567890ABCDEF12345678@AdobeOrg'
+    responses:
+      '200':
+        description: API key metadata returned successfully. Note that the API key itself will not be included in this list, as it's only displayed once (at creation).
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/ApiKeyMetadataResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+api-key-deletion:
+  delete:
+    tags:
+      - api-keys
+    summary: Delete an API key
+    description: |
+      Note: Not implemented yet.
+      
+      This endpoint can be used to delete an API key. The API key will be marked as deleted in the system and
+      will no longer be valid for authentication. Only keys created by this IMS client can be deleted by it.
+    operationId: deleteApiKey
+    security:
+      - ims_key: [ ]
+    parameters:
+      - $ref: './parameters.yaml#/apiKeyId'
+      - in: header
+        name: x-gw-ims-org-id
+        schema:
+          type: string
+        description: |
+          IMS Organization Id of the client.
+        example: '1234567890ABCDEF12345678@AdobeOrg'
+    responses:
+      '204':
+        description: API key deleted successfully.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
