@@ -1,3 +1,10 @@
+## [1.75.18](https://github.com/adobe/spacecat-api-service/compare/v1.75.17...v1.75.18) (2024-11-17)
+
+
+### Bug Fixes
+
+* add recommendations (ex: guidance) information to the experimentation opportunity object ([#552](https://github.com/adobe/spacecat-api-service/issues/552)) ([b4c18f9](https://github.com/adobe/spacecat-api-service/commit/b4c18f927eb5b1fdabe41ec7da6e481471c45796))
+
 ## [1.75.17](https://github.com/adobe/spacecat-api-service/compare/v1.75.16...v1.75.17) (2024-11-16)
 
 
