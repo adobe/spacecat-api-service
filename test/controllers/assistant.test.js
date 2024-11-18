@@ -177,18 +177,18 @@ describe('AssistantController tests', () => {
       // Check client error - which means the imsOrgId is missing, but it will continue.
       await testParameterWithCommand(
         'findMainContent',
-        'Error creating FirefallClient: Context param must include properties: imsHost, clientId, clientCode, and clientSecret.',
+        'Invalid request: A valid ims-org-id is not associated with your api-key.',
         { prompt: 'nav and some text' },
-        500,
+        STATUS.UNAUTHORIZED,
       );
-      expect(baseContext.log.info.getCall(0).args[0]).to.equal('Running assistant command findMainContent using key "testName" for org N/A.');
+      expect(baseContext.log.error.getCall(0).args[0]).to.contain('Invalid request: A valid ims-org-id is not associated with your api-key.');
     });
     it('missing profile in request test', async () => {
-      const profilelessContext = { ...baseContext };
-      delete profilelessContext.attributes.authInfo.profile;
+      const noProfileContext = { ...baseContext };
+      delete noProfileContext.attributes.authInfo.profile;
       const response = await assistantController.processImportAssistant(
         {
-          ...profilelessContext,
+          ...noProfileContext,
           data: {
             command: 'findMainContent',
             prompt: 'nav and some text',
