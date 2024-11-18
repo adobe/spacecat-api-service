@@ -134,6 +134,7 @@ function ApiKeyController(context) {
 
     try {
       const imsUserToken = getImsUserToken(headers);
+      log.debug('imsUserToken: ', imsUserToken);
 
       validateRequestData(data);
       const imsUserProfile = await validateImsOrgId(imsOrgId, imsUserToken);
