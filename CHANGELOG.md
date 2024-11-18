@@ -1,3 +1,10 @@
+## [1.76.1](https://github.com/adobe/spacecat-api-service/compare/v1.76.0...v1.76.1) (2024-11-18)
+
+
+### Bug Fixes
+
+* SITES-26996 [Import Assistant] Context ImsOrg not being used by Firefall Client ([#583](https://github.com/adobe/spacecat-api-service/issues/583)) ([10111e0](https://github.com/adobe/spacecat-api-service/commit/10111e07bbc7866f7d59b33a4d127200bd55253d))
+
 # [1.76.0](https://github.com/adobe/spacecat-api-service/compare/v1.75.19...v1.76.0) (2024-11-18)
 
 
