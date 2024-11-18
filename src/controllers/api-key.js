@@ -99,12 +99,8 @@ function ApiKeyController(context) {
     if (!hasText(imsOrgId)) {
       throw new ErrorWithStatusCode('Missing x-gw-ims-org-id header', STATUS_UNAUTHORIZED);
     }
-    log.debug('retrieve ims user profile');
     const imsUserProfile = await imsClient.getImsUserProfile(imsUserToken);
-    log.debug('imsUserProfile: ', imsUserProfile);
     const { organizations } = imsUserProfile;
-    log.debug('organizations: ', organizations);
-    log.debug('imsOrgId: ', imsOrgId);
     if (!organizations.includes(imsOrgId)) {
       throw new ErrorWithStatusCode('Invalid request: Unable to find a reference to the Organization provided.', STATUS_UNAUTHORIZED);
     }
@@ -123,7 +119,8 @@ function ApiKeyController(context) {
     if (!hasText(authorizationHeader)) {
       throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
     }
-    return authorizationHeader.replace(BEARER_PREFIX, '');
+    return authorizationHeader.startsWith(BEARER_PREFIX)
+      ? authorizationHeader.substring(BEARER_PREFIX.length) : authorizationHeader;
   }
 
   /**
@@ -154,8 +151,6 @@ function ApiKeyController(context) {
       // Check whether the user has already created the maximum number of
       // active API keys for the given imsOrgId.
       const apiKeys = await dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
-
-      log.debug('Retrieved the API keys for the user: ', apiKeys);
 
       const validApiKeys = apiKeys.filter(
         (apiKey) => apiKey.isValid(),
