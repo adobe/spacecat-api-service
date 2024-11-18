@@ -30,6 +30,9 @@ site-opportunities:
         application/json:
           schema:
             $ref: './schemas.yaml#/OpportunityCreate'
+          examples:
+            broken-backlinks-opportunity:
+              $ref: './examples.yaml#/broken-backlinks-opportunity-create'
     responses:
       '201':
         description: Opportunity created
@@ -102,6 +105,9 @@ site-opportunity:
         application/json:
           schema:
             $ref: './schemas.yaml#/OpportunityUpdate'
+          examples:
+            broken-backlinks-opportunity-update:
+              $ref: './examples.yaml#/broken-backlinks-opportunity-update'
     responses:
       '200':
         description: Opportunity updated
@@ -159,6 +165,9 @@ site-opportunity-suggestions:
         application/json:
           schema:
             $ref: './schemas.yaml#/SuggestionCreateList'
+          examples:
+            broken-backlinks-suggestion-create-list:
+              $ref: './examples.yaml#/broken-backlinks-suggestion-create-list'
     responses:
       '201':
         description: A list of suggestions created and added to the opportunity
@@ -260,6 +269,9 @@ site-opportunity-suggestion:
         application/json:
           schema:
             $ref: './schemas.yaml#/SuggestionUpdate'
+          examples:
+            broken-backlinks-suggestion-update:
+              $ref: './examples.yaml#/broken-backlinks-suggestion-update'
     responses:
       '200':
         description: Suggestion updated
