@@ -68,7 +68,8 @@ function validateSuggestionDataForCreate(suggestion) {
  * @constructor
  */
 function SuggestionsController(dataAccess) {
-  if (!isObject(dataAccess)) {
+  const { Suggestion } = dataAccess;
+  if (!isObject(Suggestion)) {
     throw new Error('Data access required');
   }
 

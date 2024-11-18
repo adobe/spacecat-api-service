@@ -86,7 +86,8 @@ function validateOpportunityDataForCreate(opportunity) {
  * @constructor
  */
 function OpportunitiesController(dataAccess) {
-  if (!isObject(dataAccess)) {
+  const { Opportunity } = dataAccess;
+  if (!isObject(Opportunity)) {
     throw new Error('Data access required');
   }
 
@@ -97,13 +98,12 @@ function OpportunitiesController(dataAccess) {
    */
   const getAllForSite = async (context) => {
     const siteId = context.params?.siteId;
-    const ascending = context.data?.ascending === 'true' || false;
 
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const opptys = (await dataAccess.getOpportunitiesForSite(siteId, ascending))
+    const opptys = (await Opportunity.allBySiteId(siteId))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
@@ -117,13 +117,12 @@ function OpportunitiesController(dataAccess) {
   const getByStatus = async (context) => {
     const siteId = context.params?.siteId;
     const status = context.params?.status || undefined;
-    const ascending = context.data?.ascending === 'true' || false;
 
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const opptys = (await dataAccess.getOpportunitiesForSite(siteId, status, ascending))
+    const opptys = (await Opportunity.getOpportunitiesForSite(siteId, status))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
@@ -146,11 +145,10 @@ function OpportunitiesController(dataAccess) {
       return badRequest('Opportunity ID required');
     }
 
-    const oppty = await dataAccess.getOpportunityById(siteId, opptyId);
-    if (!oppty) {
+    const oppty = await Opportunity.findById(opptyId);
+    if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-
     return ok(OpportunityDto.toJSON(oppty));
   };
 
@@ -174,9 +172,12 @@ function OpportunitiesController(dataAccess) {
     if (!valid) {
       return badRequest(message);
     }
-
-    const oppty = await dataAccess.addOpportunity(context.data);
-    return createResponse(OpportunityDto.toJSON(oppty), 201);
+    try {
+      const oppty = await Opportunity.createOpportunity(context.data);
+      return createResponse(OpportunityDto.toJSON(oppty), 201);
+    } catch (e) {
+      return badRequest(e.message);
+    }
   };
 
   /**
@@ -199,8 +200,8 @@ function OpportunitiesController(dataAccess) {
     if (!site) {
       return notFound('Site not found');
     }
-    const opportunity = await dataAccess.getOpportunityById(siteId, opportunityId);
-    if (!opportunity) {
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
 
@@ -209,10 +210,10 @@ function OpportunitiesController(dataAccess) {
       return badRequest('No updates provided');
     }
 
-    const { valid, message } = OpportunityDto.validateDataTypes(context.data);
+    /*    const { valid, message } = OpportunityDto.validateDataTypes(context.data);
     if (!valid) {
       return badRequest(message);
-    }
+    } */
 
     // eslint-disable-next-line object-curly-newline
     const { runbook, data, title, description, status, guidance, tags } = context.data;
@@ -254,8 +255,8 @@ function OpportunitiesController(dataAccess) {
     }
 
     if (hasUpdates) {
-      await dataAccess.updateOpportunity(opportunity);
-      return ok(OpportunityDto.toJSON(opportunity));
+      const updatedOppty = await opportunity.save(opportunity);
+      return ok(OpportunityDto.toJSON(updatedOppty));
     }
     return badRequest('No updates provided');
   };
@@ -282,11 +283,12 @@ function OpportunitiesController(dataAccess) {
       return notFound('Site not found');
     }
 
-    const opportunity = await dataAccess.getOpportunityById(siteId, opportunityId);
-    if (!opportunity) {
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-    await dataAccess.removeOpportunity(opportunityId);
+
+    await opportunity.remove();
 
     return noContent();
   };

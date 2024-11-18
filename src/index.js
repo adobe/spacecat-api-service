@@ -55,6 +55,8 @@ import AssistantController from './controllers/assistant.js';
 import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
+import OpportunitiesController from './controllers/opportunities.js';
+import SuggestionsController from './controllers/suggestions.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -101,6 +103,8 @@ async function run(request, context) {
       AssistantController(context),
       ApiKeyController(context),
       SitesAuditsToggleController(context.dataAccess),
+      OpportunitiesController(context.dataAccess),
+      SuggestionsController(context.dataAccess),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -143,3 +147,16 @@ export const main = wrap(run)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(secrets, { name: resolveSecretsName })
   .with(helixStatus);
+
+/*
+
+const config = { tableNameData: 'YOUR_TABLE_NAME' };
+const log = console;
+const dao = createDataAccess(config, log);
+
+// Create a new Opportunity
+const opportunityData = { title: 'Broken Links', siteId: 'site123', type: 'broken-backlinks' };
+const newOpportunity = await dao.Opportunity.create(opportunityData);
+console.log('New Opportunity Created:', newOpportunity);
+
+*/
