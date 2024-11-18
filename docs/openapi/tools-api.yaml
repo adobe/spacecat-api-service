@@ -184,8 +184,8 @@ import-assistant:
     summary: Send a prompt to the import assistant
     description: |
       Note: Not implemented yet.
-      
-      This endpoint can be used to send prompts to the import assistant. 
+
+      This endpoint can be used to send prompts to the import assistant.
       Each prompt will make use of AI to analyze a URL and return
       choices in response to the request.
     operationId: processImportAssistant
@@ -202,7 +202,7 @@ import-assistant:
         schema:
           type: string
         description: |
-          Client-specific import API key.
+          Client-specific import API key with the 'imports.assistant' scope.
     responses:
       '200':
         description: Contents of the response from the import AI assistant.
@@ -225,7 +225,7 @@ api-keys:
     summary: Create a new API key
     description:
       This endpoint can be used to create a new API key with a set of scopes. The scoped API key will be
-      returned in the response only once. The scoped API key can be used to authenticate the Spacecat APIs by 
+      returned in the response only once. The scoped API key can be used to authenticate the Spacecat APIs by
       including it in the x-api-key header.
     operationId: createApiKey
     security:
