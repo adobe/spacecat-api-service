@@ -152,14 +152,18 @@ describe('ApiKeyController tests', () => {
       context.imsClient.getImsUserProfile.returns({ organizations: ['test-org'] });
       context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
+      const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
+      expect(responseJson).to.have.property('apiKey');
     });
 
     it('should create a new API key if the bearer prefix is missing', async () => {
       requestContext.pathInfo.headers.authorization = 'test-token';
       context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
+      const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
+      expect(responseJson).to.have.property('apiKey');
     });
 
     it('should throw an error if the number of domains exceeds the limit', async () => {
