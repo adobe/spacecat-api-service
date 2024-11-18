@@ -20,7 +20,7 @@ import {
   STATUS_CREATED,
   STATUS_FORBIDDEN,
   STATUS_NO_CONTENT,
-  STATUS_UNAUTHORIZED,
+  STATUS_UNAUTHORIZED, STATUS_NOT_FOUND,
 } from '../utils/constants.js';
 import { ApiKeyDto } from '../dto/api-key.js';
 
@@ -93,6 +93,7 @@ function ApiKeyController(context) {
    * @param {string} imsUserToken - The IMS User access token provided by the user.
    * @throws {ErrorWithStatusCode} If the IMS Org ID is invalid or
    * if the user does not belong to the given imsOrg.
+   * @returns {object} imsUserProfile - The IMS User profile.
    */
   async function validateImsOrgId(imsOrgId, imsUserToken) {
     if (!hasText(imsOrgId)) {
@@ -103,6 +104,7 @@ function ApiKeyController(context) {
     if (!organizations.includes(imsOrgId)) {
       throw new ErrorWithStatusCode('Invalid request: Unable to find a reference to the Organization provided.', STATUS_UNAUTHORIZED);
     }
+    return imsUserProfile;
   }
 
   /**
@@ -134,11 +136,11 @@ function ApiKeyController(context) {
       const imsUserToken = getImsUserToken(headers);
 
       validateRequestData(data);
-      await validateImsOrgId(imsOrgId, imsUserToken);
+      const imsUserProfile = await validateImsOrgId(imsOrgId, imsUserToken);
 
       // Check if the domains are within the limit. Currently, we only allow one domain per API key.
       if (data.domains.length > maxDomainsPerApiKey) {
-        throw new ErrorWithStatusCode('Invalid request: Exceeds the number of domains allowed', STATUS_FORBIDDEN);
+        throw new ErrorWithStatusCode(`Invalid request: Exceeds the limit of ${maxDomainsPerApiKey} allowed domain(s)`, STATUS_FORBIDDEN);
       }
 
       const { authInfo: { profile } } = attributes;
@@ -159,16 +161,23 @@ function ApiKeyController(context) {
       // Check if the user has reached the maximum number of API keys.
       // Currently, we only allow 3 API keys per user.
       if (validApiKeys && validApiKeys.length >= maxApiKeys) {
-        throw new ErrorWithStatusCode(`Invalid request: You have exceeded the maximum number of API keys allowed (${maxApiKeys})`, STATUS_FORBIDDEN);
+        throw new ErrorWithStatusCode(`Invalid request: Exceeds the limit of ${maxApiKeys} allowed API keys`, STATUS_FORBIDDEN);
+      }
+
+      const { email } = imsUserProfile;
+      let username;
+      if (hasText(email)) {
+        [username] = email.split('@');
       }
 
       // Create the API key
-      const apiKey = crypto.randomUUID();
+      const apiKey = username ? `${username}-${crypto.randomUUID()}` : crypto.randomUUID();
       const hashedApiKey = hashWithSHA256(apiKey);
 
       let scopes = {};
 
-      // In response to an 'imports' feature request, we set the scopes to imports.read and imports.write
+      // In response to an 'imports' feature request, we set the scopes to
+        // imports.read and imports.write
       if (data.features.includes('imports')) {
         scopes = [
           {
@@ -219,8 +228,9 @@ function ApiKeyController(context) {
 
       // Currently the email is assigned as the imsUserId
       const imsUserId = profile.email;
-      if (apiKeyEntity.getImsUserId() !== imsUserId || apiKeyEntity.getImsOrgId() !== imsOrgId) {
-        throw new ErrorWithStatusCode('Invalid request: API key not found', STATUS_FORBIDDEN);
+      if (!apiKeyEntity
+          || apiKeyEntity.getImsUserId() !== imsUserId || apiKeyEntity.getImsOrgId() !== imsOrgId) {
+        throw new ErrorWithStatusCode('Invalid request: API key not found', STATUS_NOT_FOUND);
       }
 
       apiKeyEntity.updateDeletedAt(new Date().toISOString());

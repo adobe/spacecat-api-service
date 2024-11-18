@@ -24,7 +24,7 @@ import {
   STATUS_CREATED,
   STATUS_FORBIDDEN,
   STATUS_NO_CONTENT,
-  STATUS_OK, STATUS_UNAUTHORIZED,
+  STATUS_OK, STATUS_UNAUTHORIZED, STATUS_NOT_FOUND,
 } from '../../src/utils/constants.js';
 
 use(sinonChai);
@@ -85,7 +85,7 @@ describe('ApiKeyController tests', () => {
         },
       },
       imsClient: {
-        getImsUserProfile: sinon.stub().returns({ organizations: ['test-org'] }),
+        getImsUserProfile: sinon.stub().returns({ organizations: ['test-org'], email: 'test@email.com' }),
       },
     };
     apiKeyController = ApiKeyController(context);
@@ -143,6 +143,22 @@ describe('ApiKeyController tests', () => {
     it('should create a new API key', async () => {
       context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
+      const responseJson = await response.json();
+      expect(response.status).to.equal(STATUS_CREATED);
+      expect(responseJson).to.have.property('apiKey');
+    });
+
+    it('should create a new API key if email is not present in the imsUserProfile', async () => {
+      context.imsClient.getImsUserProfile.returns({ organizations: ['test-org'] });
+      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
+      const response = await apiKeyController.createApiKey({ ...requestContext });
+      expect(response.status).to.equal(STATUS_CREATED);
+    });
+
+    it('should create a new API key if the bearer prefix is missing', async () => {
+      requestContext.pathInfo.headers.authorization = 'test-token';
+      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
+      const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_CREATED);
     });
 
@@ -150,6 +166,7 @@ describe('ApiKeyController tests', () => {
       requestContext.data.domains = ['https://example.com', 'https://another.com'];
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_FORBIDDEN);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Exceeds the limit of 1 allowed domain(s)');
     });
 
     it('should throw an error if the user has reached the maximum number of API keys', async () => {
@@ -158,6 +175,7 @@ describe('ApiKeyController tests', () => {
           createApiKey(exampleApiKey), createApiKey(exampleApiKey)]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_FORBIDDEN);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Exceeds the limit of 3 allowed API keys');
     });
   });
 
@@ -180,7 +198,7 @@ describe('ApiKeyController tests', () => {
       });
 
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
-      expect(response.status).to.equal(STATUS_FORBIDDEN);
+      expect(response.status).to.equal(STATUS_NOT_FOUND);
     });
   });
 
@@ -188,7 +206,18 @@ describe('ApiKeyController tests', () => {
     it('should return all the API Keys', async () => {
       context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([createApiKey(exampleApiKey)]);
       const response = await apiKeyController.getApiKeys({ ...requestContext });
+      const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_OK);
+      const expectedJson = {
+        id: '56hjhkj309r989ra90',
+        name: 'test-key',
+        imsUserId: 'test-user-id',
+        imsOrgId: 'test-org',
+        expiresAt: '2034-05-29T14:26:00.000Z',
+        createdAt: '2024-05-29T14:26:00.000Z',
+        scopes: [{ name: 'imports.read' }, { name: 'imports.write', domains: ['https://example.com'] }],
+      };
+      expect(responseJson).to.deep.equal([expectedJson]);
     });
 
     it('should throw an error when getApiKeysByImsUserIdAndImsOrgId fails', async () => {
