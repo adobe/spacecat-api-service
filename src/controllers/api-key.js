@@ -177,7 +177,7 @@ function ApiKeyController(context) {
       let scopes = {};
 
       // In response to an 'imports' feature request, we set the scopes to
-        // imports.read and imports.write
+      // imports.read and imports.write
       if (data.features.includes('imports')) {
         scopes = [
           {
