@@ -1815,9 +1815,9 @@ SuggestionStatus:
 SuggestionType:
   description: |
     Type of suggestion:
-    - 'redirect': Add or update a redirect as suggested
-    - 'experiment': Run the experiment with the given suggestions
-    - 'content-change': Change the content to the suggested
+    - redirect: Add or update a redirect as suggested
+    - experiment: Run the experiment with the given suggestions
+    - content-change: Change the content to the suggested
   type: string
   enum:
     - 'redirect'
