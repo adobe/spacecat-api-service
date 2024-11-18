@@ -26,8 +26,8 @@ import { ErrorWithStatusCode } from '../support/utils.js';
 
 /**
  * Assistant controller. Provides methods to perform AI assisted operations.
- * There are certain commands that can be executed by the assistant. Depending on the command
- * there has to be certain inputs such as prompt and imageUrl.  A call is made to
+ * There are specific commands that can be executed by the assistant. Depending on the command
+ * there will to be required inputs, such as prompt and imageUrl.  A call is made to
  * Firefall, and the response is returned.
  * @param {UniversalContext} context - The context of the universal serverless function.
  * @param {string} context.env.ASSISTANT_CONFIGURATION - Configuration params, as a JSON string.
@@ -134,7 +134,7 @@ function AssistantController(context) {
       const requestData = parseRequestContext(requestContext);
       const { command, apiKeyName, imsOrgId } = requestData;
 
-      log.info(`Running assistant command ${command} using key ${apiKeyName} for org ${imsOrgId}.`);
+      log.info(`Running assistant command ${command} using key "${apiKeyName}" for org ${imsOrgId}.`);
 
       // Call the assistant model.
       const firefallResponse = await fetchFirefallCompletion(requestData, log);

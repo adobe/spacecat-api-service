@@ -181,7 +181,7 @@ describe('AssistantController tests', () => {
         { prompt: 'nav and some text' },
         500,
       );
-      expect(baseContext.log.info.getCall(0).args[0]).to.equal('Running assistant command findMainContent using key testName for org N/A.');
+      expect(baseContext.log.info.getCall(0).args[0]).to.equal('Running assistant command findMainContent using key "testName" for org N/A.');
     });
     it('missing profile in request test', async () => {
       const profilelessContext = { ...baseContext };
@@ -244,21 +244,32 @@ describe('AssistantController tests', () => {
       }
     });
     it('should throw an invalid request error with nonsense image', async () => {
-      const response = await assistantController.processImportAssistant(
-        {
-          ...baseContext,
-          data: {
-            command: 'findBlockSelectors',
-            prompt: 'nav and some text',
-            options: {
-              imageUrl: 'not an image',
+      // Exercise all conditions of `isBase64UrlImage()`
+      for (const imageUrl of [
+        'not an image',
+        'data:image/still not an image',
+        'data:image/still not an image=',
+        'data:image/still not a base64 image',
+      ]) {
+        // eslint-disable-next-line no-await-in-loop
+        const response = await assistantController.processImportAssistant(
+          {
+            ...baseContext,
+            data: {
+              command: 'findBlockSelectors',
+              prompt: 'nav and some text',
+              options: {
+                imageUrl,
+              },
             },
           },
-        },
-      );
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: Image url is not a base64 encoded image.');
+        );
+        expect(response).to.be.an.instanceOf(Response);
+        expect(response.status).to.equal(STATUS.BAD_REQUEST);
+        expect(response.headers.get('x-error'))
+          .to
+          .equal('Invalid request: Image url is not a base64 encoded image.');
+      }
     });
     it('should pass validation but fail firefall client', async () => {
       const response = await assistantController.processImportAssistant(

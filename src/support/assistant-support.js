@@ -42,16 +42,15 @@ const commandConfig = {
     },
   },
   findBlockCells: {
-    parameters: ['prompt', 'imageUrl'],
+    parameters: ['prompt'],
     firefallArgs: {
-      llmModel: 'gpt-4-vision',
+      llmModel: 'gpt-4-turbo',
     },
   },
   generatePageTransformation: {
     parameters: ['prompt'],
     firefallArgs: {
       llmModel: 'gpt-4-turbo',
-      responseFormat: 'json_object',
     },
   },
 };
