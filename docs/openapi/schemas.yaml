@@ -1590,6 +1590,12 @@ ApiKeyMetadataResponse:
     expiresAt:
       description: The date and time when the API key expires
       $ref: '#/DateTime'
+    deletedAt:
+      description: The date and time when the API key was deleted
+      $ref: '#/DateTime'
+    revokedAt:
+      description: The date and time when the API key was revoked
+      $ref: '#/DateTime'
 ApiKeyResponse:
   allOf:
     - $ref: '#/ApiKeyMetadataResponse'
