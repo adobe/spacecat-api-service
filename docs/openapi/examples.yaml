@@ -20,9 +20,7 @@ broken-backlinks-opportunity:
     tags:
       - 'Traffic acquisition'
     createdAt: '2024-01-20T12:00:00Z'
-    createdBy: '47995190583E98E70A495D53@adobe.com'
     updatedAt: '2024-07-23T12:00:00Z'
-    updatedBy: '67994690583E98E70A495D53@adobe.com'
 broken-backlinks-opportunity-create:
   description: Example for a broken backlinks opportunity create
   value:

@@ -1680,23 +1680,9 @@ Opportunity:
     createdAt:
       description: UTC timestamp of when the opportunity was created
       $ref: '#/DateTime'
-    createdBy:
-      type: string
-      description: |
-        Initially not available.
-        
-        IMS or other user ID of who created this opportunity
-      example: '47995190583E98E70A495D53@adobe.com'
     updatedAt:
       description: UTC timestamp of when the opportunity was last updated
       $ref: '#/DateTime'
-    updatedBy:
-      description: |
-        Initially not available.
-        
-        IMS or other user ID of who updated this opportunity
-      type: string
-      example: '67994690583E98E70A495D53@adobe.com'
   required:
     - id
     - siteId
@@ -1707,9 +1693,7 @@ Opportunity:
     - title
     - status
     - createdAt
-    - createdBy
     - updatedAt
-    - updatedBy
 OpportunityList:
   type: array
   items:
