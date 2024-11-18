@@ -1927,6 +1927,7 @@ SuggestionStatusUpdate:
     properties:
       id:
         description: UUID of this suggestion
+        readOnly: false
         $ref: '#/Id'
       status:
         description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization

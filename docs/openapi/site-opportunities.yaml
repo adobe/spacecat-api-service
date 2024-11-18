@@ -221,6 +221,9 @@ site-opportunity-suggestions-status:
         application/json:
           schema:
             $ref: './schemas.yaml#/SuggestionStatusUpdate'
+          examples:
+            broken-backlinks-suggestions-status-update:
+              $ref: './examples.yaml#/broken-backlinks-suggestions-status-update'
     responses:
       '200':
         description: Suggestions updated
