@@ -1,3 +1,10 @@
+# [1.76.0](https://github.com/adobe/spacecat-api-service/compare/v1.75.19...v1.76.0) (2024-11-18)
+
+
+### Features
+
+* SITES-26526 Import Assistant service phase 1 ([#573](https://github.com/adobe/spacecat-api-service/issues/573)) ([a7b5f0c](https://github.com/adobe/spacecat-api-service/commit/a7b5f0ca9eb43c9498d1ef6e601b448404fb000c))
+
 ## [1.75.19](https://github.com/adobe/spacecat-api-service/compare/v1.75.18...v1.75.19) (2024-11-18)
 
 
