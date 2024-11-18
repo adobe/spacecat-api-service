@@ -15,33 +15,44 @@ import { ErrorWithStatusCode } from './utils.js';
 
 /*
  * Command Config Type:
- *  - parameters: string[] : parameters required for the command
- *  - responseFormat: string : AI response format for the command
- *  - llmModel: string : the LLM Model to use for the command
+ * - parameters: string[] : parameters required for the command
+ * - firefallArgs: object : key/value pairs to pass to the FirefallClient
+ *  - firefallArgs.llmModel: string : the LLM Model to use for the command
+ *  - firefallArgs.responseFormat: string : AI response format for the command
  */
 const commandConfig = {
   findMainContent: {
     parameters: [],
-    llmModel: 'gpt-4-turbo',
-    responseFormat: 'json_object',
+    firefallArgs: {
+      llmModel: 'gpt-4-turbo',
+      responseFormat: 'json_object',
+    },
   },
   findRemovalSelectors: {
     parameters: ['prompt'],
-    llmModel: 'gpt-4-turbo',
-    responseFormat: 'json_object',
+    firefallArgs: {
+      llmModel: 'gpt-4-turbo',
+      responseFormat: 'json_object',
+    },
   },
   findBlockSelectors: {
     parameters: ['prompt', 'imageUrl'],
-    llmModel: 'gpt-4-vision',
+    firefallArgs: {
+      llmModel: 'gpt-4-vision',
+    },
   },
   findBlockCells: {
     parameters: ['prompt', 'imageUrl'],
-    llmModel: 'gpt-4-vision',
+    firefallArgs: {
+      llmModel: 'gpt-4-vision',
+    },
   },
   generatePageTransformation: {
     parameters: ['prompt'],
-    llmModel: 'gpt-4-turbo',
-    responseFormat: 'json_object',
+    firefallArgs: {
+      llmModel: 'gpt-4-turbo',
+      responseFormat: 'json_object',
+    },
   },
 };
 
@@ -64,13 +75,13 @@ const STATUS = {
  * @return {true} if scope is allowed.
  */
 const validateAccessScopes = (auth, scopes, log) => {
-  log?.debug(`validating scopes: ${scopes}`);
-
   try {
     auth.checkScopes(scopes);
   } catch (error) {
+    log?.info(`Validation of scopes failed: ${scopes}`);
     throw new ErrorWithStatusCode('Missing required scopes.', STATUS.UNAUTHORIZED);
   }
+  log?.debug(`Validation of scopes succeeded: ${scopes}`);
 };
 
 const fetchFirefallCompletion = async (requestData, log) => {

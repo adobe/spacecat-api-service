@@ -99,6 +99,22 @@ describe('AssistantController tests', () => {
   };
 
   describe('processImportAssistant parameters', () => {
+    it('commandConfig completeness test', async () => {
+      for (const config of Object.values(commandConfig)) {
+        const { parameters, firefallArgs } = config;
+        expect(parameters).to.be.an('array');
+        expect(firefallArgs).to.not.be.undefined;
+        expect(firefallArgs).to.be.an('object');
+        const { llmModel } = firefallArgs;
+        expect(llmModel).to.not.be.undefined;
+
+        // If an image is required, the prompt and model should be set appropriately.
+        if (parameters.includes('imageUrl')) {
+          expect(parameters).to.include('prompt');
+          expect(llmModel).to.equal('gpt-4-vision');
+        }
+      }
+    });
     it('missing ASSISTANT_CONFIGURATION test', async () => {
       delete baseContext.env.ASSISTANT_CONFIGURATION;
       assistantController = AssistantController(baseContext);
@@ -202,16 +218,6 @@ describe('AssistantController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(STATUS.BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: command not implemented: test');
-    });
-    it('commandConfig parameters test', async () => {
-      for (const config of Object.values(commandConfig)) {
-        expect(config.parameters).to.be.an('array');
-        // If an image is required, the prompt and model should be set appropriately.
-        if (config.parameters.includes('imageUrl')) {
-          expect(config.parameters).to.include('prompt');
-          expect(config.llmModel).to.equal('gpt-4-vision');
-        }
-      }
     });
     it('missing prompt test', async () => {
       for (const [command, config] of Object.entries(commandConfig)) {

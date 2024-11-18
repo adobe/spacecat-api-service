@@ -57,16 +57,16 @@ function AssistantController(context) {
     if (!command) {
       throw new ErrorWithStatusCode('Invalid request: command is required.', STATUS.BAD_REQUEST);
     }
-    const currentCommandConfig = commandConfig[command];
-    if (!currentCommandConfig) {
+    if (!commandConfig[command]) {
       throw new ErrorWithStatusCode(`Invalid request: command not implemented: ${command}`, STATUS.BAD_REQUEST);
     }
 
-    if (currentCommandConfig.parameters.includes('prompt') && !prompt) {
+    const { parameters } = commandConfig[command];
+    if (parameters.includes('prompt') && !prompt) {
       throw new ErrorWithStatusCode('Invalid request: prompt is required.', STATUS.BAD_REQUEST);
     }
 
-    if (currentCommandConfig.parameters.includes('imageUrl')) {
+    if (parameters.includes('imageUrl')) {
       if (!imageUrl) {
         throw new ErrorWithStatusCode('Invalid request: Image url is required.', STATUS.BAD_REQUEST);
       }
@@ -96,6 +96,7 @@ function AssistantController(context) {
     }
 
     const { data: { command, prompt, options }, attributes } = requestContext;
+    const { firefallArgs = {} } = commandConfig[command] || {};
     const { imageUrl, ...otherOptions } = options || {};
     const { authInfo: { profile } } = attributes;
     const requestData = {
@@ -104,11 +105,10 @@ function AssistantController(context) {
         ...assistantConfiguration,
         FIREFALL_API_KEY: assistantConfiguration.IMS_CLIENT_ID,
       },
+      ...firefallArgs,
       command,
       prompt,
       imageUrl,
-      llmModel: commandConfig[command]?.llmModel,
-      responseFormat: commandConfig[command]?.responseFormat,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
       apiKeyName: profile?.getName(),
       imsOrgId: profile?.getImsOrgId() ?? requestContext.pathInfo.headers['x-gw-ims-org-id'] ?? 'N/A',
