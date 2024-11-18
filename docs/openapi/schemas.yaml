@@ -577,6 +577,18 @@ ExperimentationOpportunity:
       description: The metrics for the experimentation opportunity
       items:
         type: object
+    recommendations:
+      type: array
+      description: The recommendations for the experimentation opportunity
+      items:
+        type: object
+      example:
+        - type: 'guidance'
+          insight: 'The main CTAs ("Buy now", "Free trial") are not prominently visible above the fold for users coming from platforms like TikTok.'
+          recommendation: 'Relocate one of the primary CTAs, such as "Buy now", to a more prominent position above the fold where it is immediately visible upon landing on the page.'
+        - type: 'guidance'
+          insight: 'The current design and layout of the page, while visually appealing, might be overwhelming for users coming from TikTok who prefer short and concise content.'
+          recommendation: 'Simplify the page by reducing the amount of text and focusing on key features with visually engaging images or short videos, particularly near the top of the page.'
 StructuredData:
   type: object
   readOnly: true
