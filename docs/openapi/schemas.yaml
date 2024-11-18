@@ -1623,9 +1623,9 @@ OpportunityType:
   description: Type of opportunity
   type: string
   enum:
-    - 'Backlinks'
-    - 'Internal links'
-  example: 'Backlinks'
+    - 'broken-backlinks'
+    - 'broken-internal-backlinks'
+  example: 'broken-backlinks'
 OpportunityOrigin:
   description: |
     Origin of opportunity.
@@ -1811,15 +1811,17 @@ SuggestionStatus:
 SuggestionType:
   description: |
     Type of suggestion:
-    - redirect: Add or update a redirect as suggested
-    - experiment: Run the experiment with the given suggestions
-    - content-change: Change the content to the suggested
+    - REDIRECT_UPDATE: Add or update a redirect as suggested
+    - EXPERIMENT: Run the experiment with the given suggestions
+    - CONTENT_UPDATE: Update the content to the suggested
+    - METADATA_UPDATE: Update the metadata to the suggested
   type: string
   enum:
-    - 'redirect'
-    - 'experiment'
-    - 'content-change'
-  example: 'redirect'
+    - 'REDIRECT_UPDATE'
+    - 'EXPERIMENT'
+    - 'CONTENT_UPDATE'
+    - 'METADATA_UPDATE'
+  example: 'REDIRECT_UPDATE'
 Suggestion:
   type: object
   properties:
