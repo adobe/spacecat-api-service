@@ -53,6 +53,10 @@ function AssistantController(context) {
       command, prompt, imageUrl,
     } = data;
 
+    if (!data.env.FIREFALL_IMS_ORG_ID) {
+      throw new ErrorWithStatusCode('Invalid request: A valid ims-org-id is not associated with your api-key.', STATUS.UNAUTHORIZED);
+    }
+
     // Validate 'command'
     if (!command) {
       throw new ErrorWithStatusCode('Invalid request: command is required.', STATUS.BAD_REQUEST);
@@ -98,20 +102,21 @@ function AssistantController(context) {
     const { data: { command, prompt, options }, attributes } = requestContext;
     const { firefallArgs = {} } = commandConfig[command] || {};
     const { imageUrl, ...otherOptions } = options || {};
-    const { authInfo: { profile } } = attributes;
+    const { authInfo: { profile: apikeyProfile } } = attributes;
+    const callerImsOrgId = apikeyProfile?.getImsOrgId() ?? requestContext.pathInfo.headers['x-gw-ims-org-id'];
     const requestData = {
       env: {
         ...context.env,
         ...assistantConfiguration,
         FIREFALL_API_KEY: assistantConfiguration.IMS_CLIENT_ID,
+        FIREFALL_IMS_ORG_ID: callerImsOrgId,
       },
       ...firefallArgs,
       command,
       prompt,
       imageUrl,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
-      apiKeyName: profile?.getName(),
-      imsOrgId: profile?.getImsOrgId() ?? requestContext.pathInfo.headers['x-gw-ims-org-id'] ?? 'N/A',
+      apiKeyName: apikeyProfile?.getName(),
       otherOptions,
     };
 
@@ -132,9 +137,9 @@ function AssistantController(context) {
       validateAccessScopes(auth, [SCOPE.ASSISTANT], log);
 
       const requestData = parseRequestContext(requestContext);
-      const { command, apiKeyName, imsOrgId } = requestData;
+      const { command, apiKeyName, env } = requestData;
 
-      log.info(`Running assistant command ${command} using key "${apiKeyName}" for org ${imsOrgId}.`);
+      log.info(`Running assistant command ${command} using key "${apiKeyName}" for org ${env.FIREFALL_IMS_ORG_ID}.`);
 
       // Call the assistant model.
       const firefallResponse = await fetchFirefallCompletion(requestData, log);
