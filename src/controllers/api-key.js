@@ -119,8 +119,7 @@ function ApiKeyController(context) {
     if (!hasText(authorizationHeader)) {
       throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
     }
-    return authorizationHeader.startsWith(BEARER_PREFIX)
-      ? authorizationHeader.substring(BEARER_PREFIX.length) : authorizationHeader;
+    return authorizationHeader.replace(BEARER_PREFIX, '');
   }
 
   /**
