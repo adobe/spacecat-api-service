@@ -124,8 +124,9 @@ function ApiKeyController(context) {
   }
 
   /**
-   * Get the IMS User ID from the profile. Currently the email is assigned as the imsUserId.
+   * Get the IMS User ID from the profile. Currently, the email is assigned as the imsUserId.
    * @param {object} profile
+   * @returns {string} imsUserId - The IMS User ID.
    */
   function getImsUserIdFromProfile(profile) {
     // While the property is named 'profile.email', it is in fact the user's IMS User Id
