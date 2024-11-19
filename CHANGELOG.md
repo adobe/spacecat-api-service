@@ -1,3 +1,10 @@
+# [1.77.0](https://github.com/adobe/spacecat-api-service/compare/v1.76.1...v1.77.0) (2024-11-19)
+
+
+### Features
+
+* Build an API to generate API keys for the importer ([#569](https://github.com/adobe/spacecat-api-service/issues/569)) ([0d78df9](https://github.com/adobe/spacecat-api-service/commit/0d78df90b6aea67f31f7ee08d14f54134d346416))
+
 ## [1.76.1](https://github.com/adobe/spacecat-api-service/compare/v1.76.0...v1.76.1) (2024-11-18)
 
 
