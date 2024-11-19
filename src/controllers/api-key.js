@@ -145,7 +145,7 @@ function ApiKeyController(context) {
 
       const { authInfo: { profile } } = attributes;
 
-      // Currently the email is assigned as the imsUserId
+      // While the property is named 'profile.email', it is in fact the user's IMS User Id
       const imsUserId = profile.email;
 
       // Check whether the user has already created the maximum number of
