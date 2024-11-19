@@ -1,3 +1,24 @@
+# [1.77.0](https://github.com/adobe/spacecat-api-service/compare/v1.76.1...v1.77.0) (2024-11-19)
+
+
+### Features
+
+* Build an API to generate API keys for the importer ([#569](https://github.com/adobe/spacecat-api-service/issues/569)) ([0d78df9](https://github.com/adobe/spacecat-api-service/commit/0d78df90b6aea67f31f7ee08d14f54134d346416))
+
+## [1.76.1](https://github.com/adobe/spacecat-api-service/compare/v1.76.0...v1.76.1) (2024-11-18)
+
+
+### Bug Fixes
+
+* SITES-26996 [Import Assistant] Context ImsOrg not being used by Firefall Client ([#583](https://github.com/adobe/spacecat-api-service/issues/583)) ([10111e0](https://github.com/adobe/spacecat-api-service/commit/10111e07bbc7866f7d59b33a4d127200bd55253d))
+
+# [1.76.0](https://github.com/adobe/spacecat-api-service/compare/v1.75.19...v1.76.0) (2024-11-18)
+
+
+### Features
+
+* SITES-26526 Import Assistant service phase 1 ([#573](https://github.com/adobe/spacecat-api-service/issues/573)) ([a7b5f0c](https://github.com/adobe/spacecat-api-service/commit/a7b5f0ca9eb43c9498d1ef6e601b448404fb000c))
+
 ## [1.75.19](https://github.com/adobe/spacecat-api-service/compare/v1.75.18...v1.75.19) (2024-11-18)
 
 
