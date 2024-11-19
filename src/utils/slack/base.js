@@ -122,6 +122,7 @@ const sendMessageBlocks = async (
   const message = Message()
     .blocks(textSections.map(
       (section) => {
+        log.debug('Creating message block', section.text);
         const block = Blocks.Section().text(section.text);
         if (section.accessory) {
           block.accessory(Elements.Button()
