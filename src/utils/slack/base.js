@@ -29,14 +29,7 @@ export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;
-
-const splitBlockTextIntoChunks = (block, chunkSize = MAX_TEXT_CHUNK_SIZE) => {
-  const chunks = [];
-  for (let i = 0; i < block.length; i += chunkSize) {
-    chunks.push(block.slice(i, i + chunkSize));
-  }
-  return chunks;
-};
+const MAX_CHUNK_SIZE = '25';
 
 /**
  * Extracts a URL from a given input string. The input can be in a Slack message
@@ -113,6 +106,22 @@ const postSiteNotFoundMessage = async (say, baseURL) => {
   await say(`:x: No site found with base URL '${baseURL}'.`);
 };
 
+const splitBlockTextIntoChunks = (block, chunkSize = MAX_TEXT_CHUNK_SIZE) => {
+  const chunks = [];
+  for (let i = 0; i < block.length; i += chunkSize) {
+    chunks.push(block.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
+const splitBlocksIntoChunks = (blocks, chunkSize = MAX_CHUNK_SIZE) => {
+  const chunks = [];
+  for (let i = 0; i < blocks.length; i += chunkSize) {
+    chunks.push(blocks.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
 /**
  * Sends a message with blocks to the user.
  *
@@ -133,21 +142,24 @@ const sendMessageBlocks = async (
     formatSections[formatSections.length - 1].accessory = section.accessory;
     return formatSections;
   }).flat();
-  const message = Message()
-    .blocks(finalSections.map(
-      (section) => {
-        const block = Blocks.Section().text(section.text);
-        if (section.accessory) {
-          block.accessory(Elements.Button()
-            .text(section.accessory.text)
-            .actionId(section.accessory.actionId));
-        }
-        return block;
-      },
-    ));
-  message.blocks(...additionalBlocks);
-  const slackMessage = message.buildToJSON();
-  await say({ ...options, ...JSON.parse(slackMessage) });
+  const blocks = finalSections.map(
+    (section) => {
+      const block = Blocks.Section().text(section.text);
+      if (section.accessory) {
+        block.accessory(Elements.Button()
+          .text(section.accessory.text)
+          .actionId(section.accessory.actionId));
+      }
+      return block;
+    },
+  );
+  const allBlocks = blocks.concat(...additionalBlocks);
+  const chunks = splitBlocksIntoChunks(allBlocks);
+  for (const chunk of chunks) {
+    const message = Message().blocks(chunk);
+    // eslint-disable-next-line no-await-in-loop
+    await say({ ...options, ...JSON.parse(message.buildToJSON()) });
+  }
 };
 
 const sendFile = async (slackContext, file, filename) => {
