@@ -114,13 +114,22 @@ function ApiKeyController(context) {
    * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
    */
   function getImsUserToken(headers) {
-    const authorizationHeader = headers.authorization;
+    const { authorization: authorizationHeader } = headers;
     const BEARER_PREFIX = 'Bearer ';
     if (!hasText(authorizationHeader)) {
       throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
     }
     return authorizationHeader.startsWith(BEARER_PREFIX)
       ? authorizationHeader.substring(BEARER_PREFIX.length) : authorizationHeader;
+  }
+
+  /**
+   * Get the IMS User ID from the profile. Currently the email is assigned as the imsUserId.
+   * @param {object} profile
+   */
+  function getImsUserIdFromProfile(profile) {
+    // While the property is named 'profile.email', it is in fact the user's IMS User Id
+    return profile.email;
   }
 
   /**
@@ -145,8 +154,7 @@ function ApiKeyController(context) {
 
       const { authInfo: { profile } } = attributes;
 
-      // While the property is named 'profile.email', it is in fact the user's IMS User Id
-      const imsUserId = profile.email;
+      const imsUserId = getImsUserIdFromProfile(profile);
 
       // Check whether the user has already created the maximum number of
       // active API keys for the given imsOrgId.
@@ -224,8 +232,7 @@ function ApiKeyController(context) {
       const apiKeyEntity = await dataAccess.getApiKeyById(id);
       const { authInfo: { profile } } = attributes;
 
-      // Currently the email is assigned as the imsUserId
-      const imsUserId = profile.email;
+      const imsUserId = getImsUserIdFromProfile(profile);
       if (!apiKeyEntity
           || apiKeyEntity.getImsUserId() !== imsUserId || apiKeyEntity.getImsOrgId() !== imsOrgId) {
         throw new ErrorWithStatusCode('Invalid request: API key not found', STATUS_NOT_FOUND);
@@ -255,8 +262,7 @@ function ApiKeyController(context) {
       await validateImsOrgId(imsOrgId, imsUserToken);
       const { authInfo: { profile } } = attributes;
 
-      // Currently the email is assigned as the imsUserId
-      const imsUserId = profile.email;
+      const imsUserId = getImsUserIdFromProfile(profile);
       const apiKeys = await dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
       return ok(apiKeys.map((apiKey) => ApiKeyDto.toJSON(apiKey)));
     } catch (error) {
