@@ -29,7 +29,7 @@ export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;
-const MAX_CHUNK_SIZE = '25';
+const MAX_CHUNK_SIZE = 25;
 
 /**
  * Extracts a URL from a given input string. The input can be in a Slack message
@@ -106,14 +106,6 @@ const postSiteNotFoundMessage = async (say, baseURL) => {
   await say(`:x: No site found with base URL '${baseURL}'.`);
 };
 
-const splitBlockTextIntoChunks = (block, chunkSize = MAX_TEXT_CHUNK_SIZE) => {
-  const chunks = [];
-  for (let i = 0; i < block.length; i += chunkSize) {
-    chunks.push(block.slice(i, i + chunkSize));
-  }
-  return chunks;
-};
-
 const splitBlocksIntoChunks = (blocks, chunkSize = MAX_CHUNK_SIZE) => {
   const chunks = [];
   for (let i = 0; i < blocks.length; i += chunkSize) {
@@ -137,11 +129,12 @@ const sendMessageBlocks = async (
   options = {},
 ) => {
   const finalSections = textSections.map((section) => {
-    const splitSections = splitBlockTextIntoChunks(section.text);
+    const splitSections = splitBlocksIntoChunks(section.text, MAX_TEXT_CHUNK_SIZE);
     const formatSections = splitSections.map((text) => ({ text }));
     formatSections[formatSections.length - 1].accessory = section.accessory;
     return formatSections;
   }).flat();
+
   const blocks = finalSections.map(
     (section) => {
       const block = Blocks.Section().text(section.text);
@@ -153,6 +146,7 @@ const sendMessageBlocks = async (
       return block;
     },
   );
+
   const allBlocks = blocks.concat(...additionalBlocks);
   const chunks = splitBlocksIntoChunks(allBlocks);
   for (const chunk of chunks) {
