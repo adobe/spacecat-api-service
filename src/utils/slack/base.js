@@ -112,7 +112,13 @@ const postSiteNotFoundMessage = async (say, baseURL) => {
  * @param {Object[]} [additionalBlocks=[]] - Additional blocks to send in the message.
  * @param options - Additional options which can include properties like 'unfurl_links'.
  */
-const sendMessageBlocks = async (say, textSections, additionalBlocks = [], options = {}) => {
+const sendMessageBlocks = async (
+  say,
+  textSections,
+  additionalBlocks = [],
+  options = {},
+  log = console,
+) => {
   const message = Message()
     .blocks(textSections.map(
       (section) => {
@@ -125,9 +131,10 @@ const sendMessageBlocks = async (say, textSections, additionalBlocks = [], optio
         return block;
       },
     ));
-
   message.blocks(...additionalBlocks);
-  await say({ ...options, ...JSON.parse(message.buildToJSON()) });
+  const slackMessage = message.buildToJSON();
+  log.debug('Sending message blocks', slackMessage);
+  await say({ ...options, ...JSON.parse(slackMessage) });
 };
 
 const sendFile = async (slackContext, file, filename) => {

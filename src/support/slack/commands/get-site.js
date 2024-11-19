@@ -150,7 +150,7 @@ ${formatAudits(audits)}
   `,
       }];
 
-      await sendMessageBlocks(say, textSections, [], { unfurl_links: false });
+      await sendMessageBlocks(say, textSections, [], { unfurl_links: false }, log);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);

@@ -81,7 +81,7 @@
     "busboy": "1.6.0",
     "js-yaml": "4.1.0",
     "psl": "1.10.0",
-    "slack-block-builder": "^2.8.0"
+    "slack-block-builder": "2.8.0"
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.8",
