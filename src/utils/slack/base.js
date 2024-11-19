@@ -18,6 +18,7 @@ import {
 
 import { URL } from 'url';
 
+import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
 
 export const BACKTICKS = '```';
@@ -27,7 +28,6 @@ export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
-const MAX_CHUNK_SIZE = '25';
 
 /**
  * Extracts a URL from a given input string. The input can be in a Slack message
@@ -104,14 +104,6 @@ const postSiteNotFoundMessage = async (say, baseURL) => {
   await say(`:x: No site found with base URL '${baseURL}'.`);
 };
 
-const splitBlocksIntoChunks = (blocks, chunkSize = MAX_CHUNK_SIZE) => {
-  const chunks = [];
-  for (let i = 0; i < blocks.length; i += chunkSize) {
-    chunks.push(blocks.slice(i, i + chunkSize));
-  }
-  return chunks;
-};
-
 /**
  * Sends a message with blocks to the user.
  *
@@ -121,28 +113,21 @@ const splitBlocksIntoChunks = (blocks, chunkSize = MAX_CHUNK_SIZE) => {
  * @param options - Additional options which can include properties like 'unfurl_links'.
  */
 const sendMessageBlocks = async (say, textSections, additionalBlocks = [], options = {}) => {
-  const blocks = textSections.map((section) => {
-    const block = {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: section.text,
+  const message = Message()
+    .blocks(textSections.map(
+      (section) => {
+        const block = Blocks.Section().text(section.text);
+        if (section.accessory) {
+          block.accessory(Elements.Button()
+            .text(section.accessory.text)
+            .actionId(section.accessory.actionId));
+        }
+        return block;
       },
-    };
+    ));
 
-    if (section.accessory) {
-      block.accessory = section.accessory;
-    }
-
-    return block;
-  });
-
-  blocks.push(...additionalBlocks);
-  const chunks = splitBlocksIntoChunks(blocks);
-  for (const chunk of chunks) {
-    // eslint-disable-next-line no-await-in-loop
-    await say({ ...options, blocks: chunk });
-  }
+  message.blocks(...additionalBlocks);
+  await say({ ...options, ...JSON.parse(message.buildToJSON()) });
 };
 
 const sendFile = async (slackContext, file, filename) => {
