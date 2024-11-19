@@ -28,6 +28,14 @@ export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
+const MAX_CHUNK_SIZE = 3000;
+const splitBlockIntoChunks = (block, chunkSize = MAX_CHUNK_SIZE) => {
+  const chunks = [];
+  for (let i = 0; i < block.length; i += chunkSize) {
+    chunks.push(block.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
 
 /**
  * Extracts a URL from a given input string. The input can be in a Slack message
@@ -119,10 +127,15 @@ const sendMessageBlocks = async (
   options = {},
   log = console,
 ) => {
+  const finalSections = textSections.map((section) => {
+    const splitSections = splitBlockIntoChunks(section.text);
+    const formatSections = splitSections.map((text) => ({ text }));
+    formatSections[formatSections.length - 1].accessory = section.accessory;
+    return formatSections;
+  }).flat();
   const message = Message()
-    .blocks(textSections.map(
+    .blocks(finalSections.map(
       (section) => {
-        log.debug('Creating message block', section.text);
         const block = Blocks.Section().text(section.text);
         if (section.accessory) {
           block.accessory(Elements.Button()
