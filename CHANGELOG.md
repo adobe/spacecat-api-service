@@ -1,3 +1,52 @@
+# [1.77.0](https://github.com/adobe/spacecat-api-service/compare/v1.76.1...v1.77.0) (2024-11-19)
+
+
+### Features
+
+* Build an API to generate API keys for the importer ([#569](https://github.com/adobe/spacecat-api-service/issues/569)) ([0d78df9](https://github.com/adobe/spacecat-api-service/commit/0d78df90b6aea67f31f7ee08d14f54134d346416))
+
+## [1.76.1](https://github.com/adobe/spacecat-api-service/compare/v1.76.0...v1.76.1) (2024-11-18)
+
+
+### Bug Fixes
+
+* SITES-26996 [Import Assistant] Context ImsOrg not being used by Firefall Client ([#583](https://github.com/adobe/spacecat-api-service/issues/583)) ([10111e0](https://github.com/adobe/spacecat-api-service/commit/10111e07bbc7866f7d59b33a4d127200bd55253d))
+
+# [1.76.0](https://github.com/adobe/spacecat-api-service/compare/v1.75.19...v1.76.0) (2024-11-18)
+
+
+### Features
+
+* SITES-26526 Import Assistant service phase 1 ([#573](https://github.com/adobe/spacecat-api-service/issues/573)) ([a7b5f0c](https://github.com/adobe/spacecat-api-service/commit/a7b5f0ca9eb43c9498d1ef6e601b448404fb000c))
+
+## [1.75.19](https://github.com/adobe/spacecat-api-service/compare/v1.75.18...v1.75.19) (2024-11-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.10.0 ([#582](https://github.com/adobe/spacecat-api-service/issues/582)) ([31f2b50](https://github.com/adobe/spacecat-api-service/commit/31f2b50a1876207d940295c900143b0d4f35e727))
+
+## [1.75.18](https://github.com/adobe/spacecat-api-service/compare/v1.75.17...v1.75.18) (2024-11-17)
+
+
+### Bug Fixes
+
+* add recommendations (ex: guidance) information to the experimentation opportunity object ([#552](https://github.com/adobe/spacecat-api-service/issues/552)) ([b4c18f9](https://github.com/adobe/spacecat-api-service/commit/b4c18f927eb5b1fdabe41ec7da6e481471c45796))
+
+## [1.75.17](https://github.com/adobe/spacecat-api-service/compare/v1.75.16...v1.75.17) (2024-11-16)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#579](https://github.com/adobe/spacecat-api-service/issues/579)) ([9e6c08e](https://github.com/adobe/spacecat-api-service/commit/9e6c08ee8d3d6a1b0d11851a89a843b86009e986))
+
+## [1.75.16](https://github.com/adobe/spacecat-api-service/compare/v1.75.15...v1.75.16) (2024-11-15)
+
+
+### Bug Fixes
+
+* update shared utils ([0fab66f](https://github.com/adobe/spacecat-api-service/commit/0fab66fb6db50c0fcdd89082831a8001a0412cca))
+
 ## [1.75.15](https://github.com/adobe/spacecat-api-service/compare/v1.75.14...v1.75.15) (2024-11-15)
 
 
