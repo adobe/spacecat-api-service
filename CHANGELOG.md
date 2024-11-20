@@ -1,3 +1,24 @@
+## [1.78.2](https://github.com/adobe/spacecat-api-service/compare/v1.78.1...v1.78.2) (2024-11-20)
+
+
+### Bug Fixes
+
+* get site command slack error ([11da794](https://github.com/adobe/spacecat-api-service/commit/11da7943420d97c0c73b75cf90b40a305cf9f8ca))
+
+## [1.78.1](https://github.com/adobe/spacecat-api-service/compare/v1.78.0...v1.78.1) (2024-11-20)
+
+
+### Bug Fixes
+
+* update deps ([#586](https://github.com/adobe/spacecat-api-service/issues/586)) ([99e1439](https://github.com/adobe/spacecat-api-service/commit/99e1439e3a2800d04d7467535e34e82ba499cadb))
+
+# [1.78.0](https://github.com/adobe/spacecat-api-service/compare/v1.77.0...v1.78.0) (2024-11-20)
+
+
+### Features
+
+* Introduce configurable grouping patterns ([#571](https://github.com/adobe/spacecat-api-service/issues/571)) ([d16416c](https://github.com/adobe/spacecat-api-service/commit/d16416c05890d878ad2cc68558ed4d4c4a1931be))
+
 # [1.77.0](https://github.com/adobe/spacecat-api-service/compare/v1.76.1...v1.77.0) (2024-11-19)
 
 
