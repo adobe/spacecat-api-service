@@ -890,6 +890,31 @@ describe('Audits Controller', () => {
         expect(result.status).to.equal(200);
       });
 
+      it('successful update when groupedURLs is empty', async () => {
+        const groupedURLsConfig = [
+          { name: 'news', pattern: '/news/' },
+        ];
+        const handlerConfig = {
+          groupedURLs: groupedURLsConfig,
+        };
+
+        const groupedURLs = [];
+        const context = {
+          params: { siteId, auditType: 'broken-backlinks' },
+          data: { groupedURLs },
+        };
+
+        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
+        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(siteConfig.updateGroupedURLs.calledWith(auditType, [])).to.be.true;
+        expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
+        expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+        expect(result.status).to.equal(200);
+      });
+
       it('successful update if groupedURLs is undefined in the config', async () => {
         const groupedURLsConfig = undefined;
         const handlerConfig = {
