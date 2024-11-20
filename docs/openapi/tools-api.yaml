@@ -123,9 +123,7 @@ import-job-status:
       content:
         application/json:
           schema:
-            type: array
-            items:
-              $ref: './schemas.yaml#/ImportJobStopRequest'
+            $ref: './schemas.yaml#/ImportJobStopRequest'
     parameters:
       - $ref: './parameters.yaml#/jobId'
       - in: header
@@ -299,7 +297,7 @@ api-keys:
     tags:
       - api-keys
     summary: Get all API keys owned by the given IMS client
-    description: |
+    description:  |
       This endpoint can be used to list all the API keys created by the client.
     operationId: getApiKeys
     security:
@@ -314,7 +312,7 @@ api-keys:
         example: '1234567890ABCDEF12345678@AdobeOrg'
     responses:
       '200':
-        description: |
+        description:  |
           API key metadata returned successfully. Note that the API key itself will not be included in this list, as it's only displayed once (at creation).
         content:
           application/json:
@@ -333,7 +331,7 @@ api-key-deletion:
     tags:
       - api-keys
     summary: Delete an API key
-    description: |
+    description:  |
       This endpoint can be used to delete an API key. The API key will be marked as deleted in the system and
       will no longer be valid for authentication. Only keys created by this IMS client can be deleted by it.
     operationId: deleteApiKey
