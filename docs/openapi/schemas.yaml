@@ -1970,7 +1970,7 @@ SuggestionCreateFailure:
       minimum: 0
     statusCode:
       description: HTTP status code indicating the type of failure
-      type: string
+      type: integer
     message:
       description: Error message describing the failure
       type: string
@@ -2050,7 +2050,7 @@ SuggestionUpdateFailure:
       $ref: '#/Id'
     statusCode:
       description: HTTP status code indicating the type of failure
-      type: string
+      type: integer
     message:
       description: Error message describing the failure
       type: string
