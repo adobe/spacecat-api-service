@@ -126,6 +126,16 @@ function AuditsController(dataAccess) {
       return Object.values(overrides);
     }
 
+    const validateGroupedURLsInput = (groupedURLs) => {
+      groupedURLs.forEach(({ name, pattern }) => {
+        try {
+          RegExp(pattern);
+        } catch (error) {
+          throw new Error(`Invalid regular expression in pattern for "${name}": "${pattern}".`);
+        }
+      });
+    };
+
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
@@ -194,21 +204,26 @@ function AuditsController(dataAccess) {
     }
 
     if (Array.isArray(groupedURLs)) {
+      try {
+        validateGroupedURLsInput(groupedURLs);
+      } catch (error) {
+        return badRequest(error.message);
+      }
       hasUpdates = true;
 
+      const currentGroupedURLs = config.getGroupedURLs(auditType) || [];
       const patchedGroupedURLs = groupedURLs.length === 0
         ? []
-        : Array.from(new Set([...(config.getGroupedURLs(auditType) || []), ...groupedURLs]));
+        : Array.from(new Set([...currentGroupedURLs, ...groupedURLs]));
 
       config.updateGroupedURLs(auditType, patchedGroupedURLs);
     }
 
     if (hasUpdates) {
-      const handlerType = config.getHandlerConfig(auditType);
       const configObj = Config.toDynamoItem(config);
       site.updateConfig(configObj);
       await dataAccess.updateSite(site);
-      return ok(handlerType);
+      return ok(handlerConfig);
     }
     return badRequest('No updates provided');
   };
