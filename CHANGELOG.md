@@ -1,3 +1,10 @@
+# [1.78.0](https://github.com/adobe/spacecat-api-service/compare/v1.77.0...v1.78.0) (2024-11-20)
+
+
+### Features
+
+* Introduce configurable grouping patterns ([#571](https://github.com/adobe/spacecat-api-service/issues/571)) ([d16416c](https://github.com/adobe/spacecat-api-service/commit/d16416c05890d878ad2cc68558ed4d4c4a1931be))
+
 # [1.77.0](https://github.com/adobe/spacecat-api-service/compare/v1.76.1...v1.77.0) (2024-11-19)
 
 
