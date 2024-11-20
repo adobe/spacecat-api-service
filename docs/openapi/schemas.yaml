@@ -1599,7 +1599,7 @@ ImportAssistantResponse:
   example:
     choices:
       - message:
-          content: 'div.main div.product'
+          content: '.breadcrumbs'
 ApiKeyRequest:
   type: object
   required:
@@ -1670,6 +1670,22 @@ ApiKeyResponse:
         apiKey:
           description: The API key
           type: string
+ImportJobStopRequest:
+  type: object
+  properties:
+    op:
+      description: The operation to perform on the import job
+      type: string
+      enum:
+        - 'replace'
+    path:
+      description: The path of the attribute to update
+      type: string
+      example: '/status'
+    value:
+      description: The value to set
+      type: string
+      example: 'STOPPED'
 OpportunityStatus:
   description: Status of an opportunity
   type: string

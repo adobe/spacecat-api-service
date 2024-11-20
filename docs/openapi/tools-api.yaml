@@ -109,6 +109,41 @@ import-job-status:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - import
+    summary: Stop an import job
+    description: |
+      This endpoint can be used to stop an import job, given its jobId. This operation will stop
+      the import job and mark the job status as STOPPED.
+    operationId: stopImportJob
+    security:
+      - scoped_api_key: [ ]
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/ImportJobStopRequest'
+    parameters:
+      - $ref: './parameters.yaml#/jobId'
+      - in: header
+        name: x-api-key
+        schema:
+          type: string
+        description: |
+          Client-specific import API key. Must match the key used to start the import job, and
+          include the imports.write scope.
+    responses:
+      '204':
+        description: Import job stopped successfully.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
 import-job-progress:
   get:
     tags:
@@ -262,7 +297,7 @@ api-keys:
     tags:
       - api-keys
     summary: Get all API keys owned by the given IMS client
-    description:  |
+    description: |
       This endpoint can be used to list all the API keys created by the client.
     operationId: getApiKeys
     security:
@@ -277,7 +312,7 @@ api-keys:
         example: '1234567890ABCDEF12345678@AdobeOrg'
     responses:
       '200':
-        description:  |
+        description: |
           API key metadata returned successfully. Note that the API key itself will not be included in this list, as it's only displayed once (at creation).
         content:
           application/json:
@@ -296,7 +331,7 @@ api-key-deletion:
     tags:
       - api-keys
     summary: Delete an API key
-    description:  |
+    description: |
       This endpoint can be used to delete an API key. The API key will be marked as deleted in the system and
       will no longer be valid for authentication. Only keys created by this IMS client can be deleted by it.
     operationId: deleteApiKey
