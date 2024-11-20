@@ -15,6 +15,16 @@ site-opportunities:
           application/json:
             schema:
               $ref: './schemas.yaml#/OpportunityList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
   post:
@@ -40,6 +50,18 @@ site-opportunities:
           application/json:
             schema:
               $ref: './schemas.yaml#/Opportunity'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
@@ -65,6 +87,18 @@ site-opportunities-by-status:
           application/json:
             schema:
               $ref: './schemas.yaml#/OpportunityList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
@@ -89,6 +123,16 @@ site-opportunity:
             examples:
               broken-backlinks-opportunity:
                 $ref: './examples.yaml#/broken-backlinks-opportunity'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
@@ -115,6 +159,18 @@ site-opportunity:
           application/json:
             schema:
               $ref: './schemas.yaml#/Opportunity'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
@@ -128,6 +184,16 @@ site-opportunity:
     responses:
       '204':
         description: Opportunity deleted
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
@@ -149,6 +215,16 @@ site-opportunity-suggestions:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
@@ -169,12 +245,15 @@ site-opportunity-suggestions:
             broken-backlinks-suggestion-create-list:
               $ref: './examples.yaml#/broken-backlinks-suggestion-create-list'
     responses:
-      '201':
+      '207':
         description: A list of suggestions created and added to the opportunity
         content:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
+            examples:
+              broken-backlinks-suggestion-create-list-response:
+                $ref: './examples.yaml#/broken-backlinks-suggestion-create-list-response'
     security:
       - ims_key: [ ]
 
@@ -201,6 +280,18 @@ site-opportunity-suggestions-by-status:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
@@ -225,12 +316,15 @@ site-opportunity-suggestions-status:
             broken-backlinks-suggestions-status-update:
               $ref: './examples.yaml#/broken-backlinks-suggestions-status-update'
     responses:
-      '200':
+      '207':
         description: Suggestions updated
         content:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
+            examples:
+              broken-backlinks-suggestions-status-update-response:
+                $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
     security:
       - ims_key: [ ]
 
@@ -256,9 +350,18 @@ site-opportunity-suggestion:
             examples:
               broken-backlinks-suggestion:
                 $ref: './examples.yaml#/broken-backlinks-suggestion'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
-
   patch:
     summary: |
       Not implemented yet.
@@ -285,5 +388,18 @@ site-opportunity-suggestion:
             examples:
               broken-backlinks-suggestion:
                 $ref: './examples.yaml#/broken-backlinks-suggestion'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
+
