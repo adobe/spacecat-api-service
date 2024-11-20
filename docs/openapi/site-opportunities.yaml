@@ -246,11 +246,13 @@ site-opportunity-suggestions:
               $ref: './examples.yaml#/broken-backlinks-suggestion-create-list'
     responses:
       '207':
-        description: A list of suggestions created and added to the opportunity
+        description: |
+          A list of suggestions created and added to the opportunity, 
+          or the status code and error message for the ones failed.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SuggestionList'
+              $ref: './schemas.yaml#/SuggestionCreateListResponse'
             examples:
               broken-backlinks-suggestion-create-list-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestion-create-list-response'
@@ -317,11 +319,13 @@ site-opportunity-suggestions-status:
               $ref: './examples.yaml#/broken-backlinks-suggestions-status-update'
     responses:
       '207':
-        description: Suggestions updated
+        description: |
+          A list of suggestions updated, 
+          or the status code and error message for the ones failed.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SuggestionList'
+              $ref: './schemas.yaml#/SuggestionStatusUpdateListResponse'
             examples:
               broken-backlinks-suggestions-status-update-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'

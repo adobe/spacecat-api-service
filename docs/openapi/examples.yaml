@@ -24,7 +24,6 @@ broken-backlinks-opportunity:
 broken-backlinks-opportunity-create:
   description: Example for a broken backlinks opportunity create
   value:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     auditId: '123e4567-e89b-12d3-a456-426614174000'
     runbook: 'https://example.com/runbook/broken-backlinks'
     type: 'broken-backlinks'
@@ -79,6 +78,7 @@ broken-backlinks-suggestion-create-list:
         - 'https://www.example.com/customer-service'
         referringPageTraffic: 571000
     - opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+      type: 'REDIRECT_UPDATE'
       rank: 123000
       data:
         referringPageTitle: 'Black Friday Sale at Example Inc.'
@@ -91,8 +91,10 @@ broken-backlinks-suggestion-create-list-response:
   description: Example for a broken backlinks suggestion create list response
   value:
     suggestions:
-      - opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+      - id: '2563e4567-f543-12d3-a456-426614174000'
+        opportunityId: '123e4567-e89b-12d3-a456-426614174000'
         type: 'REDIRECT_UPDATE'
+        status: 'NEW'
         rank: 571000
         data:
           referringPageTitle: 'Black Friday Sale at Example Inc.'
@@ -102,6 +104,8 @@ broken-backlinks-suggestion-create-list-response:
             - 'https://www.example.com/customer-service/contact'
             - 'https://www.example.com/customer-service'
           referringPageTraffic: 571000
+        createdAt: '2024-01-22T12:00:00Z'
+        updatedAt: '2024-07-26T12:00:00Z'
       - suggestionIndex: 1
         statusCode: '400'
         message: 'Validation failed in suggestion: type is required'

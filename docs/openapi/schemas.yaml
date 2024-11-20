@@ -1960,6 +1960,53 @@ SuggestionCreateList:
   type: array
   items:
     $ref: '#/SuggestionCreate'
+SuggestionCreateFailure:
+  type: object
+  description: Suggestion create failure response
+  properties:
+    suggestionIndex:
+      description: Index of this suggestion in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of failure
+      type: string
+    message:
+      description: Error message describing the failure
+      type: string
+  required:
+    - suggestionIndex
+    - statusCode
+    - message
+SuggestionCreateListResponse:
+  type: object
+  description: Suggestion create list response
+  properties:
+    suggestions:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/Suggestion'
+          - $ref: '#/SuggestionCreateFailure'
+    metadata:
+      type: object
+      properties:
+        total:
+          description: Total number of suggestions in the response
+          type: integer
+        success:
+          description: Number of suggestions successfully create
+          type: integer
+        failure:
+          description: Number of suggestions that failed to create
+          type: integer
+      required:
+        - total
+        - success
+        - failure
+  required:
+    - suggestions
+    - metadata
 SuggestionUpdate:
   type: object
   properties:
@@ -1991,6 +2038,55 @@ SuggestionStatusUpdate:
       status:
         description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
         $ref: '#/SuggestionStatus'
+    required:
+      - id
+      - status
+SuggestionUpdateFailure:
+  type: object
+  description: Suggestion update failure
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    statusCode:
+      description: HTTP status code indicating the type of failure
+      type: string
+    message:
+      description: Error message describing the failure
+      type: string
+  required:
+    - id
+    - statusCode
+    - message
+SuggestionStatusUpdateListResponse:
+  type: object
+  description: Suggestions status update response
+  properties:
+    suggestions:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/Suggestion'
+          - $ref: '#/SuggestionUpdateFailure'
+    metadata:
+      type: object
+      properties:
+        total:
+          description: Total number of suggestions in the response
+          type: integer
+        success:
+          description: Number of suggestions successfully updated
+          type: integer
+        failure:
+          description: Number of suggestions that failed to update
+          type: integer
+      required:
+        - total
+        - success
+        - failure
+  required:
+    - suggestions
+    - metadata
 BrokenBacklinksRedirectData:
   description: Data specific to redirect suggestion for broken backlinks opportunity
   type: object
