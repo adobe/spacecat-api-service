@@ -147,6 +147,8 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
+    console.log(context);
+    console.log(context.data);
     const { excludedURLs, manualOverwrites, groupedURLs } = context.data;
     let hasUpdates = false;
 
