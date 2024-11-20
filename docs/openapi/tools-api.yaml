@@ -123,7 +123,9 @@ import-job-status:
       content:
         application/json:
           schema:
-            $ref: './schemas.yaml#/ImportJobStopRequest'
+            type: array
+            items:
+              $ref: './schemas.yaml#/ImportJobStopRequest'
     parameters:
       - $ref: './parameters.yaml#/jobId'
       - in: header
