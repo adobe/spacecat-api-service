@@ -18,48 +18,11 @@ import {
 import {
   hasText,
   isArray,
-  isNumber,
   isObject,
 } from '@adobe/spacecat-shared-utils';
 
+import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
-
-// TODO: Validation methods should be moved to a different file. dataAccess?
-// eslint-disable-next-line object-curly-newline
-function validateDataTypes({ type, rank, data, kpiDeltas }) {
-  // I undestand that there are more types to come, but for now, we only have this one
-  if (type && !['redirect'].includes(type)) {
-    return { valid: false, message: 'Invalid type' };
-  }
-
-  if (rank && !isNumber(rank)) {
-    return { valid: false, message: 'Rank should be a number' };
-  }
-
-  if (data && !isObject(data)) {
-    return { valid: false, message: 'Data should be an object' };
-  }
-
-  if (kpiDeltas && !isObject(kpiDeltas)) {
-    return { valid: false, message: 'kpiDeltas should be an object' };
-  }
-  return { valid: true };
-}
-/**
- * Validates whether a given suggestion data is valid.
- * @param {Object} suggestion data
- * @returns {{ valid: boolean, message: string }} Validation result.
- */
-function validateSuggestionDataForCreate(suggestion) {
-  const requiredFields = ['type', 'rank', 'data'];
-
-  const missingRequiredFields = requiredFields.filter((field) => !suggestion[field]);
-  if (missingRequiredFields.length > 0) {
-    return { valid: false, message: `Missing required fields: ${missingRequiredFields.join(', ')}` };
-  }
-
-  return validateDataTypes(suggestion);
-}
 
 /**
  * Suggestions controller.
@@ -81,7 +44,6 @@ function SuggestionsController(dataAccess) {
   const getAllForOpportunity = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
-    const ascending = context.data?.ascending === 'true' || false;
 
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
@@ -90,9 +52,16 @@ function SuggestionsController(dataAccess) {
     if (!hasText(opptyId)) {
       return badRequest('Opportunity ID required');
     }
-    const suggestions = (await dataAccess.getSuggestionsForSite(siteId, opptyId, ascending))
-      .map((sugg) => SuggestionDto.toJSON(sugg));
 
+    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+    // Check if the opportunity belongs to the site
+    if (suggestionEntities.length > 0) {
+      const oppty = await suggestionEntities[0].getOpportunity();
+      if (oppty.getSiteId() !== siteId) {
+        return badRequest('Opportunity not found');
+      }
+    }
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
     return ok(suggestions);
   };
 
@@ -105,17 +74,25 @@ function SuggestionsController(dataAccess) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
-    const ascending = context.data?.ascending === 'true' || false;
-
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
     }
     if (!hasText(opptyId)) {
       return badRequest('Opportunity ID required');
     }
-    const suggestions = (await dataAccess.getSuggestionsForSite(siteId, opptyId, status, ascending))
-      .map((sugg) => SuggestionDto.toJSON(sugg));
+    if (!hasText(status)) {
+      return badRequest('Status is required');
+    }
 
+    const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
+    // Check if the opportunity belongs to the site
+    if (suggestionEntities.length > 0) {
+      const oppty = await suggestionEntities[0].getOpportunity();
+      if (oppty.getSiteId() !== siteId) {
+        return badRequest('Opportunity not found');
+      }
+    }
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
     return ok(suggestions);
   };
 
@@ -141,8 +118,9 @@ function SuggestionsController(dataAccess) {
       return badRequest('suggestion ID required');
     }
 
-    const sugg = await dataAccess.getSuggestionById(siteId, opptyId, suggestionId);
-    if (!sugg) {
+    const sugg = await Suggestion.findById(suggestionId);
+    if (!sugg || sugg.getOpportunityId() !== opptyId
+       || (await sugg.getOpportunity()).getSiteId() !== siteId) {
       return notFound('Suggestion not found');
     }
     return ok(SuggestionDto.toJSON(sugg));
@@ -174,24 +152,37 @@ function SuggestionsController(dataAccess) {
       return badRequest('request body must be an array');
     }
 
-    // validate each suggestion
-    const errors = [];
-    const validSuggestions = context.data.map((suggData) => {
-      const validationResult = validateSuggestionDataForCreate(suggData);
-      if (!validationResult.valid) {
-        errors.push(validationResult.message);
-        return null;
+    const suggestionPromises = context.data.map(async (suggData, index) => {
+      try {
+        const suggestionEntity = await Suggestion.create(suggData);
+        return {
+          index,
+          suggestion: SuggestionDto.toJSON(suggestionEntity),
+          statusCode: 201,
+        };
+      } catch (error) {
+        return {
+          index,
+          message: error.message,
+          statusCode: error instanceof ValidationError ? 400 : 500,
+        };
       }
-      return suggData;
-    }).filter((sugg) => sugg);
+    });
 
-    // TODO: if errors? create valid suggestions and return 201 or fail the whole transaction?
-    if (validSuggestions.length === 0 && errors.length > 0) {
-      return badRequest(errors.join(', '));
-    }
+    const responses = await Promise.all(suggestionPromises);
+    // Sort the results by the index of the suggestion in the request
+    responses.sort((a, b) => a.index - b.index);
+    const succeded = responses.filter((r) => r.status === 201).length;
+    const fullResponse = {
+      suggestions: responses,
+      metadata: {
+        total: responses.length,
+        success: succeded,
+        failed: responses.length - succeded,
+      },
+    };
 
-    const suggestions = await dataAccess.addSuggestions(validSuggestions, siteId, opptyId);
-    return createResponse(suggestions.map((sugg) => SuggestionDto.toJSON(sugg)), 201);
+    return createResponse(fullResponse, 207);
   };
 
   /**
@@ -216,18 +207,9 @@ function SuggestionsController(dataAccess) {
       return badRequest('Suggestion ID required');
     }
 
-    const site = await dataAccess.getSiteByID(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    const opportunity = await dataAccess.getOpportunityById(siteId, opportunityId);
-    if (!opportunity) {
-      return notFound('Opportunity not found');
-    }
-
-    const suggestion = await dataAccess.getSuggestionById(siteId, opportunityId, suggestionId);
-    if (!suggestion) {
+    const suggestion = Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opportunityId
+       || (await suggestion.getOpportunity()).getSiteId() !== siteId) {
       return notFound('Suggestion not found');
     }
 
@@ -238,24 +220,28 @@ function SuggestionsController(dataAccess) {
 
     let hasUpdates = false;
     const { rank, data, kpiDeltas } = context.data;
-    if (rank && rank !== suggestion.rank) {
-      hasUpdates = true;
-      suggestion.setRank(rank);
-    }
+    try {
+      if (rank && rank !== suggestion.rank) {
+        hasUpdates = true;
+        suggestion.setRank(rank);
+      }
 
-    if (data) {
-      hasUpdates = true;
-      suggestion.setData(data);
-    }
+      if (data) {
+        hasUpdates = true;
+        suggestion.setData(data);
+      }
 
-    if (kpiDeltas) {
-      hasUpdates = true;
-      suggestion.setKpiDeltas(kpiDeltas);
-    }
+      if (kpiDeltas) {
+        hasUpdates = true;
+        suggestion.setKpiDeltas(kpiDeltas);
+      }
 
-    if (hasUpdates) {
-      await dataAccess.updateSuggestion(suggestion);
-      return ok(SuggestionDto.toJSON(suggestion));
+      if (hasUpdates) {
+        const updatedSuggestion = await suggestion.save();
+        return ok(SuggestionDto.toJSON(updatedSuggestion));
+      }
+    } catch (e) {
+      return badRequest(e.message);
     }
     return badRequest('No updates provided');
   };
@@ -277,16 +263,6 @@ function SuggestionsController(dataAccess) {
       return badRequest('Opportunity ID required');
     }
 
-    const site = await dataAccess.getSiteByID(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    const opportunity = await dataAccess.getOpportunityById(siteId, opportunityId);
-    if (!opportunity) {
-      return notFound('Opportunity not found');
-    }
-
     // validate request body
     if (!context.data) {
       return badRequest('No updates provided');
@@ -295,40 +271,86 @@ function SuggestionsController(dataAccess) {
     if (!isArray(context.data)) {
       return badRequest('request body must be an array of [{ suggestionId, status },...]');
     }
-    let hasUpdates = false;
-    const errors = [];
-    const suggestions = context.data.map(async ({ id, status }) => {
+
+    const suggestionPromises = context.data.map(async ({ id, status }, index) => {
       if (!hasText(id)) {
-        errors.push('suggestionId is required');
-        return null;
+        return {
+          index,
+          uuid: '',
+          message: 'suggestionId is required',
+          statusCode: 400,
+        };
       }
       if (!hasText(status)) {
-        errors.push('status is required');
-        return null;
+        return {
+          index,
+          uuid: id,
+          message: 'status is required',
+          statusCode: 400,
+        };
       }
 
-      const suggestion = await dataAccess.getSuggestionById(siteId, opportunityId, id);
-      if (!suggestion) {
-        errors.push(`Suggestion ${id} not found`);
-        return null;
+      const suggestion = await Suggestion.findById(id);
+      if (!suggestion || suggestion.getOpportunityId() !== opportunityId
+         || (await suggestion.getOpportunity()).getSiteId() !== siteId) {
+        return {
+          index,
+          uuid: id,
+          message: 'suggestion not found',
+          statusCode: 404,
+        };
       }
 
-      if (suggestion.status !== status) {
-        hasUpdates = true;
-        suggestion.setStatus(status);
+      try {
+        if (suggestion.status !== status) {
+          suggestion.setStatus(status);
+        } else {
+          return {
+            index,
+            uuid: id,
+            message: 'no updates provided',
+            statusCode: 400,
+          };
+        }
+      } catch (e) {
+        // Validation error on setStatus
+        return {
+          index,
+          uuid: id,
+          message: e.message,
+          statusCode: 400,
+        };
       }
-      return suggestion;
-    }).filter((sugg) => sugg);
+      try {
+        const updatedSuggestion = await suggestion.save();
+        return {
+          index,
+          uuid: id,
+          suggestion: SuggestionDto.toJSON(updatedSuggestion),
+          statusCode: 200,
+        };
+      } catch (error) {
+        return {
+          index,
+          message: error.message,
+          statusCode: error instanceof ValidationError ? 400 : 500,
+        };
+      }
+    });
 
-    // TODO: if errors? update data and return 200 or fail the whole transaction?
-    if (hasUpdates) {
-      await dataAccess.updateSuggestions(suggestions);
-      return ok(suggestions.map((sugg) => SuggestionDto.toJSON(sugg)));
-    }
-    if (suggestions.length === 0 && errors.length > 0) {
-      return badRequest(errors.join(', '));
-    }
-    return badRequest('No updates provided');
+    const responses = await Promise.all(suggestionPromises);
+    // Sort the results by the index of the suggestion in the request
+    responses.sort((a, b) => a.index - b.index);
+    const succeded = responses.filter((r) => r.status === 200).length;
+    const fullResponse = {
+      suggestions: responses,
+      metadata: {
+        total: responses.length,
+        success: succeded,
+        failed: responses.length - succeded,
+      },
+    };
+    return createResponse(fullResponse, 207);
   };
 
   return {
