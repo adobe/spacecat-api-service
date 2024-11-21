@@ -1,3 +1,45 @@
+# [1.79.0](https://github.com/adobe/spacecat-api-service/compare/v1.78.3...v1.79.0) (2024-11-21)
+
+
+### Features
+
+* HTTP API specification for opportunities, suggestions ([#556](https://github.com/adobe/spacecat-api-service/issues/556)) ([3f78add](https://github.com/adobe/spacecat-api-service/commit/3f78add91e3de11ee7a60e6ec81508a902d88466))
+
+## [1.78.3](https://github.com/adobe/spacecat-api-service/compare/v1.78.2...v1.78.3) (2024-11-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.55.0 ([#585](https://github.com/adobe/spacecat-api-service/issues/585)) ([733ddf7](https://github.com/adobe/spacecat-api-service/commit/733ddf70135eb06c78f00e47584a79d02360f5c7))
+
+## [1.78.2](https://github.com/adobe/spacecat-api-service/compare/v1.78.1...v1.78.2) (2024-11-20)
+
+
+### Bug Fixes
+
+* get site command slack error ([11da794](https://github.com/adobe/spacecat-api-service/commit/11da7943420d97c0c73b75cf90b40a305cf9f8ca))
+
+## [1.78.1](https://github.com/adobe/spacecat-api-service/compare/v1.78.0...v1.78.1) (2024-11-20)
+
+
+### Bug Fixes
+
+* update deps ([#586](https://github.com/adobe/spacecat-api-service/issues/586)) ([99e1439](https://github.com/adobe/spacecat-api-service/commit/99e1439e3a2800d04d7467535e34e82ba499cadb))
+
+# [1.78.0](https://github.com/adobe/spacecat-api-service/compare/v1.77.0...v1.78.0) (2024-11-20)
+
+
+### Features
+
+* Introduce configurable grouping patterns ([#571](https://github.com/adobe/spacecat-api-service/issues/571)) ([d16416c](https://github.com/adobe/spacecat-api-service/commit/d16416c05890d878ad2cc68558ed4d4c4a1931be))
+
+# [1.77.0](https://github.com/adobe/spacecat-api-service/compare/v1.76.1...v1.77.0) (2024-11-19)
+
+
+### Features
+
+* Build an API to generate API keys for the importer ([#569](https://github.com/adobe/spacecat-api-service/issues/569)) ([0d78df9](https://github.com/adobe/spacecat-api-service/commit/0d78df90b6aea67f31f7ee08d14f54134d346416))
+
 ## [1.76.1](https://github.com/adobe/spacecat-api-service/compare/v1.76.0...v1.76.1) (2024-11-18)
 
 

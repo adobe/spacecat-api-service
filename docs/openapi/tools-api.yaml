@@ -224,8 +224,6 @@ api-keys:
       - api-keys
     summary: Create a new API key
     description: |
-      Note: Not implemented yet.
-      
       This endpoint can be used to create a new API key with a set of scopes. The scoped API key will be
       returned in the response only once. The scoped API key can be used to authenticate the Spacecat APIs by
       including it in the x-api-key header.
@@ -264,9 +262,7 @@ api-keys:
     tags:
       - api-keys
     summary: Get all API keys owned by the given IMS client
-    description: |
-      Note: Not implemented yet.
-      
+    description:  |
       This endpoint can be used to list all the API keys created by the client.
     operationId: getApiKeys
     security:
@@ -281,7 +277,8 @@ api-keys:
         example: '1234567890ABCDEF12345678@AdobeOrg'
     responses:
       '200':
-        description: API key metadata returned successfully. Note that the API key itself will not be included in this list, as it's only displayed once (at creation).
+        description:  |
+          API key metadata returned successfully. Note that the API key itself will not be included in this list, as it's only displayed once (at creation).
         content:
           application/json:
             schema:
@@ -299,9 +296,7 @@ api-key-deletion:
     tags:
       - api-keys
     summary: Delete an API key
-    description: |
-      Note: Not implemented yet.
-      
+    description:  |
       This endpoint can be used to delete an API key. The API key will be marked as deleted in the system and
       will no longer be valid for authentication. Only keys created by this IMS client can be deleted by it.
     operationId: deleteApiKey
