@@ -11,46 +11,48 @@
  */
 
 import { FirefallClient } from '@adobe/spacecat-shared-gpt-client';
+import Handlebars from 'handlebars';
 import { ErrorWithStatusCode } from './utils.js';
 
 /*
  * Command Config Type:
  * - parameters: string[] : parameters required for the command
  * - firefallArgs: object : key/value pairs to pass to the FirefallClient
- *  - firefallArgs.llmModel: string : the LLM Model to use for the command
+ *  - firefallArgs.model: string : the LLM Model to use for the command
  *  - firefallArgs.responseFormat: string : AI response format for the command
+ * NOTE: each command key requires a matching 'System Prompt' in AWS Secrets Manager.
  */
 const commandConfig = {
   findMainContent: {
-    parameters: [],
+    parameters: ['htmlContent'],
     firefallArgs: {
-      llmModel: 'gpt-4-turbo',
+      model: 'gpt-4-turbo',
       responseFormat: 'json_object',
     },
   },
   findRemovalSelectors: {
-    parameters: ['prompt'],
+    parameters: ['prompt', 'htmlContent'],
     firefallArgs: {
-      llmModel: 'gpt-4-turbo',
+      model: 'gpt-4-turbo',
       responseFormat: 'json_object',
     },
   },
   findBlockSelectors: {
-    parameters: ['prompt', 'imageUrl'],
+    parameters: ['prompt', 'htmlContent', 'imageUrl'],
     firefallArgs: {
-      llmModel: 'gpt-4-vision',
+      model: 'gpt-4-vision',
     },
   },
   findBlockCells: {
-    parameters: ['prompt'],
+    parameters: ['prompt', 'htmlContent', 'selector'],
     firefallArgs: {
-      llmModel: 'gpt-4-turbo',
+      model: 'gpt-4-turbo',
     },
   },
   generatePageTransformation: {
-    parameters: ['prompt'],
+    parameters: ['prompt', 'htmlContent'],
     firefallArgs: {
-      llmModel: 'gpt-4-turbo',
+      model: 'gpt-4-turbo',
     },
   },
 };
@@ -83,6 +85,30 @@ const validateAccessScopes = (auth, scopes, log) => {
   log?.debug(`Validation of scopes succeeded: ${scopes}`);
 };
 
+/**
+ * Merge the command's system prompt with all the properties in the provided object.
+ * @param {object} assistantPrompts Prompts with 'command' as key
+ * @param {object} command Assistant command
+ * @param {string} mergeData Object containing the values to merge with the command's system prompt.
+ * @param {string} mergeData.content The HTML text to use in the prompt.
+ * @param {string} mergeData.pattern The pattern to use in the prompt, usually the user prompt.
+ * @param {string} mergeData.selector The selector of the element in the provided HTML.
+ * @returns {string}
+ */
+const mergePrompt = (assistantPrompts, command, mergeData) => {
+  if (!assistantPrompts || !assistantPrompts[command]) {
+    throw new Error(`Command has no associated prompt: ${command}`);
+  }
+  const systemPrompt = assistantPrompts[command];
+
+  try {
+    const templateFunction = Handlebars.compile(systemPrompt, { strict: true });
+    return templateFunction(mergeData);
+  } catch (e) {
+    throw new Error(`Failed to create prompt for ${command}. Message: ${e.message}`);
+  }
+};
+
 const fetchFirefallCompletion = async (requestData, log) => {
   const context = {
     ...requestData,
@@ -96,15 +122,15 @@ const fetchFirefallCompletion = async (requestData, log) => {
   }
 
   const {
-    prompt, llmModel, responseFormat, imageUrl,
+    prompt, model, responseFormat, imageUrl,
   } = requestData;
 
   try {
-    const imageCnt = imageUrl?.length || 0;
-    log.info(`Calling chat completions with model ${llmModel}, format ${responseFormat || 'none'} and ${imageCnt} imageUrls.`);
+    const imageCnt = imageUrl ? 1 : 0;
+    log.info(`Calling chat completions with model ${model}, format ${responseFormat || 'none'} and ${imageCnt} imageUrls.`);
 
     return await client.fetchChatCompletion(prompt, {
-      model: llmModel,
+      model,
       responseFormat,
       imageUrls: imageUrl ? [imageUrl] : undefined,
     });
@@ -116,6 +142,7 @@ const fetchFirefallCompletion = async (requestData, log) => {
 export {
   commandConfig,
   fetchFirefallCompletion,
+  mergePrompt,
   validateAccessScopes,
   STATUS,
   SCOPE,

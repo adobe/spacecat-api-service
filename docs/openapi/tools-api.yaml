@@ -192,12 +192,14 @@ import-assistant:
     security:
       - scoped_api_key: [ ]
     requestBody:
+      required: true
       content:
         application/json:
           schema:
             $ref: './schemas.yaml#/ImportAssistantRequest'
     parameters:
       - in: header
+        required: true
         name: x-api-key
         schema:
           type: string

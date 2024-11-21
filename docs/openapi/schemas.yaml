@@ -1567,13 +1567,14 @@ ImportAssistantRequest:
       description: Optional prompt to provide context for the analysis.
       type: string
     options:
-      description: Optional configuration options required by the command.  Example 'imageUrl'
+      description: Optional configuration options required by the command. Example 'htmlContent', 'imageUrl', 'selector'.
       type: object
   example:
-    command: 'findRemovalSelectors'
-    prompt: 'breadcrumbs'
+    command: 'findBlockSelectors'
+    prompt: 'rectangle with blue background, a heading and paragraph text'
     options: {
-      imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...='
+      imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...=',
+      htmlContent: '<html>...</html>',
     }
 ImportAssistantResponse:
   type: object
@@ -1594,7 +1595,7 @@ ImportAssistantResponse:
   example:
     choices:
       - message:
-          content: '.breadcrumbs'
+          content: 'div.main div.product'
 ApiKeyRequest:
   type: object
   required:
