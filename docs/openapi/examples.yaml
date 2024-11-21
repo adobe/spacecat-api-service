@@ -91,22 +91,25 @@ broken-backlinks-suggestion-create-list-response:
   description: Example for a broken backlinks suggestion create list response
   value:
     suggestions:
-      - id: '2563e4567-f543-12d3-a456-426614174000'
-        opportunityId: '123e4567-e89b-12d3-a456-426614174000'
-        type: 'REDIRECT_UPDATE'
-        status: 'NEW'
-        rank: 571000
-        data:
-          referringPageTitle: 'Black Friday Sale at Example Inc.'
-          referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-          brokenTargetURL: 'https://www.example.com/CustomerServiceView.aspx'
-          proposedTargetURLs:
-            - 'https://www.example.com/customer-service/contact'
-            - 'https://www.example.com/customer-service'
-          referringPageTraffic: 571000
-        createdAt: '2024-01-22T12:00:00Z'
-        updatedAt: '2024-07-26T12:00:00Z'
-      - suggestionIndex: 1
+      - index: 0
+        statusCode: 201
+        suggestion:
+          id: '2563e4567-f543-12d3-a456-426614174000'
+          opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+          type: 'REDIRECT_UPDATE'
+          status: 'NEW'
+          rank: 571000
+          data:
+            referringPageTitle: 'Black Friday Sale at Example Inc.'
+            referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+            brokenTargetURL: 'https://www.example.com/CustomerServiceView.aspx'
+            proposedTargetURLs:
+              - 'https://www.example.com/customer-service/contact'
+              - 'https://www.example.com/customer-service'
+            referringPageTraffic: 571000
+          createdAt: '2024-01-22T12:00:00Z'
+          updatedAt: '2024-07-26T12:00:00Z'
+      - index: 1
         statusCode: 400
         message: 'Validation failed in suggestion: type is required'
     metadata:
@@ -132,23 +135,27 @@ broken-backlinks-suggestions-status-update-response:
   description: Example for broken backlinks suggestions status update response
   value:
     suggestions:
-      - id: '213e4567-f543-12d3-a456-426614174000'
-        opportunityId: '123e4567-e89b-12d3-a456-426614174000'
-        type: 'REDIRECT_UPDATE'
-        rank: 571000
-        data:
-          referringPageTitle: 'Black Friday Sale at Example Inc.'
-          referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-          brokenTargetURL: 'https://www.example.com/CustomerServiceView.aspx'
-          proposedTargetURLs:
-            - 'https://www.example.com/customer-service/contact'
-            - 'https://www.example.com/customer-service'
-          manualOverrideURL: 'https://www.example.com/customer-service/faq'
-          referringPageTraffic: 571000
-        status: 'APPROVED'
-        createdAt: '2024-01-22T12:00:00Z'
-        updatedAt: '2024-07-26T12:00:00Z'
+      - index: 0
+        statusCode: 200
+        suggestion:
+          id: '213e4567-f543-12d3-a456-426614174000'
+          opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+          type: 'REDIRECT_UPDATE'
+          rank: 571000
+          data:
+            referringPageTitle: 'Black Friday Sale at Example Inc.'
+            referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+            brokenTargetURL: 'https://www.example.com/CustomerServiceView.aspx'
+            proposedTargetURLs:
+              - 'https://www.example.com/customer-service/contact'
+              - 'https://www.example.com/customer-service'
+            manualOverrideURL: 'https://www.example.com/customer-service/faq'
+            referringPageTraffic: 571000
+          status: 'APPROVED'
+          createdAt: '2024-01-22T12:00:00Z'
+          updatedAt: '2024-07-26T12:00:00Z'
       - id: '945e4567-f543-12d3-a456-426614174010'
+        index: 1
         statusCode: 400
         message: 'Validation failed in suggestion: status must be one of NEW,APPROVED,SKIPPED,FIXED,ERROR'
     metadata:

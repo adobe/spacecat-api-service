@@ -1960,11 +1960,28 @@ SuggestionCreateList:
   type: array
   items:
     $ref: '#/SuggestionCreate'
+SuggestionOperationSuccess:
+  type: object
+  description: Success response for a suggestion operation
+  properties:
+    index:
+      description: Index of this suggestion in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of success
+      type: integer
+    suggestion:
+      $ref: '#/Suggestion'
+  required:
+    - index
+    - statusCode
+    - suggestion
 SuggestionCreateFailure:
   type: object
   description: Suggestion create failure response
   properties:
-    suggestionIndex:
+    index:
       description: Index of this suggestion in the list from the request body, starting from 0
       type: integer
       minimum: 0
@@ -1975,7 +1992,7 @@ SuggestionCreateFailure:
       description: Error message describing the failure
       type: string
   required:
-    - suggestionIndex
+    - index
     - statusCode
     - message
 SuggestionCreateListResponse:
@@ -1986,7 +2003,7 @@ SuggestionCreateListResponse:
       type: array
       items:
         oneOf:
-          - $ref: '#/Suggestion'
+          - $ref: '#/SuggestionOperationSuccess'
           - $ref: '#/SuggestionCreateFailure'
     metadata:
       type: object
@@ -2048,6 +2065,10 @@ SuggestionUpdateFailure:
     id:
       description: UUID of this suggestion
       $ref: '#/Id'
+    index:
+      description: Index of this suggestion in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
     statusCode:
       description: HTTP status code indicating the type of failure
       type: integer
@@ -2056,6 +2077,7 @@ SuggestionUpdateFailure:
       type: string
   required:
     - id
+    - index
     - statusCode
     - message
 SuggestionStatusUpdateListResponse:
@@ -2066,7 +2088,7 @@ SuggestionStatusUpdateListResponse:
       type: array
       items:
         oneOf:
-          - $ref: '#/Suggestion'
+          - $ref: '#/SuggestionOperationSuccess'
           - $ref: '#/SuggestionUpdateFailure'
     metadata:
       type: object
