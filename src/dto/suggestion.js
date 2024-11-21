@@ -9,10 +9,6 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import {
-  createSuggestion,
-} from '../temp-mocks/mocks.js';
-// from '@adobe/spacecat-shared-data-access/src/models/suggestion.js';
 
 /**
  * Data transfer object for Site.
@@ -23,7 +19,7 @@ export const SuggestionDto = {
    * Converts a JSON object into a Suggestion object.
    * @param {object} jsonObject - JSON object.
    * @returns {Readonly<Suggestion>} Suggestion object.
-   */
+
   fromJson: (jsonObject) => {
     const suggestionData = {
       id: jsonObject.id,
@@ -39,6 +35,7 @@ export const SuggestionDto = {
     };
     return createSuggestion(suggestionData);
   },
+     */
 
   /**
    * Converts a Suggestion object into a JSON object.

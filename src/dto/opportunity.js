@@ -10,11 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-import {
-  createOpportunity,
-} from '../temp-mocks/mocks.js';
-// from @adobe/spacecat-shared-data-access/src/models/opportunity.js';
-
 /**
  * Data transfer object for Site.
  */
@@ -24,10 +19,10 @@ export const OpportunityDto = {
    * Converts a JSON object into an Opportunity object.
    * @param {object } jsonObject - JSON object.
    * @returns {Readonly<Audit>} Opportunity object.
-   */
+
   fromJson: (jsonObject) => {
     const opptyData = {
-      id: jsonObject.id,
+      opportunityId: jsonObject.opportunityId,
       siteId: jsonObject.siteId,
       auditId: jsonObject.auditId,
       runbook: jsonObject.runbook,
@@ -37,15 +32,15 @@ export const OpportunityDto = {
       title: jsonObject.title,
       description: jsonObject.description,
       guidance: jsonObject.guidance,
+      status: jsonObject.status,
       tags: jsonObject.tags,
       createdAt: jsonObject.createdAt,
-      createdBy: jsonObject.createdBy,
       updatedAt: jsonObject.updatedAt,
-      updatedBy: jsonObject.updatedBy,
     };
 
     return createOpportunity(opptyData);
   },
+     */
 
   /**
    * Converts an Opportunity object into a JSON object.
@@ -69,7 +64,7 @@ export const OpportunityDto = {
     * }} JSON object.
    */
   toJSON: (oppty) => ({
-    id: oppty.getId(),
+    opportunityId: oppty.getOpportunityId(),
     siteId: oppty.getSiteId(),
     auditId: oppty.getAuditId(),
     runbook: oppty.getRunbook(),
@@ -80,9 +75,8 @@ export const OpportunityDto = {
     description: oppty.getDescription(),
     guidance: oppty.getGuidance(),
     tags: oppty.getTags(),
+    status: oppty.getStatus(),
     createdAt: oppty.getCreatedAt(),
-    createdBy: oppty.getCreatedBy(),
     updatedAt: oppty.getUpdatedAt(),
-    updatedBy: oppty.getUpdatedBy(),
   }),
 };
