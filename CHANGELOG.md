@@ -1,3 +1,10 @@
+# [1.79.0](https://github.com/adobe/spacecat-api-service/compare/v1.78.3...v1.79.0) (2024-11-21)
+
+
+### Features
+
+* HTTP API specification for opportunities, suggestions ([#556](https://github.com/adobe/spacecat-api-service/issues/556)) ([3f78add](https://github.com/adobe/spacecat-api-service/commit/3f78add91e3de11ee7a60e6ec81508a902d88466))
+
 ## [1.78.3](https://github.com/adobe/spacecat-api-service/compare/v1.78.2...v1.78.3) (2024-11-20)
 
 
