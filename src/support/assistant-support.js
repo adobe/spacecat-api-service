@@ -110,13 +110,13 @@ const mergePrompt = (assistantPrompts, command, mergeData) => {
 };
 
 const fetchFirefallCompletion = async (requestData, log) => {
-  const context = {
+  const firefallContext = {
     ...requestData,
     log,
   };
   let client;
   try {
-    client = FirefallClient.createFrom(context);
+    client = FirefallClient.createFrom(firefallContext);
   } catch (error) {
     throw new ErrorWithStatusCode(`Error creating FirefallClient: ${error.message}`, STATUS.SYS_ERROR);
   }
@@ -128,6 +128,8 @@ const fetchFirefallCompletion = async (requestData, log) => {
   try {
     const imageCnt = imageUrl ? 1 : 0;
     log.info(`Calling chat completions with model ${model}, format ${responseFormat || 'none'} and ${imageCnt} imageUrls.`);
+    // TODO: remove this log line once we're sure the prompt is created correctly.
+    log.debug(`Prompt: ${prompt}`);
 
     return await client.fetchChatCompletion(prompt, {
       model,

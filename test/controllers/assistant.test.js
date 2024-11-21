@@ -29,7 +29,7 @@ const testAssistantPrompts = {
   findMainContent: 'Analyze the provided HTML or sidebars: {{{content}}}',
   findRemovalSelectors: 'Problem Statement: 1. You are a developer that is tasked to migrate an existing website to the Adobe Edge Delivery Services platform. 2. html: {{{content}}}, remove {{pattern}}. Format {selectors: [...]}',
   findBlockSelectors: 'Problem Statement: 1. You are a developer Html: {{{content}}} and pattern: {{pattern}}. 3. The html and image represent the same document. strings.',
-  findBlockCells: 'Problem Statement: 1. You are a developer Html: {{{content}}}, Pattern: {{pattern}} Called "export default function parse(element, { document })", where element is a good one selector of "{{selector}}" in the html "export default function parse(element, { document })" function. 4. treference and not "outerHTML" or "innerHTML". 6. All qmo build better queries.',
+  findBlockCells: 'Problem Statement: 1. You are a developer Html: {{{content}}}, Pattern: {{pattern}} Called "export default function parse(element, { document })", where element is a good one selector of "{{selector}}" in the html "export default function parse(element, { document })" function. 4. reference and not "outerHTML" or "innerHTML". 6. All qmo build better queries.',
   generatePageTransformation: 'Problem Statement: 1. You are a javascript developer Html: {{{content}}}, Called "export default function transform(element)", where element Pattern {{pattern}} 5. Use Do not use the "document" object in the function. 4. Use all the latest ES6 features.',
 };
 const testHtml = '<html lang="en"><head><title>testing</title></head><body>here is my body</body></html>';
@@ -38,6 +38,7 @@ describe('AssistantController tests', () => {
   let sandbox;
   let baseContext;
   let assistantController;
+  let firefallContext;
   let mockAuth;
   const screenshot = 'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAApgAAAKYB3X3/OAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAANCSURBVEiJtZZPbBtFFMZ/M7ubXdtdb1xSFyeilBapySVU8h8OoFaooFSqiihIVIpQBKci6KEg9Q6H9kovIHoCIVQJJCKE1ENFjnAgcaSGC6rEnxBwA04Tx43t2FnvDAfjkNibxgHxnWb2e/u992bee7tCa00YFsffekFY+nUzFtjW0LrvjRXrCDIAaPLlW0nHL0SsZtVoaF98mLrx3pdhOqLtYPHChahZcYYO7KvPFxvRl5XPp1sN3adWiD1ZAqD6XYK1b/dvE5IWryTt2udLFedwc1+9kLp+vbbpoDh+6TklxBeAi9TL0taeWpdmZzQDry0AcO+jQ12RyohqqoYoo8RDwJrU+qXkjWtfi8Xxt58BdQuwQs9qC/afLwCw8tnQbqYAPsgxE1S6F3EAIXux2oQFKm0ihMsOF71dHYx+f3NND68ghCu1YIoePPQN1pGRABkJ6Bus96CutRZMydTl+TvuiRW1m3n0eDl0vRPcEysqdXn+jsQPsrHMquGeXEaY4Yk4wxWcY5V/9scqOMOVUFthatyTy8QyqwZ+kDURKoMWxNKr2EeqVKcTNOajqKoBgOE28U4tdQl5p5bwCw7BWquaZSzAPlwjlithJtp3pTImSqQRrb2Z8PHGigD4RZuNX6JYj6wj7O4TFLbCO/Mn/m8R+h6rYSUb3ekokRY6f/YukArN979jcW+V/S8g0eT/N3VN3kTqWbQ428m9/8k0P/1aIhF36PccEl6EhOcAUCrXKZXXWS3XKd2vc/TRBG9O5ELC17MmWubD2nKhUKZa26Ba2+D3P+4/MNCFwg59oWVeYhkzgN/JDR8deKBoD7Y+ljEjGZ0sosXVTvbc6RHirr2reNy1OXd6pJsQ+gqjk8VWFYmHrwBzW/n+uMPFiRwHB2I7ih8ciHFxIkd/3Omk5tCDV1t+2nNu5sxxpDFNx+huNhVT3/zMDz8usXC3ddaHBj1GHj/As08fwTS7Kt1HBTmyN29vdwAw+/wbwLVOJ3uAD1wi/dUH7Qei66PfyuRj4Ik9is+hglfbkbfR3cnZm7chlUWLdwmprtCohX4HUtlOcQjLYCu+fzGJH2QRKvP3UNz8bWk1qMxjGTOMThZ3kvgLI5AzFfo379UAAAAASUVORK5CYII=';
   const { info, debug, error } = console;
@@ -60,10 +61,10 @@ describe('AssistantController tests', () => {
       params: {},
       data: {
         command: 'findMainContent',
-        options:
-          {
-            htmlContent: testHtml,
-          },
+        prompt: 'nav and some text',
+        htmlContent: testHtml,
+        imageUrl: `data:image/png;base64,${screenshot}`,
+        selector: '.body .div.main .myblock',
       },
       pathInfo: {
         headers: {
@@ -93,7 +94,41 @@ describe('AssistantController tests', () => {
       baseContext.attributes.authInfo.profile.getImsOrgId = () => undefined;
     }
     assistantController = AssistantController(baseContext);
+
+    firefallContext = {
+      env: {
+        IMS_CLIENT_CODE: 'big_long_string_of_testy_client_code',
+        IMS_CLIENT_ID: 'test_client_id',
+        IMS_CLIENT_SECRET: 'ssshhhhh',
+        FIREFALL_API_KEY: 'test_client_id',
+        FIREFALL_IMS_ORG_ID: 'testImsOrgId',
+      },
+      model: 'gpt-4-turbo',
+      command: 'findBlockCells',
+      imageUrl: `data:image/png;base64,${screenshot}`,
+      prompt: 'Problem Statement: 1. You are a developer Html: <html lang="en"><head><title>testing</title></head><body>here is my body</body></html>, Pattern: Analyze the provided HTML document to determine which element most likely represents the main content of the page and provide an appropriate CSS selector for this element. The main content of the page should not include any headers, footers, breadcrumbs or sidebars: {{{content}}} Called "export default function parse(element, { document })", where element is a good one selector of ".body .div.main .myblock" in the html "export default function parse(element, { document })" function. 4. reference and not "outerHTML" or "innerHTML". 6. All qmo build better queries.',
+      importApiKey: undefined,
+      apiKeyName: 'testName',
+      log: baseContext.log,
+    };
   });
+
+  // Quick method to test objects for equality, including nested objects.
+  const testObjectEquality = (actualObject, expectedObject) => {
+    // Check that both have the same keys, then check the values.
+    expect(Object.keys(actualObject)).to.have.members(Object.keys(expectedObject));
+    Object.keys(actualObject).forEach((key) => {
+      if (typeof actualObject[key] === 'object') {
+        testObjectEquality(actualObject[key], expectedObject[key]);
+      } else {
+        // DEBUG: console.log(key,
+        //  JSON.stringify(actualObject[key], undefined, 2),
+        //  JSON.stringify(expectedObject[key], undefined, 2),
+        // );
+        expect(actualObject[key]).to.equal(expectedObject[key]);
+      }
+    });
+  };
 
   const testParameterWithCommand = async (
     command,
@@ -217,9 +252,7 @@ describe('AssistantController tests', () => {
         'Error creating FirefallClient: Context param must include properties: imsHost, clientId, clientCode, and clientSecret.',
         {
           prompt: 'nav and some text',
-          options: {
-            htmlContent: testHtml,
-          },
+          htmlContent: testHtml,
         },
         STATUS.SYS_ERROR,
       );
@@ -233,9 +266,7 @@ describe('AssistantController tests', () => {
         'Invalid request: A valid ims-org-id is not associated with your api-key.',
         {
           prompt: 'nav and some text',
-          options: {
-            htmlContent: testHtml,
-          },
+          htmlContent: testHtml,
         },
         STATUS.UNAUTHORIZED,
       );
@@ -296,7 +327,7 @@ describe('AssistantController tests', () => {
         if (config.parameters.includes('prompt')) {
           // For Debugging: console.log(`Testing ${command} for missing prompt`);
           // eslint-disable-next-line no-await-in-loop
-          await testParameterWithCommand(command, 'Invalid request: prompt is required.');
+          await testParameterWithCommand(command, `Invalid request: prompt is required for ${command}.`);
         }
       }
     });
@@ -307,12 +338,10 @@ describe('AssistantController tests', () => {
           // eslint-disable-next-line no-await-in-loop
           await testParameterWithCommand(
             command,
-            'Invalid request: imageUrl is required.',
+            `Invalid request: imageUrl is required for ${command}.`,
             {
               prompt: 'nav ing',
-              options: {
-                htmlContent: testHtml,
-              },
+              htmlContent: testHtml,
             },
           );
         }
@@ -332,10 +361,8 @@ describe('AssistantController tests', () => {
             data: {
               command: 'findBlockSelectors',
               prompt: 'nav and some text',
-              options: {
-                imageUrl,
-                htmlContent: testHtml,
-              },
+              imageUrl,
+              htmlContent: testHtml,
             },
           },
         );
@@ -353,11 +380,9 @@ describe('AssistantController tests', () => {
           data: {
             command: 'findBlockCells',
             prompt: 'nav and some text',
-            options: {
-              imageUrl: `data:image/png;base64,${screenshot}`,
-              htmlContent: testHtml,
-              selector: '.body .div.main .myblock',
-            },
+            imageUrl: `data:image/png;base64,${screenshot}`,
+            htmlContent: testHtml,
+            selector: '.body .div.main .myblock',
           },
         },
       );
@@ -375,11 +400,9 @@ describe('AssistantController tests', () => {
           data: {
             command: 'findBlockCells',
             prompt: 'nav and some text',
-            options: {
-              imageUrl: `data:image/png;base64,${screenshot}`,
-              htmlContent: testHtml,
-              selector: '.body .div.main .myblock',
-            },
+            imageUrl: `data:image/png;base64,${screenshot}`,
+            htmlContent: testHtml,
+            selector: '.body .div.main .myblock',
           },
         },
       );
@@ -388,11 +411,12 @@ describe('AssistantController tests', () => {
       expect(response.headers.get('x-error')).to.include('Error fetching completion:');
     });
     it('should succeed with no image url', async () => {
-      sinon.stub(FirefallClient, 'createFrom').callsFake(() => ({
+      const createFromStub = sinon.stub(FirefallClient, 'createFrom').callsFake(() => ({
         fetchChatCompletion: () => Promise.resolve({
           choices: [{ message: { content: '.breadcrumbs, .footer, .header' } }],
         }),
       }));
+      baseContext.attributes.authInfo.profile.getImsOrgId = () => undefined;
 
       const response = await assistantController.processImportAssistant(
         {
@@ -400,9 +424,7 @@ describe('AssistantController tests', () => {
           data: {
             command: 'findRemovalSelectors',
             prompt: 'Find breadcrumb selector: {{{content}}}',
-            options: {
-              htmlContent: testHtml,
-            },
+            htmlContent: testHtml,
           },
         },
       );
@@ -416,13 +438,30 @@ describe('AssistantController tests', () => {
       expect(results.choices[0].message).to.not.be.undefined;
       expect(results.choices[0].message.content).to.not.be.undefined;
       expect(results.choices[0].message.content).to.equal('.breadcrumbs, .footer, .header');
+
+      const arg1 = createFromStub.getCall(0).args[0];
+      expect(arg1).to.not.be.undefined;
+
+      const expected = {
+        ...firefallContext,
+        env: {
+          ...firefallContext.env,
+          FIREFALL_IMS_ORG_ID: 'testHeaderImsOrgId',
+        },
+        command: 'findRemovalSelectors',
+        responseFormat: 'json_object',
+        prompt: 'Problem Statement: 1. You are a developer that is tasked to migrate an existing website to the Adobe Edge Delivery Services platform. 2. html: <html lang="en"><head><title>testing</title></head><body>here is my body</body></html>, remove Find breadcrumb selector: {{{content}}}. Format {selectors: [...]}',
+        imageUrl: undefined,
+      };
+      testObjectEquality(arg1, expected);
     });
     it('should succeed', async () => {
-      sinon.stub(FirefallClient, 'createFrom').callsFake(() => ({
+      const createFromStub = sinon.stub(FirefallClient, 'createFrom').callsFake(() => ({
         fetchChatCompletion: () => Promise.resolve({
           choices: [{ message: { content: '.breadcrumbs, .footer, .header' } }],
         }),
       }));
+      baseContext.attributes.authInfo.profile.getImsOrgId = () => 'testImsOrgId';
 
       const response = await assistantController.processImportAssistant(
         {
@@ -430,11 +469,9 @@ describe('AssistantController tests', () => {
           data: {
             command: 'findBlockCells',
             prompt: 'Analyze the provided HTML document to determine which element most likely represents the main content of the page and provide an appropriate CSS selector for this element. The main content of the page should not include any headers, footers, breadcrumbs or sidebars: {{{content}}}',
-            options: {
-              imageUrl: `data:image/png;base64,${screenshot}`,
-              htmlContent: testHtml,
-              selector: '.body .div.main .myblock',
-            },
+            imageUrl: `data:image/png;base64,${screenshot}`,
+            htmlContent: testHtml,
+            selector: '.body .div.main .myblock',
           },
         },
       );
@@ -448,6 +485,10 @@ describe('AssistantController tests', () => {
       expect(results.choices[0].message).to.not.be.undefined;
       expect(results.choices[0].message.content).to.not.be.undefined;
       expect(results.choices[0].message.content).to.equal('.breadcrumbs, .footer, .header');
+
+      const arg1 = createFromStub.getCall(0).args[0];
+      expect(arg1).to.not.be.undefined;
+      testObjectEquality(arg1, firefallContext);
     });
   });
 

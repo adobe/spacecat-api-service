@@ -1561,14 +1561,21 @@ ImportAssistantRequest:
     - command
   properties:
     command:
+      required: true
       description: Assistant command to execute. Examples 'findMainContent', 'findRemovalSelectors', 'findBlockSelectors', 'findBlockCells', 'generatePageTransformation'.
       type: string
     prompt:
       description: Optional prompt to provide context for the analysis.
       type: string
-    options:
-      description: Optional configuration options required by the command. Example 'htmlContent', 'imageUrl', 'selector'.
-      type: object
+    htmlContent:
+      description: The HTML to be inspected. It is required for most commands. Removing unnecessary content and properties will reduce the number of credits used.
+      type: string
+    imageUrl:
+      description: A base64 encoded image.  It is required for specific commands like 'findBlockSelectors'.
+      type: string
+    selector:
+      description: A CSS selector indicating the element to inspect in the provided htmlContent. It is required for specific commands like 'findBlockCells'.
+      type: string
   example:
     command: 'findBlockSelectors'
     prompt: 'rectangle with blue background, a heading and paragraph text'

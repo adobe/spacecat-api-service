@@ -50,16 +50,21 @@ function AssistantController(context) {
   }
 
   function processAndValidateContextEnv(contextEnv) {
-    const env = { ...contextEnv };
+    let env = {};
 
     // Process AWS secrets
-    if (!env.ASSISTANT_CONFIGURATION) {
+    if (!contextEnv.ASSISTANT_CONFIGURATION) {
       throw new ErrorWithStatusCode('The Assistant Configuration value is not defined.', STATUS.SYS_ERROR);
     }
     try {
-      env.ASSISTANT_CONFIGURATION = JSON.parse(context.env.ASSISTANT_CONFIGURATION);
+      const assistantConfiguration = JSON.parse(contextEnv.ASSISTANT_CONFIGURATION);
       // The IMS_CLIENT_ID is used as the API key for Firefall.
-      env.FIREFALL_API_KEY = env.ASSISTANT_CONFIGURATION.IMS_CLIENT_ID;
+      env = {
+        ...contextEnv,
+        ...assistantConfiguration,
+        FIREFALL_API_KEY: assistantConfiguration.IMS_CLIENT_ID,
+      };
+      delete env.ASSISTANT_CONFIGURATION;
     } catch (error) {
       throw new ErrorWithStatusCode(`Could not parse the Assistant Configuration: ${error.message}`, STATUS.SYS_ERROR);
     }
@@ -68,7 +73,7 @@ function AssistantController(context) {
       throw new ErrorWithStatusCode('The Assistant Prompts value is not defined.', STATUS.SYS_ERROR);
     }
     try {
-      env.ASSISTANT_PROMPTS = JSON.parse(context.env.ASSISTANT_PROMPTS);
+      env.ASSISTANT_PROMPTS = JSON.parse(env.ASSISTANT_PROMPTS);
     } catch (error) {
       throw new ErrorWithStatusCode(`Could not parse the Assistant Prompts: ${error.message}`, STATUS.SYS_ERROR);
     }
@@ -77,7 +82,7 @@ function AssistantController(context) {
   }
 
   function validateRequestData(data) {
-    const { command, options } = data;
+    const { command } = data;
 
     // Validate 'command'
     if (!command || !/^[A-Za-z]+$/.test(command)) {
@@ -88,22 +93,16 @@ function AssistantController(context) {
     }
 
     const { parameters } = commandConfig[command];
-    if (parameters.includes('prompt') && !data.prompt) {
-      throw new ErrorWithStatusCode('Invalid request: prompt is required.', STATUS.BAD_REQUEST);
-    }
-
-    // Validate options parameters
-    parameters
-      .filter((param) => param !== 'prompt')
-      .forEach((param) => {
-        if (!options[param]) {
-          throw new ErrorWithStatusCode(`Invalid request: ${param} is required.`, STATUS.BAD_REQUEST);
-        }
-      });
+    // Validate command parameters.
+    parameters.forEach((param) => {
+      if (!data[param]) {
+        throw new ErrorWithStatusCode(`Invalid request: ${param} is required for ${command}.`, STATUS.BAD_REQUEST);
+      }
+    });
 
     if (parameters.includes('imageUrl')) {
       // Only base64 images for now.
-      if (!isBase64UrlImage(options.imageUrl)) {
+      if (!isBase64UrlImage(data.imageUrl)) {
         throw new ErrorWithStatusCode('Invalid request: Image url is not a base64 encoded image.', STATUS.BAD_REQUEST);
       }
     }
@@ -135,10 +134,9 @@ function AssistantController(context) {
    * @param requestContext.data Object containing the request parameters
    * @param requestContext.data.command String indicating the command to execute
    * @param requestContext.data.prompt String containing the user prompt
-   * @param requestContext.data.options Object containing the request options
-   * @param requestContext.data.options.htmlContent String containing the HTML content
-   * @param requestContext.data.options.selector CSS selectors of the block being processed
-   * @param requestContext.data.options.imageUrl String base64 encoded image
+   * @param requestContext.data.htmlContent String containing the HTML content
+   * @param requestContext.data.selector CSS selectors of the block being processed
+   * @param requestContext.data.imageUrl String base64 encoded image
    * @param requestContext.attributes Object containing request processing (api-key, profile, etc.)
    * @param requestContext.pathInfo Object containing the request path and headers
    * @param requestContext.pathInfo.headers Object containing the request headers
@@ -175,16 +173,24 @@ function AssistantController(context) {
     const contextEnv = processAndValidateContextEnv(context.env);
 
     // Validation complete. Return the parsed request data.
-    const { command, prompt, options } = data;
+    const {
+      command,
+      prompt,
+      htmlContent,
+      imageUrl,
+      selector,
+    } = data;
     const mergedPrompt = mergePrompt(
       contextEnv.ASSISTANT_PROMPTS,
       command,
       {
-        content: options.htmlContent,
-        selector: options.selector,
+        content: htmlContent,
+        selector,
         pattern: prompt,
       },
     );
+    // Prune ASSISTANT_PROMPTS and other properties from the env.
+    delete contextEnv.ASSISTANT_PROMPTS;
 
     const { firefallArgs = {} } = commandConfig[command];
     const { authInfo: { profile: apikeyProfile } } = attributes;
@@ -199,8 +205,8 @@ function AssistantController(context) {
       },
       ...firefallArgs,
       command,
+      imageUrl,
       prompt: mergedPrompt,
-      ...options,
       importApiKey: requestContext.pathInfo.headers['x-api-key'],
       apiKeyName: apikeyProfile?.getName(),
     };
@@ -209,7 +215,7 @@ function AssistantController(context) {
   /**
    * Send an import assistant request to the model.
    * @param {object} requestContext - Context of the request.
-   * @returns {Promise<Response>} 200 OK with a list of options, 4xx or 5xx otherwise.
+   * @returns {Promise<Response>} 200 OK with a list of choices, 4xx or 5xx otherwise.
    */
   async function processImportAssistant(requestContext) {
     try {
