@@ -147,16 +147,3 @@ export const main = wrap(run)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(secrets, { name: resolveSecretsName })
   .with(helixStatus);
-
-/*
-
-const config = { tableNameData: 'YOUR_TABLE_NAME' };
-const log = console;
-const dao = createDataAccess(config, log);
-
-// Create a new Opportunity
-const opportunityData = { title: 'Broken Links', siteId: 'site123', type: 'broken-backlinks' };
-const newOpportunity = await dao.Opportunity.create(opportunityData);
-console.log('New Opportunity Created:', newOpportunity);
-
-*/

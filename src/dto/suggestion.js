@@ -16,28 +16,6 @@
 export const SuggestionDto = {
 
   /**
-   * Converts a JSON object into a Suggestion object.
-   * @param {object} jsonObject - JSON object.
-   * @returns {Readonly<Suggestion>} Suggestion object.
-
-  fromJson: (jsonObject) => {
-    const suggestionData = {
-      id: jsonObject.id,
-      opportunityId: jsonObject.opportunityId,
-      auditId: jsonObject.auditId,
-      type: jsonObject.type,
-      rank: jsonObject.rank,
-      data: jsonObject.data,
-      kpiDeltas: jsonObject.kpiDeltas,
-      status: jsonObject.status,
-      createdAt: jsonObject.createdAt,
-      updatedAt: jsonObject.updatedAt,
-    };
-    return createSuggestion(suggestionData);
-  },
-     */
-
-  /**
    * Converts a Suggestion object into a JSON object.
    * @param {Readonly<Suggestion>} suggestion - Suggestion object.
    * @returns {{

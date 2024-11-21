@@ -16,33 +16,6 @@
 export const OpportunityDto = {
 
   /**
-   * Converts a JSON object into an Opportunity object.
-   * @param {object } jsonObject - JSON object.
-   * @returns {Readonly<Audit>} Opportunity object.
-
-  fromJson: (jsonObject) => {
-    const opptyData = {
-      opportunityId: jsonObject.opportunityId,
-      siteId: jsonObject.siteId,
-      auditId: jsonObject.auditId,
-      runbook: jsonObject.runbook,
-      type: jsonObject.type,
-      data: jsonObject.data,
-      origin: jsonObject.origin,
-      title: jsonObject.title,
-      description: jsonObject.description,
-      guidance: jsonObject.guidance,
-      status: jsonObject.status,
-      tags: jsonObject.tags,
-      createdAt: jsonObject.createdAt,
-      updatedAt: jsonObject.updatedAt,
-    };
-
-    return createOpportunity(opptyData);
-  },
-     */
-
-  /**
    * Converts an Opportunity object into a JSON object.
    * @param {Readonly<Opportunity>} oppty - Opportunity object.
    * @returns {{
