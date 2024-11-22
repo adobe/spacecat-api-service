@@ -1,3 +1,10 @@
+## [1.79.5](https://github.com/adobe/spacecat-api-service/compare/v1.79.4...v1.79.5) (2024-11-22)
+
+
+### Bug Fixes
+
+* SITES-27040 [Import Assistant] Incorporate system prompts ([#588](https://github.com/adobe/spacecat-api-service/issues/588)) ([d3f5f28](https://github.com/adobe/spacecat-api-service/commit/d3f5f2848a8609aeeed2bab78943542b59ef4bbb))
+
 ## [1.79.4](https://github.com/adobe/spacecat-api-service/compare/v1.79.3...v1.79.4) (2024-11-22)
 
 
