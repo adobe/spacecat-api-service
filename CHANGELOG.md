@@ -1,3 +1,10 @@
+## [1.79.3](https://github.com/adobe/spacecat-api-service/compare/v1.79.2...v1.79.3) (2024-11-22)
+
+
+### Bug Fixes
+
+* udpate deps ([#591](https://github.com/adobe/spacecat-api-service/issues/591)) ([38e6bb9](https://github.com/adobe/spacecat-api-service/commit/38e6bb98def5a9996a68009227f12c16c5ec2ca7))
+
 ## [1.79.2](https://github.com/adobe/spacecat-api-service/compare/v1.79.1...v1.79.2) (2024-11-21)
 
 
