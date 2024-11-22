@@ -1561,7 +1561,6 @@ ImportAssistantRequest:
     - command
   properties:
     command:
-      required: true
       description: Assistant command to execute. Examples 'findMainContent', 'findRemovalSelectors', 'findBlockSelectors', 'findBlockCells', 'generatePageTransformation'.
       type: string
     prompt:
