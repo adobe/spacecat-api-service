@@ -1,3 +1,38 @@
+## [1.79.2](https://github.com/adobe/spacecat-api-service/compare/v1.79.1...v1.79.2) (2024-11-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.56.0 ([#589](https://github.com/adobe/spacecat-api-service/issues/589)) ([8254a17](https://github.com/adobe/spacecat-api-service/commit/8254a17da2c344dcced43a0f8b9a6763618333ca))
+
+## [1.79.1](https://github.com/adobe/spacecat-api-service/compare/v1.79.0...v1.79.1) (2024-11-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.12.0 ([#587](https://github.com/adobe/spacecat-api-service/issues/587)) ([760ad0d](https://github.com/adobe/spacecat-api-service/commit/760ad0d291952c3107c45cbae1cb34ada8824932))
+
+# [1.79.0](https://github.com/adobe/spacecat-api-service/compare/v1.78.3...v1.79.0) (2024-11-21)
+
+
+### Features
+
+* HTTP API specification for opportunities, suggestions ([#556](https://github.com/adobe/spacecat-api-service/issues/556)) ([3f78add](https://github.com/adobe/spacecat-api-service/commit/3f78add91e3de11ee7a60e6ec81508a902d88466))
+
+## [1.78.3](https://github.com/adobe/spacecat-api-service/compare/v1.78.2...v1.78.3) (2024-11-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.55.0 ([#585](https://github.com/adobe/spacecat-api-service/issues/585)) ([733ddf7](https://github.com/adobe/spacecat-api-service/commit/733ddf70135eb06c78f00e47584a79d02360f5c7))
+
+## [1.78.2](https://github.com/adobe/spacecat-api-service/compare/v1.78.1...v1.78.2) (2024-11-20)
+
+
+### Bug Fixes
+
+* get site command slack error ([11da794](https://github.com/adobe/spacecat-api-service/commit/11da7943420d97c0c73b75cf90b40a305cf9f8ca))
+
 ## [1.78.1](https://github.com/adobe/spacecat-api-service/compare/v1.78.0...v1.78.1) (2024-11-20)
 
 

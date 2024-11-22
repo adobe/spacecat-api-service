@@ -15,6 +15,7 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 
+import { Blocks } from 'slack-block-builder';
 import {
   extractURLFromSlackInput,
   FALLBACK_SLACK_CHANNEL,
@@ -149,14 +150,24 @@ describe('Base Slack Utils', () => {
           { text: 'Hello' },
           { text: 'World', accessory: { type: 'button', text: 'Click me' } },
         ];
-        const additionalBlocks = [{ type: 'divider' }];
+        const additionalBlocks = [Blocks.Divider()];
         const options = { unfurl_links: false };
 
         await sendMessageBlocks(say, textSections, additionalBlocks, options);
 
         const expectedBlocks = [
           { type: 'section', text: { type: 'mrkdwn', text: 'Hello' } },
-          { type: 'section', text: { type: 'mrkdwn', text: 'World' }, accessory: { type: 'button', text: 'Click me' } },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'World' },
+            accessory: {
+              type: 'button',
+              text: {
+                text: 'Click me',
+                type: 'plain_text',
+              },
+            },
+          },
           { type: 'divider' },
         ];
 
