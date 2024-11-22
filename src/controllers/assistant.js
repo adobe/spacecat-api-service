@@ -199,7 +199,7 @@ function AssistantController(context) {
     delete contextEnv.ASSISTANT_PROMPTS;
 
     // TODO: remove this log line once we're sure the prompt is created correctly.
-    log.debug(`${command} generated prompt: ${prompt}`);
+    log.debug(`${command} generated prompt: ${mergedPrompt}`);
 
     const { firefallArgs = {} } = commandConfig[command];
     const { authInfo: { profile: apikeyProfile } } = attributes;
