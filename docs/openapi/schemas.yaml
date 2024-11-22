@@ -1599,7 +1599,7 @@ ImportAssistantResponse:
   example:
     choices:
       - message:
-          content: '.breadcrumbs'
+          content: 'div.main div.product'
 ApiKeyRequest:
   type: object
   required:
