@@ -1578,8 +1578,8 @@ ImportAssistantRequest:
   example:
     command: 'findBlockSelectors'
     prompt: 'rectangle with blue background, a heading and paragraph text'
-    imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...',
-    htmlContent: '<html>...</html>',
+    imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...'
+    htmlContent: '<html>...</html>'
 ImportAssistantResponse:
   type: object
   properties:
