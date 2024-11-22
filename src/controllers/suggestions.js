@@ -31,6 +31,9 @@ import { SuggestionDto } from '../dto/suggestion.js';
  * @constructor
  */
 function SuggestionsController(dataAccess) {
+  if (!isObject(dataAccess)) {
+    throw new Error('Data access required');
+  }
   const { Suggestion } = dataAccess;
   if (!isObject(Suggestion)) {
     throw new Error('Data access required');
@@ -115,7 +118,7 @@ function SuggestionsController(dataAccess) {
     }
 
     if (!hasText(suggestionId)) {
-      return badRequest('suggestion ID required');
+      return badRequest('Suggestion ID required');
     }
 
     const sugg = await Suggestion.findById(suggestionId);
@@ -149,7 +152,7 @@ function SuggestionsController(dataAccess) {
     }
 
     if (!isArray(context.data)) {
-      return badRequest('request body must be an array');
+      return badRequest('Request body must be an array');
     }
 
     const suggestionPromises = context.data.map(async (suggData, index) => {
@@ -172,7 +175,7 @@ function SuggestionsController(dataAccess) {
     const responses = await Promise.all(suggestionPromises);
     // Sort the results by the index of the suggestion in the request
     responses.sort((a, b) => a.index - b.index);
-    const succeded = responses.filter((r) => r.status === 201).length;
+    const succeded = responses.filter((r) => r.statusCode === 201).length;
     const fullResponse = {
       suggestions: responses,
       metadata: {
@@ -207,7 +210,7 @@ function SuggestionsController(dataAccess) {
       return badRequest('Suggestion ID required');
     }
 
-    const suggestion = Suggestion.findById(suggestionId);
+    const suggestion = await Suggestion.findById(suggestionId);
     if (!suggestion || suggestion.getOpportunityId() !== opportunityId
        || (await suggestion.getOpportunity()).getSiteId() !== siteId) {
       return notFound('Suggestion not found');
@@ -269,7 +272,7 @@ function SuggestionsController(dataAccess) {
     }
 
     if (!isArray(context.data)) {
-      return badRequest('request body must be an array of [{ suggestionId, status },...]');
+      return badRequest('Request body must be an array of [{ suggestionId, status },...]');
     }
 
     const suggestionPromises = context.data.map(async ({ id, status }, index) => {
@@ -296,19 +299,19 @@ function SuggestionsController(dataAccess) {
         return {
           index,
           uuid: id,
-          message: 'suggestion not found',
+          message: 'Suggestion not found',
           statusCode: 404,
         };
       }
 
       try {
-        if (suggestion.status !== status) {
+        if (suggestion.getStatus() !== status) {
           suggestion.setStatus(status);
         } else {
           return {
             index,
             uuid: id,
-            message: 'no updates provided',
+            message: 'No updates provided',
             statusCode: 400,
           };
         }
@@ -341,7 +344,7 @@ function SuggestionsController(dataAccess) {
     const responses = await Promise.all(suggestionPromises);
     // Sort the results by the index of the suggestion in the request
     responses.sort((a, b) => a.index - b.index);
-    const succeded = responses.filter((r) => r.status === 200).length;
+    const succeded = responses.filter((r) => r.statusCode === 200).length;
     const fullResponse = {
       suggestions: responses,
       metadata: {

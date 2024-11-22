@@ -21,26 +21,20 @@ export const SuggestionDto = {
    * @returns {{
    *  id: string,
    *  opportunityId: string,
-   *  auditId: string,
    *  type: string,
    *  rank: number,
    *  data: object,
    *  kpiDeltas: object,
-   *  status: string,
-   *  createdAt: Date,
-   *  updatedAt: Date,
+   *  status: string
    * }} JSON object.
    */
   toJSON: (suggestion) => ({
-    id: suggestion.getId(),
+    suggestionId: suggestion.getSuggestionId(),
     opportunityId: suggestion.getOpportunityId(),
-    auditId: suggestion.getAuditId(),
     type: suggestion.getType(),
     rank: suggestion.getRank(),
     data: suggestion.getData(),
     kpiDeltas: suggestion.getKpiDeltas(),
     status: suggestion.getStatus(),
-    createdAt: suggestion.getCreatedAt(),
-    updatedAt: suggestion.getUpdatedAt(),
   }),
 };

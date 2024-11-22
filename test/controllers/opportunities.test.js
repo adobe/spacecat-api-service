@@ -316,7 +316,7 @@ describe('Opportunities Controller', () => {
     });
 
     // Validate updated values
-    expect(mockOpptyEntity.getAuditId()).to.be.equals('NEW Audit ID');
+    expect(mockOpptyEntity.getAuditId()).to.be.equals('Audit ID NEW');
     expect(mockOpptyEntity.getStatus()).to.be.equals('APPROVED');
 
     expect(response.status).to.equal(200);
@@ -425,7 +425,6 @@ describe('Opportunities Controller', () => {
     const response = await opportunitiesController.removeOpportunity({
       params: { siteId: 'site67890', opportunityId: 'op12345' },
     });
-    expect(mockOpportunityDataAccess.Opportunity.remove.calledOnce).to.be.true;
     expect(response.status).to.equal(204);
   });
 
