@@ -199,7 +199,6 @@ import-assistant:
             $ref: './schemas.yaml#/ImportAssistantRequest'
     parameters:
       - in: header
-        required: true
         name: x-api-key
         schema:
           type: string
