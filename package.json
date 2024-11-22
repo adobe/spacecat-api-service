@@ -79,6 +79,7 @@
     "@aws-sdk/s3-request-presigner": "3.696.0",
     "@slack/bolt": "4.1.0",
     "busboy": "1.6.0",
+    "handlebars": "^4.7.8",
     "js-yaml": "4.1.0",
     "psl": "1.10.0",
     "slack-block-builder": "2.8.0"
