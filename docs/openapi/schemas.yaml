@@ -1564,7 +1564,7 @@ ImportAssistantRequest:
       description: Assistant command to execute. Examples 'findMainContent', 'findRemovalSelectors', 'findBlockSelectors', 'findBlockCells', 'generatePageTransformation'.
       type: string
     prompt:
-      description: Optional prompt to provide context for the analysis.
+      description: Optional prompt to provide context for the analysis. It is required for all commands except 'findMainContent'.
       type: string
     htmlContent:
       description: The HTML to be inspected. It is required for most commands. Removing unnecessary content and properties will reduce the number of credits used.
@@ -1579,7 +1579,7 @@ ImportAssistantRequest:
     command: 'findBlockSelectors'
     prompt: 'rectangle with blue background, a heading and paragraph text'
     options: {
-      imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...=',
+      imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...',
       htmlContent: '<html>...</html>',
     }
 ImportAssistantResponse:

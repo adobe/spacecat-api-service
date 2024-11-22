@@ -11,7 +11,9 @@
  */
 
 import { FirefallClient } from '@adobe/spacecat-shared-gpt-client';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import Handlebars from 'handlebars';
+import { STATUS_INTERNAL_SERVER_ERROR, STATUS_UNAUTHORIZED } from '../utils/constants.js';
 import { ErrorWithStatusCode } from './utils.js';
 
 /*
@@ -61,12 +63,7 @@ const SCOPE = {
   ASSISTANT: 'imports.assistant', // allows users submit prompts with their API key
 };
 
-const STATUS = {
-  OK: 200,
-  BAD_REQUEST: 400,
-  UNAUTHORIZED: 401,
-  SYS_ERROR: 500,
-};
+const getCommands = () => Object.keys(commandConfig);
 
 /**
  * Verify that the authenticated user has the required level of access scope.
@@ -80,7 +77,7 @@ const validateAccessScopes = (auth, scopes, log) => {
     auth.checkScopes(scopes);
   } catch (error) {
     log?.info(`Validation of scopes failed: ${scopes}`);
-    throw new ErrorWithStatusCode('Missing required scopes.', STATUS.UNAUTHORIZED);
+    throw new ErrorWithStatusCode('Missing required scopes.', STATUS_UNAUTHORIZED);
   }
   log?.debug(`Validation of scopes succeeded: ${scopes}`);
 };
@@ -96,7 +93,7 @@ const validateAccessScopes = (auth, scopes, log) => {
  * @returns {string}
  */
 const mergePrompt = (assistantPrompts, command, mergeData) => {
-  if (!assistantPrompts || !assistantPrompts[command]) {
+  if (!assistantPrompts || !assistantPrompts[command] || !hasText(assistantPrompts[command])) {
     throw new Error(`Command has no associated prompt: ${command}`);
   }
   const systemPrompt = assistantPrompts[command];
@@ -118,7 +115,7 @@ const fetchFirefallCompletion = async (requestData, log) => {
   try {
     client = FirefallClient.createFrom(firefallContext);
   } catch (error) {
-    throw new ErrorWithStatusCode(`Error creating FirefallClient: ${error.message}`, STATUS.SYS_ERROR);
+    throw new ErrorWithStatusCode(`Error creating FirefallClient: ${error.message}`, STATUS_INTERNAL_SERVER_ERROR);
   }
 
   const {
@@ -128,8 +125,6 @@ const fetchFirefallCompletion = async (requestData, log) => {
   try {
     const imageCnt = imageUrl ? 1 : 0;
     log.info(`Calling chat completions with model ${model}, format ${responseFormat || 'none'} and ${imageCnt} imageUrls.`);
-    // TODO: remove this log line once we're sure the prompt is created correctly.
-    log.debug(`Prompt: ${prompt}`);
 
     return await client.fetchChatCompletion(prompt, {
       model,
@@ -137,15 +132,15 @@ const fetchFirefallCompletion = async (requestData, log) => {
       imageUrls: imageUrl ? [imageUrl] : undefined,
     });
   } catch (error) {
-    throw new ErrorWithStatusCode(`Error fetching completion: ${error.message}`, STATUS.SYS_ERROR);
+    throw new ErrorWithStatusCode(`Error fetching completion: ${error.message}`, STATUS_INTERNAL_SERVER_ERROR);
   }
 };
 
 export {
   commandConfig,
   fetchFirefallCompletion,
+  getCommands,
   mergePrompt,
   validateAccessScopes,
-  STATUS,
   SCOPE,
 };

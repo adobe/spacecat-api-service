@@ -19,7 +19,16 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import AssistantController from '../../src/controllers/assistant.js';
-import { commandConfig, mergePrompt, STATUS } from '../../src/support/assistant-support.js';
+import {
+  commandConfig,
+  getCommands,
+  mergePrompt,
+} from '../../src/support/assistant-support.js';
+import {
+  STATUS_BAD_REQUEST,
+  STATUS_INTERNAL_SERVER_ERROR, STATUS_OK,
+  STATUS_UNAUTHORIZED,
+} from '../../src/utils/constants.js';
 
 use(sinonChai);
 use(chaiAsPromised);
@@ -134,7 +143,7 @@ describe('AssistantController tests', () => {
     command,
     errorMessage,
     testData = {},
-    errorCode = STATUS.BAD_REQUEST,
+    errorCode = STATUS_BAD_REQUEST,
   ) => {
     const response = await assistantController.processImportAssistant(
       {
@@ -172,7 +181,7 @@ describe('AssistantController tests', () => {
       assistantController = AssistantController(baseContext);
       const response = await assistantController.processImportAssistant(baseContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.SYS_ERROR);
+      expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
       expect(baseContext.log.error.getCall(0).args[0]).to.include('The Assistant Configuration value is not defined.');
       expect(response.headers.get('x-error')).to.include('Assistant Configuration value is not defined.');
     });
@@ -181,7 +190,7 @@ describe('AssistantController tests', () => {
       assistantController = AssistantController(baseContext);
       const response = await assistantController.processImportAssistant(baseContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.SYS_ERROR);
+      expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
       expect(response.headers.get('x-error')).to.include('Could not parse the Assistant Configuration:');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Could not parse the Assistant Configuration:');
     });
@@ -190,7 +199,7 @@ describe('AssistantController tests', () => {
       assistantController = AssistantController(baseContext);
       const response = await assistantController.processImportAssistant(baseContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.SYS_ERROR);
+      expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
       expect(baseContext.log.error.getCall(0).args[0]).to.include('The Assistant Prompts value is not defined.');
       expect(response.headers.get('x-error')).to.include('Assistant Prompts value is not defined.');
     });
@@ -199,7 +208,7 @@ describe('AssistantController tests', () => {
       assistantController = AssistantController(baseContext);
       const response = await assistantController.processImportAssistant(baseContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.SYS_ERROR);
+      expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
       expect(response.headers.get('x-error')).to.include('Could not parse the Assistant Prompts:');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Could not parse the Assistant Prompts:');
     });
@@ -210,21 +219,21 @@ describe('AssistantController tests', () => {
       baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Kaboom'));
       const response = await assistantController.processImportAssistant(undefined);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.UNAUTHORIZED);
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
       expect(response.headers.get('x-error')).to.equal('Missing required scopes.');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Missing required scopes.');
     });
     it('undefined request test', async () => {
       const response = await assistantController.processImportAssistant(undefined);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: missing request context.');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Invalid request: missing request context.');
     });
     it('non-object request test', async () => {
       const response = await assistantController.processImportAssistant('string');
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: invalid request context format.');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('invalid request context format.');
     });
@@ -233,7 +242,7 @@ describe('AssistantController tests', () => {
       delete datalessContext.data;
       const response = await assistantController.processImportAssistant(datalessContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: invalid request context format.');
     });
     it('missing attributes in request test', async () => {
@@ -241,7 +250,7 @@ describe('AssistantController tests', () => {
       delete datalessContext.attributes;
       const response = await assistantController.processImportAssistant(datalessContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: invalid request context format.');
     });
     it('missing apikey imsOrgId test', async () => {
@@ -254,7 +263,7 @@ describe('AssistantController tests', () => {
           prompt: 'nav and some text',
           htmlContent: testHtml,
         },
-        STATUS.SYS_ERROR,
+        STATUS_INTERNAL_SERVER_ERROR,
       );
       expect(baseContext.log.error.getCall(0).args[0]).to.contain('Context param must include properties: imsHost, clientId, clientCode, and clientSecret.');
     });
@@ -268,7 +277,7 @@ describe('AssistantController tests', () => {
           prompt: 'nav and some text',
           htmlContent: testHtml,
         },
-        STATUS.UNAUTHORIZED,
+        STATUS_UNAUTHORIZED,
       );
       expect(baseContext.log.error.getCall(0).args[0]).to.contain('Invalid request: A valid ims-org-id is not associated with your api-key.');
     });
@@ -281,7 +290,7 @@ describe('AssistantController tests', () => {
         },
       );
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.UNAUTHORIZED);
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
       expect(response.headers.get('x-error')).to.include('Invalid request: missing authentication information.');
     });
     it('missing profile in request test', async () => {
@@ -293,34 +302,28 @@ describe('AssistantController tests', () => {
         },
       );
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.UNAUTHORIZED);
+      expect(response.status).to.equal(STATUS_UNAUTHORIZED);
       expect(response.headers.get('x-error')).to.include('Invalid request: missing authentication profile.');
     });
     it('missing command test', async () => {
       delete baseContext.data.command;
       const response = await assistantController.processImportAssistant({ ...baseContext });
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: a valid command is required.');
       expect(baseContext.log.error.getCall(0).args[0]).to.include('Invalid request: a valid command is required.');
     });
     it('empty command test', async () => {
       const response = await assistantController.processImportAssistant({ ...baseContext, data: { command: '' } });
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: a valid command is required.');
-    });
-    it('invalid command format test', async () => {
-      const response = await assistantController.processImportAssistant({ ...baseContext, data: { command: '#hi{' } });
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
       expect(response.headers.get('x-error')).to.equal('Invalid request: a valid command is required.');
     });
     it('invalid command test', async () => {
       const response = await assistantController.processImportAssistant({ ...baseContext, data: { command: 'test' } });
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: command not implemented: test');
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.contain('Invalid request: command not implemented. It must be one of');
     });
     it('missing prompt test', async () => {
       for (const [command, config] of Object.entries(commandConfig)) {
@@ -367,7 +370,7 @@ describe('AssistantController tests', () => {
           },
         );
         expect(response).to.be.an.instanceOf(Response);
-        expect(response.status).to.equal(STATUS.BAD_REQUEST);
+        expect(response.status).to.equal(STATUS_BAD_REQUEST);
         expect(response.headers.get('x-error'))
           .to
           .equal('Invalid request: Image url is not a base64 encoded image.');
@@ -429,7 +432,7 @@ describe('AssistantController tests', () => {
         },
       );
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.OK);
+      expect(response.status).to.equal(STATUS_OK);
       expect(response.headers.get('x-error')).to.equal(null);
       const results = await response.json();
       expect(results).to.not.be.undefined;
@@ -476,7 +479,7 @@ describe('AssistantController tests', () => {
         },
       );
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(STATUS.OK);
+      expect(response.status).to.equal(STATUS_OK);
       expect(response.headers.get('x-error')).to.equal(null);
       const results = await response.json();
       expect(results).to.not.be.undefined;
@@ -493,8 +496,6 @@ describe('AssistantController tests', () => {
   });
 
   describe('Assistant Prompt tests', () => {
-    const commands = Object.keys(commandConfig);
-
     it('Test merge with bad command', () => {
       try {
         mergePrompt(testAssistantPrompts, 'what', {});
@@ -504,7 +505,7 @@ describe('AssistantController tests', () => {
       }
     });
     it('Test merge with no data', () => {
-      commands.forEach((command) => {
+      getCommands().forEach((command) => {
         try {
           mergePrompt(testAssistantPrompts, command, {});
           expect('Should have thrown an error').to.equal('No error thrown');
@@ -519,7 +520,7 @@ describe('AssistantController tests', () => {
         pattern: 'pattern_string',
         selector: 'select_this',
       };
-      commands.forEach((command) => {
+      getCommands().forEach((command) => {
         let mergedPrompt;
         try {
           mergedPrompt = mergePrompt(testAssistantPrompts, command, allData);

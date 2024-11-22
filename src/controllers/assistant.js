@@ -18,12 +18,18 @@ import { AssistantDto } from '../dto/assistant-response.js';
 import {
   commandConfig,
   fetchFirefallCompletion,
+  getCommands,
   mergePrompt,
   validateAccessScopes,
   SCOPE,
-  STATUS,
 } from '../support/assistant-support.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
+import {
+  STATUS_BAD_REQUEST,
+  STATUS_INTERNAL_SERVER_ERROR,
+  STATUS_OK,
+  STATUS_UNAUTHORIZED,
+} from '../utils/constants.js';
 
 /**
  * Assistant controller. Provides methods to perform AI assisted operations.
@@ -54,7 +60,7 @@ function AssistantController(context) {
 
     // Process AWS secrets
     if (!contextEnv.ASSISTANT_CONFIGURATION) {
-      throw new ErrorWithStatusCode('The Assistant Configuration value is not defined.', STATUS.SYS_ERROR);
+      throw new ErrorWithStatusCode('The Assistant Configuration value is not defined.', STATUS_INTERNAL_SERVER_ERROR);
     }
     try {
       const assistantConfiguration = JSON.parse(contextEnv.ASSISTANT_CONFIGURATION);
@@ -66,16 +72,16 @@ function AssistantController(context) {
       };
       delete env.ASSISTANT_CONFIGURATION;
     } catch (error) {
-      throw new ErrorWithStatusCode(`Could not parse the Assistant Configuration: ${error.message}`, STATUS.SYS_ERROR);
+      throw new ErrorWithStatusCode(`Could not parse the Assistant Configuration: ${error.message}`, STATUS_INTERNAL_SERVER_ERROR);
     }
 
     if (!env.ASSISTANT_PROMPTS) {
-      throw new ErrorWithStatusCode('The Assistant Prompts value is not defined.', STATUS.SYS_ERROR);
+      throw new ErrorWithStatusCode('The Assistant Prompts value is not defined.', STATUS_INTERNAL_SERVER_ERROR);
     }
     try {
       env.ASSISTANT_PROMPTS = JSON.parse(env.ASSISTANT_PROMPTS);
     } catch (error) {
-      throw new ErrorWithStatusCode(`Could not parse the Assistant Prompts: ${error.message}`, STATUS.SYS_ERROR);
+      throw new ErrorWithStatusCode(`Could not parse the Assistant Prompts: ${error.message}`, STATUS_INTERNAL_SERVER_ERROR);
     }
 
     return env;
@@ -85,25 +91,25 @@ function AssistantController(context) {
     const { command } = data;
 
     // Validate 'command'
-    if (!command || !/^[A-Za-z]+$/.test(command)) {
-      throw new ErrorWithStatusCode('Invalid request: a valid command is required.', STATUS.BAD_REQUEST);
+    if (!command) {
+      throw new ErrorWithStatusCode('Invalid request: a valid command is required.', STATUS_BAD_REQUEST);
     }
     if (!commandConfig[command]) {
-      throw new ErrorWithStatusCode(`Invalid request: command not implemented: ${command}`, STATUS.BAD_REQUEST);
+      throw new ErrorWithStatusCode(`Invalid request: command not implemented. It must be one of ${getCommands().join(',')}`, STATUS_BAD_REQUEST);
     }
 
     const { parameters } = commandConfig[command];
     // Validate command parameters.
     parameters.forEach((param) => {
       if (!data[param]) {
-        throw new ErrorWithStatusCode(`Invalid request: ${param} is required for ${command}.`, STATUS.BAD_REQUEST);
+        throw new ErrorWithStatusCode(`Invalid request: ${param} is required for ${command}.`, STATUS_BAD_REQUEST);
       }
     });
 
     if (parameters.includes('imageUrl')) {
       // Only base64 images for now.
       if (!isBase64UrlImage(data.imageUrl)) {
-        throw new ErrorWithStatusCode('Invalid request: Image url is not a base64 encoded image.', STATUS.BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: Image url is not a base64 encoded image.', STATUS_BAD_REQUEST);
       }
     }
   }
@@ -111,10 +117,10 @@ function AssistantController(context) {
   // TODO: remove `headerImsOrgId` check when the api-key will have it in the profile.
   function validateRequestAttributes(attributes, headerImsOrgId) {
     if (!attributes.authInfo) {
-      throw new ErrorWithStatusCode('Invalid request: missing authentication information.', STATUS.UNAUTHORIZED);
+      throw new ErrorWithStatusCode('Invalid request: missing authentication information.', STATUS_UNAUTHORIZED);
     }
     if (!attributes.authInfo.profile) {
-      throw new ErrorWithStatusCode('Invalid request: missing authentication profile.', STATUS.UNAUTHORIZED);
+      throw new ErrorWithStatusCode('Invalid request: missing authentication profile.', STATUS_UNAUTHORIZED);
     }
 
     const { authInfo: { profile: apikeyProfile } } = attributes;
@@ -123,7 +129,7 @@ function AssistantController(context) {
     if (!callerImsOrgId) {
       throw new ErrorWithStatusCode(
         'Invalid request: A valid ims-org-id is not associated with your api-key.',
-        STATUS.UNAUTHORIZED,
+        STATUS_UNAUTHORIZED,
       );
     }
   }
@@ -152,7 +158,7 @@ function AssistantController(context) {
     if (!requestContext) {
       throw new ErrorWithStatusCode(
         'Invalid request: missing request context.',
-        STATUS.BAD_REQUEST,
+        STATUS_BAD_REQUEST,
       );
     }
     if (!isObject(requestContext)
@@ -162,7 +168,7 @@ function AssistantController(context) {
     ) {
       throw new ErrorWithStatusCode(
         'Invalid request: invalid request context format.',
-        STATUS.BAD_REQUEST,
+        STATUS_BAD_REQUEST,
       );
     }
 
@@ -191,6 +197,9 @@ function AssistantController(context) {
     );
     // Prune ASSISTANT_PROMPTS and other properties from the env.
     delete contextEnv.ASSISTANT_PROMPTS;
+
+    // TODO: remove this log line once we're sure the prompt is created correctly.
+    log.debug(`${command} generated prompt: ${prompt}`);
 
     const { firefallArgs = {} } = commandConfig[command];
     const { authInfo: { profile: apikeyProfile } } = attributes;
@@ -229,7 +238,7 @@ function AssistantController(context) {
       // Call the assistant model.
       const firefallResponse = await fetchFirefallCompletion(requestData, log);
       const firefallDto = AssistantDto.toJSON(firefallResponse);
-      return createResponse(firefallDto, STATUS.OK);
+      return createResponse(firefallDto, STATUS_OK);
     } catch (error) {
       log.error(`Failed to run assistant command: ${error.message}`);
       return createErrorResponse(error);
