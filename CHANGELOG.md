@@ -1,3 +1,24 @@
+## [1.79.5](https://github.com/adobe/spacecat-api-service/compare/v1.79.4...v1.79.5) (2024-11-22)
+
+
+### Bug Fixes
+
+* SITES-27040 [Import Assistant] Incorporate system prompts ([#588](https://github.com/adobe/spacecat-api-service/issues/588)) ([d3f5f28](https://github.com/adobe/spacecat-api-service/commit/d3f5f2848a8609aeeed2bab78943542b59ef4bbb))
+
+## [1.79.4](https://github.com/adobe/spacecat-api-service/compare/v1.79.3...v1.79.4) (2024-11-22)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v1.57.1 ([#592](https://github.com/adobe/spacecat-api-service/issues/592)) ([cc11d4e](https://github.com/adobe/spacecat-api-service/commit/cc11d4e5219ce3007f81c609f65e37a26d35ed2c))
+
+## [1.79.3](https://github.com/adobe/spacecat-api-service/compare/v1.79.2...v1.79.3) (2024-11-22)
+
+
+### Bug Fixes
+
+* udpate deps ([#591](https://github.com/adobe/spacecat-api-service/issues/591)) ([38e6bb9](https://github.com/adobe/spacecat-api-service/commit/38e6bb98def5a9996a68009227f12c16c5ec2ca7))
+
 ## [1.79.2](https://github.com/adobe/spacecat-api-service/compare/v1.79.1...v1.79.2) (2024-11-21)
 
 
