@@ -86,6 +86,8 @@ describe('Index Tests', () => {
           }),
         }),
         getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),
+        Opportunity: {},
+        Suggestion: {},
       },
       s3Client: {
         send: sinon.stub(),
