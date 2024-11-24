@@ -99,7 +99,7 @@
     "@xmldom/xmldom": "0.9.5",
     "c8": "10.1.2",
     "chai": "5.1.2",
-    "chai-as-promised": "8.0.0",
+    "chai-as-promised": "8.0.1",
     "dotenv": "16.4.5",
     "eslint": "8.57.1",
     "esmock": "2.6.9",
