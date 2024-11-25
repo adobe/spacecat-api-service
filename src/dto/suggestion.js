@@ -36,5 +36,7 @@ export const SuggestionDto = {
     data: suggestion.getData(),
     kpiDeltas: suggestion.getKpiDeltas(),
     status: suggestion.getStatus(),
+    createdAt: suggestion.getCreatedAt(),
+    updatedAt: suggestion.getUpdatedAt(),
   }),
 };
