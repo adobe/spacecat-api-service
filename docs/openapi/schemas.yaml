@@ -1934,10 +1934,6 @@ SuggestionList:
 SuggestionCreate:
   type: object
   properties:
-    opportunityId:
-      description: UUID of the opportunity this suggestion belongs to
-      readOnly: false
-      $ref: '#/Id'
     type:
       $ref: '#/SuggestionType'
     rank:
