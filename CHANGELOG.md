@@ -1,3 +1,10 @@
+## [1.79.8](https://github.com/adobe/spacecat-api-service/compare/v1.79.7...v1.79.8) (2024-11-25)
+
+
+### Bug Fixes
+
+* **api-spec:** fix schema and example of request body of create suggestions ([#597](https://github.com/adobe/spacecat-api-service/issues/597)) ([e4cfb88](https://github.com/adobe/spacecat-api-service/commit/e4cfb88d4b3cee6244c282cb662ad23b3c300f45))
+
 ## [1.79.7](https://github.com/adobe/spacecat-api-service/compare/v1.79.6...v1.79.7) (2024-11-23)
 
 
