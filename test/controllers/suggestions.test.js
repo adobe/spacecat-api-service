@@ -654,6 +654,32 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'suggestion id is required');
   });
 
+  it('bulk patches suggestion status fails if site ID does not match site id of the opportunity', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: 'wrong-site-id',
+        opportunityId: 'op67890',
+      },
+      data: [{ id: 'sug67890', status: 'NEW-APPROVED' }, { id: 'sug12345', status: 'NEW-APPROVED' }],
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse).to.have.property('suggestions');
+    expect(bulkPatchResponse).to.have.property('metadata');
+    expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+    expect(bulkPatchResponse.metadata).to.have.property('success', 0);
+    expect(bulkPatchResponse.metadata).to.have.property('failed', 2);
+    expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+    expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+    expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+    expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 404);
+    expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 404);
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
+    expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Suggestion not found');
+    expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion not found');
+  });
+
   it('bulk patches suggestion status 1 fails passed data does not have status', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
