@@ -25,7 +25,7 @@ describe('Opportunities Controller', () => {
   const sandbox = sinon.createSandbox();
   const opptys = [
     {
-      opportunityId: 'op12345',
+      id: 'op12345',
       siteId: 'site67890',
       auditId: 'audit001',
       title: 'Test Opportunity',
@@ -45,11 +45,11 @@ describe('Opportunities Controller', () => {
   ];
 
   const mockOpptyEntity = {
-    getOpportunityId() {
-      return opptys[0].opportunityId;
+    getId() {
+      return opptys[0].id;
     },
-    setOpportunityId(value) {
-      opptys[0].opportunityId = value;
+    setId(value) {
+      opptys[0].id = value;
     },
     getSiteId() {
       return opptys[0].siteId;
@@ -154,7 +154,7 @@ describe('Opportunities Controller', () => {
 
   beforeEach(() => {
     opptys[0] = {
-      opportunityId: 'op12345',
+      id: 'op12345',
       siteId: 'site67890',
       auditId: 'audit001',
       title: 'Test Opportunity',
@@ -214,7 +214,7 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(200);
     const opportunities = await response.json();
     expect(opportunities).to.be.an('array').with.lengthOf(1);
-    expect(opportunities[0]).to.have.property('opportunityId', 'op12345');
+    expect(opportunities[0]).to.have.property('id', 'op12345');
   });
 
   it('gets all opportunities for a site returns bad request if no site ID is passed', async () => {
@@ -231,7 +231,7 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(200);
     const opportunities = await response.json();
     expect(opportunities).to.be.an('array').with.lengthOf(1);
-    expect(opportunities[0]).to.have.property('opportunityId', 'op12345');
+    expect(opportunities[0]).to.have.property('id', 'op12345');
   });
 
   it('gets opportunity by ID', async () => {
@@ -239,7 +239,7 @@ describe('Opportunities Controller', () => {
     expect(mockOpportunityDataAccess.Opportunity.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const opportunity = await response.json();
-    expect(opportunity).to.have.property('opportunityId', 'op12345');
+    expect(opportunity).to.have.property('id', 'op12345');
   });
 
   it('gets all opportunities for a site by status returns bad request if no site ID is passed', async () => {
@@ -290,7 +290,7 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(201);
 
     const opportunity = await response.json();
-    expect(opportunity).to.have.property('opportunityId', 'op12345');
+    expect(opportunity).to.have.property('id', 'op12345');
     expect(opportunity).to.have.property('siteId', 'site67890');
   });
 
@@ -323,7 +323,7 @@ describe('Opportunities Controller', () => {
 
     const updatedOppty = await response.json();
     expect(updatedOppty).to.have.property('siteId', 'site67890');
-    expect(updatedOppty).to.have.property('opportunityId', 'op12345');
+    expect(updatedOppty).to.have.property('id', 'op12345');
     expect(updatedOppty).to.have.property('auditId', 'Audit ID NEW');
     expect(updatedOppty).to.have.property('status', 'APPROVED');
   });

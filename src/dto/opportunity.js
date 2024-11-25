@@ -37,7 +37,7 @@ export const OpportunityDto = {
     * }} JSON object.
    */
   toJSON: (oppty) => ({
-    opportunityId: oppty.getOpportunityId(),
+    id: oppty.getId(),
     siteId: oppty.getSiteId(),
     auditId: oppty.getAuditId(),
     runbook: oppty.getRunbook(),
