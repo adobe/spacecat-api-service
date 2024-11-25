@@ -121,12 +121,15 @@ function SuggestionsController(dataAccess) {
       return badRequest('Suggestion ID required');
     }
 
-    const sugg = await Suggestion.findById(suggestionId);
-    if (!sugg || sugg.getOpportunityId() !== opptyId
-       || (await sugg.getOpportunity()).getSiteId() !== siteId) {
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
       return notFound('Suggestion not found');
     }
-    return ok(SuggestionDto.toJSON(sugg));
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Suggestion not found');
+    }
+    return ok(SuggestionDto.toJSON(suggestion));
   };
 
   /**
@@ -213,8 +216,11 @@ function SuggestionsController(dataAccess) {
     }
 
     const suggestion = await Suggestion.findById(suggestionId);
-    if (!suggestion || suggestion.getOpportunityId() !== opportunityId
-       || (await suggestion.getOpportunity()).getSiteId() !== siteId) {
+    if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
+      return notFound('Suggestion not found');
+    }
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Suggestion not found');
     }
 
@@ -296,8 +302,16 @@ function SuggestionsController(dataAccess) {
       }
 
       const suggestion = await Suggestion.findById(id);
-      if (!suggestion || suggestion.getOpportunityId() !== opportunityId
-         || (await suggestion.getOpportunity()).getSiteId() !== siteId) {
+      if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
+        return {
+          index,
+          uuid: id,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        };
+      }
+      const opportunity = await suggestion.getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return {
           index,
           uuid: id,
