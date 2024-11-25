@@ -2153,3 +2153,19 @@ BrokenBacklinksGuidance:
       type: array
       items:
         type: string
+ImportJobStopRequest:
+  type: object
+  properties:
+    op:
+      description: The operation to perform on the import job
+      type: string
+      enum:
+        - 'replace'
+    path:
+      description: The path of the attqribute to update
+      type: string
+      example: '/status'
+    value:
+      description: The value to set
+      type: string
+      example: 'STOPPED'

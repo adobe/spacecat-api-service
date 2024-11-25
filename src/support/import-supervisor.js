@@ -15,6 +15,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'crypto';
 import { hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
 import { ErrorWithStatusCode } from './utils.js';
+import { STATUS_BAD_REQUEST } from '../utils/constants.js';
 
 const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
 
@@ -51,6 +52,8 @@ function ImportSupervisor(services, config) {
     queues = [], // Array of import queues
     importWorkerQueue, // URL of the import worker queue
     s3Bucket,
+    importQueueUrlPrefix, // URL of the queue where the import job will be
+    // sent from the import job manager to the content-scraper service
   } = config;
   const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
@@ -322,6 +325,45 @@ function ImportSupervisor(services, config) {
     return dataAccess.removeImportJob(job);
   }
 
+  /**
+   * Check if an import job is in a terminal state.
+   * @param {object} job - The import job.
+   * @returns {<boolean>} - true if the job is in a terminal state, false otherwise.
+   */
+  function isJobInTerminalState(job) {
+    return job.getStatus() === ImportJobStatus.FAILED
+        || job.getStatus() === ImportJobStatus.COMPLETE
+        || job.getStatus() === ImportJobStatus.STOPPED;
+  }
+
+  /**
+   * Stop an import job.
+   * @param {string} jobId - The ID of the job.
+   * @param {string} importApiKey - API key provided to the stop request.
+   * @returns {Promise<void>} Resolves once the job is stopped.
+   */
+  async function stopImportJob(jobId, importApiKey) {
+    // Fetch the job. This also confirms the API key matches the one used to start the job.
+    const job = await getImportJob(jobId, importApiKey);
+
+    // Check if the job already has a status of FAILED or COMPLETE or STOPPED
+    // Do not stop a job that is already in a terminal state
+    if (isJobInTerminalState(job)) {
+      throw new ErrorWithStatusCode(`Job with jobId: ${jobId} cannot be stopped as it is already in a terminal state`, STATUS_BAD_REQUEST);
+    }
+
+    job.updateStatus(ImportJobStatus.STOPPED);
+    await dataAccess.updateImportJob(job);
+
+    log.info(`Stopping import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)}`);
+
+    log.info(`Purging the queue ${importQueueUrlPrefix}${job.getImportQueueId()} for the import job with jobId: ${jobId}`);
+
+    sqs.purgeQueue(`${importQueueUrlPrefix}${job.getImportQueueId()}`);
+
+    log.debug(`Import job with jobId: ${jobId} has been stopped successfully`);
+  }
+
   return {
     startNewJob,
     getImportJob,
@@ -329,6 +371,7 @@ function ImportSupervisor(services, config) {
     getImportJobsByDateRange,
     getImportJobProgress,
     deleteImportJob,
+    stopImportJob,
   };
 }
 
