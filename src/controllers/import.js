@@ -17,6 +17,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import psl from 'psl';
+import { ImportJobStatus } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -353,6 +354,60 @@ function ImportController(context) {
     }
   }
 
+  /**
+   * Validate the data in a PATCH request
+   * @param {Object[]} data - The data to validate. It has to be of the format:
+   * [[ { "op": "replace", "path": "/status", "value": "STOPPED" }
+   * ]]
+   * @throws {ErrorWithStatusCode} 400 Bad Request if the data is invalid.
+   */
+  function validatePatchRequestData(data) {
+    if (!Array.isArray(data)) {
+      throw new ErrorWithStatusCode('Invalid request: Patch request data needs to be an array', STATUS_BAD_REQUEST);
+    }
+
+    if (data.length !== 1) {
+      throw new ErrorWithStatusCode('Invalid request: Patch request data needs to contain exactly one operation', STATUS_BAD_REQUEST);
+    }
+
+    data.forEach((patch) => {
+      if (!isObject(patch)) {
+        throw new ErrorWithStatusCode('Invalid request: Patch request data needs to be an object', STATUS_BAD_REQUEST);
+      }
+      if (patch.op !== 'replace') {
+        throw new ErrorWithStatusCode('Invalid request: Patch request operation needs to be "replace"', STATUS_BAD_REQUEST);
+      }
+
+      if (patch.path !== '/status') {
+        throw new ErrorWithStatusCode('Invalid request: Patch request path needs to be "/status"', STATUS_BAD_REQUEST);
+      }
+
+      if (patch.value !== ImportJobStatus.STOPPED) {
+        throw new ErrorWithStatusCode('Invalid request: Patch request value needs to be "STOPPED"', STATUS_BAD_REQUEST);
+      }
+    });
+  }
+
+  /**
+   * Stop an import job.
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.jobId - The ID of the job to delete.
+   * @returns {Promise<Response>} 204 No Content if successful, 4xx or 5xx otherwise.
+   */
+  async function stopImportJob(requestContext) {
+    const { data } = requestContext;
+    const { jobId, importApiKey } = parseRequestContext(requestContext);
+    try {
+      validateAccessScopes([SCOPE.WRITE]);
+      validatePatchRequestData(data);
+      await importSupervisor.stopImportJob(jobId, importApiKey);
+      return noContent();
+    } catch (error) {
+      log.error(`Failed to stop import jobId: ${jobId} : ${error.message}`);
+      return createErrorResponse(error);
+    }
+  }
+
   return {
     createImportJob,
     getImportJobStatus,
@@ -360,6 +415,7 @@ function ImportController(context) {
     getImportJobProgress,
     getImportJobsByDateRange,
     deleteImportJob,
+    stopImportJob,
   };
 }
 
