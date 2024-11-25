@@ -1679,7 +1679,7 @@ ImportJobStopRequest:
       enum:
         - 'replace'
     path:
-      description: The path of the attqribute to update
+      description: The path of the attribute to update
       type: string
       example: '/status'
     value:
