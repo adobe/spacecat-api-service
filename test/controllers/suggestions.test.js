@@ -25,11 +25,11 @@ describe('Suggestions Controller', () => {
   const sandbox = sinon.createSandbox();
 
   const mockSuggestionEntity = (suggData) => ({
-    getSuggestionId() {
-      return suggData.suggestionId;
+    getId() {
+      return suggData.id;
     },
-    setSuggestionId(value) {
-      suggData.suggestionId = value;
+    setId(value) {
+      suggData.id = value;
     },
     getOpportunityId() {
       return suggData.opportunityId;
@@ -110,7 +110,7 @@ describe('Suggestions Controller', () => {
   beforeEach(() => {
     suggs = [
       {
-        suggestionId: 'sug12345',
+        id: 'sug12345',
         opportunityId: 'op67890',
         type: 'CODE_CHANGE',
         status: 'NEW',
@@ -123,7 +123,7 @@ describe('Suggestions Controller', () => {
         },
       },
       {
-        suggestionId: 'sug67890',
+        id: 'sug67890',
         opportunityId: 'op67890',
         type: 'FIX_LINK',
         status: 'APPROVED',
@@ -141,7 +141,7 @@ describe('Suggestions Controller', () => {
       allByOpportunityId: sandbox.stub().resolves([mockSuggestionEntity(suggs[0])]),
       allByOpportunityIdAndStatus: sandbox.stub().resolves([mockSuggestionEntity(suggs[0])]),
       findById: sandbox.stub().callsFake((id) => {
-        const suggestion = suggs.find((s) => s.suggestionId === id);
+        const suggestion = suggs.find((s) => s.id === id);
         return Promise.resolve(suggestion ? mockSuggestionEntity(suggestion) : null);
       }),
       create: sandbox.stub().callsFake((suggData) => {
@@ -265,7 +265,7 @@ describe('Suggestions Controller', () => {
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const suggestion = await response.json();
-    expect(suggestion).to.have.property('suggestionId', 'sug12345');
+    expect(suggestion).to.have.property('id', 'sug12345');
   });
 
   it('gets suggestion by ID returns bad request if no site ID is passed', async () => {
@@ -333,8 +333,8 @@ describe('Suggestions Controller', () => {
     expect(createResponse.suggestions[1]).to.have.property('statusCode', 201);
     expect(createResponse.suggestions[0].suggestion).to.exist;
     expect(createResponse.suggestions[1].suggestion).to.exist;
-    expect(createResponse.suggestions[0].suggestion).to.have.property('suggestionId', 'sug12345');
-    expect(createResponse.suggestions[1].suggestion).to.have.property('suggestionId', 'sug67890');
+    expect(createResponse.suggestions[0].suggestion).to.have.property('id', 'sug12345');
+    expect(createResponse.suggestions[1].suggestion).to.have.property('id', 'sug67890');
   });
 
   it('creates bulk suggestion returns 400 and 500 error', async () => {
@@ -406,7 +406,7 @@ describe('Suggestions Controller', () => {
 
     const updatedSuggestion = await response.json();
     expect(updatedSuggestion).to.have.property('opportunityId', 'op67890');
-    expect(updatedSuggestion).to.have.property('suggestionId', 'sug12345');
+    expect(updatedSuggestion).to.have.property('id', 'sug12345');
     expect(updatedSuggestion).to.have.property('rank', 2);
   });
 
@@ -613,7 +613,7 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
-    expect(error).to.have.property('message', 'Request body must be an array of [{ suggestionId, status },...]');
+    expect(error).to.have.property('message', 'Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
   });
 
   it('bulk patches suggestion status 1 fails passed data does not have id', async () => {
@@ -639,7 +639,7 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
     expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
     expect(bulkPatchResponse.suggestions[0].message).to.not.exist;
-    expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'suggestionId is required');
+    expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'suggestion id is required');
   });
 
   it('bulk patches suggestion status 1 fails passed data does not have status', async () => {

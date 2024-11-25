@@ -272,7 +272,7 @@ function SuggestionsController(dataAccess) {
     }
 
     if (!isArray(context.data)) {
-      return badRequest('Request body must be an array of [{ suggestionId, status },...]');
+      return badRequest('Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
     }
 
     const suggestionPromises = context.data.map(async ({ id, status }, index) => {
@@ -280,7 +280,7 @@ function SuggestionsController(dataAccess) {
         return {
           index,
           uuid: '',
-          message: 'suggestionId is required',
+          message: 'suggestion id is required',
           statusCode: 400,
         };
       }

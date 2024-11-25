@@ -29,7 +29,7 @@ export const SuggestionDto = {
    * }} JSON object.
    */
   toJSON: (suggestion) => ({
-    suggestionId: suggestion.getSuggestionId(),
+    id: suggestion.getId(),
     opportunityId: suggestion.getOpportunityId(),
     type: suggestion.getType(),
     rank: suggestion.getRank(),
