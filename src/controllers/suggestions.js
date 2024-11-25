@@ -60,7 +60,7 @@ function SuggestionsController(dataAccess) {
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
-      if (oppty.getSiteId() !== siteId) {
+      if (!oppty || oppty.getSiteId() !== siteId) {
         return badRequest('Opportunity not found');
       }
     }
@@ -91,7 +91,7 @@ function SuggestionsController(dataAccess) {
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
-      if (oppty.getSiteId() !== siteId) {
+      if (!oppty || oppty.getSiteId() !== siteId) {
         return badRequest('Opportunity not found');
       }
     }
