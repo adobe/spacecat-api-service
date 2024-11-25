@@ -73,6 +73,18 @@ describe('Suggestions Controller', () => {
     setKpiDeltas(value) {
       suggData.kpiDeltas = value;
     },
+    getCreatedAt() {
+      return suggData.createdAt;
+    },
+    getUpdatedAt() {
+      return suggData.updatedAt;
+    },
+    setCreatedAt(value) {
+      suggData.createdAt = value;
+    },
+    setUpdatedAt(value) {
+      suggData.updateddAt = value;
+    },
     getOpportunity() {
       return {
         getSiteId() {
