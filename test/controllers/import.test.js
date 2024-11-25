@@ -704,7 +704,7 @@ describe('ImportController tests', () => {
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to be an object');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to be an array of objects');
     });
     it('should fail when request data does not contain an operation', async () => {
       baseContext.data = [{ notAnOperation: 'not an operation' }];

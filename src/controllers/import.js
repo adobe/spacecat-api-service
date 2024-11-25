@@ -357,8 +357,7 @@ function ImportController(context) {
   /**
    * Validate the data in a PATCH request
    * @param {Object[]} data - The data to validate. It has to be of the format:
-   * [[ { "op": "replace", "path": "/status", "value": "STOPPED" }
-   * ]]
+   * [ { "op": "replace", "path": "/status", "value": "STOPPED" } ]
    * @throws {ErrorWithStatusCode} 400 Bad Request if the data is invalid.
    */
   function validatePatchRequestData(data) {
@@ -372,7 +371,7 @@ function ImportController(context) {
 
     data.forEach((patch) => {
       if (!isObject(patch)) {
-        throw new ErrorWithStatusCode('Invalid request: Patch request data needs to be an object', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: Patch request data needs to be an array of objects', STATUS_BAD_REQUEST);
       }
       if (patch.op !== 'replace') {
         throw new ErrorWithStatusCode('Invalid request: Patch request operation needs to be "replace"', STATUS_BAD_REQUEST);
@@ -403,7 +402,7 @@ function ImportController(context) {
       await importSupervisor.stopImportJob(jobId, importApiKey);
       return noContent();
     } catch (error) {
-      log.error(`Failed to stop import jobId: ${jobId} : ${error.message}`);
+      log.error(`Failed to stop import job with jobId: ${jobId} : ${error.message}`);
       return createErrorResponse(error);
     }
   }
