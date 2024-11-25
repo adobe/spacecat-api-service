@@ -157,6 +157,8 @@ function SuggestionsController(dataAccess) {
 
     const suggestionPromises = context.data.map(async (suggData, index) => {
       try {
+        // eslint-disable-next-line no-param-reassign
+        suggData.opportunityId = opptyId;
         const suggestionEntity = await Suggestion.create(suggData);
         return {
           index,
