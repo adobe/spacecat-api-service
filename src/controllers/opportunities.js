@@ -225,7 +225,8 @@ function OpportunitiesController(dataAccess) {
 
     // TODO: eventually suggestions will be removed by the data access layer
     // and this code should be removed
-    const removeSuggestionsPromises = await (opportunity.getSuggestions())
+    const suggestionsArray = await opportunity.getSuggestions();
+    const removeSuggestionsPromises = suggestionsArray
       .map(async (suggestion) => suggestion.remove());
 
     await Promise.all(removeSuggestionsPromises);
