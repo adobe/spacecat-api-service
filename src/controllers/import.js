@@ -373,6 +373,7 @@ function ImportController(context) {
       if (!isObject(patch)) {
         throw new ErrorWithStatusCode('Invalid request: Patch request data needs to be an array of objects', STATUS_BAD_REQUEST);
       }
+
       if (patch.op !== 'replace') {
         throw new ErrorWithStatusCode('Invalid request: Patch request operation needs to be "replace"', STATUS_BAD_REQUEST);
       }
