@@ -728,7 +728,7 @@ describe('ImportController tests', () => {
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request value needs to be "STOPPED"');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following values: ["STOPPED"]');
     });
     it('should fail when import job is not provided', async () => {
       baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(null);
