@@ -383,7 +383,7 @@ function ImportController(context) {
       }
 
       if (patch.value !== ImportJobStatus.STOPPED) {
-        throw new ErrorWithStatusCode('Invalid request: Patch request value needs to be "STOPPED"', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: Patch request supports the following values: ["STOPPED"]', STATUS_BAD_REQUEST);
       }
     });
   }
