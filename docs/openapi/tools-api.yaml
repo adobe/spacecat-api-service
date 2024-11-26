@@ -112,7 +112,7 @@ import-job-status:
   patch:
     tags:
       - import
-    summary: Stop an import job
+    summary: Patch an import job
     description: |
       This endpoint can be used to stop an import job, given its jobId. This operation will stop
       the import job and mark the job status as STOPPED.
