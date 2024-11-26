@@ -793,5 +793,152 @@ describe('Audits Controller', () => {
       const error = await result.json();
       expect(error).to.have.property('message', 'Manual overwrite must have both brokenTargetURL and targetURL');
     });
+
+    describe('process groupedURLs parameter', () => {
+      const siteId = 'site0';
+      const auditType = 'broken-backlinks';
+
+      let siteConfig;
+      let site;
+
+      beforeEach(() => {
+        siteConfig = {
+          getHandlerConfig: sandbox.stub(),
+          getGroupedURLs: sandbox.stub(),
+          updateGroupedURLs: sandbox.stub(),
+          getSlackConfig: () => {},
+          getHandlers: () => {},
+          getImports: () => {},
+        };
+        site = {
+          getConfig: () => siteConfig,
+          updateConfig: sinon.stub(),
+        };
+
+        mockDataAccess.getSiteByID.withArgs(siteId).resolves(site);
+      });
+
+      it('returns a bad request if the groupedURLs parameter is not an array', async () => {
+        siteConfig.getHandlerConfig.withArgs(auditType).returns({});
+
+        const context = {
+          params: { siteId, auditType: 'broken-backlinks' },
+          data: { groupedURLs: 'invalid_type' },
+        };
+        const result = await auditsController.patchAuditForSite(context);
+        const error = await result.json();
+
+        expect(siteConfig.updateGroupedURLs.called).to.be.false;
+        expect(site.updateConfig.called).to.be.false;
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'No updates provided');
+      });
+
+      it('returns a bad request if the groupedURLs pattern is not a valid regular expression', async () => {
+        const groupedURLsConfig = undefined;
+        const handlerConfig = {
+          groupedURLs: groupedURLsConfig,
+        };
+
+        const groupedURLs = [
+          { name: 'catalog', pattern: '[a-z-invalid_regexp' },
+          { name: 'blog', pattern: '/posts/' },
+        ];
+        const context = {
+          params: { siteId, auditType: 'broken-backlinks' },
+          data: { groupedURLs },
+        };
+
+        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
+        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
+
+        const result = await auditsController.patchAuditForSite(context);
+        const error = await result.json();
+
+        expect(siteConfig.updateGroupedURLs.called).to.be.false;
+        expect(site.updateConfig.called).to.be.false;
+        expect(result.status).to.equal(400);
+        expect(error).to.have.property('message', 'Invalid regular expression in pattern for "catalog": "[a-z-invalid_regexp".');
+      });
+
+      it('successful update', async () => {
+        const groupedURLsConfig = [
+          { name: 'news', pattern: '/news/' },
+        ];
+        const handlerConfig = {
+          groupedURLs: groupedURLsConfig,
+        };
+
+        const groupedURLs = [
+          { name: 'catalog', pattern: '/products/' },
+          { name: 'blog', pattern: '/posts/' },
+        ];
+        const context = {
+          params: { siteId, auditType: 'broken-backlinks' },
+          data: { groupedURLs },
+        };
+
+        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
+        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        const expectedGroupedURLs = [...groupedURLsConfig, ...groupedURLs];
+        expect(siteConfig.updateGroupedURLs.calledWith(auditType, expectedGroupedURLs)).to.be.true;
+        expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
+        expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+        expect(result.status).to.equal(200);
+      });
+
+      it('successful update when groupedURLs is empty', async () => {
+        const groupedURLsConfig = [
+          { name: 'news', pattern: '/news/' },
+        ];
+        const handlerConfig = {
+          groupedURLs: groupedURLsConfig,
+        };
+
+        const groupedURLs = [];
+        const context = {
+          params: { siteId, auditType: 'broken-backlinks' },
+          data: { groupedURLs },
+        };
+
+        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
+        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(siteConfig.updateGroupedURLs.calledWith(auditType, [])).to.be.true;
+        expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
+        expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+        expect(result.status).to.equal(200);
+      });
+
+      it('successful update if groupedURLs is undefined in the config', async () => {
+        const groupedURLsConfig = undefined;
+        const handlerConfig = {
+          groupedURLs: groupedURLsConfig,
+        };
+        const groupedURLs = [
+          { name: 'catalog', pattern: '/products/' },
+          { name: 'blog', pattern: '/posts/' },
+        ];
+        const context = {
+          params: { siteId, auditType: 'broken-backlinks' },
+          data: { groupedURLs },
+        };
+
+        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
+        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
+
+        const result = await auditsController.patchAuditForSite(context);
+
+        expect(siteConfig.updateGroupedURLs.calledWith(auditType, groupedURLs)).to.be.true;
+        expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
+        expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+        expect(result.status).to.equal(200);
+      });
+    });
   });
 });
