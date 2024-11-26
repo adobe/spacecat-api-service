@@ -485,48 +485,34 @@ AuditResult:
       description: The result of CWV audit
       properties:
         cwv:
-          type: object
-          properties:
-            siteMetrics:
-              type: object
-              properties:
-                performanceScore:
-                  type: number
-                  description: "Overall performance score for the site"
-                  example: 82.5
-                bounceRate:
-                  type: number
-                  description: "Overall bounce rate for the site"
-                  example: 47.3
-            pageMetrics:
-              type: array
-              items:
-                type: object
-                properties:
-                  type:
-                    type: string
-                    enum: ["group", "url"]
-                    description: "Specifies if the metric applies to a 'group' or an individual 'url'"
-                  name:
-                    type: string
-                    description: "Name of the group (only applicable when type is 'group')"
-                    example: "Homepage Group"
-                  pattern:
-                    type: string
-                    description: "URL pattern for the group (only applicable when type is 'group')"
-                    example: "https://www.aem.live/home*"
-                  url:
-                    description: "URL of the page (only applicable when type is 'url')"
-                    $ref: '#/URL'
-                  pageviews:
-                    type: integer
-                    description: "Total pageviews for this group or URL"
-                    example: 4620
-                  metrics:
-                    type: array
-                    description: "Array of performance metrics by device type"
-                    items:
-                      $ref: './schemas.yaml#/CWVMetric'
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: ["group", "url"]
+                description: "Specifies if the metric applies to a 'group' or an individual 'url'"
+              name:
+                type: string
+                description: "Name of the group (only applicable when type is 'group')"
+                example: "Homepage Group"
+              pattern:
+                type: string
+                description: "URL pattern for the group (only applicable when type is 'group')"
+                example: "https://www.aem.live/home*"
+              url:
+                description: "URL of the page (only applicable when type is 'url')"
+                $ref: '#/URL'
+              pageviews:
+                type: integer
+                description: "Total pageviews for this group or URL"
+                example: 4620
+              metrics:
+                type: array
+                description: "Array of performance metrics by device type"
+                items:
+                  $ref: './schemas.yaml#/CWVMetric'
 AuditList:
   type: array
   items:
@@ -539,6 +525,10 @@ CWVMetric:
       description: "The type of device"
       enum: ["mobile", "desktop"]
       example: "mobile"
+    pageviews:
+      type: integer
+      description: "Total pageviews for this device type"
+      example: 2120
     lcp:
       type: number
       format: float
