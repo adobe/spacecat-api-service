@@ -61,7 +61,7 @@ function SuggestionsController(dataAccess) {
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
       if (!oppty || oppty.getSiteId() !== siteId) {
-        return badRequest('Opportunity not found');
+        return notFound('Opportunity not found');
       }
     }
     const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
@@ -92,7 +92,7 @@ function SuggestionsController(dataAccess) {
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
       if (!oppty || oppty.getSiteId() !== siteId) {
-        return badRequest('Opportunity not found');
+        return notFound('Opportunity not found');
       }
     }
     const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));

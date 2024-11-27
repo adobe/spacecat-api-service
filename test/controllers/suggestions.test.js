@@ -223,10 +223,10 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Opportunity ID required');
   });
 
-  it('gets all suggestions for an opportunity returns bad request if passed site ID does not match opportunity site id', async () => {
+  it('gets all suggestions for an opportunity returns not found if passed site ID does not match opportunity site id', async () => {
     const response = await suggestionsController.getAllForOpportunity({ params: { siteId: 'wrong-site-id', opportunityId: 'op12345' } });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.true;
-    expect(response.status).to.equal(400);
+    expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
   });
@@ -264,10 +264,10 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Status is required');
   });
 
-  it('gets all suggestions for an opportunity by status returns bad request if no site ID passed does not match opportunity site id', async () => {
+  it('gets all suggestions for an opportunity by status returns not found if site ID passed does not match opportunity site id', async () => {
     const response = await suggestionsController.getByStatus({ params: { siteId: 'wrong-site-id', opportunityId: 'op67890', status: 'NEW' } });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
-    expect(response.status).to.equal(400);
+    expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
   });
