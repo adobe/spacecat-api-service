@@ -375,7 +375,7 @@ function ImportController(context) {
       }
 
       if (patch.op !== 'replace') {
-        throw new ErrorWithStatusCode('Invalid request: Patch request operation needs to be "replace"', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: Patch request supports the following operations: ["replace"]', STATUS_BAD_REQUEST);
       }
 
       if (patch.path !== '/status') {
