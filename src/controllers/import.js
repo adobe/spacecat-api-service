@@ -360,7 +360,7 @@ function ImportController(context) {
    * [ { "op": "replace", "path": "/status", "value": "STOPPED" } ]
    * @throws {ErrorWithStatusCode} 400 Bad Request if the data is invalid.
    */
-  function validatePatchRequestData(data) {
+  function validateStopJobPatchData(data) {
     if (!Array.isArray(data)) {
       throw new ErrorWithStatusCode('Invalid request: Patch request data needs to be an array', STATUS_BAD_REQUEST);
     }

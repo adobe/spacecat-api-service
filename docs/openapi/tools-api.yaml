@@ -115,7 +115,7 @@ import-job-status:
     summary: Patch an import job
     description: |
       This endpoint can be used to stop an import job, given its jobId. This operation will prevent
-      any further scraping of the import job URLs, and mark the job status as STOPPED.
+      any further scraping of the import job URLs, and mark the job status as STOPPED. The results will not be saved to storage, allowing the user to start a new import immediately.
     operationId: stopImportJob
     security:
       - scoped_api_key: [ ]

@@ -712,7 +712,7 @@ describe('ImportController tests', () => {
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request operation needs to be "replace"');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following operations: ["replace"]');
     });
     it('should fail when request data does not contain a valid path', async () => {
       baseContext.data = [{ op: 'replace', path: '/not-a-valid-path', value: 'not a valid value' }];
@@ -720,7 +720,7 @@ describe('ImportController tests', () => {
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request path needs to be "/status"');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following paths: ["/status"]');
     });
     it('should fail when request data does not contain a valid value', async () => {
       baseContext.data = [{ op: 'replace', path: '/status', value: 'not a valid value' }];
