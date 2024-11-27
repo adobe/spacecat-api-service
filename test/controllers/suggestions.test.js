@@ -326,7 +326,7 @@ describe('Suggestions Controller', () => {
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
     const error = await response.json();
-    expect(error).to.have.property('message', 'Suggestion not found');
+    expect(error).to.have.property('message', 'not found');
   });
 
   it('creates 2 suggestions success', async () => {

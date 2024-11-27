@@ -127,7 +127,7 @@ function SuggestionsController(dataAccess) {
     }
     const opportunity = await suggestion.getOpportunity();
     if (!opportunity || opportunity.getSiteId() !== siteId) {
-      return notFound('Suggestion not found');
+      return notFound();
     }
     return ok(SuggestionDto.toJSON(suggestion));
   };
