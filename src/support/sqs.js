@@ -44,7 +44,7 @@ class SQS {
   }
 
   /**
-   * Purge the queue
+   * Purge the queue identified by its queueUrl.
    * @param {string} queueUrl - URL of the queue to be purged
    * @returns {Promise<void>} - Promise that resolves when the queue is purged
    */
