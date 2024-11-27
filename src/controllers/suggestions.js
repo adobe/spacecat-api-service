@@ -252,7 +252,10 @@ function SuggestionsController(dataAccess) {
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
     } catch (e) {
-      return badRequest(e.message);
+      if (e instanceof ValidationError) {
+        return badRequest(e.message);
+      }
+      return createResponse({ message: 'Error updating suggestion' }, 500);
     }
     return badRequest('No updates provided');
   };

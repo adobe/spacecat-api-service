@@ -552,6 +552,22 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Validation error');
   });
 
+  it('patches a suggestion returns 500 error if there is an error other than validation', async () => {
+    const { rank, data, kpiDeltas } = suggs[1];
+    suggs[0].throwError = true;
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: 'site67890',
+        opportunityId: 'op67890',
+        suggestionId: 'sug12345',
+      },
+      data: { rank, data, kpiDeltas },
+    });
+    expect(response.status).to.equal(500);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Error updating suggestion');
+  });
+
   it('bulk patches suggestion status 2 successes', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
