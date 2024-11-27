@@ -1,3 +1,10 @@
+# [1.80.0](https://github.com/adobe/spacecat-api-service/compare/v1.79.12...v1.80.0) (2024-11-27)
+
+
+### Features
+
+* Add an API to stop an import job ([#600](https://github.com/adobe/spacecat-api-service/issues/600)) ([06c3e94](https://github.com/adobe/spacecat-api-service/commit/06c3e942db95d051b317a7cd52956c3d2137aba2))
+
 ## [1.79.12](https://github.com/adobe/spacecat-api-service/compare/v1.79.11...v1.79.12) (2024-11-27)
 
 
