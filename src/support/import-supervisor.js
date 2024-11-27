@@ -327,7 +327,7 @@ function ImportSupervisor(services, config) {
   /**
    * Check if an import job is in a terminal state.
    * @param {object} job - The import job.
-   * @returns {<boolean>} - true if the job is in a terminal state, false otherwise.
+   * @returns {boolean} - true if the job is in a terminal state, false otherwise.
    */
   function isJobInTerminalState(job) {
     return job.getStatus() === ImportJobStatus.FAILED
