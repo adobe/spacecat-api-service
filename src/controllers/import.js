@@ -379,7 +379,7 @@ function ImportController(context) {
       }
 
       if (patch.path !== '/status') {
-        throw new ErrorWithStatusCode('Invalid request: Patch request path needs to be "/status"', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode('Invalid request: Patch request supports the following paths: ["/status"]', STATUS_BAD_REQUEST);
       }
 
       if (patch.value !== ImportJobStatus.STOPPED) {
