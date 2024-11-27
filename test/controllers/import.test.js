@@ -81,6 +81,7 @@ describe('ImportController tests', () => {
 
     mockSqsClient = {
       sendMessage: sandbox.stub(),
+      purgeQueue: sandbox.stub(),
     };
 
     mockAuth = {
@@ -103,6 +104,7 @@ describe('ImportController tests', () => {
       createNewImportJob: (data) => createImportJob(data),
       createNewImportUrl: (data) => createImportUrl(data),
       getImportJobByID: sandbox.stub(),
+      updateImportJob: sandbox.stub().resolves(),
       getImportJobProgress: sandbox.stub(),
       getImportUrlsByJobId: sandbox.stub().resolves([]),
       getApiKeyByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
@@ -131,6 +133,7 @@ describe('ImportController tests', () => {
     importConfiguration = {
       queues: ['spacecat-import-queue-1', 'spacecat-import-queue-2'],
       importWorkerQueue: 'https://sqs.us-east-1.amazonaws.com/1234567890/import-worker-queue',
+      importQueueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
       options: {
         enableJavascript: true,
       },
@@ -664,6 +667,112 @@ describe('ImportController tests', () => {
       // Check that removeImportJob was invoked with the expected jobId
       expect(mockDataAccess.removeImportJob).to.have.been.calledOnce;
       expect(mockDataAccess.removeImportJob.getCall(0).args[0].getId()).to.equal(exampleJob.id);
+    });
+  });
+
+  describe('stopImportJob', () => {
+    it('should fail when api key does not have the correct scopes', async () => {
+      baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
+      baseContext.params.jobId = exampleJob.id;
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(401);
+      expect(response.headers.get('x-error')).to.equal('Missing required scopes');
+
+      expect(mockSqsClient.purgeQueue).to.not.have.been.called;
+    });
+
+    it('should fail when request data is not an array', async () => {
+      baseContext.data = 'not an array';
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to be an array');
+    });
+
+    it('should fail when request data is an empty array', async () => {
+      baseContext.data = [];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to contain exactly one operation');
+    });
+
+    it('should fail when request data does not contain an object', async () => {
+      baseContext.data = ['not an object'];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to be an array of objects');
+    });
+
+    it('should fail when request data does not contain an operation', async () => {
+      baseContext.data = [{ notAnOperation: 'not an operation' }];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following operations: ["replace"]');
+    });
+
+    it('should fail when request data does not contain a valid path', async () => {
+      baseContext.data = [{ op: 'replace', path: '/not-a-valid-path', value: 'not a valid value' }];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following paths: ["/status"]');
+    });
+
+    it('should fail when request data does not contain a valid value', async () => {
+      baseContext.data = [{ op: 'replace', path: '/status', value: 'not a valid value' }];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following values: ["STOPPED"]');
+    });
+
+    it('should fail when import job is not provided', async () => {
+      baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(null);
+      baseContext.data = [{ op: 'replace', path: '/status', value: 'STOPPED' }];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Job ID is required');
+    });
+
+    it('should fail when import job is not running', async () => {
+      baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(createImportJob({
+        ...exampleJob,
+        status: 'STOPPED',
+      }));
+      baseContext.data = [{ op: 'replace', path: '/status', value: 'STOPPED' }];
+      baseContext.params.jobId = 'f91afda0-afc8-467e-bfa3-fdbeba3037e8';
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Job with jobId: f91afda0-afc8-467e-bfa3-fdbeba3037e8 cannot be stopped as it is already in a terminal state');
+    });
+
+    it('should successfully stop an import job', async () => {
+      baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(createImportJob({
+        ...exampleJob,
+        status: 'RUNNING',
+      }));
+      baseContext.data = [{ op: 'replace', path: '/status', value: 'STOPPED' }];
+      baseContext.params.jobId = 'f91afda0-afc8-467e-bfa3-fdbeba3037e8';
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(204);
+      expect(mockSqsClient.purgeQueue).to.have.been.calledOnce;
     });
   });
 });

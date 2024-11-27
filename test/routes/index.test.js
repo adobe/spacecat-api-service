@@ -72,6 +72,7 @@ describe('getRouteHandlers', () => {
     getImportJobResult: sinon.stub(),
     getImportJobProgress: sinon.stub(),
     getImportJobsByDateRange: sinon.stub(),
+    stopImportJob: sinon.stub(),
   };
 
   const mockAssistantController = {
@@ -191,6 +192,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'DELETE /tools/api-keys/:id',
       'GET /tools/import/jobs/:jobId',
+      'PATCH /tools/import/jobs/:jobId',
       'POST /tools/import/jobs/:jobId/result',
       'GET /tools/import/jobs/:jobId/progress',
       'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
