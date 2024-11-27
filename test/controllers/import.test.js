@@ -682,6 +682,7 @@ describe('ImportController tests', () => {
 
       expect(mockSqsClient.purgeQueue).to.not.have.been.called;
     });
+
     it('should fail when request data is not an array', async () => {
       baseContext.data = 'not an array';
       const response = await importController.stopImportJob(baseContext);
@@ -690,6 +691,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to be an array');
     });
+
     it('should fail when request data is an empty array', async () => {
       baseContext.data = [];
       const response = await importController.stopImportJob(baseContext);
@@ -698,6 +700,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to contain exactly one operation');
     });
+
     it('should fail when request data does not contain an object', async () => {
       baseContext.data = ['not an object'];
       const response = await importController.stopImportJob(baseContext);
@@ -706,6 +709,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to be an array of objects');
     });
+
     it('should fail when request data does not contain an operation', async () => {
       baseContext.data = [{ notAnOperation: 'not an operation' }];
       const response = await importController.stopImportJob(baseContext);
@@ -714,6 +718,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following operations: ["replace"]');
     });
+
     it('should fail when request data does not contain a valid path', async () => {
       baseContext.data = [{ op: 'replace', path: '/not-a-valid-path', value: 'not a valid value' }];
       const response = await importController.stopImportJob(baseContext);
@@ -722,6 +727,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following paths: ["/status"]');
     });
+
     it('should fail when request data does not contain a valid value', async () => {
       baseContext.data = [{ op: 'replace', path: '/status', value: 'not a valid value' }];
       const response = await importController.stopImportJob(baseContext);
@@ -730,6 +736,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following values: ["STOPPED"]');
     });
+
     it('should fail when import job is not provided', async () => {
       baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(null);
       baseContext.data = [{ op: 'replace', path: '/status', value: 'STOPPED' }];
@@ -739,6 +746,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Job ID is required');
     });
+
     it('should fail when import job is not running', async () => {
       baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(createImportJob({
         ...exampleJob,
@@ -752,6 +760,7 @@ describe('ImportController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Job with jobId: f91afda0-afc8-467e-bfa3-fdbeba3037e8 cannot be stopped as it is already in a terminal state');
     });
+
     it('should successfully stop an import job', async () => {
       baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(createImportJob({
         ...exampleJob,
