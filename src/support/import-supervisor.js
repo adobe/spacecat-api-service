@@ -52,8 +52,7 @@ function ImportSupervisor(services, config) {
     queues = [], // Array of import queues
     importWorkerQueue, // URL of the import worker queue
     s3Bucket,
-    importQueueUrlPrefix, // URL of the queue where the import job will be
-    // sent from the import job manager to the content-scraper service
+    importQueueUrlPrefix, // URL prefix for the queues assigned to particular import jobs
   } = config;
   const IMPORT_RESULT_ARCHIVE_NAME = 'import-result.zip';
 
