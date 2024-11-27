@@ -360,7 +360,7 @@ function ImportSupervisor(services, config) {
 
     await sqs.purgeQueue(`${importQueueUrlPrefix}${job.getImportQueueId()}`);
 
-    log.debug(`Import job with jobId: ${jobId} has been stopped successfully`);
+    log.info(`Import job with jobId: ${jobId} has been stopped successfully`);
   }
 
   return {
