@@ -9,7 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { SendMessageCommand, SQSClient, PurgeQueueCommand } from '@aws-sdk/client-sqs';
 
 /**
  * @class SQS utility to send messages to SQS
@@ -39,6 +39,23 @@ class SQS {
     } catch (e) {
       const { type, code, message: msg } = e;
       this.log.error(`Message sent failed. Type: ${type}, Code: ${code}, Message: ${msg}`);
+      throw e;
+    }
+  }
+
+  /**
+   * Purge the queue identified by its queueUrl.
+   * @param {string} queueUrl - URL of the queue to be purged
+   * @returns {Promise<void>} - Promise that resolves when the queue is purged
+   */
+  async purgeQueue(queueUrl) {
+    const purgeQueueCommand = new PurgeQueueCommand({ QueueUrl: queueUrl });
+    try {
+      await this.sqsClient.send(purgeQueueCommand);
+      this.log.info(`Success, queue purged. QueueUrl: ${queueUrl}`);
+    } catch (e) {
+      const { type, code, message: msg } = e;
+      this.log.error(`Queue purge failed. Type: ${type}, Code: ${code}, Message: ${msg}`);
       throw e;
     }
   }

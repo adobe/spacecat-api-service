@@ -1934,10 +1934,6 @@ SuggestionList:
 SuggestionCreate:
   type: object
   properties:
-    opportunityId:
-      description: UUID of the opportunity this suggestion belongs to
-      readOnly: false
-      $ref: '#/Id'
     type:
       $ref: '#/SuggestionType'
     rank:
@@ -2157,3 +2153,20 @@ BrokenBacklinksGuidance:
       type: array
       items:
         type: string
+ImportJobStopRequest:
+  type: object
+  properties:
+    op:
+      description: The operation to perform on the import job
+      type: string
+      enum:
+        - 'replace'
+    path:
+      description: The path of the attribute to update
+      type: string
+      example: '/status'
+    value:
+      description: The value to set
+      type: string
+      enum:
+        - 'STOPPED'
