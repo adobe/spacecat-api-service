@@ -399,7 +399,7 @@ function ImportController(context) {
     const { jobId, importApiKey } = parseRequestContext(requestContext);
     try {
       validateAccessScopes([SCOPE.WRITE]);
-      validatePatchRequestData(data);
+      validateStopJobPatchData(data);
       await importSupervisor.stopImportJob(jobId, importApiKey);
       return noContent();
     } catch (error) {
