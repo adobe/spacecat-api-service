@@ -23,7 +23,7 @@ import {
   isNonEmptyObject,
   arrayEquals,
 } from '@adobe/spacecat-shared-utils';
-
+import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
 
 /**
@@ -38,7 +38,25 @@ function OpportunitiesController(dataAccess) {
   }
   const { Opportunity } = dataAccess;
   if (!isObject(Opportunity)) {
-    throw new Error('Data access required');
+    throw new Error('Opportunity Collection not available');
+  }
+
+  /**
+   * returns a response for a data access error.
+   * If there's a ValidationError it will return a 400 response, and the
+   * validation error message coming from the data access layer.
+   * If there's another kind of error, it will return a 500 response.
+   * The error message in the 500 response is overriden by passing the message parameter
+   * to avoid exposing internal error messages to the client.
+   * @param {*} e - error
+   * @param {*} message - error message to override 500 error messages
+   * @returns a response
+   */
+  function handleDataAccessError(e, message) {
+    if (e instanceof ValidationError) {
+      return badRequest(e.message);
+    }
+    return createResponse({ message }, 500);
   }
 
   /**
@@ -66,7 +84,7 @@ function OpportunitiesController(dataAccess) {
    */
   const getByStatus = async (context) => {
     const siteId = context.params?.siteId;
-    const status = context.params?.status || undefined;
+    const status = context.params?.status;
 
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
@@ -88,7 +106,7 @@ function OpportunitiesController(dataAccess) {
    */
   const getByID = async (context) => {
     const siteId = context.params?.siteId;
-    const opptyId = context.params?.opportunityId || undefined;
+    const opptyId = context.params?.opportunityId;
 
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
@@ -124,7 +142,7 @@ function OpportunitiesController(dataAccess) {
       const oppty = await Opportunity.create(context.data);
       return createResponse(OpportunityDto.toJSON(oppty), 201);
     } catch (e) {
-      return badRequest(e.message);
+      return handleDataAccessError(e, 'Error creating opportunity');
     }
   };
 
@@ -196,7 +214,7 @@ function OpportunitiesController(dataAccess) {
         return ok(OpportunityDto.toJSON(updatedOppty));
       }
     } catch (e) {
-      return badRequest(e.message);
+      return handleDataAccessError(e, 'Error updating opportunity');
     }
     return badRequest('No updates provided');
   };
@@ -223,16 +241,20 @@ function OpportunitiesController(dataAccess) {
       return notFound('Opportunity not found');
     }
 
-    // TODO: eventually suggestions will be removed by the data access layer
-    // and this code should be removed
-    const arraySuggestions = await opportunity.getSuggestions();
-    const removeSuggestionsPromises = arraySuggestions
-      .map(async (suggestion) => suggestion.remove());
+    try {
+      // TODO: eventually suggestions will be removed by the data access layer
+      // and this code should be removed
+      const arraySuggestions = await opportunity.getSuggestions();
+      const removeSuggestionsPromises = arraySuggestions
+        .map(async (suggestion) => suggestion.remove());
 
-    await Promise.all(removeSuggestionsPromises);
+      await Promise.all(removeSuggestionsPromises);
 
-    await opportunity.remove();
-    return noContent();
+      await opportunity.remove();
+      return noContent();
+    } catch (e) {
+      return handleDataAccessError(e, 'Error removing opportunity');
+    }
   };
 
   return {

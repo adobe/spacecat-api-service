@@ -205,7 +205,7 @@ describe('Opportunities Controller', () => {
   });
 
   it('throws an error if data access cannot be destructured to Opportunity', () => {
-    expect(() => OpportunitiesController({ test: {} })).to.throw('Data access required');
+    expect(() => OpportunitiesController({ test: {} })).to.throw('Opportunity Collection not available');
   });
 
   it('gets all opportunities for a site', async () => {
@@ -451,5 +451,19 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('returns 500 when removing an opportunity if there is a data access layer error', async () => {
+    const mockOpptyEntityError = mockOpptyEntity;
+    mockOpptyEntityError.remove = () => {
+      throw new Error('internal error not exposed to the client');
+    };
+    const response = await opportunitiesController.removeOpportunity({
+      params: { siteId: 'site67890', opportunityId: 'op12345' },
+      data: {},
+    });
+    expect(response.status).to.equal(500);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Error removing opportunity');
   });
 });
