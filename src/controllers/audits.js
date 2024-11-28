@@ -157,6 +157,8 @@ function AuditsController(dataAccess) {
 
     const config = site.getConfig();
     const handlerConfig = config.getHandlerConfig(auditType);
+    return ok(config.getHandlers());
+
     if (!handlerConfig) {
       return notFound('Audit type not found');
     }
