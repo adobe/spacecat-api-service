@@ -118,116 +118,20 @@ function AuditsController(dataAccess) {
    * @returns {Promise<Response>} the site's updated audit config
    */
   const patchAuditForSite = async (context) => {
-    function mergeOverrides(existingOverrides, manualOverwrites) {
-      const overrides = {};
-      [...existingOverrides, ...manualOverwrites].forEach((override) => {
-        overrides[override.brokenTargetURL] = override;
-      });
-      return Object.values(overrides);
-    }
-
-    const validateGroupedURLsInput = (groupedURLs) => {
-      groupedURLs.forEach(({ name, pattern }) => {
-        try {
-          RegExp(pattern);
-        } catch (error) {
-          throw new Error(`Invalid regular expression in pattern for "${name}": "${pattern}".`);
-        }
-      });
-    };
-
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
-
-    if (!hasText(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!hasText(auditType)) {
-      return badRequest('Audit type required');
-    }
-
-    const { excludedURLs, manualOverwrites, groupedURLs } = context.data;
-    let hasUpdates = false;
+    const { groupedURLs } = context.data;
 
     const site = await dataAccess.getSiteByID(siteId);
     if (!site) {
       return notFound('Site not found');
     }
-
     const config = site.getConfig();
-    const handlerConfig = config.getHandlerConfig(auditType);
-    return ok(config.getHandlers());
+    config.updateGroupedURLs(auditType, groupedURLs);
 
-    if (!handlerConfig) {
-      return notFound('Audit type not found');
-    }
-    if (Array.isArray(excludedURLs)) {
-      for (const url of excludedURLs) {
-        if (!isValidUrl(url)) {
-          return badRequest('Invalid URL format');
-        }
-      }
-
-      hasUpdates = true;
-
-      const newExcludedURLs = excludedURLs.length === 0
-        ? []
-        : Array.from(new Set([...(config.getExcludedURLs(auditType) || []), ...excludedURLs]));
-
-      config.updateExcludedURLs(auditType, newExcludedURLs);
-    }
-
-    if (Array.isArray(manualOverwrites)) {
-      for (const manualOverwrite of manualOverwrites) {
-        if (!isObject(manualOverwrite)) {
-          return badRequest('Manual overwrite must be an object');
-        }
-        if (Object.keys(manualOverwrite).length === 0) {
-          return badRequest('Manual overwrite object cannot be empty');
-        }
-        if (!hasText(manualOverwrite.brokenTargetURL) || !hasText(manualOverwrite.targetURL)) {
-          return badRequest('Manual overwrite must have both brokenTargetURL and targetURL');
-        }
-        if (!isValidUrl(manualOverwrite.brokenTargetURL)
-            || !isValidUrl(manualOverwrite.targetURL)) {
-          return badRequest('Invalid URL format');
-        }
-      }
-
-      hasUpdates = true;
-
-      const existingOverrides = config.getManualOverwrites(auditType);
-      const newManualOverwrites = manualOverwrites.length === 0
-        ? []
-        : mergeOverrides(existingOverrides, manualOverwrites);
-
-      config.updateManualOverwrites(auditType, newManualOverwrites);
-    }
-
-    if (Array.isArray(groupedURLs)) {
-      try {
-        validateGroupedURLsInput(groupedURLs);
-      } catch (error) {
-        return badRequest(error.message);
-      }
-      hasUpdates = true;
-
-      const currentGroupedURLs = config.getGroupedURLs(auditType) || [];
-      const patchedGroupedURLs = groupedURLs.length === 0
-        ? []
-        : Array.from(new Set([...currentGroupedURLs, ...groupedURLs]));
-
-      config.updateGroupedURLs(auditType, patchedGroupedURLs);
-    }
-
-    if (hasUpdates) {
-      const configObj = Config.toDynamoItem(config);
-      site.updateConfig(configObj);
-      await dataAccess.updateSite(site);
-      return ok(handlerConfig);
-    }
-    return badRequest('No updates provided');
+    const configObj = Config.toDynamoItem(config);
+    site.updateConfig(configObj);
+    await dataAccess.updateSite(site);
   };
 
   return {
