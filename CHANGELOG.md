@@ -1,3 +1,10 @@
+## [1.80.5](https://github.com/adobe/spacecat-api-service/compare/v1.80.4...v1.80.5) (2024-12-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-bounce to v2.0.25 ([#612](https://github.com/adobe/spacecat-api-service/issues/612)) ([c65f462](https://github.com/adobe/spacecat-api-service/commit/c65f462be300b8a15aa319d520c0a9c690fd5ba6))
+
 ## [1.80.4](https://github.com/adobe/spacecat-api-service/compare/v1.80.3...v1.80.4) (2024-12-02)
 
 
