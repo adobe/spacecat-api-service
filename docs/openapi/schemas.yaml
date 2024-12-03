@@ -537,48 +537,90 @@ AuditResult:
       properties:
         cwv:
           type: array
-          description: A list of CWV metrics per url.
+          description: A list of CWV metrics per device type
           items:
-            $ref: './schemas.yaml#/CWVResult'
+            type: object
+            properties:
+              type:
+                type: string
+                enum: ["group", "url"]
+                description: "Specifies if the metric applies to a 'group' or an individual 'url'"
+              name:
+                type: string
+                description: "Name of the group (only applicable when type is 'group')"
+                example: "Homepage Group"
+              pattern:
+                type: string
+                description: "URL pattern for the group (only applicable when type is 'group')"
+                example: "https://www.aem.live/home*"
+              url:
+                description: "URL of the page (only applicable when type is 'url')"
+                $ref: '#/URL'
+              pageviews:
+                type: integer
+                description: "Total pageviews for this group or URL"
+                example: 4620
+              organic:
+                type: integer
+                description: "Total organic traffic for this group or URL"
+                example: 2510
+              metrics:
+                type: array
+                description: "Array of performance metrics by device type"
+                items:
+                  $ref: './schemas.yaml#/CWVMetric'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
-CWVResult:
+CWVMetric:
   type: object
   properties:
-    url:
-      $ref: '#/URL'
+    deviceType:
+      type: string
+      description: "The type of device"
+      enum: ["mobile", "desktop"]
+      example: "mobile"
     pageviews:
       type: integer
-      example: 349900
+      description: "Total pageviews for this device type"
+      example: 2120
     lcp:
       type: number
       format: float
-      example: 3303.300000000745
+      description: "Largest Contentful Paint (LCP) metric"
+      example: 2099.7
     lcpCount:
       type: integer
-      example: 4873
+      description: "The count of LCP samples"
+      example: 9
     cls:
       type: number
       format: float
-      example: 0.0138671875
+      description: "Cumulative Layout Shift (CLS) metric"
+      example: 0.02066
     clsCount:
       type: integer
-      example: 4216
+      description: "The count of CLS samples"
+      example: 7
     inp:
       type: integer
-      example: 72
+      format: float
+      description: "Interaction to Next Paint (INP) metric"
+      example: 12
     inpCount:
       type: integer
-      example: 1952
+      description: "The count of INP samples"
+      example: 3
     ttfb:
       type: number
       format: float
-      example: 732.0500007271767
+      description: "Time to First Byte (TTFB) metric"
+      example: 520.45
     ttfbCount:
       type: integer
-      example: 5678
+      description: "The count of TTFB samples"
+      example: 18
 ExperimentationOpportunity:
   type: object
   readOnly: true
