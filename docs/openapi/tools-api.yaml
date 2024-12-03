@@ -109,6 +109,44 @@ import-job-status:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - import
+    summary: Patch an import job
+    description: |
+      This endpoint can be used to stop an import job, given its jobId. This operation will prevent
+      any further scraping of the import job URLs, and mark the job status as STOPPED. The results
+      will not be saved to storage, allowing the user to start a new import immediately.
+    operationId: stopImportJob
+    security:
+      - scoped_api_key: [ ]
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: './schemas.yaml#/ImportJobStopRequest'
+    parameters:
+      - $ref: './parameters.yaml#/jobId'
+      - in: header
+        name: x-api-key
+        schema:
+          type: string
+        description: |
+          Client-specific import API key. Must match the key used to start the import job, and
+          include the imports.write scope.
+    responses:
+      '204':
+        description: Import job stopped successfully.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
 import-job-progress:
   get:
     tags:
