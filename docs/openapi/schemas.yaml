@@ -560,6 +560,10 @@ AuditResult:
                 type: integer
                 description: "Total pageviews for this group or URL"
                 example: 4620
+              organic:
+                type: integer
+                description: "Total organic traffic for this group or URL"
+                example: 2510
               metrics:
                 type: array
                 description: "Array of performance metrics by device type"
