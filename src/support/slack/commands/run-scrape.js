@@ -85,20 +85,21 @@ function RunScrapeCommand(context) {
       const urls = topPages.map((page) => ({ url: page.getURL() }));
       await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
-      const jobId = site.getId();
-      const promises = [];
-      for (let i = 0; i < urls.length; i += 100) {
-        const urlsBatch = urls.slice(i, i + 100);
-        const message = `:adobe-run: Triggered scrape run for site \`${baseURL}\` — Total URLs: ${urlsBatch.length}`;
-        promises.push(
-          triggerScraperRun(
-            jobId,
-            urlsBatch,
-            slackContext,
-            context,
-          ).then(() => say(message)),
-        );
-      }
+      const half = Math.ceil(urls.length / 2);
+      const promises = [
+        triggerScraperRun(
+          site.getId(),
+          urls.slice(0, half),
+          slackContext,
+          context,
+        ),
+        triggerScraperRun(
+          site.getId(),
+          urls.slice(half),
+          slackContext,
+          context,
+        ),
+      ];
       await Promise.all(promises);
       await say(`:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` — Total URLs: ${urls.length}`);
     } catch (error) {
