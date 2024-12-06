@@ -1,3 +1,10 @@
+# [1.81.0](https://github.com/adobe/spacecat-api-service/compare/v1.80.9...v1.81.0) (2024-12-06)
+
+
+### Features
+
+* Include site level metrics in the CWV response ([#615](https://github.com/adobe/spacecat-api-service/issues/615)) ([803081f](https://github.com/adobe/spacecat-api-service/commit/803081ff6d012af6294801cc1c4761050cf44180))
+
 ## [1.80.9](https://github.com/adobe/spacecat-api-service/compare/v1.80.8...v1.80.9) (2024-12-05)
 
 
