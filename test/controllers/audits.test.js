@@ -98,8 +98,15 @@ describe('Audits Controller', () => {
     },
   ].map((audit) => createAudit(audit));
 
+  const handlers = { some_audit: {}, 'broken-backlinks': {} };
+
+  const mockConfiguration = {
+    getHandlers: sandbox.stub().returns(handlers),
+  };
+
   const mockDataAccess = {
     getAuditsForSite: sandbox.stub(),
+    getConfiguration: sandbox.stub().resolves(mockConfiguration),
     getLatestAudits: sandbox.stub(),
     getLatestAuditsForSite: sandbox.stub(),
     getLatestAuditForSite: sandbox.stub(),
@@ -540,7 +547,11 @@ describe('Audits Controller', () => {
 
       expect(result.status).to.equal(404);
       const error = await result.json();
-      expect(error).to.have.property('message', 'Audit type not found');
+      expect(error).to.have.property(
+        'message',
+        `The "${auditType}" is not present in the configuration. List of allowed audits:`
+        + ` ${Object.keys(handlers).join(', ')}.`,
+      );
     });
 
     it('merges manual overwrites correctly', async () => {
