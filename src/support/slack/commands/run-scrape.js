@@ -94,7 +94,7 @@ function RunScrapeCommand(context) {
           context,
         ),
         triggerScraperRun(
-          site.getId(),
+          `${site.getId()}-1`,
           urls.slice(half),
           slackContext,
           context,
