@@ -535,13 +535,7 @@ describe('Audits Controller', () => {
         data: { excludedURLs: [] },
       };
 
-      const site = {
-        getConfig: () => ({
-          getHandlerConfig: () => null,
-        }),
-      };
-
-      mockDataAccess.getSiteByID.resolves(site);
+      mockDataAccess.getSiteByID.resolves({ siteId });
 
       const result = await auditsController.patchAuditForSite(context);
 
@@ -830,10 +824,8 @@ describe('Audits Controller', () => {
       });
 
       it('returns a bad request if the groupedURLs parameter is not an array', async () => {
-        siteConfig.getHandlerConfig.withArgs(auditType).returns({});
-
         const context = {
-          params: { siteId, auditType: 'broken-backlinks' },
+          params: { siteId, auditType },
           data: { groupedURLs: 'invalid_type' },
         };
         const result = await auditsController.patchAuditForSite(context);
@@ -846,22 +838,15 @@ describe('Audits Controller', () => {
       });
 
       it('returns a bad request if the groupedURLs pattern is not a valid regular expression', async () => {
-        const groupedURLsConfig = undefined;
-        const handlerConfig = {
-          groupedURLs: groupedURLsConfig,
-        };
-
-        const groupedURLs = [
-          { name: 'catalog', pattern: '[a-z-invalid_regexp' },
-          { name: 'blog', pattern: '/posts/' },
-        ];
         const context = {
-          params: { siteId, auditType: 'broken-backlinks' },
-          data: { groupedURLs },
+          params: { siteId, auditType },
+          data: {
+            groupedURLs: [
+              { name: 'catalog', pattern: '[a-z-invalid_regexp' },
+              { name: 'blog', pattern: '/posts/' },
+            ],
+          },
         };
-
-        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
-        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
 
         const result = await auditsController.patchAuditForSite(context);
         const error = await result.json();
@@ -872,51 +857,46 @@ describe('Audits Controller', () => {
         expect(error).to.have.property('message', 'Invalid regular expression in pattern for "catalog": "[a-z-invalid_regexp".');
       });
 
-      it('successful update', async () => {
-        const groupedURLsConfig = [
+      it('successful patch update', async () => {
+        const currentGroupedURLs = [
           { name: 'news', pattern: '/news/' },
         ];
-        const handlerConfig = {
-          groupedURLs: groupedURLsConfig,
-        };
-
-        const groupedURLs = [
+        const requestGroupedURLs = [
           { name: 'catalog', pattern: '/products/' },
           { name: 'blog', pattern: '/posts/' },
         ];
+        const expectedGroupedURLs = [...currentGroupedURLs, ...requestGroupedURLs];
+
         const context = {
-          params: { siteId, auditType: 'broken-backlinks' },
-          data: { groupedURLs },
+          params: { siteId, auditType },
+          data: { groupedURLs: requestGroupedURLs },
         };
 
-        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
-        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
+        siteConfig.getHandlerConfig.withArgs(auditType);
+        siteConfig.getGroupedURLs.withArgs(auditType).returns(currentGroupedURLs);
 
         const result = await auditsController.patchAuditForSite(context);
 
-        const expectedGroupedURLs = [...groupedURLsConfig, ...groupedURLs];
-        expect(siteConfig.updateGroupedURLs.calledWith(auditType, expectedGroupedURLs)).to.be.true;
+        expect(siteConfig.updateGroupedURLs.getCall(0).args[0]).to.be.equal(auditType);
+        expect(siteConfig.updateGroupedURLs.getCall(0).args[1]).to.deep.equal(expectedGroupedURLs);
         expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
         expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
         expect(result.status).to.equal(200);
       });
 
-      it('successful update when groupedURLs is empty', async () => {
-        const groupedURLsConfig = [
+      it('successful update when groupedURLs is empty, delete all existing groups', async () => {
+        const currentGroupedURLs = [
           { name: 'news', pattern: '/news/' },
         ];
-        const handlerConfig = {
-          groupedURLs: groupedURLsConfig,
-        };
+        const requestGroupedURLs = [];
 
-        const groupedURLs = [];
         const context = {
-          params: { siteId, auditType: 'broken-backlinks' },
-          data: { groupedURLs },
+          params: { siteId, auditType },
+          data: { groupedURLs: requestGroupedURLs },
         };
 
-        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
-        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
+        siteConfig.getHandlerConfig.withArgs(auditType);
+        siteConfig.getGroupedURLs.withArgs(auditType).returns(currentGroupedURLs);
 
         const result = await auditsController.patchAuditForSite(context);
 
@@ -926,30 +906,64 @@ describe('Audits Controller', () => {
         expect(result.status).to.equal(200);
       });
 
-      it('successful update if groupedURLs is undefined in the config', async () => {
-        const groupedURLsConfig = undefined;
-        const handlerConfig = {
-          groupedURLs: groupedURLsConfig,
-        };
-        const groupedURLs = [
+      it('successful update if groupedURLs is undefined in the site config', async () => {
+        const currentGroupedURLs = undefined;
+        const requestGroupedURLs = [
           { name: 'catalog', pattern: '/products/' },
           { name: 'blog', pattern: '/posts/' },
         ];
+
         const context = {
-          params: { siteId, auditType: 'broken-backlinks' },
-          data: { groupedURLs },
+          params: { siteId, auditType },
+          data: { groupedURLs: requestGroupedURLs },
         };
 
-        siteConfig.getHandlerConfig.withArgs(auditType).returns(handlerConfig);
-        siteConfig.getGroupedURLs.withArgs(auditType).returns(groupedURLsConfig);
+        siteConfig.getHandlerConfig.withArgs(auditType);
+        siteConfig.getGroupedURLs.withArgs(auditType).returns(currentGroupedURLs);
 
         const result = await auditsController.patchAuditForSite(context);
 
-        expect(siteConfig.updateGroupedURLs.calledWith(auditType, groupedURLs)).to.be.true;
+        expect(siteConfig.updateGroupedURLs.getCall(0).args[0]).to.be.equal(auditType);
+        expect(siteConfig.updateGroupedURLs.getCall(0).args[1]).to.deep.equal(requestGroupedURLs);
         expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
         expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
         expect(result.status).to.equal(200);
       });
+
+      it(
+        'updates existing group instead of creating a new one for duplicate pattern',
+        async () => {
+          const currentGroupedURLs = [
+            { name: 'page', pattern: '/page/*' },
+            { name: 'existed_group', pattern: '/pattern/*' },
+          ];
+          const requestGroupedURLs = [
+            { name: 'group_with_the_same_pattern', pattern: '/pattern/*' },
+          ];
+          const expectedGroupedURLs = [
+            { name: 'page', pattern: '/page/*' },
+            { name: 'group_with_the_same_pattern', pattern: '/pattern/*' },
+          ];
+
+          const context = {
+            params: { siteId, auditType },
+            data: { groupedURLs: requestGroupedURLs },
+          };
+
+          siteConfig.getHandlerConfig.withArgs(auditType);
+          siteConfig.getGroupedURLs.withArgs(auditType).returns(currentGroupedURLs);
+
+          const result = await auditsController.patchAuditForSite(context);
+
+          expect(siteConfig.updateGroupedURLs.getCall(0).args[0]).to.be.equal(auditType);
+          expect(
+            siteConfig.updateGroupedURLs.getCall(0).args[1],
+          ).to.deep.equal(expectedGroupedURLs);
+          expect(site.updateConfig.calledWith(sinon.match.any)).to.be.true;
+          expect(mockDataAccess.updateSite.calledWith(site)).to.be.true;
+          expect(result.status).to.equal(200);
+        },
+      );
     });
   });
 });
