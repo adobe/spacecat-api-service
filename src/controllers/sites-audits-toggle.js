@@ -81,12 +81,12 @@ export default (dataAccess) => {
             return { status: 404, message: `Site with baseURL: ${baseURL} not found.` };
           }
 
-          const validAuditTypes = Object.keys(configuration.getHandlers());
-          if (!validAuditTypes.includes(auditType)) {
+          const registeredAudits = configuration.getHandlers();
+          if (!registeredAudits[auditType]) {
             return {
               status: 404,
-              message: `The "${auditType}" is not present in the configuration. List of allowed audit`
-                + ` types: ${validAuditTypes.join(', ')}.`,
+              message: `The "${auditType}" is not present in the configuration. List of allowed audits:`
+                + ` ${Object.keys(registeredAudits).join(', ')}.`,
             };
           }
 
