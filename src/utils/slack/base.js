@@ -289,6 +289,7 @@ const getHlxConfigMessagePart = (source, hlxConfig) => {
   const { rso, hlxVersion } = hlxConfig;
   return source === SITE_CANDIDATE_SOURCES.CDN
     ? `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``
+    /* c8 ignore 1 */
     : '';
 };
 
