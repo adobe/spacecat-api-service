@@ -216,10 +216,16 @@ function AuditsController(dataAccess) {
       hasUpdates = true;
 
       const currentGroupedURLs = siteConfig.getGroupedURLs(auditType) || [];
-      const patchedGroupedURLs = groupedURLs.length === 0
-        ? []
-        : Array.from(new Set([...currentGroupedURLs, ...groupedURLs]));
 
+      let patchedGroupedURLs = [];
+      if (groupedURLs.length !== 0) {
+        patchedGroupedURLs = Object.values(
+          [...currentGroupedURLs, ...groupedURLs].reduce((acc, item) => {
+            acc[item.pattern] = item;
+            return acc;
+          }, {}),
+        );
+      }
       siteConfig.updateGroupedURLs(auditType, patchedGroupedURLs);
     }
 
