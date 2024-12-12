@@ -30,7 +30,6 @@ import { fetch, isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
-const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
 
 export const BUTTON_LABELS = {
   APPROVE_CUSTOMER: 'As Customer',
@@ -337,7 +336,6 @@ function HooksController(lambdaContext) {
   async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(config, baseURL);
-    await verifyHelixSite(baseURL, hlxConfig);
 
     const siteCandidate = {
       baseURL,
@@ -416,26 +414,10 @@ function HooksController(lambdaContext) {
     return ok('CDN site candidate is successfully processed');
   }
 
-  async function processRUMHook(context) {
-    const { log } = context;
-    const { domain } = context.data;
-
-    log.info(`Processing RUM site candidate. Input: ${JSON.stringify(context.data)}`);
-
-    const source = SITE_CANDIDATE_SOURCES.RUM;
-    const baseURL = await processSiteCandidate(domain, source, log);
-    await sendDiscoveryMessage(baseURL, source);
-
-    return ok('RUM site candidate is successfully processed');
-  }
-
   return {
     processCDNHook: wrap(processCDNHook)
       .with(errorHandler, { type: 'CDN' })
       .with(hookAuth, { secretName: CDN_HOOK_SECRET_NAME }),
-    processRUMHook: wrap(processRUMHook)
-      .with(errorHandler, { type: 'RUM' })
-      .with(hookAuth, { secretName: RUM_HOOK_SECRET_NAME }),
   };
 }
 
