@@ -12,9 +12,6 @@
 
 import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
-import {
-  SITE_CANDIDATE_SOURCES,
-} from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 
 import { URL } from 'url';
 
