@@ -265,7 +265,7 @@ function verifyURLCandidate(config, baseURL) {
 }
 
 function buildSlackMessage(baseURL, source, hlxConfig, channel) {
-  const hlxConfigMessagePart = getHlxConfigMessagePart(source, hlxConfig);
+  const hlxConfigMessagePart = getHlxConfigMessagePart(hlxConfig);
   return Message()
     .channel(channel)
     .blocks(
@@ -351,7 +351,7 @@ function HooksController(lambdaContext) {
           await dataAccess.updateSite(site);
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
-          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(SITE_CANDIDATE_SOURCES.CDN, hlxConfig)}`);
+          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`);
         }
       }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);

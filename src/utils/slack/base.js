@@ -285,12 +285,9 @@ const wrapSayForThread = (say, threadTs) => {
   return wrappedFunction;
 };
 
-const getHlxConfigMessagePart = (source, hlxConfig) => {
+const getHlxConfigMessagePart = (hlxConfig) => {
   const { rso, hlxVersion } = hlxConfig;
-  return source === SITE_CANDIDATE_SOURCES.CDN
-    ? `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``
-    /* c8 ignore 1 */
-    : '';
+  return `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``;
 };
 
 export {
