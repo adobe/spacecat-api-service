@@ -1,3 +1,10 @@
+## [1.81.9](https://github.com/adobe/spacecat-api-service/compare/v1.81.8...v1.81.9) (2024-12-12)
+
+
+### Bug Fixes
+
+* Patterns Duplication in Grouped URLs for CWV metrics ([#633](https://github.com/adobe/spacecat-api-service/issues/633)) ([9458b24](https://github.com/adobe/spacecat-api-service/commit/9458b245643c8eec2bf8bef2e0e4ced9393a8e11))
+
 ## [1.81.8](https://github.com/adobe/spacecat-api-service/compare/v1.81.7...v1.81.8) (2024-12-12)
 
 
