@@ -1,3 +1,10 @@
+## [1.81.7](https://github.com/adobe/spacecat-api-service/compare/v1.81.6...v1.81.7) (2024-12-12)
+
+
+### Bug Fixes
+
+* Grouping of URLs for a site fail when no CWV handler exist in the site config ([#630](https://github.com/adobe/spacecat-api-service/issues/630)) ([876da16](https://github.com/adobe/spacecat-api-service/commit/876da167fc2147400d6a98e6db7819627fa2fb9b))
+
 ## [1.81.6](https://github.com/adobe/spacecat-api-service/compare/v1.81.5...v1.81.6) (2024-12-11)
 
 
