@@ -135,7 +135,7 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
   const { hlxVersion, rso } = hlxConfig;
 
   if (hlxVersion < 5) {
-    log.info(`HLX version is ${hlxVersion}. Skipping fetching hlx config`);
+    log.info(`HLX version is ${hlxVersion}. Skipping fetching hlx config...`);
     return null;
   }
 
