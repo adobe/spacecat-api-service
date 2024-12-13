@@ -85,21 +85,16 @@ function RunScrapeCommand(context) {
       const urls = topPages.map((page) => ({ url: page.getURL() }));
       await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
-      const half = Math.ceil(urls.length / 2);
-      const promises = [
-        triggerScraperRun(
-          site.getId(),
-          urls.slice(0, half),
-          slackContext,
-          context,
-        ),
-        triggerScraperRun(
-          `${site.getId()}-1`,
-          urls.slice(half),
-          slackContext,
-          context,
-        ),
-      ];
+      const batches = [];
+      for (let i = 0; i < urls.length; i += 50) {
+        batches.push(urls.slice(i, i + 50));
+      }
+      const promises = batches.map((urlsBatch) => triggerScraperRun(
+        `${site.getId()}`,
+        urlsBatch,
+        slackContext,
+        context,
+      ));
       await Promise.all(promises).then(() => say(`:adobe-run: Triggered scrape run for site \`${baseURL}\``));
       await say(`:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` — Total URLs: ${urls.length}`);
     } catch (error) {
