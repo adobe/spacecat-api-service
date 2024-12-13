@@ -155,11 +155,15 @@ function AuditsController(dataAccess) {
       return notFound('Site not found');
     }
 
-    const config = site.getConfig();
-    const handlerConfig = config.getHandlerConfig(auditType);
-    if (!handlerConfig) {
-      return notFound('Audit type not found');
+    const configuration = await dataAccess.getConfiguration();
+    const registeredAudits = configuration.getHandlers();
+    if (!registeredAudits[auditType]) {
+      return notFound(`The "${auditType}" is not present in the configuration. List of allowed audits:`
+        + ` ${Object.keys(registeredAudits).join(', ')}.`);
     }
+
+    const siteConfig = site.getConfig();
+
     if (Array.isArray(excludedURLs)) {
       for (const url of excludedURLs) {
         if (!isValidUrl(url)) {
@@ -171,9 +175,9 @@ function AuditsController(dataAccess) {
 
       const newExcludedURLs = excludedURLs.length === 0
         ? []
-        : Array.from(new Set([...(config.getExcludedURLs(auditType) || []), ...excludedURLs]));
+        : Array.from(new Set([...(siteConfig.getExcludedURLs(auditType) || []), ...excludedURLs]));
 
-      config.updateExcludedURLs(auditType, newExcludedURLs);
+      siteConfig.updateExcludedURLs(auditType, newExcludedURLs);
     }
 
     if (Array.isArray(manualOverwrites)) {
@@ -195,12 +199,12 @@ function AuditsController(dataAccess) {
 
       hasUpdates = true;
 
-      const existingOverrides = config.getManualOverwrites(auditType);
+      const existingOverrides = siteConfig.getManualOverwrites(auditType);
       const newManualOverwrites = manualOverwrites.length === 0
         ? []
         : mergeOverrides(existingOverrides, manualOverwrites);
 
-      config.updateManualOverwrites(auditType, newManualOverwrites);
+      siteConfig.updateManualOverwrites(auditType, newManualOverwrites);
     }
 
     if (Array.isArray(groupedURLs)) {
@@ -211,19 +215,26 @@ function AuditsController(dataAccess) {
       }
       hasUpdates = true;
 
-      const currentGroupedURLs = config.getGroupedURLs(auditType) || [];
-      const patchedGroupedURLs = groupedURLs.length === 0
-        ? []
-        : Array.from(new Set([...currentGroupedURLs, ...groupedURLs]));
+      const currentGroupedURLs = siteConfig.getGroupedURLs(auditType) || [];
 
-      config.updateGroupedURLs(auditType, patchedGroupedURLs);
+      let patchedGroupedURLs = [];
+      if (groupedURLs.length !== 0) {
+        patchedGroupedURLs = Object.values(
+          [...currentGroupedURLs, ...groupedURLs].reduce((acc, item) => {
+            acc[item.pattern] = item;
+            return acc;
+          }, {}),
+        );
+      }
+      siteConfig.updateGroupedURLs(auditType, patchedGroupedURLs);
     }
 
     if (hasUpdates) {
-      const configObj = Config.toDynamoItem(config);
+      const configObj = Config.toDynamoItem(siteConfig);
       site.updateConfig(configObj);
       await dataAccess.updateSite(site);
-      return ok(handlerConfig);
+      const auditConfig = siteConfig.getHandlerConfig(auditType);
+      return ok(auditConfig);
     }
     return badRequest('No updates provided');
   };

@@ -270,8 +270,8 @@ describe('UpdateSitesAuditsCommand', () => {
 
       exceptsAtBadRequest();
       expect(
-        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}The "${auditType}" is not present in the configuration.\nList of allowed audit`
-          + ` types:\n${Object.keys(handlers).join('\n')}.`),
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}The "${auditType}" is not present in the configuration.\nList of allowed`
+          + ` audits:\n${Object.keys(handlers).join('\n')}.`),
         'Expected error message was not called',
       ).to.be.true;
     });

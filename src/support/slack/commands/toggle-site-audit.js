@@ -67,10 +67,10 @@ export default (context) => {
         return;
       }
 
-      const validAuditTypes = Object.keys(configuration.getHandlers());
-      if (!validAuditTypes.includes(auditType)) {
-        await say(`${ERROR_MESSAGE_PREFIX}The "${auditType}" is not present in the configuration.\nList of allowed audit`
-            + ` types:\n${validAuditTypes.join('\n')}.`);
+      const registeredAudits = configuration.getHandlers();
+      if (!registeredAudits[auditType]) {
+        await say(`${ERROR_MESSAGE_PREFIX}The "${auditType}" is not present in the configuration.\nList of allowed`
+            + ` audits:\n${Object.keys(registeredAudits).join('\n')}.`);
         return;
       }
 
