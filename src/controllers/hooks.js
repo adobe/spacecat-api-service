@@ -358,7 +358,8 @@ function HooksController(lambdaContext) {
     }
 
     // discard the site candidate if previously evaluated
-    if (!site && (await dataAccess.siteCandidateExists(siteCandidate.baseURL))) {
+    const isPreviouslyEvaluated = await dataAccess.siteCandidateExists(siteCandidate.baseURL);
+    if (isPreviouslyEvaluated) {
       throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
     }
 
