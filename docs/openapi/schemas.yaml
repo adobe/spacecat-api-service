@@ -1765,6 +1765,7 @@ Opportunity:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksOpportunityData'
+        - $ref: '#/CWVOpportunityData'
     origin:
       $ref: '#/OpportunityOrigin'
     title:
@@ -1784,6 +1785,7 @@ Opportunity:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksGuidance'
+        - $ref: '#/CWVGuidance'
     tags:
       type: array
       items:
@@ -2212,3 +2214,24 @@ ImportJobStopRequest:
       type: string
       enum:
         - 'STOPPED'
+CWVOpportunityData:
+  description: Data specific to Core Web Vitals improvements opportunity
+  type: object
+  properties:
+    projectedTrafficLost:
+      type: number
+      description: Projected Traffic Lost, representing the estimated loss of organic traffic
+    projectedTrafficValue:
+      type: number
+      description: Projected Traffic Value, calculated by multiplying the Projected Traffic Lost by the Cost Per Click (CPC) value.
+  additionalProperties: true
+CWVGuidance:
+  description: Guidance specific to Core Web Vitals improvements opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    steps:
+      description: The recommended steps to resolve Core Web Vitals issues and improve site performance.
+      type: array
+      items:
+        type: string
