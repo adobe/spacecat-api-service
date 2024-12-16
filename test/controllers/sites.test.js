@@ -87,6 +87,7 @@ describe('Sites Controller', () => {
     'getAll',
     'getAllByDeliveryType',
     'getAllWithLatestAudit',
+    'getLatestSiteMetrics',
     'getAllAsCSV',
     'getAllAsXLS',
     'getAuditForSite',
