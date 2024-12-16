@@ -1,3 +1,10 @@
+## [1.81.13](https://github.com/adobe/spacecat-api-service/compare/v1.81.12...v1.81.13) (2024-12-16)
+
+
+### Bug Fixes
+
+* **site-detection:** remove rum based detection ([#632](https://github.com/adobe/spacecat-api-service/issues/632)) ([b41f554](https://github.com/adobe/spacecat-api-service/commit/b41f5545049793d343b46fbc86bcf0603ddbc834))
+
 ## [1.81.12](https://github.com/adobe/spacecat-api-service/compare/v1.81.11...v1.81.12) (2024-12-15)
 
 
