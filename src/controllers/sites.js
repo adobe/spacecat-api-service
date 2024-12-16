@@ -22,10 +22,12 @@ import {
   hasText,
   isBoolean,
   isObject,
-  getStoredMetrics,
+  getStoredMetrics, getRUMDomainKey,
 } from '@adobe/spacecat-shared-utils';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 
+import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import URI from 'urijs';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -37,6 +39,13 @@ import { KeyEventDto } from '../dto/key-event.js';
  * @returns {object} Sites controller.
  * @constructor
  */
+
+const wwwUrlResolver = (site) => {
+  const baseURL = site.getBaseURL();
+  const uri = new URI(baseURL);
+  return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
+};
+
 function SitesController(dataAccess) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
@@ -352,6 +361,49 @@ function SitesController(dataAccess) {
     return ok(metrics);
   };
 
+  const getLatestSiteMetrics = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!hasText(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    const rumAPIClient = RUMAPIClient.createFrom(context);
+    const domain = wwwUrlResolver(site);
+    const domainkey = await getRUMDomainKey(site.getBaseURL(), context);
+    const now = new Date();
+    const endDate = now.toISOString().split('T')[0];
+    const startDate = new Date(now.setDate(now.getDate() - 7)).toISOString().split('T')[0];
+
+    const previousEndDate = startDate;
+    const previousStartDate = new Date(now.setDate(now.getDate() - 7)).toISOString().split('T')[0];
+    const currentRumMetrics = await rumAPIClient.query('cwv', {
+      domain,
+      domainkey,
+      interval: -1,
+      startdate: startDate,
+      enddate: endDate,
+      granularity: 'hourly',
+    });
+    const previousRumMetrics = await rumAPIClient.query('cwv', {
+      domain,
+      domainkey,
+      interval: -1,
+      startdate: previousStartDate,
+      enddate: previousEndDate,
+      granularity: 'hourly',
+    });
+    // todo previous and current engagement metrics
+    return ok({
+      rumMetrics: { currentRumMetrics, previousRumMetrics },
+    });
+  };
+
   return {
     createSite,
     getAll,
@@ -372,6 +424,7 @@ function SitesController(dataAccess) {
 
     // site metrics
     getSiteMetricsBySource,
+    getLatestSiteMetrics,
   };
 }
 
