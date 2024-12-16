@@ -39,9 +39,6 @@ function getExpectedSlackMessage(baseURL, channel, source, hlxConfig) {
     .buildToObject();
 }
 
-const validHelixDom = '<!doctype html><html lang="en"><head></head><body><header></header><main><div></div></main></body></html>';
-const invalidHelixDom = '<!doctype html><html lang="en"><head></head><body>some other dome structure</body></html>';
-
 describe('Hooks Controller', () => {
   let slackClient;
   let context;
@@ -69,7 +66,6 @@ describe('Hooks Controller', () => {
       env: {
         HLX_ADMIN_TOKEN: 'hlx-admin-token',
         INCOMING_WEBHOOK_SECRET_CDN: 'hook-secret-for-cdn',
-        INCOMING_WEBHOOK_SECRET_RUM: 'hook-secret-for-rum',
         SITE_DETECTION_IGNORED_DOMAINS: '/helix3.dev/, /fastly.net/, /ngrok-free.app/, /oastify.co/, /fastly-aem.page/, /findmy.media/, /impactful-[0-9]+\\.site/, /shuyi-guan/, /adobevipthankyou/, /alshayauat/, /caseytokarchuk/',
         SITE_DETECTION_IGNORED_SUBDOMAIN_TOKENS: 'demo, dev, stag, qa, --, sitemap, test, preview, cm-verify, owa, mail, ssl, secure, publish',
         SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: 'channel-id',
@@ -91,30 +87,12 @@ describe('Hooks Controller', () => {
       expect(slackClient.postMessage.notCalled).to.be.true;
     });
 
-    it('return 404 if hook secret env for rum was not set up', async () => {
-      delete context.env.INCOMING_WEBHOOK_SECRET_RUM;
-
-      const resp = await hooksController.processRUMHook(context);
-      expect(resp.status).to.equal(404);
-      expect(slackClient.postMessage.notCalled).to.be.true;
-    });
-
     it('return 404 if cdn secret doesnt match', async () => {
       context.params = {
         hookSecret: 'wrong-secret',
       };
 
       const resp = await hooksController.processCDNHook(context);
-      expect(resp.status).to.equal(404);
-      expect(slackClient.postMessage.notCalled).to.be.true;
-    });
-
-    it('return 404 if rum secret doesnt match', async () => {
-      context.params = {
-        hookSecret: 'wrong-secret',
-      };
-
-      const resp = await hooksController.processRUMHook(context);
       expect(resp.status).to.equal(404);
       expect(slackClient.postMessage.notCalled).to.be.true;
     });
@@ -230,50 +208,8 @@ describe('Hooks Controller', () => {
     });
   });
 
-  describe('Site content checks', () => {
-    beforeEach('set up', () => {
-      context.params = { hookSecret: 'hook-secret-for-cdn' };
-    });
-
-    it('URLs with error responses are disregarded', async () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
-
-      context.data = {
-        hlxVersion: 4,
-        requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
-      };
-
-      const resp = await (await hooksController.processCDNHook(context)).json();
-      expect(resp).to.equal('CDN site candidate disregarded');
-      expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Cannot fetch the site due to rainy weather, Source: CDN, Candidate: https://some-domain.com');
-    });
-
-    it('URLs with invalid DOMs are disregarded', async () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .reply(200, invalidHelixDom);
-
-      context.data = {
-        hlxVersion: 4,
-        requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
-      };
-
-      const resp = await (await hooksController.processCDNHook(context)).json();
-      expect(resp).to.equal('CDN site candidate disregarded');
-      expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}. Body: <body>some other dome structure</body></html>, Source: CDN, Candidate: https://some-domain.com');
-    });
-  });
-
   describe('Site candidate not processed ', () => {
     beforeEach('set up', () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .reply(200, validHelixDom);
-
       context.data = {
         hlxVersion: 4,
         requestPath: '/test',
@@ -512,10 +448,6 @@ describe('Hooks Controller', () => {
 
   describe('Site candidate processed', () => {
     beforeEach('set up', () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .reply(200, validHelixDom);
-
       context.dataAccess.siteCandidateExists.resolves(false);
       context.dataAccess.upsertSiteCandidate.resolves();
       context.dataAccess.getSiteByBaseURL.resolves(null);
@@ -532,10 +464,6 @@ describe('Hooks Controller', () => {
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(200, hlx5Config);
-
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
@@ -567,10 +495,6 @@ describe('Hooks Controller', () => {
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
-
       const resp = await (await hooksController.processCDNHook(context)).json();
 
       expect(context.log.info).to.have.been.calledWith('HLX version is 4. Skipping fetching hlx config');
@@ -587,10 +511,6 @@ describe('Hooks Controller', () => {
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(404);
-
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
@@ -609,10 +529,6 @@ describe('Hooks Controller', () => {
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(500, '', { 'x-error': 'test-error' });
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
-
       const resp = await (await hooksController.processCDNHook(context)).json();
 
       expect(context.log.error).to.have.been.calledWith('Error fetching hlx config for some-owner/some-site. Status: 500. Error: test-error');
@@ -629,10 +545,6 @@ describe('Hooks Controller', () => {
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
         .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
-
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
@@ -651,9 +563,6 @@ describe('Hooks Controller', () => {
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(500, '', { 'x-error': 'test-error' });
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .replyWithError('test-error');
@@ -675,9 +584,6 @@ describe('Hooks Controller', () => {
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(500, '', { 'x-error': 'test-error' });
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .reply(404, 'test-error');
@@ -699,9 +605,6 @@ describe('Hooks Controller', () => {
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(500, '', { 'x-error': 'test-error' });
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .reply(200, 'malformed-fstab');
@@ -728,22 +631,6 @@ describe('Hooks Controller', () => {
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
-    it('RUM candidate is processed and slack message sent', async () => {
-      context.data = {
-        domain: 'some-domain.com',
-      };
-      context.params = { hookSecret: 'hook-secret-for-rum' };
-
-      const resp = await (await hooksController.processRUMHook(context)).json();
-
-      expect(resp).to.equal('RUM site candidate is successfully processed');
-      expect(slackClient.postMessage.calledOnceWith(getExpectedSlackMessage(
-        'https://some-domain.com',
-        context.env.SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL,
-        'RUM',
-      ))).to.be.true;
-    });
-
     it('Slack message sending fails for CDN candidate', async () => {
       context.data = {
         hlxVersion: 5,
@@ -757,20 +644,6 @@ describe('Hooks Controller', () => {
 
       expect(resp.status).to.equal(500);
       expect(context.log.error).to.have.been.calledWith('Unexpected error while processing the CDN site candidate');
-    });
-
-    it('Slack message sending fails for RUM candidate', async () => {
-      context.data = {
-        domain: 'some-domain.com',
-      };
-      context.params = { hookSecret: 'hook-secret-for-rum' };
-
-      slackClient.postMessage.rejects(new Error('Slack message failure'));
-
-      const resp = await hooksController.processRUMHook(context);
-
-      expect(resp.status).to.equal(500);
-      expect(context.log.error).to.have.been.calledWith('Unexpected error while processing the RUM site candidate');
     });
   });
 });
