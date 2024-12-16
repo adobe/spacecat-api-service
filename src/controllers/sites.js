@@ -46,7 +46,7 @@ const wwwUrlResolver = (site) => {
   return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
 };
 
-function SitesController(dataAccess) {
+function SitesController(dataAccess, log) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -379,9 +379,10 @@ function SitesController(dataAccess) {
     const now = new Date();
     const endDate = now.toISOString().split('T')[0];
     const startDate = new Date(now.setDate(now.getDate() - 7)).toISOString().split('T')[0];
-
+    log.info(`Getting RUM metrics for site ${siteId} from ${startDate} to ${endDate}`);
     const previousEndDate = startDate;
     const previousStartDate = new Date(now.setDate(now.getDate() - 7)).toISOString().split('T')[0];
+    log.info(`Getting RUM metrics for site ${siteId} from ${previousStartDate} to ${previousEndDate}`);
     const currentRumMetrics = await rumAPIClient.query('cwv', {
       domain,
       domainkey,
@@ -398,6 +399,8 @@ function SitesController(dataAccess) {
       enddate: previousEndDate,
       granularity: 'hourly',
     });
+    log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
+
     // todo previous and current engagement metrics
     return ok({
       rumMetrics: { currentRumMetrics, previousRumMetrics },
