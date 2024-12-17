@@ -383,13 +383,13 @@ function SitesController(dataAccess, log) {
     const previousEndDate = startDate;
     const previousStartDate = new Date(now.setDate(now.getDate() - 7)).toISOString().split('T')[0];
     log.info(`Getting RUM metrics for site ${siteId} from ${previousStartDate} to ${previousEndDate}`);
-    const currentRumMetrics = await rumAPIClient.query('cwv', {
+    const currentRumMetrics = await rumAPIClient.query('total-metrics', {
       domain,
       domainkey,
       interval: 7,
       granularity: 'hourly',
     });
-    const previousRumMetrics = await rumAPIClient.query('cwv', {
+    const previousRumMetrics = await rumAPIClient.query('total-metrics', {
       domain,
       domainkey,
       interval: 14,
