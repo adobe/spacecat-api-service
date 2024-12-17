@@ -1,3 +1,17 @@
+## [1.81.15](https://github.com/adobe/spacecat-api-service/compare/v1.81.14...v1.81.15) (2024-12-16)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.15.7 ([#640](https://github.com/adobe/spacecat-api-service/issues/640)) ([ef1ca45](https://github.com/adobe/spacecat-api-service/commit/ef1ca45361eff61cfd7f90a15836bcff81d143e6))
+
+## [1.81.14](https://github.com/adobe/spacecat-api-service/compare/v1.81.13...v1.81.14) (2024-12-16)
+
+
+### Bug Fixes
+
+* **site-detection:** reject all previously evaluated candidates ([#639](https://github.com/adobe/spacecat-api-service/issues/639)) ([6e806d5](https://github.com/adobe/spacecat-api-service/commit/6e806d525d63c69f82458864a1cd42a39e65e3c0))
+
 ## [1.81.13](https://github.com/adobe/spacecat-api-service/compare/v1.81.12...v1.81.13) (2024-12-16)
 
 
