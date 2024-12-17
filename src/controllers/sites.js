@@ -39,11 +39,7 @@ import { KeyEventDto } from '../dto/key-event.js';
  * @param sevenDaysAgo
  */
 
-const isSameDay = (date, sevenDaysAgo) => date.getFullYear() === sevenDaysAgo.getFullYear()
-        && date.getMonth() === sevenDaysAgo.getMonth()
-        && date.getDate() === sevenDaysAgo.getDate();
-
-function SitesController(dataAccess, log) {
+function SitesController(dataAccess) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -370,19 +366,7 @@ function SitesController(dataAccess, log) {
       return notFound('Site not found');
     }
     const currentRumMetric = await dataAccess.getLatestAuditForSite(siteId, 'cwv');
-    const previousRumMetrics = await dataAccess.getAuditsForSite(siteId, 'cwv');
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    log.info(`sevenDaysAgo: ${sevenDaysAgo}`);
-    let previousRumMetric;
-    for (const previous of previousRumMetrics) {
-      log.info(`previous: ${previous.getAuditedAt()}`);
-      if (isSameDay(new Date(previous.getAuditedAt()), sevenDaysAgo)) {
-        previousRumMetric = previous;
-        break;
-      }
-    }
-
+    const previousRumMetric = currentRumMetric.getPreviousAuditResult();
     return ok({
       rumMetrics: { currentRumMetric, previousRumMetric },
     });
