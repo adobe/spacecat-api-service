@@ -43,7 +43,7 @@ const isSameDay = (date, sevenDaysAgo) => date.getFullYear() === sevenDaysAgo.ge
         && date.getMonth() === sevenDaysAgo.getMonth()
         && date.getDate() === sevenDaysAgo.getDate();
 
-function SitesController(dataAccess) {
+function SitesController(dataAccess, log) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -373,9 +373,11 @@ function SitesController(dataAccess) {
     const previousRumMetrics = await dataAccess.getAuditsForSite(siteId, 'cwv');
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    log.info(`sevenDaysAgo: ${sevenDaysAgo}`);
     let previousRumMetric;
     for (const previous of previousRumMetrics) {
-      if (isSameDay(new Date(previous.auditedAt), sevenDaysAgo)) {
+      log.info(`previous: ${previous.getAuditedAt()}`);
+      if (isSameDay(new Date(previous.getAuditedAt()), sevenDaysAgo)) {
         previousRumMetric = previous;
         break;
       }
