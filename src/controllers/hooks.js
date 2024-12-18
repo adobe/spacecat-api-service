@@ -26,11 +26,10 @@ import {
   SITE_CANDIDATE_STATUS,
 } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { fetch, isHelixSite } from '../support/utils.js';
+import { fetch } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
-const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
 
 export const BUTTON_LABELS = {
   APPROVE_CUSTOMER: 'As Customer',
@@ -87,16 +86,6 @@ function isIPAddress(hostname) {
 
 function containsPathOrSearchParams(url) {
   return url.pathname !== '/' || url.search !== '';
-}
-
-async function verifyHelixSite(url, hlxConfig = {}) {
-  const { isHelix, reason } = await isHelixSite(url, hlxConfig);
-
-  if (!isHelix) {
-    throw new InvalidSiteCandidate(reason, url);
-  }
-
-  return true;
 }
 
 function parseHlxRSO(domain) {
@@ -276,7 +265,7 @@ function verifyURLCandidate(config, baseURL) {
 }
 
 function buildSlackMessage(baseURL, source, hlxConfig, channel) {
-  const hlxConfigMessagePart = getHlxConfigMessagePart(source, hlxConfig);
+  const hlxConfigMessagePart = getHlxConfigMessagePart(hlxConfig);
   return Message()
     .channel(channel)
     .blocks(
@@ -337,7 +326,6 @@ function HooksController(lambdaContext) {
   async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(config, baseURL);
-    await verifyHelixSite(baseURL, hlxConfig);
 
     const siteCandidate = {
       baseURL,
@@ -363,14 +351,15 @@ function HooksController(lambdaContext) {
           await dataAccess.updateSite(site);
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
-          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(SITE_CANDIDATE_SOURCES.CDN, hlxConfig)}`);
+          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`);
         }
       }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
 
     // discard the site candidate if previously evaluated
-    if (!site && (await dataAccess.siteCandidateExists(siteCandidate.baseURL))) {
+    const isPreviouslyEvaluated = await dataAccess.siteCandidateExists(siteCandidate.baseURL);
+    if (isPreviouslyEvaluated) {
       throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
     }
 
@@ -416,26 +405,10 @@ function HooksController(lambdaContext) {
     return ok('CDN site candidate is successfully processed');
   }
 
-  async function processRUMHook(context) {
-    const { log } = context;
-    const { domain } = context.data;
-
-    log.info(`Processing RUM site candidate. Input: ${JSON.stringify(context.data)}`);
-
-    const source = SITE_CANDIDATE_SOURCES.RUM;
-    const baseURL = await processSiteCandidate(domain, source, log);
-    await sendDiscoveryMessage(baseURL, source);
-
-    return ok('RUM site candidate is successfully processed');
-  }
-
   return {
     processCDNHook: wrap(processCDNHook)
       .with(errorHandler, { type: 'CDN' })
       .with(hookAuth, { secretName: CDN_HOOK_SECRET_NAME }),
-    processRUMHook: wrap(processRUMHook)
-      .with(errorHandler, { type: 'RUM' })
-      .with(hookAuth, { secretName: RUM_HOOK_SECRET_NAME }),
   };
 }
 

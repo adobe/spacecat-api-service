@@ -528,8 +528,8 @@ describe('Sites Audits Controller', () => {
           + 'is not present in the configuration, but it did not match the expected output.',
       ).to.deep.equal({
         status: 404,
-        message: `The "${auditType}" is not present in the configuration. List of allowed audit`
-          + ` types: ${Object.keys(handlers).join(', ')}.`,
+        message: `The "${auditType}" is not present in the configuration. List of allowed audits:`
+          + ` ${Object.keys(handlers).join(', ')}.`,
       });
 
       expect(

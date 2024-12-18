@@ -22,7 +22,7 @@ import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
 async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
   const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
   const slackClient = BaseSlackClient.createFrom(context, SLACK_TARGETS.WORKSPACE_INTERNAL);
-  const hlxConfigMessagePart = getHlxConfigMessagePart(source, hlxConfig);
+  const hlxConfigMessagePart = getHlxConfigMessagePart(hlxConfig);
   const announcementMessage = Message()
     .channel(channel)
     .blocks(
