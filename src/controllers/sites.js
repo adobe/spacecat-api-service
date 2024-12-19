@@ -388,7 +388,7 @@ function SitesController(dataAccess, log) {
       interval: 60,
       granularity: 'daily',
     });
-    const organicTrafficMetric = await getStoredMetrics({ siteId, metric: 'organicTraffic', source: 'ahrefs' }, context);
+    const organicTrafficMetric = await getStoredMetrics({ siteId, metric: 'organic-traffic', source: 'ahrefs' }, context);
     const cpc = organicTrafficMetric[0].cost / organicTrafficMetric[0].value;
     const previousRumMetrics = {};
     previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
