@@ -386,15 +386,18 @@ function SitesController(dataAccess, log) {
     const currentRumMetrics = await rumAPIClient.query('totalMetrics', {
       domain,
       domainkey,
-      interval: 7,
-      granularity: 'hourly',
+      interval: 30,
+      granularity: 'daily',
     });
-    const previousRumMetrics = await rumAPIClient.query('totalMetrics', {
+    const totalRumMetrics = await rumAPIClient.query('totalMetrics', {
       domain,
       domainkey,
-      interval: 14,
-      granularity: 'hourly',
+      interval: 60,
+      granularity: 'daily',
     });
+    const previousRumMetrics = {};
+    previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
+        - currentRumMetrics.totalPageViews;
     log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
 
     // todo previous and current engagement metrics
