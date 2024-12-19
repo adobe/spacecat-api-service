@@ -380,13 +380,11 @@ function SitesController(dataAccess, log) {
       domain,
       domainkey,
       interval: 30,
-      granularity: 'daily',
     });
     const totalRumMetrics = await rumAPIClient.query('totalMetrics', {
       domain,
       domainkey,
       interval: 60,
-      granularity: 'daily',
     });
     const organicTrafficMetric = await getStoredMetrics({ siteId, metric: 'organic-traffic', source: 'ahrefs' }, context);
     const cpc = organicTrafficMetric[0].cost / organicTrafficMetric[0].value;
