@@ -398,6 +398,7 @@ function SitesController(dataAccess, log) {
     const previousRumMetrics = {};
     previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
         - currentRumMetrics.totalPageViews;
+    previousRumMetrics.totalCTR = totalRumMetrics.totalCTR - currentRumMetrics.totalCTR;
     log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
 
     // todo previous and current engagement metrics
