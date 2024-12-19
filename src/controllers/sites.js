@@ -22,10 +22,12 @@ import {
   hasText,
   isBoolean,
   isObject,
-  getStoredMetrics,
+  getStoredMetrics, getRUMDomainKey,
 } from '@adobe/spacecat-shared-utils';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 
+import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import URI from 'urijs';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -37,7 +39,14 @@ import { KeyEventDto } from '../dto/key-event.js';
  * @returns {object} Sites controller.
  * @constructor
  */
-function SitesController(dataAccess) {
+
+const wwwUrlResolver = (site) => {
+  const baseURL = site.getBaseURL();
+  const uri = new URI(baseURL);
+  return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
+};
+
+function SitesController(dataAccess, log) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -63,7 +72,7 @@ function SitesController(dataAccess) {
 
   /**
    * Gets all sites by delivery type.
-    * @param {object} context - Context of the request.
+   * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAllByDeliveryType = async (context) => {
@@ -248,7 +257,7 @@ function SitesController(dataAccess) {
     }
 
     if (requestBody.deliveryType !== site.getDeliveryType()
-      && Object.values(DELIVERY_TYPES).includes(requestBody.deliveryType)) {
+        && Object.values(DELIVERY_TYPES).includes(requestBody.deliveryType)) {
       site.updateDeliveryType(requestBody.deliveryType);
       updates = true;
     }
@@ -352,6 +361,52 @@ function SitesController(dataAccess) {
     return ok(metrics);
   };
 
+  const getLatestSiteMetrics = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!hasText(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await dataAccess.getSiteByID(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    const rumAPIClient = RUMAPIClient.createFrom(context);
+    const domain = wwwUrlResolver(site);
+    const domainkey = await getRUMDomainKey(site.getBaseURL(), context);
+    const currentRumMetrics = await rumAPIClient.query('totalMetrics', {
+      domain,
+      domainkey,
+      interval: 30,
+    });
+    const totalRumMetrics = await rumAPIClient.query('totalMetrics', {
+      domain,
+      domainkey,
+      interval: 60,
+    });
+    const organicTrafficMetric = await getStoredMetrics({ siteId, metric: 'organic-traffic', source: 'ahrefs' }, context);
+    const cpc = organicTrafficMetric[organicTrafficMetric.length - 1].cost
+        / organicTrafficMetric[organicTrafficMetric.length - 1].value;
+    const previousRumMetrics = {};
+    previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
+        - currentRumMetrics.totalPageViews;
+    previousRumMetrics.totalCTR = totalRumMetrics.totalCTR - currentRumMetrics.totalCTR;
+    const pageViewsChange = ((currentRumMetrics.totalPageViews - previousRumMetrics.totalPageViews)
+        / previousRumMetrics.totalPageViews) * 100;
+    const ctrChange = ((currentRumMetrics.totalCTR - previousRumMetrics.totalCTR)
+        / previousRumMetrics.totalCTR) * 100;
+    const projectedTrafficValue = pageViewsChange * cpc;
+
+    log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
+    return ok({
+      pageViewsChange,
+      ctrChange,
+      projectedTrafficValue,
+    });
+  };
+
   return {
     createSite,
     getAll,
@@ -372,6 +427,7 @@ function SitesController(dataAccess) {
 
     // site metrics
     getSiteMetricsBySource,
+    getLatestSiteMetrics,
   };
 }
 
