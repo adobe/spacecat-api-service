@@ -402,6 +402,8 @@ function SitesController(dataAccess, log) {
 
     log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
     return ok({
+      currentRumMetrics,
+      previousRumMetrics,
       pageViewsChange,
       ctrChange,
       projectedTrafficValue,
