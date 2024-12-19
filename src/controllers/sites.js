@@ -386,8 +386,9 @@ function SitesController(dataAccess, log) {
       domainkey,
       interval: 60,
     });
-    const organicTrafficMetric = await getStoredMetrics({ siteId, metric: 'organic-traffic', source: 'ahrefs' }, context);
-    const cpc = organicTrafficMetric[0].cost / organicTrafficMetric[0].value;
+    const { organicTrafficMetric } = await getStoredMetrics({ siteId, metric: 'organic-traffic', source: 'ahrefs' }, context);
+    const cpc = organicTrafficMetric[organicTrafficMetric.length - 1].cost
+        / organicTrafficMetric[organicTrafficMetric.length - 1].value;
     const previousRumMetrics = {};
     previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
         - currentRumMetrics.totalPageViews;
@@ -400,7 +401,6 @@ function SitesController(dataAccess, log) {
 
     log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
     return ok({
-      organicTrafficMetric,
       pageViewsChange,
       ctrChange,
       projectedTrafficValue,
