@@ -400,10 +400,23 @@ function SitesController(dataAccess, log) {
         - currentRumMetrics.totalPageViews;
     previousRumMetrics.totalCTR = totalRumMetrics.totalCTR - currentRumMetrics.totalCTR;
     log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
-
-    // todo previous and current engagement metrics
+    const currentOrganicTrafficMetrics = await getStoredMetrics({
+      siteId,
+      metric: 'organic-traffic',
+      source: 'ahrefs',
+      startDate,
+      endDate,
+    }, context);
+    const previousOrganicTrafficMetrics = await getStoredMetrics({
+      siteId,
+      metric: 'organic-traffic',
+      source: 'ahrefs',
+      startDate: previousStartDate,
+      endDate: previousEndDate,
+    }, context);
     return ok({
       rumMetrics: { currentRumMetrics, previousRumMetrics },
+      organicTrafficMetrics: { currentOrganicTrafficMetrics, previousOrganicTrafficMetrics },
     });
   };
 
