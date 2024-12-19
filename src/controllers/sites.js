@@ -376,13 +376,6 @@ function SitesController(dataAccess, log) {
     const rumAPIClient = RUMAPIClient.createFrom(context);
     const domain = wwwUrlResolver(site);
     const domainkey = await getRUMDomainKey(site.getBaseURL(), context);
-    const now = new Date();
-    const endDate = now.toISOString().split('T')[0];
-    const startDate = new Date(now.setDate(now.getDate() - 7)).toISOString().split('T')[0];
-    log.info(`Getting RUM metrics for site ${siteId} from ${startDate} to ${endDate}`);
-    const previousEndDate = startDate;
-    const previousStartDate = new Date(now.setDate(now.getDate() - 7)).toISOString().split('T')[0];
-    log.info(`Getting RUM metrics for site ${siteId} from ${previousStartDate} to ${previousEndDate}`);
     const currentRumMetrics = await rumAPIClient.query('totalMetrics', {
       domain,
       domainkey,
@@ -395,28 +388,23 @@ function SitesController(dataAccess, log) {
       interval: 60,
       granularity: 'daily',
     });
+    const organicTrafficMetric = await getStoredMetrics({ siteId, metric: 'organicTraffic', source: 'ahrefs' }, context);
+    const cpc = organicTrafficMetric[0].cost / organicTrafficMetric[0].value;
     const previousRumMetrics = {};
     previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
         - currentRumMetrics.totalPageViews;
     previousRumMetrics.totalCTR = totalRumMetrics.totalCTR - currentRumMetrics.totalCTR;
+    const pageViewsChange = ((currentRumMetrics.totalPageViews - previousRumMetrics.totalPageViews)
+        / previousRumMetrics.totalPageViews) * 100;
+    const ctrChange = ((currentRumMetrics.totalCTR - previousRumMetrics.totalCTR)
+        / previousRumMetrics.totalCTR) * 100;
+    const projectedTrafficValue = pageViewsChange * cpc;
+
     log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
-    const currentOrganicTrafficMetrics = await getStoredMetrics({
-      siteId,
-      metric: 'organic-traffic',
-      source: 'ahrefs',
-      startDate,
-      endDate,
-    }, context);
-    const previousOrganicTrafficMetrics = await getStoredMetrics({
-      siteId,
-      metric: 'organic-traffic',
-      source: 'ahrefs',
-      startDate: previousStartDate,
-      endDate: previousEndDate,
-    }, context);
     return ok({
-      rumMetrics: { currentRumMetrics, previousRumMetrics },
-      organicTrafficMetrics: { currentOrganicTrafficMetrics, previousOrganicTrafficMetrics },
+      pageViewsChange,
+      ctrChange,
+      projectedTrafficValue,
     });
   };
 
