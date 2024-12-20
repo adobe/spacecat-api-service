@@ -39,6 +39,9 @@ function getExpectedSlackMessage(baseURL, channel, source, hlxConfig) {
     .buildToObject();
 }
 
+const validHelixDom = '<!doctype html><html lang="en"><head></head><body><header></header><main><div></div></main></body></html>';
+const invalidHelixDom = '<!doctype html><html lang="en"><head></head><body>some other dome structure</body></html>';
+
 describe('Hooks Controller', () => {
   let slackClient;
   let context;
@@ -208,8 +211,34 @@ describe('Hooks Controller', () => {
     });
   });
 
+  describe('Site content checks', () => {
+    beforeEach('set up', () => {
+      context.params = { hookSecret: 'hook-secret-for-cdn' };
+    });
+
+    it('URLs with invalid DOMs are disregarded', async () => {
+      nock('https://some-domain.com')
+        .get('/')
+        .reply(200, invalidHelixDom);
+
+      context.data = {
+        hlxVersion: 4,
+        requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
+      };
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+      expect(resp).to.equal('CDN site candidate disregarded');
+      expect(slackClient.postMessage.notCalled).to.be.true;
+      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}. Body: <body>some other dome structure</body></html>, Source: CDN, Candidate: https://some-domain.com');
+    });
+  });
+
   describe('Site candidate not processed ', () => {
     beforeEach('set up', () => {
+      nock('https://some-domain.com')
+        .get('/')
+        .reply(200, validHelixDom);
+
       context.data = {
         hlxVersion: 4,
         requestPath: '/test',
@@ -448,6 +477,10 @@ describe('Hooks Controller', () => {
 
   describe('Site candidate processed', () => {
     beforeEach('set up', () => {
+      nock('https://some-domain.com')
+        .get('/')
+        .reply(200, validHelixDom);
+
       context.dataAccess.siteCandidateExists.resolves(false);
       context.dataAccess.upsertSiteCandidate.resolves();
       context.dataAccess.getSiteByBaseURL.resolves(null);
@@ -464,6 +497,9 @@ describe('Hooks Controller', () => {
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(200, hlx5Config);
+      nock('https://some-cdn-host.com')
+        .get('/')
+        .reply(200, validHelixDom);
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
