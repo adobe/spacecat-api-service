@@ -11,6 +11,8 @@
  */
 import { context as h2, h1 } from '@adobe/fetch';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import URI from 'urijs';
+import { hasText } from '@adobe/spacecat-shared-utils';
 
 /* c8 ignore next 3 */
 export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
@@ -303,3 +305,9 @@ export class ErrorWithStatusCode extends Error {
     this.status = status;
   }
 }
+
+export const wwwUrlResolver = (site) => {
+  const baseURL = site.getBaseURL();
+  const uri = new URI(baseURL);
+  return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
+};
