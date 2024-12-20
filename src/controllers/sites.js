@@ -394,7 +394,8 @@ function SitesController(dataAccess, log) {
     const previousRumMetrics = {};
     previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
         - currentRumMetrics.totalPageViews;
-    previousRumMetrics.totalCTR = totalRumMetrics.totalCTR - currentRumMetrics.totalCTR;
+    previousRumMetrics.totalCTR = (totalRumMetrics.totalClicks - currentRumMetrics.totalClicks)
+        / previousRumMetrics.totalPageViews;
     const pageViewsChange = ((currentRumMetrics.totalPageViews - previousRumMetrics.totalPageViews)
         / previousRumMetrics.totalPageViews) * 100;
     const ctrChange = ((currentRumMetrics.totalCTR - previousRumMetrics.totalCTR)

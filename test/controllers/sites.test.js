@@ -360,11 +360,13 @@ describe('Sites Controller', () => {
 
   it('gets the latest site metrics', async () => {
     context.rumApiClient.query.onCall(0).resolves({
-      totalCTR: 7303,
+      totalCTR: 0.20,
+      totalClicks: 4901,
       totalPageViews: 24173,
     });
     context.rumApiClient.query.onCall(1).resolves({
-      totalCTR: 13704,
+      totalCTR: 0.21,
+      totalClicks: 9723,
       totalPageViews: 46944,
     });
     const storedMetrics = [{
@@ -388,7 +390,7 @@ describe('Sites Controller', () => {
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
-      ctrChange: 14.091548195594438,
+      ctrChange: -5.553712152633755,
       pageViewsChange: 6.156954020464625,
       projectedTrafficValue: 0.3078477010232313,
     });
