@@ -40,6 +40,11 @@ import { KeyEventDto } from '../dto/key-event.js';
  * @constructor
  */
 
+const AHREFS = 'ahrefs';
+const ORGANIC_TRAFFIC = 'organic-traffic';
+const MONTH_DAYS = 30;
+const TOTAL_METRICS = 'totalMetrics';
+
 const wwwUrlResolver = (site) => {
   const baseURL = site.getBaseURL();
   const uri = new URI(baseURL);
@@ -376,17 +381,20 @@ function SitesController(dataAccess, log) {
     const rumAPIClient = RUMAPIClient.createFrom(context);
     const domain = wwwUrlResolver(site);
     const domainkey = await getRUMDomainKey(site.getBaseURL(), context);
-    const currentRumMetrics = await rumAPIClient.query('totalMetrics', {
+    const currentRumMetrics = await rumAPIClient.query(TOTAL_METRICS, {
       domain,
       domainkey,
-      interval: 30,
+      interval: MONTH_DAYS,
     });
-    const totalRumMetrics = await rumAPIClient.query('totalMetrics', {
+    const totalRumMetrics = await rumAPIClient.query(TOTAL_METRICS, {
       domain,
       domainkey,
-      interval: 60,
+      interval: 2 * MONTH_DAYS,
     });
-    const organicTrafficMetric = await getStoredMetrics({ siteId, metric: 'organic-traffic', source: 'ahrefs' }, context);
+    const organicTrafficMetric = await getStoredMetrics(
+      { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+      context,
+    );
     const cpc = organicTrafficMetric[organicTrafficMetric.length - 1].cost
         / organicTrafficMetric[organicTrafficMetric.length - 1].value;
     const previousRumMetrics = {};
