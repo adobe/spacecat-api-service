@@ -1,3 +1,11 @@
+## [1.81.18](https://github.com/adobe/spacecat-api-service/compare/v1.81.17...v1.81.18) (2024-12-20)
+
+
+### Bug Fixes
+
+* **site-detection:** bring ishelixcheck back ([#646](https://github.com/adobe/spacecat-api-service/issues/646)) ([64f41f6](https://github.com/adobe/spacecat-api-service/commit/64f41f6c8c92df096f0386d739f06039b09d2465))
+* trigger release ([78d56a1](https://github.com/adobe/spacecat-api-service/commit/78d56a1feced358c2203cdd4bfbee5a0727b7401))
+
 ## [1.81.17](https://github.com/adobe/spacecat-api-service/compare/v1.81.16...v1.81.17) (2024-12-20)
 
 
