@@ -16,11 +16,11 @@
     "lint": "eslint .",
     "logs": "aws logs tail /aws/lambda/spacecat-services--api-service",
     "semantic-release": "semantic-release",
-    "semantic-release-dry": "semantic-release --dry-run --no-ci --branches $CIRCLE_BRANCH",
+    "semantic-release-dry": "semantic-release --dry-run --no-ci --branches $CI_BRANCH",
     "build": "hedy -v --test-bundle",
     "deploy": "hedy -v --deploy --test",
     "deploy-routes": "hedy --no-build -no-hints -l major",
-    "deploy-ci": "hedy -v --deploy --test --pkgVersion=ci$CIRCLE_BUILD_NUM -l ci --cleanup-ci=24h",
+    "deploy-ci": "hedy -v --deploy --test --pkgVersion=ci$CI_BUILD_NUM -l ci --cleanup-ci=24h",
     "deploy-secrets": "hedy --aws-update-secrets --params-file=secrets/secrets.env",
     "docs": "npm run docs:lint && npm run docs:build",
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
@@ -40,7 +40,7 @@
     },
     "fastlyServiceId!important": "",
     "timeout": 900000,
-    "nodeVersion": 20
+    "nodeVersion": 22
   },
   "repository": {
     "type": "git",
