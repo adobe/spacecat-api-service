@@ -19,6 +19,7 @@ import esmock from 'esmock';
 
 import { createKeyEvent, KEY_EVENT_TYPES } from '@adobe/spacecat-shared-data-access/src/models/key-event.js';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import nock from 'nock';
 import SitesController from '../../src/controllers/sites.js';
 import { SiteDto } from '../../src/dto/site.js';
 
@@ -103,6 +104,7 @@ describe('Sites Controller', () => {
 
   let mockDataAccess;
   let sitesController;
+  let context;
 
   beforeEach(() => {
     mockDataAccess = {
@@ -119,7 +121,24 @@ describe('Sites Controller', () => {
       getKeyEventsForSite: sandbox.stub(),
       removeKeyEvent: sandbox.stub(),
     };
-
+    context = {
+      runtime: { name: 'aws-lambda', region: 'us-east-1' },
+      func: { package: 'spacecat-services', version: 'ci', name: 'test' },
+      rumApiClient: {
+        query: sandbox.stub(),
+      },
+      log: {
+        info: sandbox.stub(),
+      },
+      dataAccess: mockDataAccess,
+    };
+    nock('https://secretsmanager.us-east-1.amazonaws.com/')
+      .post('/', (body) => body.SecretId === '/helix-deploy/spacecat-services/customer-secrets/site1_com/ci')
+      .reply(200, {
+        SecretString: JSON.stringify({
+          RUM_DOMAIN_KEY: '42',
+        }),
+      });
     sitesController = SitesController(mockDataAccess);
   });
 
@@ -337,6 +356,66 @@ describe('Sites Controller', () => {
     expect(site).to.be.an('object');
     expect(site).to.have.property('id', 'site1');
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('gets the latest site metrics', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 7303,
+      totalPageViews: 24173,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 13704,
+      totalPageViews: 46944,
+    });
+    const storedMetrics = [{
+      siteId: '123',
+      source: 'ahrefs',
+      time: '2023-03-13T00:00:00Z',
+      metric: 'organic-traffic',
+      value: 200,
+      cost: 10,
+    }];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+      },
+    });
+    const result = await (await sitesControllerMock.default(mockDataAccess, context.log).getLatestSiteMetrics({ ...context, params: { siteId: 'site1' } }));
+    const metrics = await result.json();
+
+    expect(metrics).to.deep.equal({
+      ctrChange: 14.091548195594438,
+      pageViewsChange: 6.156954020464625,
+      projectedTrafficValue: 0.3078477010232313,
+    });
+  });
+
+  it('returns bad request if site ID is not provided', async () => {
+    const response = await sitesController.getLatestSiteMetrics({
+      params: {},
+    });
+
+    const error = await response.json();
+
+    expect(response.status).to.equal(400);
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('returns not found if site does not exist', async () => {
+    mockDataAccess.getSiteByID.resolves(null);
+
+    const response = await sitesController.getLatestSiteMetrics({
+      params: { siteId: 'site1' },
+    });
+
+    const error = await response.json();
+
+    expect(response.status).to.equal(404);
+    expect(error).to.have.property('message', 'Site not found');
   });
 
   it('gets specific audit for a site', async () => {
