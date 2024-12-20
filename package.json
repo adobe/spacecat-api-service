@@ -16,7 +16,7 @@
     "lint": "eslint .",
     "logs": "aws logs tail /aws/lambda/spacecat-services--api-service",
     "semantic-release": "semantic-release",
-    "semantic-release-dry": "semantic-release --dry-run --no-ci --branches $CI_BUILD_NUM",
+    "semantic-release-dry": "semantic-release --dry-run --no-ci --branches $CI_BRANCH",
     "build": "hedy -v --test-bundle",
     "deploy": "hedy -v --deploy --test",
     "deploy-routes": "hedy --no-build -no-hints -l major",
