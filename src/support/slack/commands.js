@@ -23,6 +23,7 @@ import setLiveStatus from './commands/set-live-status.js';
 import getGoogleLink from './commands/create-google-link.js';
 import help from './commands/help.js';
 import toggleSiteAudit from './commands/toggle-site-audit.js';
+import onboard from './commands/onboard.js';
 
 /**
  * Returns all commands.
@@ -44,4 +45,5 @@ export default (context) => [
   getGoogleLink(context),
   help(context),
   toggleSiteAudit(context),
+  onboard(context),
 ];
