@@ -26,7 +26,7 @@ import {
   SITE_CANDIDATE_STATUS,
 } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { fetch } from '../support/utils.js';
+import { fetch, isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
@@ -86,6 +86,16 @@ function isIPAddress(hostname) {
 
 function containsPathOrSearchParams(url) {
   return url.pathname !== '/' || url.search !== '';
+}
+
+async function verifyHelixSite(url, hlxConfig = {}) {
+  const { isHelix, reason } = await isHelixSite(url, hlxConfig);
+
+  if (!isHelix) {
+    throw new InvalidSiteCandidate(reason, url);
+  }
+
+  return true;
 }
 
 function parseHlxRSO(domain) {
@@ -326,6 +336,7 @@ function HooksController(lambdaContext) {
   async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(config, baseURL);
+    await verifyHelixSite(baseURL, hlxConfig);
 
     const siteCandidate = {
       baseURL,
