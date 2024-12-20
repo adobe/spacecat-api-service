@@ -27,3 +27,32 @@ site-metrics-by-source:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+site-metrics-latest:
+  get:
+    summary: Get latest site metrics
+    description: Retrieves the latest metrics for a specific site, including RUM (Real User Monitoring) data and organic traffic metrics.
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: Successful response
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pageViewsChange:
+                  type: number
+                  description: Percentage change in page views compared to the previous period
+                ctrChange:
+                  type: number
+                  description: Percentage change in Click-Through Rate (CTR) compared to the previous period
+                projectedTrafficValue:
+                  type: number
+                  description: Projected traffic value based on page views change and cost per click
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    tags:
+      - Sites
