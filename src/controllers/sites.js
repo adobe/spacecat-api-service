@@ -27,11 +27,11 @@ import {
 import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
-import URI from 'urijs';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
+import { wwwUrlResolver } from '../support/utils.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -44,12 +44,6 @@ const AHREFS = 'ahrefs';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
-
-const wwwUrlResolver = (site) => {
-  const baseURL = site.getBaseURL();
-  const uri = new URI(baseURL);
-  return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
-};
 
 function SitesController(dataAccess, log) {
   if (!isObject(dataAccess)) {
