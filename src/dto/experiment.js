@@ -36,7 +36,7 @@ export const ExperimentDto = {
    */
   toJSON: (experiment) => ({
     siteId: experiment.getSiteId(),
-    experimentId: experiment.getExperimentId(),
+    expId: experiment.getExpId(),
     name: experiment.getName(),
     url: experiment.getUrl(),
     type: experiment.getType(),

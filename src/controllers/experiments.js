@@ -30,6 +30,8 @@ function ExperimentsController(dataAccess) {
     throw new Error('Data access required');
   }
 
+  const { Experiment } = dataAccess;
+
   /**
    * Gets all experiments for a given site
    *
@@ -42,7 +44,7 @@ function ExperimentsController(dataAccess) {
       return badRequest('Site ID required');
     }
 
-    const experiments = (await dataAccess.getExperiments(siteId))
+    const experiments = (await Experiment.allBySiteId(siteId))
       .map((experiment) => ExperimentDto.toJSON(experiment));
 
     return ok(experiments);

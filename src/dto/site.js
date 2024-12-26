@@ -62,7 +62,7 @@ export const SiteDto = {
     deliveryType: site.getDeliveryType(),
     gitHubURL: site.getGitHubURL(),
     organizationId: site.getOrganizationId(),
-    isLive: site.isLive(),
+    isLive: site.getIsLive(),
     isLiveToggledAt: site.getIsLiveToggledAt(),
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),

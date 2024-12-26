@@ -21,7 +21,7 @@ export const ImportJobDto = {
     id: importJob.getId(),
     baseURL: importJob.getBaseURL(),
     options: importJob.getOptions(),
-    startTime: importJob.getStartTime(),
+    startedAt: importJob.getStartedAt(),
     endTime: importJob.getEndTime(),
     duration: importJob.getDuration(),
     status: importJob.getStatus(),

@@ -67,7 +67,7 @@
     "@adobe/helix-shared-wrap": "2.0.2",
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.23",
-    "@adobe/spacecat-shared-data-access": "1.61.0",
+    "@adobe/spacecat-shared-data-access": "1.61.1",
     "@adobe/spacecat-shared-gpt-client": "1.4.0",
     "@adobe/spacecat-shared-http-utils": "1.9.0",
     "@adobe/spacecat-shared-ims-client": "1.5.0",

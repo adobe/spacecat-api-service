@@ -150,6 +150,7 @@ function SlackController(SlackApp) {
       data, dataAccess, imsClient, slack: { elevatedClient }, log,
     } = context;
     const { imsUserAccessToken, imsOrgId } = data;
+    const { Organization } = dataAccess;
 
     let userProfile;
     try {
@@ -167,7 +168,7 @@ function SlackController(SlackApp) {
       return badRequest('User is not a member of the given organization.');
     }
 
-    const spaceCatOrg = await dataAccess.getOrganizationByImsOrgID(imsOrgId);
+    const spaceCatOrg = await Organization.findByImsOrgId(imsOrgId);
 
     if (!isObject(spaceCatOrg)) {
       log.error(`Organization not found in Star Catalogue data layer: ${imsOrgId}.`);

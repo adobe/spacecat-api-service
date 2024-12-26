@@ -116,6 +116,7 @@ function MartechImpactCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Site } = dataAccess;
 
   /**
    * Executes the MartechImpactCommand. Retrieves the last tbt and third party
@@ -140,14 +141,14 @@ function MartechImpactCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
 
       if (!site) {
         await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 
-      const latestAudit = await dataAccess.getLatestAuditForSite(site.getId(), 'lhs-mobile');
+      const latestAudit = await site.getLatestAuditByAuditType('lhs-mobile');
 
       if (!latestAudit) {
         await say(`:warning: No audit found for site: ${baseURL}`);
