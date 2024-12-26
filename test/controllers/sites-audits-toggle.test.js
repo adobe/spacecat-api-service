@@ -41,7 +41,7 @@ describe('Sites Audits Controller', () => {
     expect(configurationMock.enableHandlerForSite.called, 'Expected configuration.enableHandlerForSite to not be called').to.be.false;
     expect(configurationMock.disableHandlerForSite.called, 'Expected configuration.disableHandlerForSite to not be called').to.be.false;
 
-    expect(dataAccessMock.updateConfiguration.called, 'Expected updateConfiguration to not be called').to.be.false;
+    expect(configurationMock.save.called, 'Expected updateConfiguration to not be called').to.be.false;
 
     expect(response.status).to.equal(
       responseErrorCode,
@@ -63,12 +63,16 @@ describe('Sites Audits Controller', () => {
       getHandlers: sandbox.stub().returns(handlers),
       getQueues: sandbox.stub(),
       getSlackRoles: sandbox.stub(),
+      save: sandbox.stub(),
     };
 
     dataAccessMock = {
-      getConfiguration: sandbox.stub().resolves(configurationMock),
-      getSiteByBaseURL: sandbox.stub(),
-      updateConfiguration: sandbox.stub(),
+      Configuration: {
+        findLatest: sandbox.stub().resolves(configurationMock),
+      },
+      Site: {
+        findByBaseURL: sandbox.stub(),
+      },
     };
 
     logMock = {
@@ -83,8 +87,8 @@ describe('Sites Audits Controller', () => {
   });
 
   it('updates the audit configuration for multiple sites', async () => {
-    dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
-    dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
     const requestData = [
       { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
@@ -94,15 +98,16 @@ describe('Sites Audits Controller', () => {
     ];
     const response = await sitesAuditsToggleController.execute({
       data: requestData,
+      log: logMock,
     });
     const patchResponse = await response.json();
 
     expect(
-      dataAccessMock.getSiteByBaseURL.callCount,
+      dataAccessMock.Site.findByBaseURL.callCount,
       'Expected dataAccess.getSiteByBaseURL to be called 4 times, but it was not',
     ).to.equal(4);
     expect(
-      dataAccessMock.updateConfiguration.called,
+      configurationMock.save.called,
       'Expected dataAccess.updateConfiguration to be called, but it was not',
     ).to.be.true;
 
@@ -191,12 +196,12 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if an error occurred while saving the configuration', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(SiteDto.fromJson({
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(SiteDto.fromJson({
         id: 'site0', baseURL: 'https://site0.com', deliveryType: 'aem_edge',
       }));
 
       const privateInternalServerError = 'Some internal private error';
-      dataAccessMock.updateConfiguration.rejects(new Error(privateInternalServerError));
+      configurationMock.save.rejects(new Error(privateInternalServerError));
 
       const requestData = [
         { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
@@ -239,7 +244,7 @@ describe('Sites Audits Controller', () => {
 
   describe('Error during partial update of sites audits configuration (an operation in the bulk response 400/404)', () => {
     it('if Site URL is not provided', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
       const requestData = [
         { auditType: 'cwv', enable: true },
@@ -254,7 +259,7 @@ describe('Sites Audits Controller', () => {
         'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
       ).to.be.true;
       expect(
-        dataAccessMock.updateConfiguration.called,
+        configurationMock.save.called,
         'Expected dataAccess.updateConfiguration to be called, but it was not.',
       ).to.be.true;
 
@@ -276,7 +281,7 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if Site URL is empty', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
       const requestData = [
         { baseURL: '', auditType: 'cwv', enable: true },
@@ -290,7 +295,7 @@ describe('Sites Audits Controller', () => {
         'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
       ).to.be.true;
       expect(
-        dataAccessMock.updateConfiguration.called,
+        configurationMock.save.called,
         'Expected dataAccess.updateConfiguration to be called, but it was not.',
       ).to.be.true;
 
@@ -312,7 +317,7 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if Site URL has wrong format', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
       const requestData = [
         { baseURL: 'wrong_format', auditType: 'cwv', enable: true },
@@ -326,7 +331,7 @@ describe('Sites Audits Controller', () => {
         'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
       ).to.be.true;
       expect(
-        dataAccessMock.updateConfiguration.called,
+        configurationMock.save.called,
         'Expected dataAccess.updateConfiguration to be called, but it was not.',
       ).to.be.true;
 
@@ -349,8 +354,8 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if the audit types parameter is missing', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
       const requestData = [
         { baseURL: 'https://site0.com', auditType: [], enable: true },
@@ -364,7 +369,7 @@ describe('Sites Audits Controller', () => {
         'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
       ).to.be.true;
       expect(
-        dataAccessMock.updateConfiguration.called,
+        configurationMock.save.called,
         'Expected dataAccess.updateConfiguration to be called, but it was not.',
       ).to.be.true;
 
@@ -387,8 +392,8 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if "enable" parameter is missed', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
       const requestData = [
         { baseURL: 'https://site0.com', auditType: 'cwv' },
@@ -402,7 +407,7 @@ describe('Sites Audits Controller', () => {
         'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
       ).to.be.true;
       expect(
-        dataAccessMock.updateConfiguration.called,
+        configurationMock.save.called,
         'Expected dataAccess.updateConfiguration to be called, but it was not.',
       ).to.be.true;
 
@@ -425,8 +430,8 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if "enable" parameter is not a boolean value', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
       const requestData = [
         { baseURL: 'https://site0.com', auditType: 'cwv', enable: 'not_boolean' },
@@ -440,7 +445,7 @@ describe('Sites Audits Controller', () => {
         'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
       ).to.be.true;
       expect(
-        dataAccessMock.updateConfiguration.called,
+        configurationMock.save.called,
         'Expected dataAccess.updateConfiguration to be called, but it was not.',
       ).to.be.true;
 
@@ -463,8 +468,8 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if the site is not found', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(null);
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(null);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
       const requestData = [
         { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
@@ -478,7 +483,7 @@ describe('Sites Audits Controller', () => {
         'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
       ).to.be.true;
       expect(
-        dataAccessMock.updateConfiguration.called,
+        configurationMock.save.called,
         'Expected dataAccess.updateConfiguration to be called, but it was not.',
       ).to.be.true;
 
@@ -502,8 +507,8 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if an audit type is not present in the configuration', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
       const auditType = 'not_present_in_configuration_audit';
       const requestData = [
@@ -518,7 +523,7 @@ describe('Sites Audits Controller', () => {
         'Expected configuration.enableHandlerForSite to be called once with arguments "404" and sites[1], but it was not.',
       ).to.be.true;
       expect(
-        dataAccessMock.updateConfiguration.called,
+        configurationMock.save.called,
         'Expected dataAccess.updateConfiguration to be called, but it was not.',
       ).to.be.true;
 

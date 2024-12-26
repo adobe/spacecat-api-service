@@ -241,7 +241,7 @@ function ApiKeyController(context) {
 
       apiKeyEntity.setDeletedAt(new Date().toISOString());
 
-      await ApiKey.save();
+      await apiKeyEntity.save();
       return createResponse({}, STATUS_NO_CONTENT);
     } catch (error) {
       log.error(`Failed to delete the api key with id: ${id} - ${error.message}`);

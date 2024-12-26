@@ -69,10 +69,11 @@ describe('ApiKeyController tests', () => {
     context = {
       log: console,
       dataAccess: {
-        getApiKeysByImsUserIdAndImsOrgId: sinon.stub(),
-        createNewApiKey: (data) => createApiKey(data),
-        getApiKeyById: sinon.stub(),
-        updateApiKey: sinon.stub(),
+        ApiKey: {
+          allByImsOrgIdAndImsUserId: sinon.stub(),
+          create: (data) => createApiKey(data),
+          findById: sinon.stub(),
+        },
       },
       env: {
         API_KEY_CONFIGURATION: JSON.stringify({ maxDomainsPerApiKey: 1, maxApiKeys: 3 }),
@@ -141,7 +142,7 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should create a new API key', async () => {
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
@@ -150,7 +151,7 @@ describe('ApiKeyController tests', () => {
 
     it('should create a new API key if email is not present in the imsUserProfile', async () => {
       context.imsClient.getImsUserProfile.returns({ organizations: ['test-org'] });
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
@@ -159,7 +160,7 @@ describe('ApiKeyController tests', () => {
 
     it('should create a new API key if the bearer prefix is missing', async () => {
       requestContext.pathInfo.headers.authorization = 'test-token';
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
@@ -174,7 +175,7 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should throw an error if the user has reached the maximum number of API keys', async () => {
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId
         .returns([createApiKey(exampleApiKey),
           createApiKey(exampleApiKey), createApiKey(exampleApiKey)]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
@@ -185,10 +186,12 @@ describe('ApiKeyController tests', () => {
 
   describe('deleteApiKey', () => {
     it('should delete an API key', async () => {
-      context.dataAccess.getApiKeyById.returns({
+      context.dataAccess.ApiKey.findById.returns({
         getImsUserId: () => 'test@example.com',
         getImsOrgId: () => 'test-org',
+        setDeletedAt(deletedAt) { this.deletedAt = deletedAt; },
         updateDeletedAt: sinon.stub(),
+        save: sinon.stub(),
       });
 
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
@@ -196,7 +199,7 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should throw an error if the API key is not found', async () => {
-      context.dataAccess.getApiKeyById.returns({
+      context.dataAccess.ApiKey.findById.returns({
         getImsUserId: () => 'other@example.com',
         getImsOrgId: () => 'other-org',
       });
@@ -208,7 +211,7 @@ describe('ApiKeyController tests', () => {
 
   describe('getApiKeys', () => {
     it('should return all the API Keys', async () => {
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([createApiKey(exampleApiKey)]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([createApiKey(exampleApiKey)]);
       const response = await apiKeyController.getApiKeys({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_OK);
@@ -225,7 +228,7 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should throw an error when getApiKeysByImsUserIdAndImsOrgId fails', async () => {
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.throws(new Error('Dynamo Error'));
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.throws(new Error('Dynamo Error'));
       const response = await apiKeyController.getApiKeys({ ...requestContext });
       expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
     });

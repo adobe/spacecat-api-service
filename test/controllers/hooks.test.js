@@ -18,7 +18,6 @@ import sinonChai from 'sinon-chai';
 import nock from 'nock';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import HooksController from '../../src/controllers/hooks.js';
-import { SiteDto } from '../../src/dto/site.js';
 
 use(sinonChai);
 
@@ -54,12 +53,13 @@ describe('Hooks Controller', () => {
 
     context = {
       dataAccess: {
-        getSiteCandidateByBaseURL: sinon.stub(),
-        addSite: sinon.stub(),
-        updateSite: sinon.stub(),
-        upsertSiteCandidate: sinon.stub(),
-        getSiteByBaseURL: sinon.stub(),
-        siteCandidateExists: sinon.stub(),
+        SiteCandidate: {
+          create: sinon.stub(),
+          findByBaseURL: sinon.stub(),
+        },
+        Site: {
+          findByBaseURL: sinon.stub(),
+        },
       },
       log: {
         info: sinon.stub(),
@@ -248,7 +248,7 @@ describe('Hooks Controller', () => {
     });
 
     it('candidate is disregarded if already added before', async () => {
-      context.dataAccess.siteCandidateExists.resolves(true);
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves({});
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
@@ -257,13 +257,15 @@ describe('Hooks Controller', () => {
     });
 
     it('candidate is disregarded if a live aem_edge site exists with same baseURL', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-      }));
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
+      context.dataAccess.Site.findByBaseURL.resolves({
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({}),
+        setHlxConfig: () => {},
+        save() {},
+      });
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
@@ -271,33 +273,33 @@ describe('Hooks Controller', () => {
     });
 
     it('while candidate is disregarded, hlx config is updated if not present', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
+
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({}),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
 
       const expectedConfig = {
         hlxVersion: 4,
         rso: {},
       };
 
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-      }));
-
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
-      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
-      expect(
-        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
-      ).to.deep.equal(expectedConfig);
+      expect(site.setHlxConfig).to.have.been.calledWith(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
       expect(context.log.info).to.have.been.calledWith('HLX config added for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: `https://undefined--undefined--undefined.aem.live`');
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('hlx 4 config is updated from fstab when accessible with drive.google', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
       context.data = {
         hlxVersion: 4,
         requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
@@ -323,19 +325,23 @@ describe('Hooks Controller', () => {
         },
       };
 
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-        hlxConfig: {
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({
           hlxVersion: 4,
           rso: {
             ref: 'main',
             site: 'some-site',
             owner: 'some-owner',
           },
-        },
-      }));
+        }),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
+
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .once()
@@ -343,15 +349,12 @@ describe('Hooks Controller', () => {
               + '  /: https://drive.google.com/drive/folders/1KmAPZ9bsFnma4cyMXewWKw63OPJaOIvH');
 
       await (await hooksController.processCDNHook(context)).json();
-      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
-      expect(
-        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
-      ).to.deep.equal(expectedConfig);
+      expect(site.setHlxConfig).to.have.been.calledWith(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
     });
 
     it('hlx 4 config is updated from fstab when accessible with onedrive', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
       context.data = {
         hlxVersion: 4,
         requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
@@ -377,19 +380,23 @@ describe('Hooks Controller', () => {
         },
       };
 
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-        hlxConfig: {
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({
           hlxVersion: 4,
           rso: {
             ref: 'main',
             site: 'some-site',
             owner: 'some-owner',
           },
-        },
-      }));
+        }),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
+
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .once()
@@ -397,15 +404,12 @@ describe('Hooks Controller', () => {
               + '  /: https://onedrive.test.com');
 
       await (await hooksController.processCDNHook(context)).json();
-      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
-      expect(
-        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
-      ).to.deep.equal(expectedConfig);
+      expect(site.setHlxConfig).to.have.been.calledWith(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
     });
 
     it('while candidate is disregarded, hlx config is updated if different from site', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
       context.data = {
         hlxVersion: 5,
         requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
@@ -436,11 +440,11 @@ describe('Hooks Controller', () => {
         },
       };
 
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-        hlxConfig: {
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({
           cdn: { prod: { host: 'some-cdn-host.com' } },
           content: {
             title: 'helix-website',
@@ -457,8 +461,11 @@ describe('Hooks Controller', () => {
             site: 'some-site',
             owner: 'some-owner',
           },
-        },
-      }));
+        }),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
 
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
@@ -466,10 +473,8 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
-      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
-      expect(
-        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
-      ).to.deep.equal(expectedConfig);
+      expect(site.setHlxConfig).to.have.been.calledWithExactly(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
       expect(context.log.info).to.have.been.calledWith('HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`');
       expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
@@ -481,9 +486,8 @@ describe('Hooks Controller', () => {
         .get('/')
         .reply(200, validHelixDom);
 
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
-      context.dataAccess.getSiteByBaseURL.resolves(null);
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
+      context.dataAccess.Site.findByBaseURL.resolves(null);
     });
 
     it('CDN candidate is processed and slack message sent', async () => {
@@ -605,7 +609,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Error: test-error'));
+      expect(context.log.error).to.have.been.calledOnceWith('Error fetching fstab.yaml for some-owner/some-site. Error: test-error');
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
@@ -657,10 +661,10 @@ describe('Hooks Controller', () => {
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        deliveryType: 'aem_cs',
-      }));
+      context.dataAccess.Site.findByBaseURL.resolves({
+        getBaseURL: () => 'https://some-domain.com',
+        getDeliveryType: () => 'aem_cs',
+      });
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 

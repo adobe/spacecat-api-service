@@ -14,23 +14,39 @@
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
-import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
+import sinon, { stub } from 'sinon';
 import esmock from 'esmock';
 
+import { Site } from '@adobe/spacecat-shared-data-access';
 import { createKeyEvent, KEY_EVENT_TYPES } from '@adobe/spacecat-shared-data-access/src/models/key-event.js';
+import SiteSchema from '@adobe/spacecat-shared-data-access/src/v2/models/site/site.schema.js';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import nock from 'nock';
+
 import SitesController from '../../src/controllers/sites.js';
-import { SiteDto } from '../../src/dto/site.js';
 
 use(chaiAsPromised);
+use(sinonChai);
 
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
   const sites = [
-    { id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' },
-    { id: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge' },
-  ].map((site) => SiteDto.fromJson(site));
+    { siteId: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' },
+    { siteId: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge' },
+  ].map((site) => new Site(
+    { entities: { site: { model: {} } } },
+    {
+      log: console,
+      getCollection: stub().returns({
+        schema: SiteSchema,
+        findById: stub(),
+      }),
+    },
+    SiteSchema,
+    site,
+    console,
+  ));
 
   const keyEvents = [
     createKeyEvent({
@@ -43,7 +59,7 @@ describe('Sites Controller', () => {
 
   const sitesWithLatestAudits = [
     {
-      id: 'site1',
+      siteId: 'site1',
       baseURL: 'https://site1.com',
       deliveryType: 'aem_edge',
       audits: [{
@@ -62,7 +78,7 @@ describe('Sites Controller', () => {
       }],
     },
     {
-      id: 'site2',
+      siteId: 'site2',
       baseURL: 'https://site2.com',
       deliveryType: 'aem_edge',
       audits: [{
@@ -81,7 +97,19 @@ describe('Sites Controller', () => {
       }],
     },
     { id: 'site3', baseURL: 'https://site3.com', audits: [] },
-  ].map((site) => SiteDto.fromJson(site));
+  ].map((site) => new Site(
+    { entities: { site: {} } },
+    {
+      log: console,
+      getCollection: stub().returns({
+        schema: SiteSchema,
+        findById: stub(),
+      }),
+    },
+    SiteSchema,
+    site,
+    console,
+  ));
 
   const siteFunctions = [
     'createSite',
@@ -108,18 +136,19 @@ describe('Sites Controller', () => {
 
   beforeEach(() => {
     mockDataAccess = {
-      addSite: sandbox.stub().resolves(sites[0]),
-      updateSite: sandbox.stub().resolves(sites[0]),
-      removeSite: sandbox.stub().resolves(),
-      getSites: sandbox.stub().resolves(sites),
-      getSitesByDeliveryType: sandbox.stub().resolves(sites),
-      getSitesWithLatestAudit: sandbox.stub().resolves(sitesWithLatestAudits),
-      getSiteByBaseURL: sandbox.stub().resolves(sites[0]),
-      getSiteByID: sandbox.stub().resolves(sites[0]),
+      KeyEvent: {
+        allBySiteId: sandbox.stub().resolves(keyEvents),
+        create: sandbox.stub().resolves(keyEvents[0]),
+      },
+      Site: {
+        all: sandbox.stub().resolves(sites),
+        allByDeliveryType: sandbox.stub().resolves(sites),
+        allWithLatestAudit: sandbox.stub().resolves(sitesWithLatestAudits),
+        create: sandbox.stub().resolves(sites[0]),
+        findByBaseURL: sandbox.stub().resolves(sites[0]),
+        findById: sandbox.stub().resolves(sites[0]),
+      },
       getAuditForSite: sandbox.stub().resolves(sitesWithLatestAudits[0].getAudits()[0]),
-      createKeyEvent: sandbox.stub(),
-      getKeyEventsForSite: sandbox.stub(),
-      removeKeyEvent: sandbox.stub(),
     };
     context = {
       runtime: { name: 'aws-lambda', region: 'us-east-1' },
@@ -165,7 +194,7 @@ describe('Sites Controller', () => {
   it('creates a site', async () => {
     const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
 
-    expect(mockDataAccess.addSite.calledOnce).to.be.true;
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
     expect(response.status).to.equal(201);
 
     const site = await response.json();

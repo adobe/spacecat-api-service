@@ -50,8 +50,10 @@ function AuditsController(dataAccess) {
       return badRequest('Site ID required');
     }
 
-    const audits = (await Audit.allBySiteIdAndAuditType(siteId, auditType, { order }))
-      .map((audit) => AuditDto.toAbbreviatedJSON(audit));
+    const method = auditType
+      ? Audit.allBySiteIdAndAuditType(siteId, auditType, { order })
+      : Audit.allBySiteId(siteId, { order });
+    const audits = ((await method).map((audit) => AuditDto.toAbbreviatedJSON(audit)));
 
     return ok(audits);
   };

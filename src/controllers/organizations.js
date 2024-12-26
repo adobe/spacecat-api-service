@@ -191,7 +191,7 @@ function OrganizationsController(dataAccess, env) {
       return badRequest('Organization ID required');
     }
 
-    const organization = await getByID(context);
+    const organization = await Organization.findById(organizationId);
     if (!organization) {
       return notFound('Organization not found');
     }

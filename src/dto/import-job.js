@@ -22,7 +22,7 @@ export const ImportJobDto = {
     baseURL: importJob.getBaseURL(),
     options: importJob.getOptions(),
     startedAt: importJob.getStartedAt(),
-    endTime: importJob.getEndTime(),
+    endedAt: importJob.getEndedAt(),
     duration: importJob.getDuration(),
     status: importJob.getStatus(),
     urlCount: importJob.getUrlCount(),
@@ -30,7 +30,7 @@ export const ImportJobDto = {
     successCount: importJob.getSuccessCount(),
     failedCount: importJob.getFailedCount(),
     redirectCount: importJob.getRedirectCount(),
-    hasCustomHeaders: importJob.hasCustomHeaders(),
-    hasCustomImportJs: importJob.hasCustomImportJs(),
+    hasCustomHeaders: importJob.getHasCustomHeaders(),
+    hasCustomImportJs: importJob.getHasCustomImportJs(),
   }),
 };
