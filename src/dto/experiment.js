@@ -20,7 +20,7 @@ export const ExperimentDto = {
    * @param {Readonly<Experiment>} experiment - Experiment object.
    * @returns {{
    * siteId: string,
-   * experimentId: string,
+   * expId: string,
    * name: string,
    * url: string,
    * type: string,
