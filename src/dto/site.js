@@ -11,6 +11,7 @@
  */
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { AuditDto } from './audit.js';
 
 /**
  * Data transfer object for Site.
@@ -19,6 +20,7 @@ export const SiteDto = {
   /**
    * Converts a Site object into a JSON object.
    * @param {Readonly<Site>} site - Site object.
+   * @param {Audit[]} [audit] - Optional audit object.
    * @returns {{
    * id: string,
    * baseURL, gitHubURL: string,
@@ -29,7 +31,7 @@ export const SiteDto = {
    * updatedAt: string
    * }}
    */
-  toJSON: (site) => ({
+  toJSON: (site, audit) => ({
     id: site.getId(),
     baseURL: site.getBaseURL(),
     hlxConfig: site.getHlxConfig(),
@@ -41,6 +43,7 @@ export const SiteDto = {
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
     config: Config.toDynamoItem(site.getConfig()),
+    ...(audit && { audits: [AuditDto.toAbbreviatedJSON(audit)] }),
   }),
 
   // TODO: implement toCSV

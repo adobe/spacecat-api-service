@@ -107,9 +107,13 @@ function SitesController(dataAccess, log) {
 
     const order = ascending === 'true' ? 'asc' : 'desc';
 
-    const sites = (await Site.allWithLatestAudit(auditType, order))
-      .map((site) => SiteDto.toJSON(site));
-    return ok(sites);
+    const sites = await Site.allWithLatestAudit(auditType, order);
+    const result = await Promise.all(sites
+      .map(async (site) => {
+        const audit = await site.getLatestAuditByAuditType(auditType);
+        return SiteDto.toJSON(site, audit);
+      }));
+    return ok(result);
   };
 
   /**

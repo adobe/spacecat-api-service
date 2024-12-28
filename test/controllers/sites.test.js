@@ -329,6 +329,19 @@ describe('Sites Controller', () => {
   });
 
   it('gets all sites with latest audit', async () => {
+    const audit = {
+      getAuditedAt: () => '2021-01-01T00:00:00.000Z',
+      getAuditResult: () => ({ totalBlockingTime: 12, thirdPartySummary: [] }),
+      getAuditType: () => 'lhs-mobile',
+      getFullAuditRef: () => 'https://site1.com/lighthouse/20210101T000000.000Z/lhs-mobile.json',
+      getIsError: () => false,
+      getIsLive: () => true,
+      getSiteId: () => 'site1',
+    };
+    sites.forEach((site) => {
+      // eslint-disable-next-line no-param-reassign
+      site.getLatestAuditByAuditType = sandbox.stub().resolves(audit);
+    });
     const result = await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile' } });
     const resultSites = await result.json();
 
