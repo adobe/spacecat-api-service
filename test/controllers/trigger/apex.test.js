@@ -12,15 +12,15 @@
 
 /* eslint-env mocha */
 
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
-
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import nock from 'nock';
 import trigger, { INITIAL_APEX_SLACK_MESSAGE } from '../../../src/controllers/trigger/apex.js';
 import { getQueryParams } from '../../../src/utils/slack/base.js';
+
+use(sinonChai);
 
 describe('Apex trigger', () => {
   let context;
@@ -37,28 +37,35 @@ describe('Apex trigger', () => {
     };
 
     sites = [
-      createSite({
-        id: 'site1',
+      {
+        getId: () => 'site1',
         baseURL: 'http://site1.com',
         organizationId: 'org123',
-      }),
-      createSite({
-        id: 'site2',
+      },
+      {
+        getId: () => 'site2',
         baseURL: 'http://site2.com',
         organizationId: 'org123',
-      }),
+      },
     ];
 
     orgs = [
-      createOrganization({
+      {
         id: 'org123',
         name: 'ABCD',
-      })];
+      },
+    ];
 
     dataAccessMock = {
-      getOrganizations: sandbox.stub().resolves(orgs),
-      getSitesByDeliveryType: sandbox.stub(),
-      getConfiguration: sandbox.stub().resolves(configuration),
+      Configuration: {
+        findLatest: sandbox.stub().resolves(configuration),
+      },
+      Organization: {
+        all: sandbox.stub().resolves(orgs),
+      },
+      Site: {
+        allByDeliveryType: sandbox.stub().resolves(sites),
+      },
     };
 
     sqsMock = {
@@ -83,7 +90,7 @@ describe('Apex trigger', () => {
       },
     };
 
-    dataAccessMock.getSitesByDeliveryType.resolves(sites);
+    // dataAccessMock.getSitesByDeliveryType.resolves(sites);
 
     nock('https://slack.com')
       .get('/api/chat.postMessage')
@@ -97,7 +104,7 @@ describe('Apex trigger', () => {
     const response = await trigger(context, [context.data.type]);
     const result = await response.json();
 
-    expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
+    expect(dataAccessMock.Site.allByDeliveryType).to.have.been.calledOnce;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
     expect(result.message[0]).to.equal('Triggered apex audit for all 2 sites');
   });

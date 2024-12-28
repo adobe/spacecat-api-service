@@ -271,6 +271,18 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Organization ID required');
   });
 
+  it('returns not found when removing a non-existing organization', async () => {
+    organizations[0].remove = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(null);
+
+    const response = await organizationsController.removeOrganization({ params: { organizationId: 'org1' } });
+    const error = await response.json();
+
+    expect(organizations[0].remove).to.not.have.been.called;
+    expect(response.status).to.equal(404);
+    expect(error).to.have.property('message', 'Organization not found');
+  });
+
   it('gets all organizations', async () => {
     mockDataAccess.Organization.all.resolves(organizations);
 

@@ -11,13 +11,12 @@
  */
 
 /* eslint-env mocha */
+import { SiteCandidate } from '@adobe/spacecat-shared-data-access';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
 import {
   expectedAnnouncedMessage,
@@ -56,12 +55,16 @@ describe('approveSiteCandidate', () => {
 
     context = {
       dataAccess: {
-        createKeyEvent: sinon.stub(),
-        getSiteCandidateByBaseURL: sinon.stub(),
-        getSiteByBaseURL: sinon.stub(),
-        addSite: sinon.stub(),
-        updateSite: sinon.stub(),
-        updateSiteCandidate: sinon.stub(),
+        KeyEvent: {
+          create: sinon.stub(),
+        },
+        Site: {
+          create: sinon.stub(),
+          findByBaseURL: sinon.stub(),
+        },
+        SiteCandidate: {
+          findByBaseURL: sinon.stub(),
+        },
       },
       log: {
         info: sinon.stub(),
@@ -76,17 +79,26 @@ describe('approveSiteCandidate', () => {
       },
     };
 
-    site = createSite({
-      baseURL,
-      isLive: true,
-    });
+    site = {
+      getId: () => 'some-site-id',
+      getBaseURL: () => baseURL,
+      getIsLive: () => true,
+      setDeliveryType: sinon.stub(),
+      setHlxConfig: sinon.stub(),
+      toggleLive: sinon.stub(),
+      save: sinon.stub(),
+    };
 
-    siteCandidate = createSiteCandidate({
-      baseURL,
-      source: SITE_CANDIDATE_SOURCES.CDN,
-      status: SITE_CANDIDATE_STATUS.PENDING,
-      hlxConfig,
-    });
+    siteCandidate = {
+      getBaseURL: () => baseURL,
+      getSource: () => SiteCandidate.SITE_CANDIDATE_SOURCES.CDN,
+      getStatus: () => SiteCandidate.SITE_CANDIDATE_STATUS.PENDING,
+      getHlxConfig: () => hlxConfig,
+      setSiteId: sinon.stub(),
+      setStatus: sinon.stub(),
+      setUpdatedBy: sinon.stub(),
+      save: sinon.stub(),
+    };
 
     ackMock = sinon.stub().resolves();
     respondMock = sinon.stub().resolves();
@@ -98,35 +110,39 @@ describe('approveSiteCandidate', () => {
   });
 
   it('should approve site candidate and announce site discovery', async () => {
-    const expectedSiteCandidate = createSiteCandidate({
+    const expectedSiteCandidate = {
       baseURL,
-      source: SITE_CANDIDATE_SOURCES.CDN,
-      status: SITE_CANDIDATE_STATUS.APPROVED,
+      source: SiteCandidate.SITE_CANDIDATE_SOURCES.CDN,
+      status: SiteCandidate.SITE_CANDIDATE_STATUS.APPROVED,
       updatedBy: 'approvers-username',
       siteId: site.getId(),
       hlxConfig,
-    });
+    };
 
-    context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
-    context.dataAccess.getSiteByBaseURL.resolves(null);
-    context.dataAccess.addSite.resolves(site);
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
 
     // Call the function under test
     const approveFunction = approveSiteCandidate(context);
     await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
 
-    const actualUpdatedSiteCandidate = context.dataAccess.updateSiteCandidate.getCall(0).args[0];
-
     expect(ackMock).to.have.been.calledOnce;
-    expect(context.dataAccess.getSiteCandidateByBaseURL).to.have.been.calledWith(baseURL);
-    expect(context.dataAccess.addSite).to.have.been.calledWith(
+    expect(context.dataAccess.SiteCandidate.findByBaseURL).to.have.been.calledWith(baseURL);
+    expect(context.dataAccess.Site.create).to.have.been.calledWith(
       { baseURL, hlxConfig, isLive: true },
     );
-    expect(context.dataAccess.updateSite).to.have.been.callCount(0);
-    expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
+    expect(site.save).to.have.been.callCount(0);
+    expect(siteCandidate.getBaseURL()).to.equal(expectedSiteCandidate.baseURL);
+    expect(siteCandidate.getHlxConfig()).to.eql(expectedSiteCandidate.hlxConfig);
+    expect(siteCandidate.getSource()).to.equal(expectedSiteCandidate.source);
+    expect(siteCandidate.setSiteId).to.have.been.calledWith(expectedSiteCandidate.siteId);
+    expect(siteCandidate.setStatus).to.have.been.calledWith(expectedSiteCandidate.status);
+    expect(siteCandidate.setUpdatedBy).to.have.been.calledWith(expectedSiteCandidate.updatedBy);
+    expect(siteCandidate.save).to.have.been.calledOnce;
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
     expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
-    expect(context.dataAccess.createKeyEvent).to.have.been.calledWith({
+    expect(context.dataAccess.KeyEvent.create).to.have.been.calledWith({
       name: 'Go Live',
       siteId: site.getId(),
       type: 'STATUS CHANGE',
@@ -134,39 +150,35 @@ describe('approveSiteCandidate', () => {
   });
 
   it('should approve previously added non aem_edge sites then announce the discovery', async () => {
-    const expectedSiteCandidate = createSiteCandidate({
+    const expectedSiteCandidate = {
       baseURL,
-      source: SITE_CANDIDATE_SOURCES.CDN,
-      status: SITE_CANDIDATE_STATUS.APPROVED,
+      source: SiteCandidate.SITE_CANDIDATE_SOURCES.CDN,
+      status: SiteCandidate.SITE_CANDIDATE_STATUS.APPROVED,
       updatedBy: 'approvers-username',
       siteId: site.getId(),
       hlxConfig,
-    });
-    site.toggleLive();
-    site.updateDeliveryType('aem_cs');
+    };
+    site.getIsLive = () => false;
 
-    context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
-    context.dataAccess.getSiteByBaseURL.resolves(site);
-    context.dataAccess.updateSite.resolvesArg(0);
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+    site.save.resolves(site);
 
     // Call the function under test
     const approveFunction = approveSiteCandidate(context);
     await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
 
-    const actualUpdatedSiteCandidate = context.dataAccess.updateSiteCandidate.getCall(0).args[0];
-
     expect(ackMock).to.have.been.calledOnce;
-    expect(context.dataAccess.getSiteCandidateByBaseURL).to.have.been.calledWith(baseURL);
-    expect(context.dataAccess.addSite).to.have.been.callCount(0);
+    expect(context.dataAccess.SiteCandidate.findByBaseURL).to.have.been.calledWith(baseURL);
+    expect(context.dataAccess.Site.create).to.not.have.been.called;
 
-    expect(context.dataAccess.updateSite).to.have.been.calledOnce;
-    const updatedSite = context.dataAccess.updateSite.getCalls()[0].args[0];
-    expect(updatedSite.isLive()).to.be.true;
-    expect(updatedSite.getDeliveryType()).to.equal('aem_edge');
-    expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
+    expect(site.save).to.have.been.calledOnce;
+    expect(site.toggleLive).to.have.been.calledOnce;
+    expect(site.setDeliveryType).to.have.been.calledWith('aem_edge');
+    expect(site.setHlxConfig).to.have.been.calledWith(expectedSiteCandidate.hlxConfig);
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
     expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
-    expect(context.dataAccess.createKeyEvent).to.have.been.calledWith({
+    expect(context.dataAccess.KeyEvent.create).to.have.been.calledWith({
       name: 'Go Live',
       siteId: site.getId(),
       type: 'STATUS CHANGE',

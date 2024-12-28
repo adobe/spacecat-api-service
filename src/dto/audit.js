@@ -10,35 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import {
-  createAudit,
-  AUDIT_TYPE_LHS_DESKTOP,
-  AUDIT_TYPE_LHS_MOBILE,
-} from '@adobe/spacecat-shared-data-access/src/models/audit.js';
+import { Audit } from '@adobe/spacecat-shared-data-access';
 
 /**
  * Data transfer object for Site.
  */
 export const AuditDto = {
-
-  /**
-   * Converts a JSON object into an Audit object.
-   * @param {object } jsonObject - JSON object.
-   * @returns {Readonly<Audit>} Audit object.
-   */
-  fromJson: (jsonObject) => {
-    const auditData = {
-      auditResult: jsonObject.auditResult,
-      auditType: jsonObject.auditType,
-      auditedAt: jsonObject.auditedAt,
-      fullAuditRef: jsonObject.fullAuditRef,
-      isLive: jsonObject.isLive,
-      siteId: jsonObject.siteId,
-    };
-
-    return createAudit(auditData);
-  },
-
   /**
    * Converts an Audit object into a JSON object.
    * @param {Readonly<Audit>} audit - Audit object.
@@ -74,8 +51,8 @@ export const AuditDto = {
    * }} JSON object.
    */
   toAbbreviatedJSON: (audit) => {
-    if (audit.getAuditType() !== AUDIT_TYPE_LHS_DESKTOP
-      && audit.getAuditType() !== AUDIT_TYPE_LHS_MOBILE) {
+    if (audit.getAuditType() !== Audit.AUDIT_TYPES.LHS_DESKTOP
+      && audit.getAuditType() !== Audit.AUDIT_TYPES.LHS_MOBILE) {
       return AuditDto.toJSON(audit);
     }
     return {

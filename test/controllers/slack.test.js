@@ -29,11 +29,25 @@ use(chaiAsPromised);
 
 describe('SlackController', () => {
   let testPayload;
+  let mockDataAccess;
   let mockSlackApp;
   let context;
   let logStub;
   let processEventStub;
   let middlewares;
+
+  const mockOrgObject = {
+    id: 'mock-id',
+    name: 'Test org #1',
+    imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+  };
+  const mockConfig = {
+    config: {
+      slack: {
+        channel: 'mock-channel-id',
+      },
+    },
+  };
 
   function createMockSlackApp(processEventHandler) {
     class MockSlackApp {
@@ -75,6 +89,16 @@ describe('SlackController', () => {
       data: testPayload,
       pathInfo: { headers: {} },
     };
+
+    mockDataAccess = {
+      Configuration: {
+        findLatest: sinon.stub().resolves(mockConfig),
+      },
+      Organization: {
+        findByImsOrgId: sinon.stub().resolves(createOrganization(mockOrgObject)),
+      },
+    };
+    context.dataAccess = mockDataAccess;
   });
 
   afterEach(() => {
@@ -227,18 +251,6 @@ describe('SlackController', () => {
 
   describe('inviteUserToChannel', () => {
     let controller;
-    const mockOrgObject = {
-      id: 'mock-id',
-      name: 'Test org #1',
-      imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
-    };
-    const mockConfig = {
-      config: {
-        slack: {
-          channel: 'mock-channel-id',
-        },
-      },
-    };
 
     beforeEach(() => {
       controller = SlackController(mockSlackApp);
@@ -250,11 +262,6 @@ describe('SlackController', () => {
         }),
       };
       context.imsClient = mockImsClient;
-
-      const mockDataAccess = {
-        getOrganizationByImsOrgID: sinon.stub().resolves(createOrganization(mockOrgObject)),
-      };
-      context.dataAccess = mockDataAccess;
 
       context.slack = {};
 
@@ -288,10 +295,7 @@ describe('SlackController', () => {
     });
 
     it('throws error when there is no Star Catalogue entry for the requested IMS org ID', async () => {
-      context.dataAccess = {
-        // Simulate a 'not found' org lookup from Star Catalogue
-        getOrganizationByImsOrgID: sinon.stub().resolves(null),
-      };
+      mockDataAccess.Organization.findByImsOrgId = sinon.stub().resolves(null);
 
       const response = await controller.inviteUserToChannel(context);
       expect(response.status).to.equal(404);
@@ -312,8 +316,7 @@ describe('SlackController', () => {
         ...mockOrgObject,
         ...mockConfig,
       };
-      context.dataAccess.getOrganizationByImsOrgID = sinon.stub()
-        .resolves(createOrganization(orgWithSlackConfig));
+      mockDataAccess.Organization.findByImsOrgId.resolves(createOrganization(orgWithSlackConfig));
 
       const response = await controller.inviteUserToChannel(context);
       expect(response.status).to.equal(500);
@@ -325,8 +328,7 @@ describe('SlackController', () => {
         ...mockOrgObject,
         ...mockConfig,
       };
-      context.dataAccess.getOrganizationByImsOrgID = sinon.stub()
-        .resolves(createOrganization(orgWithSlackConfig));
+      mockDataAccess.Organization.findByImsOrgId.resolves(createOrganization(orgWithSlackConfig));
 
       let validatedSlackCall = false;
       context.slack.elevatedClient = {

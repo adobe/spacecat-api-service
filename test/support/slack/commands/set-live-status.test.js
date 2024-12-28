@@ -12,10 +12,13 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import SetLiveStatusCommand from '../../../../src/support/slack/commands/set-live-status.js';
+
+use(sinonChai);
 
 describe('SetLiveStatusCommand', () => {
   let context;
@@ -24,8 +27,9 @@ describe('SetLiveStatusCommand', () => {
 
   beforeEach(() => {
     dataAccessStub = {
-      getSiteByBaseURL: sinon.stub(),
-      updateSite: sinon.stub(),
+      Site: {
+        findByBaseURL: sinon.stub(),
+      },
     };
     context = { dataAccess: dataAccessStub, log: console };
     slackContext = { say: sinon.spy() };
@@ -45,34 +49,36 @@ describe('SetLiveStatusCommand', () => {
     it('toggles live status for a live site', async () => {
       const mockSite = {
         toggleLive: sinon.spy(),
-        isLive: sinon.stub().returns(true),
+        getIsLive: sinon.stub().returns(true),
+        save: sinon.stub(),
       };
-      dataAccessStub.getSiteByBaseURL.resolves(mockSite);
+      dataAccessStub.Site.findByBaseURL.resolves(mockSite);
 
       const command = SetLiveStatusCommand(context);
 
       await command.handleExecution(['validsite.com'], slackContext);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://validsite.com')).to.be.true;
+      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://validsite.com')).to.be.true;
       expect(mockSite.toggleLive.calledOnce).to.be.true;
-      expect(dataAccessStub.updateSite.calledWith(mockSite)).to.be.true;
+      expect(mockSite.save).to.have.been.calledOnce;
       expect(slackContext.say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
     });
 
     it('toggles live status for a non-live site', async () => {
       const mockSite = {
         toggleLive: sinon.spy(),
-        isLive: sinon.stub().returns(false),
+        getIsLive: sinon.stub().returns(false),
+        save: sinon.stub(),
       };
-      dataAccessStub.getSiteByBaseURL.resolves(mockSite);
+      dataAccessStub.Site.findByBaseURL.resolves(mockSite);
 
       const command = SetLiveStatusCommand(context);
 
       await command.handleExecution(['validsite.com'], slackContext);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://validsite.com')).to.be.true;
+      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://validsite.com')).to.be.true;
       expect(mockSite.toggleLive.calledOnce).to.be.true;
-      expect(dataAccessStub.updateSite.calledWith(mockSite)).to.be.true;
+      expect(mockSite.save).to.have.been.calledOnce;
       expect(slackContext.say.calledWithMatch(/Successfully updated the live status/)).to.be.true;
     });
 
@@ -85,7 +91,7 @@ describe('SetLiveStatusCommand', () => {
     });
 
     it('informs user if no site found with the given base URL', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
 
       const command = SetLiveStatusCommand(context);
 
@@ -95,7 +101,7 @@ describe('SetLiveStatusCommand', () => {
     });
 
     it('handles errors during execution', async () => {
-      dataAccessStub.getSiteByBaseURL.throws(new Error('Test Error'));
+      dataAccessStub.Site.findByBaseURL.throws(new Error('Test Error'));
 
       const command = SetLiveStatusCommand(context);
 

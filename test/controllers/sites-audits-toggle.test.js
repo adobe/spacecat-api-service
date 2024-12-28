@@ -17,7 +17,6 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import SitesAuditsToggleController from '../../src/controllers/sites-audits-toggle.js';
-import { SiteDto } from '../../src/dto/site.js';
 
 use(chaiAsPromised);
 
@@ -27,9 +26,9 @@ describe('Sites Audits Controller', () => {
   const publicInternalErrorMessage = 'An error occurred while trying to enable or disable audits.';
 
   const sites = [
-    { id: 'site0', baseURL: 'https://site0.com', deliveryType: 'aem_edge' },
-    { id: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' },
-  ].map((site) => SiteDto.fromJson(site));
+    { getId: () => 'site0', getBaseURL: () => 'https://site0.com', getDeliveryType: () => 'aem_edge' },
+    { getId: () => 'site1', getBaseURL: () => 'https://site1.com', getDeliveryType: () => 'aem_edge' },
+  ];
   const handlers = { 404: {}, cwv: {} };
 
   let configurationMock;
@@ -196,9 +195,9 @@ describe('Sites Audits Controller', () => {
     });
 
     it('if an error occurred while saving the configuration', async () => {
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(SiteDto.fromJson({
-        id: 'site0', baseURL: 'https://site0.com', deliveryType: 'aem_edge',
-      }));
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves({
+        getId: () => 'site0', getBaseURL: () => 'https://site0.com', getDeliveryType: () => 'aem_edge',
+      });
 
       const privateInternalServerError = 'Some internal private error';
       configurationMock.save.rejects(new Error(privateInternalServerError));

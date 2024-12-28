@@ -186,6 +186,19 @@ describe('Audits Controller', () => {
       expect(audits).to.deep.equal(mockRawAudits);
     });
 
+    it('retrieves all audits of a type for a site', async () => {
+      const siteId = 'site1';
+      const auditType = 'lhs-mobile';
+
+      mockDataAccess.Audit.allBySiteIdAndAuditType.resolves([mockAudits[0]]);
+
+      const result = await auditsController.getAllForSite({ params: { siteId, auditType } });
+      const audits = await result.json();
+
+      expect(mockDataAccess.Audit.allBySiteIdAndAuditType).to.have.been.calledOnceWith(siteId, auditType, { order: 'desc' });
+      expect(audits).to.deep.equal([mockRawAudits[0]]);
+    });
+
     it('retrieves all audits ascending for a site', async () => {
       const siteId = 'site1';
 
