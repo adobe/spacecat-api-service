@@ -109,8 +109,8 @@ describe('RunScrapeCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
         getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
-          { getURL: () => 'https://example.com/page1' },
-          { getURL: () => 'https://example.com/page2' },
+          { getUrl: () => 'https://example.com/page1' },
+          { getUrl: () => 'https://example.com/page2' },
         ]),
       });
 

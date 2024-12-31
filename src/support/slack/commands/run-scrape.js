@@ -83,7 +83,7 @@ function RunScrapeCommand(context) {
         await say(`:warning: No top pages found for site \`${baseURL}\``);
         return;
       }
-      const urls = topPages.map((page) => ({ url: page.getURL() }));
+      const urls = topPages.map((page) => ({ url: page.getUrl() }));
       await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
       const jobId = site.getId();
