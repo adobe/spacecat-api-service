@@ -1,3 +1,10 @@
+# [1.83.0](https://github.com/adobe/spacecat-api-service/compare/v1.82.6...v1.83.0) (2024-12-31)
+
+
+### Features
+
+* **slack:** onboard a site to ESS ([#649](https://github.com/adobe/spacecat-api-service/issues/649)) ([2bdc706](https://github.com/adobe/spacecat-api-service/commit/2bdc7065195926ebe25a01e00e29dc848d8bd681))
+
 ## [1.82.6](https://github.com/adobe/spacecat-api-service/compare/v1.82.5...v1.82.6) (2024-12-31)
 
 

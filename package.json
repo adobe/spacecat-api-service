@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.82.6",
+  "version": "1.83.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -67,7 +67,7 @@
     "@adobe/helix-shared-wrap": "2.0.2",
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.23",
-    "@adobe/spacecat-shared-data-access": "1.61.10",
+    "@adobe/spacecat-shared-data-access": "1.61.11",
     "@adobe/spacecat-shared-gpt-client": "1.4.2",
     "@adobe/spacecat-shared-http-utils": "1.9.2",
     "@adobe/spacecat-shared-ims-client": "1.5.2",
