@@ -50,28 +50,34 @@ describe('Organizations Controller', () => {
     console,
   ));
 
+  const sampleConfig1 = {
+    getSlackConfig: sinon.stub().returns({
+      channel: 'C0123456789',
+      workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
+    }),
+    getHandlers: sinon.stub().returns([]),
+    getImports: sinon.stub().returns([]),
+  };
+
+  const sampleConfig2 = {
+    getSlackConfig: sinon.stub().returns({
+      workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
+    }),
+    getHandlers: sinon.stub().returns([]),
+    getImports: sinon.stub().returns([]),
+  };
+
   const organizations = [
     { organizationId: 'org1', name: 'Org 1' },
     {
       organizationId: 'org2',
       name: 'Org 2',
       imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
-      config: {
-        slack: {
-          channel: 'C0123456789',
-          workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
-        },
-      },
     },
     {
       organizationId: 'org3',
       name: 'Org 3',
       imsOrgId: '9876567890ABCDEF12345678@AdobeOrg',
-      config: {
-        slack: {
-          workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
-        },
-      },
     },
   ].map((org) => new Organization(
     {
@@ -106,6 +112,10 @@ describe('Organizations Controller', () => {
     org,
     console,
   ));
+
+  organizations[0].getConfig = sinon.stub().returns(sampleConfig1);
+  organizations[1].getConfig = sinon.stub().returns(sampleConfig1);
+  organizations[2].getConfig = sinon.stub().returns(sampleConfig2);
 
   const organizationFunctions = [
     'createOrganization',
