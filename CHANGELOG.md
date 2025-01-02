@@ -1,3 +1,10 @@
+## [1.83.3](https://github.com/adobe/spacecat-api-service/compare/v1.83.2...v1.83.3) (2025-01-02)
+
+
+### Bug Fixes
+
+* Bump node version used by importer E2E test workflow ([#662](https://github.com/adobe/spacecat-api-service/issues/662)) ([8134f3d](https://github.com/adobe/spacecat-api-service/commit/8134f3d964389dc66b4a217454b259b0b23279a4))
+
 ## [1.83.2](https://github.com/adobe/spacecat-api-service/compare/v1.83.1...v1.83.2) (2024-12-31)
 
 
