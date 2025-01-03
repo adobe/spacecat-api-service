@@ -1,3 +1,10 @@
+# [1.84.0](https://github.com/adobe/spacecat-api-service/compare/v1.83.4...v1.84.0) (2025-01-03)
+
+
+### Features
+
+* migrate to v2 data access ([#654](https://github.com/adobe/spacecat-api-service/issues/654)) ([5e369a0](https://github.com/adobe/spacecat-api-service/commit/5e369a0384ef7e77483f6cb6e1e894ad3b3615fd))
+
 ## [1.83.4](https://github.com/adobe/spacecat-api-service/compare/v1.83.3...v1.83.4) (2025-01-03)
 
 
