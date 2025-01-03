@@ -40,6 +40,7 @@ function RunScrapeCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Configuration, Site } = dataAccess;
 
   /**
      * Validates input and triggers a new scrape run for the given site.
@@ -51,7 +52,7 @@ function RunScrapeCommand(context) {
      */
   const handleExecution = async (args, slackContext) => {
     const { say, user } = slackContext;
-    const config = await dataAccess.getConfiguration();
+    const config = await Configuration.findLatest();
     const slackRoles = config.getSlackRoles() || {};
     const admins = slackRoles?.scrape || [];
 
@@ -69,20 +70,20 @@ function RunScrapeCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
       if (!isObject(site)) {
         await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 
-      const result = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
+      const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
       const topPages = result || [];
 
       if (topPages.length === 0) {
         await say(`:warning: No top pages found for site \`${baseURL}\``);
         return;
       }
-      const urls = topPages.map((page) => ({ url: page.getURL() }));
+      const urls = topPages.map((page) => ({ url: page.getUrl() }));
       await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
       const jobId = site.getId();

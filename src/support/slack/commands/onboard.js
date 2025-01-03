@@ -21,7 +21,6 @@ import {
 import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
 
 import BaseCommand from './base.js';
-import { ConfigurationDto } from '../../../dto/configuration.js';
 
 const PHRASES = ['onboard site'];
 
@@ -52,6 +51,7 @@ function OnboardCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Configuration, Site } = dataAccess;
 
   /**
    * Validates input and onboards the site to ESS
@@ -76,23 +76,23 @@ function OnboardCommand(context) {
       }
 
       // see if the site was added previously
-      let site = await dataAccess.getSiteByBaseURL(baseURL);
+      let site = await Site.findByBaseURL(baseURL);
 
       // if not, add the site to the star catalogue
       if (!site) {
         const deliveryType = await findDeliveryType(baseURL);
         const isLive = true;
 
-        site = await dataAccess.addSite({ baseURL, deliveryType, isLive });
+        site = await Site.create({ baseURL, deliveryType, isLive });
       }
 
-      const configuration = await dataAccess.getConfiguration();
+      const configuration = await Configuration.findLatest();
 
       AUDITS.forEach((auditType) => {
         configuration.enableHandlerForSite(auditType, site);
       });
 
-      await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+      await configuration.save();
 
       for (const auditType of AUDITS) {
         // eslint-disable-next-line no-await-in-loop

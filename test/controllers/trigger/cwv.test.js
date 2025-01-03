@@ -16,8 +16,6 @@ import sinon from 'sinon';
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 import cwv from '../../../src/controllers/trigger/cwv.js';
 
 use(sinonChai);
@@ -37,27 +35,34 @@ describe('cvw handler', () => {
       isHandlerEnabledForSite: sandbox.stub(),
     };
     sites = [
-      createSite({
-        id: 'site1',
+      {
+        getId: () => 'site1',
         baseURL: 'http://site1.com',
-      }),
-      createSite({
-        id: 'site2',
+      },
+      {
+        getId: () => 'site2',
         baseURL: 'http://site2.com',
-      }),
+      },
     ];
     configuration.isHandlerEnabledForSite.withArgs('cwv', sites[0]).returns(false);
     configuration.isHandlerEnabledForSite.withArgs('cwv', sites[1]).returns(true);
     orgs = [
-      createOrganization({
+      {
         id: 'default',
         name: 'ABCD',
-      })];
+      },
+    ];
 
     dataAccessMock = {
-      getOrganizations: sandbox.stub().resolves(orgs),
-      getSitesByDeliveryType: sandbox.stub(),
-      getConfiguration: sandbox.stub().resolves(configuration),
+      Configuration: {
+        findLatest: sandbox.stub().resolves(configuration),
+      },
+      Organization: {
+        all: sandbox.stub().resolves(orgs),
+      },
+      Site: {
+        allByDeliveryType: sandbox.stub().resolves(sites),
+      },
     };
 
     sqsMock = {
@@ -82,12 +87,10 @@ describe('cvw handler', () => {
       },
     };
 
-    dataAccessMock.getSitesByDeliveryType.resolves(sites);
-
     const response = await cwv(context);
     const result = await response.json();
 
-    expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
+    expect(dataAccessMock.Site.allByDeliveryType.calledOnce).to.be.true;
     expect(sqsMock.sendMessage.callCount).to.equal(1);
     expect(result.message[0]).to.equal('Triggered cwv audit for site2');
   });

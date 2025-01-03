@@ -12,7 +12,8 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import { CHARACTER_LIMIT } from '../../../../src/utils/slack/base.js';
@@ -23,6 +24,8 @@ import MartechImpactCommand, {
   formatRows,
   formatTotalBlockingTime,
 } from '../../../../src/support/slack/commands/martech-impact.js';
+
+use(sinonChai);
 
 /**
  * Generates a specified number of mock third-party summaries.
@@ -46,8 +49,7 @@ describe('MartechImpactCommand', () => {
 
   beforeEach(() => {
     dataAccessStub = {
-      getSiteByBaseURL: sinon.stub(),
-      getLatestAuditForSite: sinon.stub(),
+      Site: { findByBaseURL: sinon.stub() },
     };
     context = { dataAccess: dataAccessStub, log: console };
     slackContext = { say: sinon.spy() };
@@ -64,22 +66,22 @@ describe('MartechImpactCommand', () => {
 
   describe('Handle Execution Method', () => {
     it('executes command successfully with valid data', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({
+      dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
         getBaseURL: () => 'example.com',
         getDeliveryType: () => 'aem_edge',
         getGitHubURL: () => '',
-        isLive: () => true,
+        getIsLive: () => true,
         getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
         getAuditConfig: () => ({
           auditsDisabled: () => false,
           getAuditTypeConfig: () => ({ disabled: () => false }),
         }),
-      });
-      dataAccessStub.getLatestAuditForSite.resolves({
-        getAuditResult: () => (
-          { totalBlockingTime: 12, thirdPartySummary: [/* Summary data */] }
-        ),
+        getLatestAuditByAuditType: () => ({
+          getAuditResult: () => (
+            { totalBlockingTime: 12, thirdPartySummary: [/* Summary data */] }
+          ),
+        }),
       });
 
       const command = MartechImpactCommand(context);
@@ -99,7 +101,7 @@ describe('MartechImpactCommand', () => {
     });
 
     it('notifies when no site is found', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
 
       const args = ['nonexistent.com'];
       const command = MartechImpactCommand(context);
@@ -110,13 +112,13 @@ describe('MartechImpactCommand', () => {
     });
 
     it('notifies when no audit is found', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({
+      dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
         getBaseURL: () => 'example.com',
         getGitHubURL: () => '',
         isLive: () => true,
+        getLatestAuditByAuditType: () => null,
       });
-      dataAccessStub.getLatestAuditForSite.resolves(null);
 
       const args = ['example.com'];
       const command = MartechImpactCommand(context);
@@ -127,7 +129,7 @@ describe('MartechImpactCommand', () => {
     });
 
     it('notifies when an error occurs', async () => {
-      dataAccessStub.getSiteByBaseURL.rejects(new Error('Test error'));
+      dataAccessStub.Site.findByBaseURL.rejects(new Error('Test error'));
 
       const args = ['nonexistent.com'];
       const command = MartechImpactCommand(context);

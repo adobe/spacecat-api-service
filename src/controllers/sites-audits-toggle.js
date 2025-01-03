@@ -14,7 +14,6 @@ import { badRequest, createResponse, internalServerError } from '@adobe/spacecat
 import {
   isObject, isValidUrl, isNonEmptyObject, isString,
 } from '@adobe/spacecat-shared-utils';
-import { ConfigurationDto } from '../dto/configuration.js';
 
 /**
  * @param {DataAccess} dataAccess - Data access.
@@ -25,6 +24,8 @@ export default (dataAccess) => {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
+
+  const { Configuration, Site } = dataAccess;
 
   const validateInput = ({ baseURL, auditType, enable }) => {
     if (isString(baseURL) === false || baseURL.length === 0) {
@@ -63,7 +64,7 @@ export default (dataAccess) => {
 
     try {
       let hasUpdates = false;
-      const configuration = await dataAccess.getConfiguration();
+      const configuration = await Configuration.findLatest();
 
       const responses = await Promise.all(
         requestBody.map(async ({ baseURL, auditType, enable }) => {
@@ -76,7 +77,7 @@ export default (dataAccess) => {
             };
           }
 
-          const site = await dataAccess.getSiteByBaseURL(baseURL);
+          const site = await Site.findByBaseURL(baseURL);
           if (site === null) {
             return { status: 404, message: `Site with baseURL: ${baseURL} not found.` };
           }
@@ -105,7 +106,7 @@ export default (dataAccess) => {
       );
 
       if (hasUpdates === true) {
-        await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+        await configuration.save();
       }
 
       return createResponse(responses, 207);

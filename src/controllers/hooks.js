@@ -331,6 +331,7 @@ const getConfigFromContext = (lambdaContext) => {
  */
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
+  const { Site, SiteCandidate } = dataAccess;
   const config = getConfigFromContext(lambdaContext);
 
   async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
@@ -345,7 +346,7 @@ function HooksController(lambdaContext) {
       hlxConfig,
     };
 
-    const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
+    const site = await Site.findByBaseURL(siteCandidate.baseURL);
 
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
     if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
@@ -358,8 +359,8 @@ function HooksController(lambdaContext) {
         const hlxConfigChanged = !deepEqual(siteHlxConfig, candidateHlxConfig);
 
         if (hlxConfigChanged) {
-          site.updateHlxConfig(siteCandidate.hlxConfig);
-          await dataAccess.updateSite(site);
+          site.setHlxConfig(siteCandidate.hlxConfig);
+          await site.save();
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
           log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`);
@@ -369,12 +370,12 @@ function HooksController(lambdaContext) {
     }
 
     // discard the site candidate if previously evaluated
-    const isPreviouslyEvaluated = await dataAccess.siteCandidateExists(siteCandidate.baseURL);
-    if (isPreviouslyEvaluated) {
+    const isPreviouslyEvaluated = await SiteCandidate.findByBaseURL(siteCandidate.baseURL);
+    if (isPreviouslyEvaluated !== null) {
       throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
     }
 
-    await dataAccess.upsertSiteCandidate(siteCandidate);
+    await SiteCandidate.create(siteCandidate);
 
     return baseURL;
   }

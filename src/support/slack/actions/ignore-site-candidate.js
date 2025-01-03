@@ -15,6 +15,7 @@ import { composeReply, extractURLFromSlackMessage } from './commons.js';
 
 export default function ignoreSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
+  const { SiteCandidate } = dataAccess;
 
   return async ({ ack, body, respond }) => {
     try {
@@ -29,12 +30,12 @@ export default function ignoreSiteCandidate(lambdaContext) {
 
       log.info(`Site is ignored: ${baseURL}`);
 
-      const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
+      const siteCandidate = await SiteCandidate.findByBaseURL(baseURL);
 
       siteCandidate.setStatus(SITE_CANDIDATE_STATUS.IGNORED);
       siteCandidate.setUpdatedBy(user.username);
 
-      await dataAccess.updateSiteCandidate(siteCandidate);
+      await siteCandidate.save();
 
       const reply = composeReply({
         blocks,

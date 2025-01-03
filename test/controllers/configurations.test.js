@@ -14,12 +14,14 @@
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import ConfigurationsController from '../../src/controllers/configuration.js';
 import { ConfigurationDto } from '../../src/dto/configuration.js';
 
 use(chaiAsPromised);
+use(sinonChai);
 
 describe('Configurations Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -89,12 +91,11 @@ describe('Configurations Controller', () => {
 
   beforeEach(() => {
     mockDataAccess = {
-      getConfigurations: sandbox.stub()
-        .resolves(configurations),
-      getConfiguration: sandbox.stub()
-        .resolves(configurations[1]),
-      getConfigurationByVersion: sandbox.stub()
-        .resolves(configurations.find((config) => config.getVersion() === 1)),
+      Configuration: {
+        all: sandbox.stub().resolves(configurations),
+        findLatest: sandbox.stub().resolves(configurations[1]),
+        findByVersion: sandbox.stub().resolves(configurations[0]),
+      },
     };
 
     configurationsController = ConfigurationsController(mockDataAccess);
@@ -132,7 +133,7 @@ describe('Configurations Controller', () => {
     const result = await configurationsController.getAll();
     const resultConfigurations = await result.json();
 
-    expect(mockDataAccess.getConfigurations.calledOnce).to.be.true;
+    expect(mockDataAccess.Configuration.all.calledOnce).to.be.true;
     expect(resultConfigurations).to.be.an('array').with.lengthOf(2);
     expect(resultConfigurations[0]).to.deep.equal(ConfigurationDto.toJSON(configurations[0]));
     expect(resultConfigurations[1]).to.deep.equal(ConfigurationDto.toJSON(configurations[1]));
@@ -142,14 +143,14 @@ describe('Configurations Controller', () => {
     const result = await configurationsController.getLatest();
     const configuration = await result.json();
 
-    expect(mockDataAccess.getConfiguration.calledOnce).to.be.true;
+    expect(mockDataAccess.Configuration.findLatest.calledOnce).to.be.true;
 
     expect(configuration).to.be.an('object');
     expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[1]));
   });
 
   it('returns not found when no latest configuration is available', async () => {
-    mockDataAccess.getConfiguration.resolves(null);
+    mockDataAccess.Configuration.findLatest.resolves(null);
 
     const result = await configurationsController.getLatest();
     const error = await result.json();
@@ -162,14 +163,14 @@ describe('Configurations Controller', () => {
     const result = await configurationsController.getByVersion({ params: { version: 1 } });
     const configuration = await result.json();
 
-    expect(mockDataAccess.getConfigurationByVersion.calledOnce).to.be.true;
+    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(1);
 
     expect(configuration).to.be.an('object');
     expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[0]));
   });
 
   it('returns not found when a configuration is not found by version', async () => {
-    mockDataAccess.getConfigurationByVersion.resolves(null);
+    mockDataAccess.Configuration.findByVersion.resolves(null);
 
     const result = await configurationsController.getByVersion({ params: { version: 4 } });
     const error = await result.json();

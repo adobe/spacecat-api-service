@@ -35,6 +35,7 @@ async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
 
 export default function approveSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
+  const { KeyEvent, Site, SiteCandidate } = dataAccess;
   const { ORGANIZATION_ID_FRIENDS_FAMILY: friendsFamilyOrgId } = lambdaContext.env;
 
   return async ({ ack, body, respond }) => {
@@ -48,18 +49,18 @@ export default function approveSiteCandidate(lambdaContext) {
 
       const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
-      const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
+      const siteCandidate = await SiteCandidate.findByBaseURL(baseURL);
 
       log.info(`Creating a new site: ${baseURL}`);
 
       const orgId = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
         && friendsFamilyOrgId;
 
-      let site = await dataAccess.getSiteByBaseURL(siteCandidate.getBaseURL());
+      let site = await Site.findByBaseURL(siteCandidate.getBaseURL());
 
       // if site didn't exist before, then directly save it
       if (!site) {
-        site = await dataAccess.addSite({
+        site = await Site.create({
           baseURL: siteCandidate.getBaseURL(),
           hlxConfig: siteCandidate.getHlxConfig(),
           isLive: true,
@@ -68,22 +69,22 @@ export default function approveSiteCandidate(lambdaContext) {
       } else {
         // site might've been added before manually. In that case, make sure it is promoted to live
         // and set delivery type to aem_edge then update
-        if (!site.isLive()) {
+        if (!site.getIsLive()) {
           site.toggleLive();
         }
         // make sure hlx config is set
-        site.updateHlxConfig(siteCandidate.getHlxConfig());
-        site.updateDeliveryType(DELIVERY_TYPES.AEM_EDGE);
-        site = await dataAccess.updateSite(site);
+        site.setHlxConfig(siteCandidate.getHlxConfig());
+        site.setDeliveryType(DELIVERY_TYPES.AEM_EDGE);
+        site = await site.save();
       }
 
       siteCandidate.setSiteId(site.getId());
       siteCandidate.setStatus(SITE_CANDIDATE_STATUS.APPROVED);
       siteCandidate.setUpdatedBy(user.username);
 
-      await dataAccess.updateSiteCandidate(siteCandidate);
+      await siteCandidate.save();
 
-      await dataAccess.createKeyEvent({
+      await KeyEvent.create({
         name: 'Go Live',
         siteId: site.getId(),
         type: KEY_EVENT_TYPES.STATUS_CHANGE,

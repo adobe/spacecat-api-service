@@ -37,7 +37,7 @@ describe('AddRepoCommand', () => {
       getDeliveryType: sinon.stub().returns('aem_edge'),
       getBaseURL: sinon.stub(),
       getGitHubURL: sinon.stub(),
-      isLive: sinon.stub(),
+      getIsLive: sinon.stub(),
       updateGitHubURL: sinon.stub(),
       getAuditConfig: sinon.stub().returns({
         auditsDisabled: sinon.stub().returns(false),
@@ -45,6 +45,8 @@ describe('AddRepoCommand', () => {
           disabled: sinon.stub().returns(false),
         }),
       }),
+      setGitHubURL: sinon.stub(),
+      save: sinon.stub(),
     };
 
     const configuration = {
@@ -52,9 +54,12 @@ describe('AddRepoCommand', () => {
     };
 
     dataAccessStub = {
-      getSiteByBaseURL: sinon.stub().resolves(siteStub),
-      updateSite: sinon.stub(),
-      getConfiguration: sinon.stub().resolves(configuration),
+      Configuration: {
+        findLatest: sinon.stub().resolves(configuration),
+      },
+      Site: {
+        findByBaseURL: sinon.stub().resolves(siteStub),
+      },
     };
 
     context = {
@@ -157,7 +162,7 @@ describe('AddRepoCommand', () => {
     });
 
     it('handles site not found', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];
       const command = AddRepoCommand(context);
