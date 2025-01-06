@@ -142,7 +142,7 @@ describe('Audits Controller', () => {
         allBySiteIdAndAuditType: sandbox.stub(),
       },
       Site: {
-        findById: sandbox.stub(),
+        findById: sandbox.stub().resolves({ id: 'site1', getLatestAudits: sandbox.stub().returns(mockLatestAudits) }),
       },
       getLatestAudits: sandbox.stub(),
       getLatestAuditsForSite: sandbox.stub(),
@@ -258,12 +258,10 @@ describe('Audits Controller', () => {
     it('retrieves all latest audits for a site', async () => {
       const siteId = 'site1';
 
-      mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
-
       const result = await auditsController.getAllLatestForSite({ params: { siteId } });
       const audits = await result.json();
 
-      expect(mockDataAccess.LatestAudit.allBySiteId).to.have.been.calledOnceWith(siteId);
+      expect(mockDataAccess.Site.findById).to.have.been.calledOnceWith(siteId);
       expect(audits).to.deep.equal(mockRawAudits);
     });
 
@@ -271,6 +269,13 @@ describe('Audits Controller', () => {
       const result = await auditsController.getAllLatestForSite({ params: {} });
 
       expect(result.status).to.equal(400);
+    });
+
+    it('handles site not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await auditsController.getAllLatestForSite({ params: { siteId: 'not-found' } });
+
+      expect(result.status).to.equal(404);
     });
   });
 
