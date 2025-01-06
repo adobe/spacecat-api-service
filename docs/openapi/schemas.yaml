@@ -542,14 +542,6 @@ AuditResult:
         auditResult:
           type: object
           properties:
-            sourceS3Folder:
-              description: |
-                The S3 folder containing the scraped data used for the audit.
-              type: string
-            fullAuditRef:
-              description: |
-                A reference to the full external result of the meta-tags audit.
-              type: string
             detectedTags:
               description: |
                 A mapping of URLs to their detected meta-tags issues and recommendations.
@@ -580,31 +572,6 @@ AuditResult:
               description: |
                 The final URL for the audited page.
               type: string
-        auditType:
-          description: |
-            The type of audit performed (e.g., meta-tags).
-          type: string
-        auditedAt:
-          description: |
-            The timestamp when the audit was performed.
-          type: string
-          format: date-time
-        fullAuditRef:
-          description: |
-            A reference to the full external result of the audit.
-          type: string
-        isLive:
-          description: |
-            Indicates whether the site being audited is live.
-          type: boolean
-        isError:
-          description: |
-            Indicates whether an error occurred during the audit.
-          type: boolean
-        siteId:
-          description: |
-            The unique identifier for the site being audited.
-          type: string
     - type: object
       description: The result of CWV audit
       properties:
