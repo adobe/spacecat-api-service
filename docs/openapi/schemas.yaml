@@ -28,6 +28,9 @@ AuditType:
     - 'sitemap'
     - 'structured-data'
     - 'costs'
+    - 'meta-tags'
+    - 'broken-internal-links'
+    - 'experimentation-opportunities'
   example: 'cwv'
 URL:
   type: string
