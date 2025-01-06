@@ -111,12 +111,12 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    const audit = await LatestAudit.allBySiteIdAndAuditType(siteId, auditType);
-    if (!audit) {
+    const audits = await LatestAudit.allBySiteIdAndAuditType(siteId, auditType);
+    if (!audits || audits.length === 0) {
       return notFound('Audit not found');
     }
 
-    return ok(AuditDto.toJSON(audit));
+    return ok(AuditDto.toJSON(audits[0]));
   };
 
   /**
