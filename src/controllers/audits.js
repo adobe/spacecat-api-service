@@ -91,9 +91,13 @@ function AuditsController(dataAccess) {
       return badRequest('Site ID required');
     }
 
-    const audits = await LatestAudit.allBySiteId(siteId);
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
 
-    const auditsDto = audits.map((audit) => AuditDto.toJSON(audit));
+    const audits = await site.getLatestAudits();
+    const auditsDto = audits.map((audit) => AuditDto.toAbbreviatedJSON(audit));
 
     return ok(auditsDto);
   };
