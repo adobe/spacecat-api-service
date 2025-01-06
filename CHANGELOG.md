@@ -1,3 +1,10 @@
+## [1.84.5](https://github.com/adobe/spacecat-api-service/compare/v1.84.4...v1.84.5) (2025-01-06)
+
+
+### Bug Fixes
+
+* Import job progress endpoint ([#670](https://github.com/adobe/spacecat-api-service/issues/670)) ([8b240e3](https://github.com/adobe/spacecat-api-service/commit/8b240e39343db237b4f63ed7f3a15a379d52f57e))
+
 ## [1.84.4](https://github.com/adobe/spacecat-api-service/compare/v1.84.3...v1.84.4) (2025-01-06)
 
 
