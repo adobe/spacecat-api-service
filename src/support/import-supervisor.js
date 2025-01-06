@@ -63,12 +63,11 @@ function ImportSupervisor(services, config) {
    * Get an available import queue name that is not currently in use. Throws an error if no queue
    * is currently available.
    */
-  async function getAvailableImportQueue(importApiKey) {
+  async function getAvailableImportQueue(hashedApiKey) {
     const runningImportJobs = await ImportJob.allByStatus(ImportJobStatus.RUNNING);
 
     // Check that this import API key has capacity to start an import job
     for (const job of runningImportJobs) {
-      const hashedApiKey = hashWithSHA256(importApiKey);
       if (job.getHashedApiKey() === hashedApiKey) {
         throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more import jobs`, 429);
       }
@@ -187,11 +186,11 @@ function ImportSupervisor(services, config) {
     initiatedBy,
     customHeaders,
   ) {
-    // Determine if there is a free import queue
-    const importQueueId = await getAvailableImportQueue(importApiKey);
-
     // Hash the API Key to ensure it is not stored in plain text
     const hashedApiKey = hashWithSHA256(importApiKey);
+
+    // Determine if there is a free import queue
+    const importQueueId = await getAvailableImportQueue(hashedApiKey);
 
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(
