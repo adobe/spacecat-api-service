@@ -91,10 +91,11 @@ function AuditsController(dataAccess) {
       return badRequest('Site ID required');
     }
 
-    const audits = (await LatestAudit.allBySiteId(siteId))
-      .map((audit) => AuditDto.toJSON(audit));
+    const audits = await LatestAudit.allBySiteId(siteId);
 
-    return ok(audits);
+    const auditsDto = audits.map((audit) => AuditDto.toJSON(audit));
+
+    return ok(auditsDto);
   };
 
   /**
