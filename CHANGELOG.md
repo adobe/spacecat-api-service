@@ -1,3 +1,10 @@
+## [1.84.3](https://github.com/adobe/spacecat-api-service/compare/v1.84.2...v1.84.3) (2025-01-06)
+
+
+### Bug Fixes
+
+* latest audits api response ([006a744](https://github.com/adobe/spacecat-api-service/commit/006a74465b0fca116d1a633a54c7d53ce24ba359))
+
 ## [1.84.2](https://github.com/adobe/spacecat-api-service/compare/v1.84.1...v1.84.2) (2025-01-04)
 
 
