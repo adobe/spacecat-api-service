@@ -484,15 +484,15 @@ describe('ImportController tests', () => {
       // only need to provide enough import url data to satisfy the import-supervisor, no need
       // for all the other properties of a ImportUrl object.
       baseContext.dataAccess.ImportUrl.allByImportJobId = sandbox.stub().resolves([
-        { state: { status: ImportUrlStatus.COMPLETE } },
-        { state: { status: ImportUrlStatus.COMPLETE } },
+        { getStatus: () => ImportUrlStatus.COMPLETE },
+        { getStatus: () => ImportUrlStatus.COMPLETE },
         // setting a status to RUNNING should not affect the result
         // as no process will flip a ImportUrl status to running at this time, therefore
         // the code will ignore running in the results
-        { state: { status: ImportUrlStatus.RUNNING } },
-        { state: { status: ImportUrlStatus.PENDING } },
-        { state: { status: ImportUrlStatus.REDIRECT } },
-        { state: { status: ImportUrlStatus.FAILED } },
+        { getStatus: () => ImportUrlStatus.RUNNING },
+        { getStatus: () => ImportUrlStatus.PENDING },
+        { getStatus: () => ImportUrlStatus.REDIRECT },
+        { getStatus: () => ImportUrlStatus.FAILED },
       ]);
 
       baseContext.params.jobId = exampleJob.importJobId;

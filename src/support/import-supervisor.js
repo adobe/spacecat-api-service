@@ -288,7 +288,7 @@ function ImportSupervisor(services, config) {
     return urls.reduce((acc, url) => {
       // intentionally ignore RUNNING as currently no code will flip the url to a running state
       // eslint-disable-next-line default-case
-      switch (url.state.status) {
+      switch (url.getStatus()) {
         case ImportUrlStatus.PENDING:
           acc.pending += 1;
           break;
