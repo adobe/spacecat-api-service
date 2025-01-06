@@ -15,7 +15,9 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  hasText, isNonEmptyArray, isObject, isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
@@ -111,12 +113,12 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    const audit = await LatestAudit.allBySiteIdAndAuditType(siteId, auditType);
-    if (!audit) {
-      return notFound('Audit not found');
+    const audits = await LatestAudit.allBySiteIdAndAuditType(siteId, auditType);
+    if (isNonEmptyArray(audits)) {
+      return ok(AuditDto.toJSON(audits[0]));
     }
 
-    return ok(AuditDto.toJSON(audit));
+    return notFound('Audit not found');
   };
 
   /**

@@ -280,7 +280,7 @@ describe('Audits Controller', () => {
       const auditType = 'security';
       const expectedAudit = AuditDto.toJSON(mockLatestAudits[0]);
 
-      mockDataAccess.LatestAudit.allBySiteIdAndAuditType.resolves(mockLatestAudits[0]);
+      mockDataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([mockLatestAudits[0]]);
 
       const result = await auditsController.getLatestForSite({ params: { siteId, auditType } });
       const audit = await result.json();
