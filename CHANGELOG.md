@@ -1,3 +1,10 @@
+## [1.84.9](https://github.com/adobe/spacecat-api-service/compare/v1.84.8...v1.84.9) (2025-01-07)
+
+
+### Bug Fixes
+
+* **trigger:** use site id when triggering audit ([#676](https://github.com/adobe/spacecat-api-service/issues/676)) ([20d9517](https://github.com/adobe/spacecat-api-service/commit/20d95174e6cfdcfdd25fdedc0498d684f336fe8d))
+
 ## [1.84.8](https://github.com/adobe/spacecat-api-service/compare/v1.84.7...v1.84.8) (2025-01-07)
 
 
