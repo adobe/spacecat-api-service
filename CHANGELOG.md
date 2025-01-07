@@ -1,3 +1,10 @@
+## [1.84.7](https://github.com/adobe/spacecat-api-service/compare/v1.84.6...v1.84.7) (2025-01-07)
+
+
+### Bug Fixes
+
+* create site ([5ff851c](https://github.com/adobe/spacecat-api-service/commit/5ff851cd7224b7a6cda374893a001f93191b6db9))
+
 ## [1.84.6](https://github.com/adobe/spacecat-api-service/compare/v1.84.5...v1.84.6) (2025-01-07)
 
 
