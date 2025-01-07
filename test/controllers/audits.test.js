@@ -150,7 +150,7 @@ describe('Audits Controller', () => {
       patchAuditForSite: sandbox.stub(),
     };
 
-    auditsController = AuditsController(mockDataAccess);
+    auditsController = AuditsController(mockDataAccess, console);
   });
 
   afterEach(() => {
@@ -262,7 +262,7 @@ describe('Audits Controller', () => {
       mockDataAccess.Site.findById.resolves({ getId: () => siteId });
 
       // eslint-disable-next-line max-len
-      const result = await auditsController.getAllLatestForSite({ params: { siteId }, log: console });
+      const result = await auditsController.getAllLatestForSite({ params: { siteId } });
       const audits = await result.json();
 
       expect(mockDataAccess.LatestAudit.allBySiteId).to.have.been.calledOnceWith(siteId);

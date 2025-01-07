@@ -28,7 +28,7 @@ import { AuditDto } from '../dto/audit.js';
  * @returns {object} Audits controller.
  * @constructor
  */
-function AuditsController(dataAccess) {
+function AuditsController(dataAccess, log) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -85,7 +85,6 @@ function AuditsController(dataAccess) {
    * @returns {Promise<Response>} Array of audits response.
    */
   const getAllLatestForSite = async (context) => {
-    const { log } = context;
     const siteId = context.params?.siteId;
 
     if (!hasText(siteId)) {
