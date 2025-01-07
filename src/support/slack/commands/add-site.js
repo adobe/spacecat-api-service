@@ -38,7 +38,7 @@ function AddSiteCommand(context) {
     usageText: `${PHRASES[0]} {site}`,
   });
 
-  const { dataAccess, log } = context;
+  const { dataAccess, log, env } = context;
   const { Configuration, Site } = dataAccess;
 
   /**
@@ -73,7 +73,12 @@ function AddSiteCommand(context) {
       const deliveryType = await findDeliveryType(baseURL);
       const isLive = deliveryType === DELIVERY_TYPES.AEM_EDGE;
 
-      const newSite = await Site.create({ baseURL, deliveryType, isLive });
+      const newSite = await Site.create({
+        baseURL,
+        deliveryType,
+        isLive,
+        organizationId: env.DEFAULT_ORGANIZATION_ID,
+      });
 
       if (!newSite) {
         await say(':x: Problem adding the site. Please contact the admins.');

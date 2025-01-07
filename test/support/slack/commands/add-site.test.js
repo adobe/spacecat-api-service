@@ -49,7 +49,7 @@ describe('AddSiteCommand', () => {
       dataAccess: dataAccessStub,
       log: console,
       sqs: sqsStub,
-      env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl' },
+      env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl', DEFAULT_ORGANIZATION_ID: 'default' },
     };
     slackContext = { say: sinon.spy() };
   });
@@ -88,7 +88,9 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'other', isLive: false });
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
+      });
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
@@ -150,7 +152,9 @@ describe('AddSiteCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'other', isLive: false });
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
+      });
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
@@ -173,7 +177,9 @@ describe('AddSiteCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'other', isLive: false });
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
+      });
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
@@ -195,7 +201,9 @@ describe('AddSiteCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'other', isLive: false });
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
+      });
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
@@ -233,7 +241,9 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'aem_edge', isLive: true });
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com', deliveryType: 'aem_edge', isLive: true, organizationId: 'default',
+      });
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
@@ -260,7 +270,9 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({ baseURL: 'https://example.com', deliveryType: 'aem_cs', isLive: false });
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com', deliveryType: 'aem_cs', isLive: false, organizationId: 'default',
+      });
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
   });
