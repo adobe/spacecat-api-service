@@ -90,8 +90,12 @@ function AuditsController(dataAccess) {
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
     }
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
 
-    const audits = (await LatestAudit.allBySiteId(siteId))
+    const audits = (await LatestAudit.allBySiteId(site.getId()))
       .map((audit) => AuditDto.toJSON(audit));
 
     return ok(audits);

@@ -259,6 +259,7 @@ describe('Audits Controller', () => {
       const siteId = 'site1';
 
       mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
+      mockDataAccess.Site.findById.resolves({ getId: () => siteId });
 
       const result = await auditsController.getAllLatestForSite({ params: { siteId } });
       const audits = await result.json();
@@ -271,6 +272,12 @@ describe('Audits Controller', () => {
       const result = await auditsController.getAllLatestForSite({ params: {} });
 
       expect(result.status).to.equal(400);
+    });
+
+    it('handles missing site not found', async () => {
+      const result = await auditsController.getAllLatestForSite({ params: { siteId: 'not-found' } });
+
+      expect(result.status).to.equal(404);
     });
   });
 
