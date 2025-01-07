@@ -49,7 +49,7 @@ export const sendAuditMessage = async (
   type,
   auditContext,
   siteId,
-) => sqs.sendMessage(queueUrl, { type, url: siteId, auditContext });
+) => sqs.sendMessage(queueUrl, { type, siteId, auditContext });
 
 // todo: prototype - untested
 /* c8 ignore start */
