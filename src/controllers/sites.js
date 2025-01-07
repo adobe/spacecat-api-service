@@ -45,7 +45,7 @@ const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 
-function SitesController(dataAccess, log) {
+function SitesController(dataAccess, log, env) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -58,7 +58,10 @@ function SitesController(dataAccess, log) {
    * @return {Promise<Response>} Site response.
    */
   const createSite = async (context) => {
-    const site = await Site.create(context.data);
+    const site = await Site.create({
+      organizationId: env.DEFAULT_ORGANIZATION_ID,
+      ...context.data,
+    });
     return createResponse(SiteDto.toJSON(site), 201);
   };
 
