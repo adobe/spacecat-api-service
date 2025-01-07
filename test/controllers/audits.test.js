@@ -261,7 +261,8 @@ describe('Audits Controller', () => {
       mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
       mockDataAccess.Site.findById.resolves({ getId: () => siteId });
 
-      const result = await auditsController.getAllLatestForSite({ params: { siteId } });
+      // eslint-disable-next-line max-len
+      const result = await auditsController.getAllLatestForSite({ params: { siteId }, log: console });
       const audits = await result.json();
 
       expect(mockDataAccess.LatestAudit.allBySiteId).to.have.been.calledOnceWith(siteId);

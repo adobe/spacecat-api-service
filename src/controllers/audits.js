@@ -85,6 +85,7 @@ function AuditsController(dataAccess) {
    * @returns {Promise<Response>} Array of audits response.
    */
   const getAllLatestForSite = async (context) => {
+    const { log } = context;
     const siteId = context.params?.siteId;
 
     if (!hasText(siteId)) {
@@ -95,10 +96,13 @@ function AuditsController(dataAccess) {
       return notFound('Site not found');
     }
 
-    const audits = (await LatestAudit.allBySiteId(site.getId()))
-      .map((audit) => AuditDto.toJSON(audit));
+    const audits = await LatestAudit.allBySiteId(site.getId());
+    if (isNonEmptyArray(audits)) {
+      log.info(JSON.stringify(audits));
+      return ok(audits.map((audit) => AuditDto.toJSON(audit)));
+    }
 
-    return ok(audits);
+    return notFound('audit not found');
   };
 
   /**
