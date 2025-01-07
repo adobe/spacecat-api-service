@@ -32,6 +32,7 @@ function AuditsController(dataAccess, log) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
+  log.info('AuditsController created');
 
   const {
     Audit, Configuration, LatestAudit, Site,
