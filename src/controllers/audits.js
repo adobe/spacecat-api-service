@@ -86,7 +86,7 @@ function AuditsController(dataAccess, log) {
    */
   const getAllLatestForSite = async (context) => {
     const siteId = context.params?.siteId;
-
+    log.info('I am hill');
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
     }
@@ -97,7 +97,7 @@ function AuditsController(dataAccess, log) {
 
     const audits = await LatestAudit.allBySiteId(site.getId());
     if (isNonEmptyArray(audits)) {
-      log.info(JSON.stringify(audits));
+      log.info(`Latest audits is:${JSON.stringify(audits)}`);
       return ok(audits.map((audit) => AuditDto.toJSON(audit)));
     }
 
