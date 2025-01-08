@@ -37,6 +37,7 @@ export default function approveSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
   const { KeyEvent, Site, SiteCandidate } = dataAccess;
   const { ORGANIZATION_ID_FRIENDS_FAMILY: friendsFamilyOrgId } = lambdaContext.env;
+  const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = lambdaContext.env;
 
   return async ({ ack, body, respond }) => {
     try {
@@ -64,7 +65,9 @@ export default function approveSiteCandidate(lambdaContext) {
           baseURL: siteCandidate.getBaseURL(),
           hlxConfig: siteCandidate.getHlxConfig(),
           isLive: true,
-          ...(orgId && { organizationId: friendsFamilyOrgId }),
+          ...(orgId
+            ? { organizationId: friendsFamilyOrgId }
+            : { organizationId: defaultOrgId }),
         });
       } else {
         // site might've been added before manually. In that case, make sure it is promoted to live
