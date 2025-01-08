@@ -96,7 +96,8 @@ function RunScrapeCommand(context) {
         slackContext,
         context,
       ));
-      await Promise.all(promises).then(() => say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``));
+      say(':adobe-run: Starting scrape run');
+      await Promise.all(promises).then(() => say(`:adobe-run: Triggered scrape run for site \`${baseURL}\``));
       await say(`:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` — Total URLs: ${urls.length}`);
     } catch (error) {
       log.error(error);
