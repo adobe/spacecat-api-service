@@ -42,6 +42,7 @@ function AddRepoCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Configuration, Site } = dataAccess;
 
   /**
    * Fetches repository information from the GitHub API.
@@ -97,7 +98,7 @@ function AddRepoCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
       if (!isObject(site)) {
         await postSiteNotFoundMessage(say, baseURL);
         return;
@@ -115,12 +116,12 @@ function AddRepoCommand(context) {
         return;
       }
 
-      site.updateGitHubURL(repoUrl);
+      site.setGitHubURL(repoUrl);
 
-      await dataAccess.updateSite(site);
+      await site.save();
 
       const auditType = 'lhs-mobile';
-      const configuration = await dataAccess.getConfiguration();
+      const configuration = await Configuration.findLatest();
       const isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
 
       if (isAuditEnabled) {

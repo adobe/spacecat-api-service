@@ -15,7 +15,9 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  hasText, isNonEmptyArray, isObject, isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
@@ -31,6 +33,10 @@ function AuditsController(dataAccess) {
     throw new Error('Data access required');
   }
 
+  const {
+    Audit, Configuration, LatestAudit, Site,
+  } = dataAccess;
+
   /**
    * Gets all audits for a given site and audit type. If no audit type is specified,
    * all audits are returned.
@@ -40,14 +46,16 @@ function AuditsController(dataAccess) {
   const getAllForSite = async (context) => {
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType || undefined;
-    const ascending = context.data?.ascending === 'true' || false;
+    const order = context.data?.ascending === 'true' ? 'asc' : 'desc';
 
     if (!hasText(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const audits = (await dataAccess.getAuditsForSite(siteId, auditType, ascending))
-      .map((audit) => AuditDto.toAbbreviatedJSON(audit));
+    const method = auditType
+      ? Audit.allBySiteIdAndAuditType(siteId, auditType, { order })
+      : Audit.allBySiteId(siteId, { order });
+    const audits = ((await method).map((audit) => AuditDto.toAbbreviatedJSON(audit)));
 
     return ok(audits);
   };
@@ -60,13 +68,13 @@ function AuditsController(dataAccess) {
    */
   const getAllLatest = async (context) => {
     const auditType = context.params?.auditType;
-    const ascending = context.data?.ascending === 'true' || false;
+    const order = context.data?.ascending === 'true' ? 'asc' : 'desc';
 
     if (!hasText(auditType)) {
       return badRequest('Audit type required');
     }
 
-    const audits = (await dataAccess.getLatestAudits(auditType, ascending))
+    const audits = (await LatestAudit.allByAuditType(auditType, { order }))
       .map((audit) => AuditDto.toAbbreviatedJSON(audit));
 
     return ok(audits);
@@ -83,7 +91,7 @@ function AuditsController(dataAccess) {
       return badRequest('Site ID required');
     }
 
-    const audits = (await dataAccess.getLatestAuditsForSite(siteId))
+    const audits = (await LatestAudit.allBySiteId(siteId))
       .map((audit) => AuditDto.toJSON(audit));
 
     return ok(audits);
@@ -105,12 +113,12 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    const audit = await dataAccess.getLatestAuditForSite(siteId, auditType);
-    if (!audit) {
-      return notFound('Audit not found');
+    const audits = await LatestAudit.allBySiteIdAndAuditType(siteId, auditType);
+    if (isNonEmptyArray(audits)) {
+      return ok(AuditDto.toJSON(audits[0]));
     }
 
-    return ok(AuditDto.toJSON(audit));
+    return notFound('Audit not found');
   };
 
   /**
@@ -150,12 +158,12 @@ function AuditsController(dataAccess) {
     const { excludedURLs, manualOverwrites, groupedURLs } = context.data;
     let hasUpdates = false;
 
-    const site = await dataAccess.getSiteByID(siteId);
+    const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
 
-    const configuration = await dataAccess.getConfiguration();
+    const configuration = await Configuration.findLatest();
     const registeredAudits = configuration.getHandlers();
     if (!registeredAudits[auditType]) {
       return notFound(`The "${auditType}" is not present in the configuration. List of allowed audits:`
@@ -231,8 +239,8 @@ function AuditsController(dataAccess) {
 
     if (hasUpdates) {
       const configObj = Config.toDynamoItem(siteConfig);
-      site.updateConfig(configObj);
-      await dataAccess.updateSite(site);
+      site.setConfig(configObj);
+      await site.save();
       const auditConfig = siteConfig.getHandlerConfig(auditType);
       return ok(auditConfig);
     }

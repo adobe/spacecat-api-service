@@ -12,10 +12,13 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import RunAuditCommand from '../../../../src/support/slack/commands/run-audit.js';
+
+use(sinonChai);
 
 describe('RunAuditCommand', () => {
   let context;
@@ -25,8 +28,8 @@ describe('RunAuditCommand', () => {
 
   beforeEach(() => {
     dataAccessStub = {
-      getSiteByBaseURL: sinon.stub(),
-      getConfiguration: sinon.stub(),
+      Configuration: { findLatest: sinon.stub() },
+      Site: { findByBaseURL: sinon.stub() },
     };
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
@@ -51,10 +54,10 @@ describe('RunAuditCommand', () => {
 
   describe('Handle Execution Method', () => {
     it('triggers an audit for a valid site', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({
+      dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
-      dataAccessStub.getConfiguration.resolves({
+      dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: () => true,
       });
       const command = RunAuditCommand(context);
@@ -70,8 +73,8 @@ describe('RunAuditCommand', () => {
       const site = {
         getId: () => '123',
       };
-      dataAccessStub.getSiteByBaseURL.resolves(site);
-      dataAccessStub.getConfiguration.resolves({
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: sinon.stub().returns(false),
       });
       const command = RunAuditCommand(context);
@@ -92,7 +95,7 @@ describe('RunAuditCommand', () => {
     });
 
     it('informs user if the site was not added previously', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
       const command = RunAuditCommand(context);
 
       await command.handleExecution(['unknownsite.com'], slackContext);
@@ -101,7 +104,7 @@ describe('RunAuditCommand', () => {
     });
 
     it('informs user when error occurs', async () => {
-      dataAccessStub.getSiteByBaseURL.rejects(new Error('Test Error'));
+      dataAccessStub.Site.findByBaseURL.rejects(new Error('Test Error'));
       const command = RunAuditCommand(context);
 
       await command.handleExecution(['some-site.com'], slackContext);

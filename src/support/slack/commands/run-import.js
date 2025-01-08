@@ -46,6 +46,7 @@ function RunImportCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Configuration, Site } = dataAccess;
 
   /**
    * Validates input and triggers a new import run for the given site.
@@ -81,7 +82,7 @@ function RunImportCommand(context) {
         return;
       }
 
-      const config = await dataAccess.getConfiguration();
+      const config = await Configuration.findLatest();
       const jobConfig = config.getJobs().filter((job) => job.group === 'imports' && job.type === importType);
 
       if (!Array.isArray(jobConfig) || jobConfig.length === 0) {
@@ -90,7 +91,7 @@ function RunImportCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
       if (!isObject(site)) {
         await postSiteNotFoundMessage(say, baseURL);
         return;

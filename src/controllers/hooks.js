@@ -30,7 +30,6 @@ import { fetch, isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
-const RUM_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_RUM';
 
 export const BUTTON_LABELS = {
   APPROVE_CUSTOMER: 'As Customer',
@@ -276,7 +275,7 @@ function verifyURLCandidate(config, baseURL) {
 }
 
 function buildSlackMessage(baseURL, source, hlxConfig, channel) {
-  const hlxConfigMessagePart = getHlxConfigMessagePart(source, hlxConfig);
+  const hlxConfigMessagePart = getHlxConfigMessagePart(hlxConfig);
   return Message()
     .channel(channel)
     .blocks(
@@ -332,6 +331,7 @@ const getConfigFromContext = (lambdaContext) => {
  */
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
+  const { Site, SiteCandidate } = dataAccess;
   const config = getConfigFromContext(lambdaContext);
 
   async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
@@ -346,7 +346,7 @@ function HooksController(lambdaContext) {
       hlxConfig,
     };
 
-    const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
+    const site = await Site.findByBaseURL(siteCandidate.baseURL);
 
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
     if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
@@ -359,22 +359,23 @@ function HooksController(lambdaContext) {
         const hlxConfigChanged = !deepEqual(siteHlxConfig, candidateHlxConfig);
 
         if (hlxConfigChanged) {
-          site.updateHlxConfig(siteCandidate.hlxConfig);
-          await dataAccess.updateSite(site);
+          site.setHlxConfig(siteCandidate.hlxConfig);
+          await site.save();
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
-          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(SITE_CANDIDATE_SOURCES.CDN, hlxConfig)}`);
+          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`);
         }
       }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
     }
 
     // discard the site candidate if previously evaluated
-    if (!site && (await dataAccess.siteCandidateExists(siteCandidate.baseURL))) {
+    const isPreviouslyEvaluated = await SiteCandidate.findByBaseURL(siteCandidate.baseURL);
+    if (isPreviouslyEvaluated !== null) {
       throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
     }
 
-    await dataAccess.upsertSiteCandidate(siteCandidate);
+    await SiteCandidate.create(siteCandidate);
 
     return baseURL;
   }
@@ -416,26 +417,10 @@ function HooksController(lambdaContext) {
     return ok('CDN site candidate is successfully processed');
   }
 
-  async function processRUMHook(context) {
-    const { log } = context;
-    const { domain } = context.data;
-
-    log.info(`Processing RUM site candidate. Input: ${JSON.stringify(context.data)}`);
-
-    const source = SITE_CANDIDATE_SOURCES.RUM;
-    const baseURL = await processSiteCandidate(domain, source, log);
-    await sendDiscoveryMessage(baseURL, source);
-
-    return ok('RUM site candidate is successfully processed');
-  }
-
   return {
     processCDNHook: wrap(processCDNHook)
       .with(errorHandler, { type: 'CDN' })
       .with(hookAuth, { secretName: CDN_HOOK_SECRET_NAME }),
-    processRUMHook: wrap(processRUMHook)
-      .with(errorHandler, { type: 'RUM' })
-      .with(hookAuth, { secretName: RUM_HOOK_SECRET_NAME }),
   };
 }
 

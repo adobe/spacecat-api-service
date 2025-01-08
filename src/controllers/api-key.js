@@ -40,6 +40,7 @@ function ApiKeyController(context) {
   const {
     dataAccess, log, env, attributes, imsClient,
   } = context;
+  const { ApiKey } = dataAccess;
 
   let apiKeyConfiguration = {};
   try {
@@ -159,7 +160,7 @@ function ApiKeyController(context) {
 
       // Check whether the user has already created the maximum number of
       // active API keys for the given imsOrgId.
-      const apiKeys = await dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
+      const apiKeys = await ApiKey.allByImsOrgIdAndImsUserId(imsOrgId, imsUserId);
 
       const validApiKeys = apiKeys.filter(
         (apiKey) => apiKey.isValid(),
@@ -200,8 +201,7 @@ function ApiKeyController(context) {
       const expiresAt = new Date();
       expiresAt.setMonth(expiresAt.getMonth() + 6);
 
-      const apiKeyEntity = await dataAccess.createNewApiKey({
-        id: crypto.randomUUID(),
+      const apiKeyEntity = await ApiKey.create({
         name: data.name,
         scopes,
         createdAt: new Date().toISOString(),
@@ -230,7 +230,7 @@ function ApiKeyController(context) {
     try {
       const imsUserToken = getImsUserToken(headers);
       await validateImsOrgId(imsOrgId, imsUserToken);
-      const apiKeyEntity = await dataAccess.getApiKeyById(id);
+      const apiKeyEntity = await ApiKey.findById(id);
       const { authInfo: { profile } } = attributes;
 
       const imsUserId = getImsUserIdFromProfile(profile);
@@ -239,9 +239,9 @@ function ApiKeyController(context) {
         throw new ErrorWithStatusCode('Invalid request: API key not found', STATUS_NOT_FOUND);
       }
 
-      apiKeyEntity.updateDeletedAt(new Date().toISOString());
+      apiKeyEntity.setDeletedAt(new Date().toISOString());
 
-      await dataAccess.updateApiKey(apiKeyEntity);
+      await apiKeyEntity.save();
       return createResponse({}, STATUS_NO_CONTENT);
     } catch (error) {
       log.error(`Failed to delete the api key with id: ${id} - ${error.message}`);
@@ -264,7 +264,7 @@ function ApiKeyController(context) {
       const { authInfo: { profile } } = attributes;
 
       const imsUserId = getImsUserIdFromProfile(profile);
-      const apiKeys = await dataAccess.getApiKeysByImsUserIdAndImsOrgId(imsUserId, imsOrgId);
+      const apiKeys = await ApiKey.allByImsOrgIdAndImsUserId(imsOrgId, imsUserId);
       return ok(apiKeys.map((apiKey) => ApiKeyDto.toJSON(apiKey)));
     } catch (error) {
       log.error(`Failed to retrieve the api keys - ${error.message}`);

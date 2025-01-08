@@ -91,6 +91,8 @@ paths:
     $ref: './site-api.yaml#/site-by-base-url'
   /sites/with-latest-audit/{auditType}:
     $ref: './sites-api.yaml#/sites-with-latest-audit'
+  /sites/{siteId}/metrics/latest:
+    $ref: './site-metrics-api.yaml#/site-metrics-latest'
   /sites/{siteId}:
     $ref: './site-api.yaml#/site'
   /sites/{siteId}/audits:

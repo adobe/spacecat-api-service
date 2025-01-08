@@ -11,9 +11,9 @@
  */
 
 import { ImportJobStatus, ImportUrlStatus } from '@adobe/spacecat-shared-data-access';
-import { hasText } from '@adobe/spacecat-shared-utils';
-import crypto from 'crypto';
 import { hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
+import { hasText } from '@adobe/spacecat-shared-utils';
+
 import { ErrorWithStatusCode } from './utils.js';
 import { STATUS_BAD_REQUEST } from '../utils/constants.js';
 
@@ -48,6 +48,9 @@ function ImportSupervisor(services, config) {
       s3Client, GetObjectCommand, PutObjectCommand, getSignedUrl,
     }, log,
   } = services;
+
+  const { ImportJob, ImportUrl } = dataAccess;
+
   const {
     queues = [], // Array of import queues
     importWorkerQueue, // URL of the import worker queue
@@ -60,12 +63,11 @@ function ImportSupervisor(services, config) {
    * Get an available import queue name that is not currently in use. Throws an error if no queue
    * is currently available.
    */
-  async function getAvailableImportQueue(importApiKey) {
-    const runningImportJobs = await dataAccess.getImportJobsByStatus(ImportJobStatus.RUNNING);
+  async function getAvailableImportQueue(hashedApiKey) {
+    const runningImportJobs = await ImportJob.allByStatus(ImportJobStatus.RUNNING);
 
     // Check that this import API key has capacity to start an import job
     for (const job of runningImportJobs) {
-      const hashedApiKey = hashWithSHA256(importApiKey);
       if (job.getHashedApiKey() === hashedApiKey) {
         throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more import jobs`, 429);
       }
@@ -109,8 +111,7 @@ function ImportSupervisor(services, config) {
     hasCustomHeaders = false,
     hasCustomImportJs = false,
   ) {
-    return dataAccess.createNewImportJob({
-      id: crypto.randomUUID(),
+    return ImportJob.create({
       baseURL: determineBaseURL(urls),
       importQueueId,
       hashedApiKey,
@@ -130,7 +131,7 @@ function ImportSupervisor(services, config) {
    * @returns {Promise<ImportJob[]>}
    */
   async function getImportJobsByDateRange(startDate, endDate) {
-    return dataAccess.getImportJobsByDateRange(startDate, endDate);
+    return ImportJob.allByDateRange(startDate, endDate);
   }
 
   /**
@@ -185,11 +186,11 @@ function ImportSupervisor(services, config) {
     initiatedBy,
     customHeaders,
   ) {
-    // Determine if there is a free import queue
-    const importQueueId = await getAvailableImportQueue(importApiKey);
-
     // Hash the API Key to ensure it is not stored in plain text
     const hashedApiKey = hashWithSHA256(importApiKey);
+
+    // Determine if there is a free import queue
+    const importQueueId = await getAvailableImportQueue(hashedApiKey);
 
     // If a queue is available, create the import-job record in dataAccess:
     const newImportJob = await createNewImportJob(
@@ -228,14 +229,14 @@ function ImportSupervisor(services, config) {
    * used to start the job.
    * @param {string} jobId - The ID of the job.
    * @param {string} importApiKey - API key that was provided to start the job.
-   * @returns {Promise<ImportJobDto>}
+   * @returns {Promise<ImportJob>}
    */
   async function getImportJob(jobId, importApiKey) {
     if (!hasText(jobId)) {
       throw new ErrorWithStatusCode('Job ID is required', 400);
     }
 
-    const job = await dataAccess.getImportJobByID(jobId);
+    const job = await ImportJob.findById(jobId);
     let hashedApiKey;
     if (job) {
       hashedApiKey = hashWithSHA256(importApiKey);
@@ -281,13 +282,13 @@ function ImportSupervisor(services, config) {
     const job = await getImportJob(jobId, importApiKey);
 
     // get the url entries for the job
-    const urls = await dataAccess.getImportUrlsByJobId(job.getId());
+    const urls = await ImportUrl.allByImportJobId(job.getId());
 
     // merge all url entries into a single object
     return urls.reduce((acc, url) => {
       // intentionally ignore RUNNING as currently no code will flip the url to a running state
       // eslint-disable-next-line default-case
-      switch (url.state.status) {
+      switch (url.getStatus()) {
         case ImportUrlStatus.PENDING:
           acc.pending += 1;
           break;
@@ -314,14 +315,14 @@ function ImportSupervisor(services, config) {
    * Delete an import job and all associated URLs.
    * @param {string} jobId - The ID of the job.
    * @param {string} importApiKey - API key provided to the delete request.
-   * @returns {Promise<void>} Resolves once the deletion is complete.
+   * @returns {Promise<ImportJob>} Resolves once the deletion is complete.
    */
   async function deleteImportJob(jobId, importApiKey) {
     // Fetch the job. This also confirms the API key matches the one used to start the job.
     const job = await getImportJob(jobId, importApiKey);
     log.info(`Deletion of import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)}`);
 
-    return dataAccess.removeImportJob(job);
+    return job.remove();
   }
 
   /**
@@ -351,8 +352,8 @@ function ImportSupervisor(services, config) {
       throw new ErrorWithStatusCode(`Job with jobId: ${jobId} cannot be stopped as it is already in a terminal state`, STATUS_BAD_REQUEST);
     }
 
-    job.updateStatus(ImportJobStatus.STOPPED);
-    await dataAccess.updateImportJob(job);
+    job.setStatus(ImportJobStatus.STOPPED);
+    await job.save();
 
     log.info(`Stopping import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)}`);
 

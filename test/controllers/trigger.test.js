@@ -54,6 +54,17 @@ describe('trigger handler', () => {
         type: 'cwv',
         url: 'space.cat',
       },
+      dataAccess: {
+        Configuration: {
+          findLatest: sandbox.stub().resolves({ isHandlerEnabledForSite: () => true }),
+        },
+        Organization: {
+          all: sandbox.stub().resolves(orgs),
+        },
+        Site: {
+          findByBaseURL: sandbox.stub().resolves(site),
+        },
+      },
     };
   });
 
@@ -94,12 +105,6 @@ describe('trigger handler', () => {
       AUDIT_JOBS_QUEUE_URL: 'queueUrl',
     };
     context.sqs = { sendMessage: () => {} };
-    context.dataAccess = {
-      getOrganizations: sandbox.stub().resolves(orgs),
-      getSitesByDeliveryType: sandbox.stub(),
-      getSiteByBaseURL: sandbox.stub().resolves(site),
-      getConfiguration: sandbox.stub().resolves({ isHandlerEnabledForSite: () => true }),
-    };
     await expect(handler(context)).to.be.fulfilled;
   });
 });

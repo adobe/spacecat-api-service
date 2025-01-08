@@ -15,7 +15,6 @@
 import sinon from 'sinon';
 import { expect } from 'chai';
 import ToggleSiteAuditCommand from '../../../../src/support/slack/commands/toggle-site-audit.js';
-import { SiteDto } from '../../../../src/dto/site.js';
 
 const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
 const ERROR_MESSAGE_PREFIX = ':x: ';
@@ -23,7 +22,11 @@ const ERROR_MESSAGE_PREFIX = ':x: ';
 describe('UpdateSitesAuditsCommand', () => {
   const sandbox = sinon.createSandbox();
 
-  const site = SiteDto.fromJson({ id: 'site0', baseURL: 'https://site0.com', deliveryType: 'aem_edge' });
+  const site = {
+    getId: () => 'site0',
+    getBaseURL: () => 'https://site0.com',
+    getDeliveryType: () => 'aem_edge',
+  };
   const handlers = { some_audit: {}, cwv: {} };
 
   let configurationMock;
@@ -42,7 +45,7 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected disableHandlerForSite to not be called, but it was',
     ).to.be.false;
     expect(
-      dataAccessMock.updateConfiguration.called,
+      configurationMock.save.called,
       'Expected updateConfiguration to not be called, but it was',
     ).to.be.false;
   };
@@ -56,12 +59,16 @@ describe('UpdateSitesAuditsCommand', () => {
       getHandlers: sandbox.stub().returns(handlers),
       getQueues: sandbox.stub(),
       getSlackRoles: sandbox.stub(),
+      save: sandbox.stub(),
     };
 
     dataAccessMock = {
-      getConfiguration: sandbox.stub().resolves(configurationMock),
-      getSiteByBaseURL: sandbox.stub(),
-      updateConfiguration: sandbox.stub(),
+      Configuration: {
+        findLatest: sandbox.stub().resolves(configurationMock),
+      },
+      Site: {
+        findByBaseURL: sandbox.stub().resolves(),
+      },
     };
 
     logMock = {
@@ -83,19 +90,19 @@ describe('UpdateSitesAuditsCommand', () => {
   });
 
   it('enable an audit type for a site', async () => {
-    dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'some_audit'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      dataAccessMock.getSiteByBaseURL.calledWith('https://site0.com'),
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
       'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
     ).to.be.true;
     expect(
-      dataAccessMock.updateConfiguration.called,
-      'Expected dataAccess.updateConfiguration to be called, but it was not',
+      configurationMock.save.called,
+      'Expected configuration.save to be called, but it was not',
     ).to.be.true;
     expect(
       configurationMock.enableHandlerForSite.calledWith('some_audit', site),
@@ -108,18 +115,18 @@ describe('UpdateSitesAuditsCommand', () => {
   });
 
   it('disable an audit type for a site', async () => {
-    dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['disable', 'https://site0.com', 'some_audit'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      dataAccessMock.getSiteByBaseURL.calledWith('https://site0.com'),
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
       'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
     ).to.be.true;
     expect(
-      dataAccessMock.updateConfiguration.called,
+      configurationMock.save.called,
       'Expected dataAccess.updateConfiguration to be called, but it was not',
     ).to.be.true;
     expect(
@@ -133,18 +140,18 @@ describe('UpdateSitesAuditsCommand', () => {
   });
 
   it('if site base URL without scheme should be added "https://"', async () => {
-    dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['disable', 'site0.com', 'some_audit'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      dataAccessMock.getSiteByBaseURL.calledWith('https://site0.com'),
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
       'Expected dataAccess.getSiteByBaseURL to be called with "site0.com", but it was not',
     ).to.be.true;
     expect(
-      dataAccessMock.updateConfiguration.called,
+      configurationMock.save.called,
       'Expected dataAccess.updateConfiguration to be called, but it was not',
     ).to.be.true;
     expect(
@@ -159,10 +166,10 @@ describe('UpdateSitesAuditsCommand', () => {
 
   describe('Internal errors', () => {
     it('error during execution', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
       const error = new Error('Test error');
-      dataAccessMock.updateConfiguration.rejects(error);
+      configurationMock.save.rejects(error);
 
       const command = ToggleSiteAuditCommand(contextMock);
       const args = ['enable', 'http://site0.com', 'some_audit'];
@@ -233,7 +240,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('if a site is not found', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(null);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(null);
 
       const command = ToggleSiteAuditCommand(contextMock);
       const args = ['enable', 'https://site0.com', 'some_audit'];
@@ -260,7 +267,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('if an audit type is not present in the configuration', async () => {
-      dataAccessMock.getSiteByBaseURL.withArgs('https://site0.com').resolves(site);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
       const command = ToggleSiteAuditCommand(contextMock);
       const auditType = 'not_present_in_configuration_audit';

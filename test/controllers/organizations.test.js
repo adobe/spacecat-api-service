@@ -14,51 +14,108 @@
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
-import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
+import sinon, { stub } from 'sinon';
 
+import { Organization, Site } from '@adobe/spacecat-shared-data-access';
+import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/v2/models/organization/organization.schema.js';
+import SiteSchema from '@adobe/spacecat-shared-data-access/src/v2/models/site/site.schema.js';
 import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
-import { OrganizationDto } from '../../src/dto/organization.js';
-import { SiteDto } from '../../src/dto/site.js';
 
 use(chaiAsPromised);
+use(sinonChai);
 
 describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();
   const sites = [
     {
-      id: 'site1', organizationId: 'org1', baseURL: 'https://site1.com', deliveryType: 'aem_edge',
+      siteId: 'site1', organizationId: 'org1', baseURL: 'https://site1.com', deliveryType: 'aem_edge',
     },
     {
-      id: 'site2', organizationId: 'org2', baseURL: 'https://site2.com', deliveryType: 'aem_edge',
+      siteId: 'site2', organizationId: 'org2', baseURL: 'https://site2.com', deliveryType: 'aem_edge',
     },
-  ].map((site) => SiteDto.fromJson(site));
+  ].map((site) => new Site(
+    { entities: { site: { model: {} } } },
+    {
+      log: console,
+      getCollection: stub().returns({
+        schema: SiteSchema,
+        findById: stub(),
+      }),
+    },
+    SiteSchema,
+    site,
+    console,
+  ));
+
+  const sampleConfig1 = {
+    getSlackConfig: sinon.stub().returns({
+      channel: 'C0123456789',
+      workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
+    }),
+    getHandlers: sinon.stub().returns([]),
+    getImports: sinon.stub().returns([]),
+  };
+
+  const sampleConfig2 = {
+    getSlackConfig: sinon.stub().returns({
+      workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
+    }),
+    getHandlers: sinon.stub().returns([]),
+    getImports: sinon.stub().returns([]),
+  };
 
   const organizations = [
-    { id: 'org1', name: 'Org 1' },
+    { organizationId: 'org1', name: 'Org 1' },
     {
-      id: 'org2',
+      organizationId: 'org2',
       name: 'Org 2',
       imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
-      config: {
-        slack: {
-          channel: 'C0123456789',
-          workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
+    },
+    {
+      organizationId: 'org3',
+      name: 'Org 3',
+      imsOrgId: '9876567890ABCDEF12345678@AdobeOrg',
+    },
+  ].map((org) => new Organization(
+    {
+      entities: {
+        organization: {
+          model: {
+            indexes: {},
+            schema: {
+              attributes: {
+                organizationId: { type: 'string' },
+                config: { type: 'any' },
+                name: { type: 'string' },
+                imsOrgId: { type: 'string' },
+              },
+            },
+          },
+          patch: sinon.stub().returns({
+            composite: () => ({ go: () => {} }),
+            set: () => {},
+          }),
         },
       },
     },
     {
-      id: 'org3',
-      name: 'Org 3',
-      imsOrgId: '9876567890ABCDEF12345678@AdobeOrg',
-      config: {
-        slack: {
-          workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
-        },
-      },
+      log: console,
+      getCollection: stub().returns({
+        schema: OrganizationSchema,
+        findById: stub(),
+      }),
     },
-  ].map((org) => OrganizationDto.fromJson(org));
+    OrganizationSchema,
+    org,
+    console,
+  ));
+
+  organizations[0].getConfig = sinon.stub().returns(sampleConfig1);
+  organizations[1].getConfig = sinon.stub().returns(sampleConfig1);
+  organizations[2].getConfig = sinon.stub().returns(sampleConfig2);
 
   const organizationFunctions = [
     'createOrganization',
@@ -76,13 +133,15 @@ describe('Organizations Controller', () => {
 
   beforeEach(() => {
     mockDataAccess = {
-      addOrganization: sandbox.stub().resolves(organizations[0]),
-      updateOrganization: sandbox.stub().resolves(organizations[0]),
-      removeOrganization: sandbox.stub().resolves(),
-      getOrganizations: sandbox.stub().resolves(organizations),
-      getOrganizationByID: sandbox.stub().resolves(organizations[0]),
-      getSitesByOrganizationID: sandbox.stub().resolves([sites[0]]),
-      getOrganizationByImsOrgID: sandbox.stub().resolves(organizations[1]),
+      Organization: {
+        all: sinon.stub(),
+        create: sinon.stub(),
+        findById: sinon.stub(),
+        findByImsOrgId: sinon.stub(),
+      },
+      Site: {
+        allByOrganizationId: sinon.stub(),
+      },
     };
 
     const env = {
@@ -117,11 +176,12 @@ describe('Organizations Controller', () => {
   });
 
   it('creates an organization', async () => {
+    mockDataAccess.Organization.create.resolves(organizations[0]);
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
     });
 
-    expect(mockDataAccess.addOrganization.calledOnce).to.be.true;
+    expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
     expect(response.status).to.equal(201);
 
     const organization = await response.json();
@@ -133,12 +193,14 @@ describe('Organizations Controller', () => {
     const response = await organizationsController.createOrganization({ params: {} });
     const error = await response.json();
 
-    expect(mockDataAccess.addOrganization.calledOnce).to.be.false;
+    expect(mockDataAccess.Organization.create).to.have.not.been.called;
     expect(response.status).to.equal(400);
     expect(error).to.have.property('message', 'Org name must be provided');
   });
 
   it('updates an organization', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
     const response = await organizationsController.updateOrganization({
       params: { organizationId: 'org1' },
       data: {
@@ -148,87 +210,108 @@ describe('Organizations Controller', () => {
       },
     });
 
-    expect(mockDataAccess.updateOrganization.calledOnce).to.be.true;
+    expect(organizations[0].save).to.have.been.calledOnce;
     expect(response.status).to.equal(200);
-
-    const organization = await response.json();
-    expect(organization).to.have.property('id', 'org1');
-    expect(organization).to.have.property('name', 'Organization 1');
   });
 
   it('returns bad request when updating an organization if id not provided', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
     const response = await organizationsController.updateOrganization({ params: {} });
     const error = await response.json();
 
-    expect(mockDataAccess.updateOrganization.calledOnce).to.be.false;
+    expect(organizations[0].save).to.not.have.been.called;
     expect(response.status).to.equal(400);
     expect(error).to.have.property('message', 'Organization ID required');
   });
 
   it('returns not found when updating a non-existing organization', async () => {
-    mockDataAccess.getOrganizationByID.resolves(null);
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(null);
 
     const response = await organizationsController.updateOrganization({ params: { organizationId: 'org1' } });
     const error = await response.json();
 
-    expect(mockDataAccess.updateOrganization.calledOnce).to.be.false;
+    expect(organizations[0].save).to.not.have.been.called;
     expect(response.status).to.equal(404);
     expect(error).to.have.property('message', 'Organization not found');
   });
 
   it('returns bad request when updating an organization without payload', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
     const response = await organizationsController.updateOrganization({ params: { organizationId: 'org1' } });
     const error = await response.json();
 
-    expect(mockDataAccess.updateOrganization.calledOnce).to.be.false;
+    expect(organizations[0].save).to.not.have.been.called;
     expect(response.status).to.equal(400);
     expect(error).to.have.property('message', 'Request body required');
   });
 
   it('returns bad request when updating an organization without modifications', async () => {
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+
     const response = await organizationsController.updateOrganization({ params: { organizationId: 'org1' }, data: {} });
     const error = await response.json();
 
-    expect(mockDataAccess.updateOrganization.calledOnce).to.be.false;
+    expect(organizations[0].save).to.not.have.been.called;
     expect(response.status).to.equal(400);
     expect(error).to.have.property('message', 'No updates provided');
   });
 
   it('removes an organization', async () => {
+    organizations[0].remove = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
     const response = await organizationsController.removeOrganization({ params: { organizationId: 'org1' } });
 
-    expect(mockDataAccess.removeOrganization.calledOnce).to.be.true;
+    expect(organizations[0].remove).to.have.been.calledOnce;
     expect(response.status).to.equal(204);
   });
 
   it('returns bad request when removing a site if id not provided', async () => {
+    organizations[0].remove = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
     const response = await organizationsController.removeOrganization({ params: {} });
     const error = await response.json();
 
-    expect(mockDataAccess.removeOrganization.calledOnce).to.be.false;
+    expect(organizations[0].remove).to.not.have.been.called;
     expect(response.status).to.equal(400);
     expect(error).to.have.property('message', 'Organization ID required');
   });
 
+  it('returns not found when removing a non-existing organization', async () => {
+    organizations[0].remove = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(null);
+
+    const response = await organizationsController.removeOrganization({ params: { organizationId: 'org1' } });
+    const error = await response.json();
+
+    expect(organizations[0].remove).to.not.have.been.called;
+    expect(response.status).to.equal(404);
+    expect(error).to.have.property('message', 'Organization not found');
+  });
+
   it('gets all organizations', async () => {
-    mockDataAccess.getOrganizations.resolves(organizations);
+    mockDataAccess.Organization.all.resolves(organizations);
 
     const result = await organizationsController.getAll();
     const resultOrganizations = await result.json();
 
-    expect(mockDataAccess.getOrganizations.calledOnce).to.be.true;
+    expect(mockDataAccess.Organization.all).to.have.been.calledOnce;
     expect(resultOrganizations).to.be.an('array').with.lengthOf(3);
     expect(resultOrganizations[0]).to.have.property('id', 'org1');
     expect(resultOrganizations[1]).to.have.property('id', 'org2');
   });
 
   it('gets all sites of an organization', async () => {
-    mockDataAccess.getSitesByOrganizationID.resolves(sites);
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
 
     const result = await organizationsController.getSitesForOrganization({ params: { organizationId: 'org1' } });
     const resultSites = await result.json();
 
-    expect(mockDataAccess.getSitesByOrganizationID.calledOnce).to.be.true;
+    expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledOnceWith('org1');
     expect(resultSites).to.be.an('array').with.lengthOf(2);
     expect(resultSites[0]).to.have.property('id', 'site1');
     expect(resultSites[1]).to.have.property('id', 'site2');
@@ -243,17 +326,19 @@ describe('Organizations Controller', () => {
   });
 
   it('gets an organization by id', async () => {
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
     const result = await organizationsController.getByID({ params: { organizationId: 'org1' } });
     const organization = await result.json();
 
-    expect(mockDataAccess.getOrganizationByID.calledOnce).to.be.true;
+    expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith('org1');
 
     expect(organization).to.be.an('object');
+    expect(result.status).to.equal(200);
     expect(organization).to.have.property('id', 'org1');
   });
 
   it('returns not found when an organization is not found by id', async () => {
-    mockDataAccess.getOrganizationByID.resolves(null);
+    mockDataAccess.Organization.findById.resolves(null);
 
     const result = await organizationsController.getByID({ params: { organizationId: 'org1' } });
     const error = await result.json();
@@ -271,18 +356,20 @@ describe('Organizations Controller', () => {
   });
 
   it('gets an organization by IMS org ID', async () => {
+    mockDataAccess.Organization.findByImsOrgId.resolves(organizations[1]);
     const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
     const result = await organizationsController.getByImsOrgID({ params: { imsOrgId } });
     const organization = await result.json();
 
-    expect(mockDataAccess.getOrganizationByImsOrgID.calledOnce).to.be.true;
+    expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledOnceWith(imsOrgId);
 
     expect(organization).to.be.an('object');
+    expect(result.status).to.equal(200);
     expect(organization).to.have.property('imsOrgId', imsOrgId);
   });
 
   it('returns not found when an organization is not found by IMS org ID', async () => {
-    mockDataAccess.getOrganizationByImsOrgID.resolves(null);
+    mockDataAccess.Organization.findByImsOrgId.resolves(null);
 
     const result = await organizationsController.getByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' } });
     const error = await result.json();
@@ -300,11 +387,12 @@ describe('Organizations Controller', () => {
   });
 
   it('gets the Slack config of an organization by IMS org ID', async () => {
+    mockDataAccess.Organization.findByImsOrgId.resolves(organizations[1]);
     const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
     const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId } });
     const slackConfig = await result.json();
 
-    expect(mockDataAccess.getOrganizationByImsOrgID.calledOnce).to.be.true;
+    expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledOnceWith(imsOrgId);
 
     expect(slackConfig).to.be.an('object');
     expect(slackConfig).to.deep.equal({
@@ -315,7 +403,7 @@ describe('Organizations Controller', () => {
   });
 
   it('returns not found when an organization is not found by IMS org ID', async () => {
-    mockDataAccess.getOrganizationByImsOrgID.resolves(null);
+    mockDataAccess.Organization.findByImsOrgId.resolves(null);
 
     const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' } });
     const error = await result.json();
@@ -333,7 +421,7 @@ describe('Organizations Controller', () => {
   });
 
   it('returns not found when an organization does not have a Slack channel configuration', async () => {
-    mockDataAccess.getOrganizationByImsOrgID.resolves(organizations[2]);
+    mockDataAccess.Organization.findByImsOrgId.resolves(organizations[2]);
 
     const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId: '9876567890ABCDEF12345678@AdobeOrg' } });
     const error = await result.json();
