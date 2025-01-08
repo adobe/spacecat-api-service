@@ -1,3 +1,10 @@
+## [1.84.10](https://github.com/adobe/spacecat-api-service/compare/v1.84.9...v1.84.10) (2025-01-08)
+
+
+### Bug Fixes
+
+* getAllLatestForSite endpoint ([f5fa5ad](https://github.com/adobe/spacecat-api-service/commit/f5fa5ad98fd7d564c2ee54ed93b5de294a6741e2))
+
 ## [1.84.9](https://github.com/adobe/spacecat-api-service/compare/v1.84.8...v1.84.9) (2025-01-07)
 
 
