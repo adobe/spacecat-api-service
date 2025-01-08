@@ -64,6 +64,7 @@ function OnboardCommand(context) {
    */
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
+    const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = context.env;
 
     try {
       const [baseURLInput] = args;
@@ -83,7 +84,9 @@ function OnboardCommand(context) {
         const deliveryType = await findDeliveryType(baseURL);
         const isLive = true;
 
-        site = await Site.create({ baseURL, deliveryType, isLive });
+        site = await Site.create({
+          baseURL, deliveryType, isLive, organizationId: defaultOrgId,
+        });
       }
 
       const configuration = await Configuration.findLatest();
