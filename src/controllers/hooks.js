@@ -62,7 +62,7 @@ function errorHandler(fn, opts) {
       return await fn(context);
     } catch (e) {
       if (e instanceof InvalidSiteCandidate) {
-        log.warn(`Could not process site candidate. Reason: ${e.message}, Source: ${type}, Candidate: ${e.url}`);
+        log.info(`Could not process site candidate. Reason: ${e.message}, Source: ${type}, Candidate: ${e.url}`);
         return ok(`${type} site candidate disregarded`);
       }
       log.error(`Unexpected error while processing the ${type} site candidate`, e);
@@ -183,7 +183,7 @@ async function getContentSource(hlxConfig, log) {
   const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
 
   if (fstabResponse.status !== 200) {
-    log.error(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
+    log.info(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
     return null;
   }
 
@@ -195,7 +195,7 @@ async function getContentSource(hlxConfig, log) {
     : null;
 
   if (!isValidUrl(url)) {
-    log.error(`No content source found for ${owner}/${repo} in fstab.yaml`);
+    log.info(`No content source found for ${owner}/${repo} in fstab.yaml`);
     return null;
   }
 
