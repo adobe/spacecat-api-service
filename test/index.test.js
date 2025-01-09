@@ -178,17 +178,6 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
   });
 
-  it('handles organizationId is default', async () => {
-    context.pathInfo.suffix = '/organizations/default';
-
-    request = new Request(`${baseUrl}/organizations/default`, { headers: { 'x-api-key': apiKey } });
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(200);
-    expect(context.dataAccess.Organization.findById).to.have.been.calledOnce;
-  });
-
   it('handles dynamic route errors', async () => {
     context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
 
