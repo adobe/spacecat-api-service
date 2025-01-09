@@ -134,27 +134,27 @@ describe('Hooks Controller', () => {
 
     async function assertInvalidSubdomain(xFwHost) {
       await assertInvalidCase(xFwHost);
-      expect(context.log.warn).to.have.been.calledWith(`Could not process site candidate. Reason: URL most likely contains a non-prod domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
+      expect(context.log.info).to.have.been.calledWith(`Could not process site candidate. Reason: URL most likely contains a non-prod domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
     }
 
     async function assertUnwantedDomain(xFwHost) {
       await assertInvalidCase(xFwHost);
-      expect(context.log.warn).to.have.been.calledWith(`Could not process site candidate. Reason: URL contains an unwanted domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
+      expect(context.log.info).to.have.been.calledWith(`Could not process site candidate. Reason: URL contains an unwanted domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
     }
 
     it('hostnames with path are not accepted', async () => {
       await assertInvalidCase('some.domain/some/path, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/some/path');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/some/path');
     });
 
     it('hostnames with query params are not accepted', async () => {
       await assertInvalidCase('some.domain?param=value, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/?param=value');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/?param=value');
     });
 
     it('hostnames in IPs are not accepted', async () => {
       await assertInvalidCase('https://112.12.12.112, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Hostname is an IP address, Source: CDN, Candidate: https://112.12.12.112/');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Hostname is an IP address, Source: CDN, Candidate: https://112.12.12.112/');
     });
 
     it('hostnames with suspected stage subdomains are not accepted', async () => {
@@ -229,7 +229,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}. Body: <body>some other dome structure</body></html>, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}. Body: <body>some other dome structure</body></html>, Source: CDN, Candidate: https://some-domain.com');
     });
   });
 
@@ -253,7 +253,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate previously evaluated, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate previously evaluated, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('candidate is disregarded if a live aem_edge site exists with same baseURL', async () => {
@@ -269,7 +269,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('while candidate is disregarded, hlx config is updated if not present', async () => {
@@ -295,7 +295,7 @@ describe('Hooks Controller', () => {
       expect(site.setHlxConfig).to.have.been.calledWith(expectedConfig);
       expect(site.save).to.have.been.calledOnce;
       expect(context.log.info).to.have.been.calledWith('HLX config added for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: `https://undefined--undefined--undefined.aem.live`');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('hlx 4 config is updated from fstab when accessible with drive.google', async () => {
@@ -476,7 +476,7 @@ describe('Hooks Controller', () => {
       expect(site.setHlxConfig).to.have.been.calledWithExactly(expectedConfig);
       expect(site.save).to.have.been.calledOnce;
       expect(context.log.info).to.have.been.calledWith('HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
   });
 
