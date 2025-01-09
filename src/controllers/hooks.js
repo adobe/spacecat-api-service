@@ -183,7 +183,7 @@ async function getContentSource(hlxConfig, log) {
   const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
 
   if (fstabResponse.status !== 200) {
-    log.error(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
+    log.info(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
     return null;
   }
 
@@ -195,7 +195,7 @@ async function getContentSource(hlxConfig, log) {
     : null;
 
   if (!isValidUrl(url)) {
-    log.error(`No content source found for ${owner}/${repo} in fstab.yaml`);
+    log.info(`No content source found for ${owner}/${repo} in fstab.yaml`);
     return null;
   }
 

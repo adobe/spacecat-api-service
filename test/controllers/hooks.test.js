@@ -630,7 +630,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Status: 404'));
+      expect(context.log.info.getCall(3)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Status: 404'));
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
@@ -651,7 +651,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('No content source found for some-owner/some-site in fstab.yaml'));
+      expect(context.log.info.getCall(3)).to.have.been.calledWith(sinon.match('No content source found for some-owner/some-site in fstab.yaml'));
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
