@@ -199,6 +199,25 @@ costs-audit:
       usedApiUnits: 198771
       limitApiUnits: 1000000
       fullAuditRef: 'https://api.ahrefs.com/v3/subscription-info/limits-and-usage'
+meta-tags-audit:
+  summary: Example for a meta-tags audit
+  value:
+    auditResult:
+      sourceS3Folder: "spacecat-scraper-dev/scrapes/cccdac43-1a22-4659-9086-b762f59b9928/"
+      detectedTags:
+        "/de":
+          title:
+            seoRecommendation: "Should be present"
+            issue: "Missing Title"
+            issueDetails: "Title tag is missing"
+            seoImpact: "High"
+      finalUrl: "www.bulk.com/uk/"
+    auditType: "meta-tags"
+    auditedAt: "2025-01-03T10:14:41.798Z"
+    fullAuditRef: null
+    isLive: true
+    isError: false
+    siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
 analytics-site-integration-aa-tags:
   summary: Example for an integration with Adobe Analytics via Adobe Tags
   value:

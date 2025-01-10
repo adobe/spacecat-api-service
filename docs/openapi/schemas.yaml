@@ -28,6 +28,9 @@ AuditType:
     - 'sitemap'
     - 'structured-data'
     - 'costs'
+    - 'meta-tags'
+    - 'broken-internal-links'
+    - 'experimentation-opportunities'
   example: 'cwv'
 URL:
   type: string
@@ -531,6 +534,43 @@ AuditResult:
             fullAuditRef:
               description: |
                 A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+              type: string
+    - type: object
+      description: |
+        The result of a meta-tags audit.
+      properties:
+        auditResult:
+          type: object
+          properties:
+            detectedTags:
+              description: |
+                A mapping of URLs to their detected meta-tags issues and recommendations.
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  title:
+                    type: object
+                    properties:
+                      seoRecommendation:
+                        description: |
+                          SEO recommendation for the title tag.
+                        type: string
+                      issue:
+                        description: |
+                          The issue detected in the title tag.
+                        type: string
+                      issueDetails:
+                        description: |
+                          Detailed explanation of the issue detected in the title tag.
+                        type: string
+                      seoImpact:
+                        description: |
+                          The impact of the detected issue on SEO.
+                        type: string
+            finalUrl:
+              description: |
+                The final URL for the audited page.
               type: string
     - type: object
       description: The result of CWV audit
