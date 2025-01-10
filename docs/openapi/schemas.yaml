@@ -1498,11 +1498,24 @@ ScrapeRequest:
   required:
     - urls
   properties:
+    jobId:
+      description: Optional ID of the scrape job
+      $ref: '#/Id'
+    options:
+      description: Optional configuration params, defined as a JSON object
+      $ref: '#/ImportOptions'
+    customHeaders:
+      description: Optional custom headers to send with each HTTP request
+      type: object
     urls:
       description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
       type: array
       items:
-        $ref: '#/URL'
+        type: object
+        properties:
+          url:
+            description: The URL to scrape
+            $ref: '#/URL'
       example:
         - 'https://example.com/en/page1'
         - 'https://example.com/fr/page2'
