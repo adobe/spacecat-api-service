@@ -156,6 +156,9 @@ describe('Sites Controller', () => {
       log: {
         info: sandbox.stub(),
       },
+      env: {
+        DEFAULT_ORGANIZATION_ID: 'default',
+      },
       dataAccess: mockDataAccess,
     };
     nock('https://secretsmanager.us-east-1.amazonaws.com/')
@@ -165,7 +168,7 @@ describe('Sites Controller', () => {
           RUM_DOMAIN_KEY: '42',
         }),
       });
-    sitesController = SitesController(mockDataAccess);
+    sitesController = SitesController(mockDataAccess, console, context.env);
   });
 
   afterEach(() => {

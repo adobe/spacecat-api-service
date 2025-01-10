@@ -1,3 +1,59 @@
+## [1.84.13](https://github.com/adobe/spacecat-api-service/compare/v1.84.12...v1.84.13) (2025-01-09)
+
+
+### Bug Fixes
+
+* org invalid uuid ([#681](https://github.com/adobe/spacecat-api-service/issues/681)) ([7d9556b](https://github.com/adobe/spacecat-api-service/commit/7d9556b6a127b14c99e50bde4090ee7e39d5bade))
+
+## [1.84.12](https://github.com/adobe/spacecat-api-service/compare/v1.84.11...v1.84.12) (2025-01-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#680](https://github.com/adobe/spacecat-api-service/issues/680)) ([49bc749](https://github.com/adobe/spacecat-api-service/commit/49bc7492a003af26b4595b0ba84f958c5d363627))
+
+## [1.84.11](https://github.com/adobe/spacecat-api-service/compare/v1.84.10...v1.84.11) (2025-01-08)
+
+
+### Bug Fixes
+
+* approve site candidate ([#679](https://github.com/adobe/spacecat-api-service/issues/679)) ([f6d77fe](https://github.com/adobe/spacecat-api-service/commit/f6d77fe14ce65bd42540d772e8a8f873be30ecc0))
+
+## [1.84.10](https://github.com/adobe/spacecat-api-service/compare/v1.84.9...v1.84.10) (2025-01-08)
+
+
+### Bug Fixes
+
+* getAllLatestForSite endpoint ([f5fa5ad](https://github.com/adobe/spacecat-api-service/commit/f5fa5ad98fd7d564c2ee54ed93b5de294a6741e2))
+
+## [1.84.9](https://github.com/adobe/spacecat-api-service/compare/v1.84.8...v1.84.9) (2025-01-07)
+
+
+### Bug Fixes
+
+* **trigger:** use site id when triggering audit ([#676](https://github.com/adobe/spacecat-api-service/issues/676)) ([20d9517](https://github.com/adobe/spacecat-api-service/commit/20d95174e6cfdcfdd25fdedc0498d684f336fe8d))
+
+## [1.84.8](https://github.com/adobe/spacecat-api-service/compare/v1.84.7...v1.84.8) (2025-01-07)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([ecf1a15](https://github.com/adobe/spacecat-api-service/commit/ecf1a154ab05308b2698548a4250c77c52ceb02d))
+
+## [1.84.7](https://github.com/adobe/spacecat-api-service/compare/v1.84.6...v1.84.7) (2025-01-07)
+
+
+### Bug Fixes
+
+* create site ([5ff851c](https://github.com/adobe/spacecat-api-service/commit/5ff851cd7224b7a6cda374893a001f93191b6db9))
+
+## [1.84.6](https://github.com/adobe/spacecat-api-service/compare/v1.84.5...v1.84.6) (2025-01-07)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#672](https://github.com/adobe/spacecat-api-service/issues/672)) ([d8c522a](https://github.com/adobe/spacecat-api-service/commit/d8c522ad94d68937b69c3084b2de5a4222bde9c5))
+
 ## [1.84.5](https://github.com/adobe/spacecat-api-service/compare/v1.84.4...v1.84.5) (2025-01-06)
 
 
