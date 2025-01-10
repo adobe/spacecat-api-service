@@ -21,11 +21,7 @@ import {
 import yaml from 'js-yaml';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
-import {
-  SITE_CANDIDATE_SOURCES,
-  SITE_CANDIDATE_STATUS,
-} from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { Site as SiteModel, SiteCandidate as SiteCandidateModel } from '@adobe/spacecat-shared-data-access';
 import { fetch, isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
@@ -342,17 +338,17 @@ function HooksController(lambdaContext) {
     const siteCandidate = {
       baseURL,
       source,
-      status: SITE_CANDIDATE_STATUS.PENDING,
+      status: SiteCandidateModel.SITE_CANDIDATE_STATUS.PENDING,
       hlxConfig,
     };
 
     const site = await Site.findByBaseURL(siteCandidate.baseURL);
 
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
-    if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
+    if (site && site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
       // for existing site with empty hlxConfig or non-equal hlxConfig, update it now
       // todo: remove after back fill of hlx config for existing sites is complete
-      if (source === SITE_CANDIDATE_SOURCES.CDN && isNonEmptyObject(hlxConfig)) {
+      if (source === SiteCandidateModel.SITE_CANDIDATE_SOURCES.CDN && isNonEmptyObject(hlxConfig)) {
         const siteHlxConfig = site.getHlxConfig();
         const siteHasHlxConfig = isNonEmptyObject(siteHlxConfig);
         const candidateHlxConfig = siteCandidate.hlxConfig;
@@ -410,7 +406,7 @@ function HooksController(lambdaContext) {
     const hlxConfig = await extractHlxConfig(domains, hlxVersion, config.hlxAdminToken, log);
 
     const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
-    const source = SITE_CANDIDATE_SOURCES.CDN;
+    const source = SiteCandidateModel.SITE_CANDIDATE_SOURCES.CDN;
     const baseURL = await processSiteCandidate(domain, source, log, hlxConfig);
     await sendDiscoveryMessage(baseURL, source, hlxConfig);
 

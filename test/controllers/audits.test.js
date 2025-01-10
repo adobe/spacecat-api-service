@@ -13,8 +13,8 @@
 /* eslint-env mocha */
 
 import { Audit, LatestAudit } from '@adobe/spacecat-shared-data-access';
-import AuditSchema from '@adobe/spacecat-shared-data-access/src/v2/models/audit/audit.schema.js';
-import LatestAuditSchema from '@adobe/spacecat-shared-data-access/src/v2/models/latest-audit/latest-audit.schema.js';
+import AuditSchema from '@adobe/spacecat-shared-data-access/src/models/audit/audit.schema.js';
+import LatestAuditSchema from '@adobe/spacecat-shared-data-access/src/models/latest-audit/latest-audit.schema.js';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';

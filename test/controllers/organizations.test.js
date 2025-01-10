@@ -18,8 +18,8 @@ import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
 import { Organization, Site } from '@adobe/spacecat-shared-data-access';
-import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/v2/models/organization/organization.schema.js';
-import SiteSchema from '@adobe/spacecat-shared-data-access/src/v2/models/site/site.schema.js';
+import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
+import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
@@ -189,13 +189,17 @@ describe('Organizations Controller', () => {
     expect(organization).to.have.property('name', 'Org 1');
   });
 
-  it('returns bad request when creating an organization with invalid data', async () => {
-    const response = await organizationsController.createOrganization({ params: {} });
-    const error = await response.json();
+  it('returns bad request when creating an organization fails', async () => {
+    mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
+    const response = await organizationsController.createOrganization({
+      data: { name: 'Org 1' },
+    });
 
-    expect(mockDataAccess.Organization.create).to.have.not.been.called;
+    expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
     expect(response.status).to.equal(400);
-    expect(error).to.have.property('message', 'Org name must be provided');
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Failed to create organization');
   });
 
   it('updates an organization', async () => {
