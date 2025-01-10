@@ -204,7 +204,6 @@ meta-tags-audit:
   value:
     auditResult:
       sourceS3Folder: "spacecat-scraper-dev/scrapes/cccdac43-1a22-4659-9086-b762f59b9928/"
-      fullAuditRef: "na"
       detectedTags:
         "/de":
           title:
@@ -215,7 +214,7 @@ meta-tags-audit:
       finalUrl: "www.bulk.com/uk/"
     auditType: "meta-tags"
     auditedAt: "2025-01-03T10:14:41.798Z"
-    fullAuditRef: "na"
+    fullAuditRef: null
     isLive: true
     isError: false
     siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
