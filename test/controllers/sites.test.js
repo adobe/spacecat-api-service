@@ -19,8 +19,8 @@ import sinon, { stub } from 'sinon';
 import esmock from 'esmock';
 
 import { KeyEvent, Site } from '@adobe/spacecat-shared-data-access';
-import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/v2/models/key-event/key-event.schema.js';
-import SiteSchema from '@adobe/spacecat-shared-data-access/src/v2/models/site/site.schema.js';
+import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
+import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import nock from 'nock';
 

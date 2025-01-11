@@ -13,7 +13,7 @@
 /* eslint-env mocha */
 
 import { Experiment } from '@adobe/spacecat-shared-data-access';
-import ExperimentSchema from '@adobe/spacecat-shared-data-access/src/v2/models/experiment/experiment.schema.js';
+import ExperimentSchema from '@adobe/spacecat-shared-data-access/src/models/experiment/experiment.schema.js';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';

@@ -21,8 +21,8 @@ import {
   hasText,
   isObject,
   isString,
+  isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-import { createOrganization as validateOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import { OrganizationDto } from '../dto/organization.js';
 import { SiteDto } from '../dto/site.js';
@@ -52,7 +52,6 @@ function OrganizationsController(dataAccess, env) {
    */
   const createOrganization = async (context) => {
     try {
-      validateOrganization(context.data);
       const organization = await Organization.create(context.data);
       return createResponse(OrganizationDto.toJSON(organization), 201);
     } catch (e) {
@@ -79,7 +78,7 @@ function OrganizationsController(dataAccess, env) {
   const getByID = async (context) => {
     const organizationId = context.params?.organizationId;
 
-    if (!hasText(organizationId)) {
+    if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
 

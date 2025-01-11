@@ -73,6 +73,7 @@ describe('approveSiteCandidate', () => {
       env: {
         SLACK_REPORT_CHANNEL_INTERNAL: 'channel-id',
         ORGANIZATION_ID_FRIENDS_FAMILY: 'friends-family-org',
+        DEFAULT_ORGANIZATION_ID: 'default',
       },
       slackClients: {
         WORKSPACE_INTERNAL_STANDARD: slackClient,
@@ -130,7 +131,9 @@ describe('approveSiteCandidate', () => {
     expect(ackMock).to.have.been.calledOnce;
     expect(context.dataAccess.SiteCandidate.findByBaseURL).to.have.been.calledWith(baseURL);
     expect(context.dataAccess.Site.create).to.have.been.calledWith(
-      { baseURL, hlxConfig, isLive: true },
+      {
+        baseURL, hlxConfig, isLive: true, organizationId: 'default',
+      },
     );
     expect(site.save).to.have.been.callCount(0);
     expect(siteCandidate.getBaseURL()).to.equal(expectedSiteCandidate.baseURL);

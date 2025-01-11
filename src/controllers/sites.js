@@ -24,7 +24,7 @@ import {
   isObject,
   getStoredMetrics, getRUMDomainKey,
 } from '@adobe/spacecat-shared-utils';
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import { SiteDto } from '../dto/site.js';
@@ -270,7 +270,7 @@ function SitesController(dataAccess, log, env) {
     }
 
     if (requestBody.deliveryType !== site.getDeliveryType()
-        && Object.values(DELIVERY_TYPES).includes(requestBody.deliveryType)) {
+        && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
       site.setDeliveryType(requestBody.deliveryType);
       updates = true;
     }

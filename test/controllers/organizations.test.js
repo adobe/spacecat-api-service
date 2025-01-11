@@ -18,8 +18,8 @@ import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
 import { Organization, Site } from '@adobe/spacecat-shared-data-access';
-import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/v2/models/organization/organization.schema.js';
-import SiteSchema from '@adobe/spacecat-shared-data-access/src/v2/models/site/site.schema.js';
+import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
+import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
@@ -31,10 +31,10 @@ describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();
   const sites = [
     {
-      siteId: 'site1', organizationId: 'org1', baseURL: 'https://site1.com', deliveryType: 'aem_edge',
+      siteId: 'site1', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28', baseURL: 'https://site1.com', deliveryType: 'aem_edge',
     },
     {
-      siteId: 'site2', organizationId: 'org2', baseURL: 'https://site2.com', deliveryType: 'aem_edge',
+      siteId: 'site2', organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f', baseURL: 'https://site2.com', deliveryType: 'aem_edge',
     },
   ].map((site) => new Site(
     { entities: { site: { model: {} } } },
@@ -68,9 +68,9 @@ describe('Organizations Controller', () => {
   };
 
   const organizations = [
-    { organizationId: 'org1', name: 'Org 1' },
+    { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28', name: 'Org 1' },
     {
-      organizationId: 'org2',
+      organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
       name: 'Org 2',
       imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
     },
@@ -185,24 +185,28 @@ describe('Organizations Controller', () => {
     expect(response.status).to.equal(201);
 
     const organization = await response.json();
-    expect(organization).to.have.property('id', 'org1');
+    expect(organization).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
     expect(organization).to.have.property('name', 'Org 1');
   });
 
-  it('returns bad request when creating an organization with invalid data', async () => {
-    const response = await organizationsController.createOrganization({ params: {} });
-    const error = await response.json();
+  it('returns bad request when creating an organization fails', async () => {
+    mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
+    const response = await organizationsController.createOrganization({
+      data: { name: 'Org 1' },
+    });
 
-    expect(mockDataAccess.Organization.create).to.have.not.been.called;
+    expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
     expect(response.status).to.equal(400);
-    expect(error).to.have.property('message', 'Org name must be provided');
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Failed to create organization');
   });
 
   it('updates an organization', async () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
     const response = await organizationsController.updateOrganization({
-      params: { organizationId: 'org1' },
+      params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
       data: {
         imsOrgId: '1234abcd@AdobeOrg',
         name: 'Organization 1',
@@ -229,7 +233,7 @@ describe('Organizations Controller', () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(null);
 
-    const response = await organizationsController.updateOrganization({ params: { organizationId: 'org1' } });
+    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
     const error = await response.json();
 
     expect(organizations[0].save).to.not.have.been.called;
@@ -241,7 +245,7 @@ describe('Organizations Controller', () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
 
-    const response = await organizationsController.updateOrganization({ params: { organizationId: 'org1' } });
+    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
     const error = await response.json();
 
     expect(organizations[0].save).to.not.have.been.called;
@@ -253,7 +257,7 @@ describe('Organizations Controller', () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
 
-    const response = await organizationsController.updateOrganization({ params: { organizationId: 'org1' }, data: {} });
+    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, data: {} });
     const error = await response.json();
 
     expect(organizations[0].save).to.not.have.been.called;
@@ -264,7 +268,7 @@ describe('Organizations Controller', () => {
   it('removes an organization', async () => {
     organizations[0].remove = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const response = await organizationsController.removeOrganization({ params: { organizationId: 'org1' } });
+    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
 
     expect(organizations[0].remove).to.have.been.calledOnce;
     expect(response.status).to.equal(204);
@@ -285,7 +289,7 @@ describe('Organizations Controller', () => {
     organizations[0].remove = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(null);
 
-    const response = await organizationsController.removeOrganization({ params: { organizationId: 'org1' } });
+    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
     const error = await response.json();
 
     expect(organizations[0].remove).to.not.have.been.called;
@@ -301,17 +305,17 @@ describe('Organizations Controller', () => {
 
     expect(mockDataAccess.Organization.all).to.have.been.calledOnce;
     expect(resultOrganizations).to.be.an('array').with.lengthOf(3);
-    expect(resultOrganizations[0]).to.have.property('id', 'org1');
-    expect(resultOrganizations[1]).to.have.property('id', 'org2');
+    expect(resultOrganizations[0]).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
+    expect(resultOrganizations[1]).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
   });
 
   it('gets all sites of an organization', async () => {
     mockDataAccess.Site.allByOrganizationId.resolves(sites);
 
-    const result = await organizationsController.getSitesForOrganization({ params: { organizationId: 'org1' } });
+    const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
     const resultSites = await result.json();
 
-    expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledOnceWith('org1');
+    expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledOnceWith('9033554c-de8a-44ac-a356-09b51af8cc28');
     expect(resultSites).to.be.an('array').with.lengthOf(2);
     expect(resultSites[0]).to.have.property('id', 'site1');
     expect(resultSites[1]).to.have.property('id', 'site2');
@@ -327,20 +331,20 @@ describe('Organizations Controller', () => {
 
   it('gets an organization by id', async () => {
     mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const result = await organizationsController.getByID({ params: { organizationId: 'org1' } });
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
     const organization = await result.json();
 
-    expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith('org1');
+    expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith('9033554c-de8a-44ac-a356-09b51af8cc28');
 
     expect(organization).to.be.an('object');
     expect(result.status).to.equal(200);
-    expect(organization).to.have.property('id', 'org1');
+    expect(organization).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
   });
 
   it('returns not found when an organization is not found by id', async () => {
     mockDataAccess.Organization.findById.resolves(null);
 
-    const result = await organizationsController.getByID({ params: { organizationId: 'org1' } });
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
     const error = await result.json();
 
     expect(result.status).to.equal(404);

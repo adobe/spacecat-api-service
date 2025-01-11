@@ -27,17 +27,19 @@ describe('Configurations Controller', () => {
   const sandbox = sinon.createSandbox();
   const configurations = [
     {
-      version: 1,
-      jobs: [{
+      getVersion: () => 1,
+      getJobs: () => [{
         group: 'reports',
         type: 'test',
         interval: 'daily',
       }],
-      queues: { reports: 'sqs://some-reports-queue' },
+      getHandlers: () => {},
+      getQueues: () => ({ reports: 'sqs://some-reports-queue' }),
+      getSlackRoles: () => {},
     },
     {
-      version: 2,
-      jobs: [{
+      getVersion: () => 2,
+      getJobs: () => [{
         group: 'reports',
         type: 'test',
         interval: 'weekly',
@@ -46,7 +48,7 @@ describe('Configurations Controller', () => {
         type: 'cwv',
         interval: 'daily',
       }],
-      handlers: {
+      getHandlers: () => ({
         404: {
           disabled: {
             sites: ['site1'],
@@ -66,19 +68,19 @@ describe('Configurations Controller', () => {
         cwv: {
           enabledByDefault: true,
         },
-      },
-      queues: {
+      }),
+      getQueues: () => ({
         reports: 'sqs://some-reports-queue',
         audits: 'sqs://some-audits-queue',
-      },
-      slackRoles: {
+      }),
+      getSlackRoles: () => ({
         scrape: [
           'WSVT1K36Z',
           'S03CR0FDC2V',
         ],
-      },
+      }),
     },
-  ].map((config) => ConfigurationDto.fromJson(config));
+  ];
 
   const configurationFunctions = [
     'getAll',
