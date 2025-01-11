@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { ImportJobStatus, ImportUrlStatus } from '@adobe/spacecat-shared-data-access';
+import { ImportJob as ImportJobModel } from '@adobe/spacecat-shared-data-access';
 import { hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
@@ -64,7 +64,7 @@ function ImportSupervisor(services, config) {
    * is currently available.
    */
   async function getAvailableImportQueue(hashedApiKey) {
-    const runningImportJobs = await ImportJob.allByStatus(ImportJobStatus.RUNNING);
+    const runningImportJobs = await ImportJob.allByStatus(ImportJobModel.ImportJobStatus.RUNNING);
 
     // Check that this import API key has capacity to start an import job
     for (const job of runningImportJobs) {
@@ -117,7 +117,7 @@ function ImportSupervisor(services, config) {
       hashedApiKey,
       options,
       urlCount: urls.length,
-      status: ImportJobStatus.RUNNING,
+      status: ImportJobModel.ImportJobStatus.RUNNING,
       initiatedBy,
       hasCustomHeaders,
       hasCustomImportJs,
@@ -256,7 +256,7 @@ function ImportSupervisor(services, config) {
    * @returns {Promise<string>}
    */
   async function getJobArchiveSignedUrl(job) {
-    if (job.getStatus() !== ImportJobStatus.COMPLETE) {
+    if (job.getStatus() !== ImportJobModel.ImportJobStatus.COMPLETE) {
       throw new ErrorWithStatusCode(`Archive not available, job status is: ${job.getStatus()}`, 404);
     }
 
@@ -289,16 +289,16 @@ function ImportSupervisor(services, config) {
       // intentionally ignore RUNNING as currently no code will flip the url to a running state
       // eslint-disable-next-line default-case
       switch (url.getStatus()) {
-        case ImportUrlStatus.PENDING:
+        case ImportJobModel.ImportUrlStatus.PENDING:
           acc.pending += 1;
           break;
-        case ImportUrlStatus.REDIRECT:
+        case ImportJobModel.ImportUrlStatus.REDIRECT:
           acc.redirect += 1;
           break;
-        case ImportUrlStatus.COMPLETE:
+        case ImportJobModel.ImportUrlStatus.COMPLETE:
           acc.completed += 1;
           break;
-        case ImportUrlStatus.FAILED:
+        case ImportJobModel.ImportUrlStatus.FAILED:
           acc.failed += 1;
           break;
       }
@@ -331,9 +331,9 @@ function ImportSupervisor(services, config) {
    * @returns {boolean} - true if the job is in a terminal state, false otherwise.
    */
   function isJobInTerminalState(job) {
-    return job.getStatus() === ImportJobStatus.FAILED
-        || job.getStatus() === ImportJobStatus.COMPLETE
-        || job.getStatus() === ImportJobStatus.STOPPED;
+    return job.getStatus() === ImportJobModel.ImportJobStatus.FAILED
+        || job.getStatus() === ImportJobModel.ImportJobStatus.COMPLETE
+        || job.getStatus() === ImportJobModel.ImportJobStatus.STOPPED;
   }
 
   /**
@@ -352,7 +352,7 @@ function ImportSupervisor(services, config) {
       throw new ErrorWithStatusCode(`Job with jobId: ${jobId} cannot be stopped as it is already in a terminal state`, STATUS_BAD_REQUEST);
     }
 
-    job.setStatus(ImportJobStatus.STOPPED);
+    job.setStatus(ImportJobModel.ImportJobStatus.STOPPED);
     await job.save();
 
     log.info(`Stopping import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)}`);

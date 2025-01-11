@@ -23,7 +23,6 @@ import {
   isString,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-import { createOrganization as validateOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import { OrganizationDto } from '../dto/organization.js';
 import { SiteDto } from '../dto/site.js';
@@ -53,7 +52,6 @@ function OrganizationsController(dataAccess, env) {
    */
   const createOrganization = async (context) => {
     try {
-      validateOrganization(context.data);
       const organization = await Organization.create(context.data);
       return createResponse(OrganizationDto.toJSON(organization), 201);
     } catch (e) {

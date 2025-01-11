@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -71,7 +71,7 @@ function AddSiteCommand(context) {
       }
 
       const deliveryType = await findDeliveryType(baseURL);
-      const isLive = deliveryType === DELIVERY_TYPES.AEM_EDGE;
+      const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
       const newSite = await Site.create({
         baseURL,

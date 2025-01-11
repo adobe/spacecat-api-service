@@ -22,9 +22,9 @@ import fs from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { ImportJob, ImportUrl, ImportUrlStatus } from '@adobe/spacecat-shared-data-access';
-import ImportJobSchema from '@adobe/spacecat-shared-data-access/src/v2/models/import-job/import-job.schema.js';
-import ImportUrlSchema from '@adobe/spacecat-shared-data-access/src/v2/models/import-url/import-url.schema.js';
+import { ImportJob, ImportUrl } from '@adobe/spacecat-shared-data-access';
+import ImportJobSchema from '@adobe/spacecat-shared-data-access/src/models/import-job/import-job.schema.js';
+import ImportUrlSchema from '@adobe/spacecat-shared-data-access/src/models/import-url/import-url.schema.js';
 import ImportController from '../../src/controllers/import.js';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
@@ -484,15 +484,15 @@ describe('ImportController tests', () => {
       // only need to provide enough import url data to satisfy the import-supervisor, no need
       // for all the other properties of a ImportUrl object.
       baseContext.dataAccess.ImportUrl.allByImportJobId = sandbox.stub().resolves([
-        { getStatus: () => ImportUrlStatus.COMPLETE },
-        { getStatus: () => ImportUrlStatus.COMPLETE },
+        { getStatus: () => ImportJob.ImportUrlStatus.COMPLETE },
+        { getStatus: () => ImportJob.ImportUrlStatus.COMPLETE },
         // setting a status to RUNNING should not affect the result
         // as no process will flip a ImportUrl status to running at this time, therefore
         // the code will ignore running in the results
-        { getStatus: () => ImportUrlStatus.RUNNING },
-        { getStatus: () => ImportUrlStatus.PENDING },
-        { getStatus: () => ImportUrlStatus.REDIRECT },
-        { getStatus: () => ImportUrlStatus.FAILED },
+        { getStatus: () => ImportJob.ImportUrlStatus.RUNNING },
+        { getStatus: () => ImportJob.ImportUrlStatus.PENDING },
+        { getStatus: () => ImportJob.ImportUrlStatus.REDIRECT },
+        { getStatus: () => ImportJob.ImportUrlStatus.FAILED },
       ]);
 
       baseContext.params.jobId = exampleJob.importJobId;

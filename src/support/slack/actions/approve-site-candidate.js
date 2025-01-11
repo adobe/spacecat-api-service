@@ -10,9 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { SITE_CANDIDATE_STATUS } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { KEY_EVENT_TYPES } from '@adobe/spacecat-shared-data-access/src/models/key-event.js';
+import {
+  KeyEvent as KeyEventModel,
+  Site as SiteModel,
+  SiteCandidate as SiteCandidateModel,
+} from '@adobe/spacecat-shared-data-access';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { Blocks, Message } from 'slack-block-builder';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
@@ -77,12 +79,12 @@ export default function approveSiteCandidate(lambdaContext) {
         }
         // make sure hlx config is set
         site.setHlxConfig(siteCandidate.getHlxConfig());
-        site.setDeliveryType(DELIVERY_TYPES.AEM_EDGE);
+        site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_EDGE);
         site = await site.save();
       }
 
       siteCandidate.setSiteId(site.getId());
-      siteCandidate.setStatus(SITE_CANDIDATE_STATUS.APPROVED);
+      siteCandidate.setStatus(SiteCandidateModel.SITE_CANDIDATE_STATUS.APPROVED);
       siteCandidate.setUpdatedBy(user.username);
 
       await siteCandidate.save();
@@ -90,7 +92,7 @@ export default function approveSiteCandidate(lambdaContext) {
       await KeyEvent.create({
         name: 'Go Live',
         siteId: site.getId(),
-        type: KEY_EVENT_TYPES.STATUS_CHANGE,
+        type: KeyEventModel.KEY_EVENT_TYPES.STATUS_CHANGE,
       });
 
       const reply = composeReply({

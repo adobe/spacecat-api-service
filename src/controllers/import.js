@@ -17,7 +17,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import psl from 'psl';
-import { ImportJobStatus } from '@adobe/spacecat-shared-data-access';
+import { ImportJob as ImportJobModel } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -382,7 +382,7 @@ function ImportController(context) {
         throw new ErrorWithStatusCode('Invalid request: Patch request supports the following paths: ["/status"]', STATUS_BAD_REQUEST);
       }
 
-      if (patch.value !== ImportJobStatus.STOPPED) {
+      if (patch.value !== ImportJobModel.ImportJobStatus.STOPPED) {
         throw new ErrorWithStatusCode('Invalid request: Patch request supports the following values: ["STOPPED"]', STATUS_BAD_REQUEST);
       }
     });

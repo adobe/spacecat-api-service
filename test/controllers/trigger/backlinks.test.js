@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import { AUDIT_TYPE_BROKEN_BACKLINKS } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
+import { Audit } from '@adobe/spacecat-shared-data-access';
 
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
@@ -40,19 +40,19 @@ describe('Backlinks trigger', () => {
     sites = [
       {
         getId: () => 'site1',
-        baseURL: 'http://site1.com',
+        getBaseURL: () => 'http://site1.com',
       },
       {
         getId: () => 'site2',
-        baseURL: 'http://site2.com',
+        getBaseURL: () => 'http://site2.com',
       },
     ];
     configuration.isHandlerEnabledForSite.withArgs(
-      AUDIT_TYPE_BROKEN_BACKLINKS,
+      Audit.AUDIT_TYPES.BROKEN_BACKLINKS,
       sites[0],
     ).returns(true);
     configuration.isHandlerEnabledForSite.withArgs(
-      AUDIT_TYPE_BROKEN_BACKLINKS,
+      Audit.AUDIT_TYPES.BROKEN_BACKLINKS,
       sites[1],
     ).returns(false);
     orgs = [

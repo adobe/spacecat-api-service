@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { SITE_CANDIDATE_STATUS } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
+import { SiteCandidate as SiteCandidateModel } from '@adobe/spacecat-shared-data-access';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 
 export default function ignoreSiteCandidate(lambdaContext) {
@@ -32,7 +32,7 @@ export default function ignoreSiteCandidate(lambdaContext) {
 
       const siteCandidate = await SiteCandidate.findByBaseURL(baseURL);
 
-      siteCandidate.setStatus(SITE_CANDIDATE_STATUS.IGNORED);
+      siteCandidate.setStatus(SiteCandidateModel.SITE_CANDIDATE_STATUS.IGNORED);
       siteCandidate.setUpdatedBy(user.username);
 
       await siteCandidate.save();

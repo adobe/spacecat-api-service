@@ -20,8 +20,6 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 
-import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
-
 import SlackController from '../../src/controllers/slack.js';
 
 use(sinonChai);
@@ -35,18 +33,12 @@ describe('SlackController', () => {
   let logStub;
   let processEventStub;
   let middlewares;
+  let mockOrgObject;
 
-  const mockOrgObject = {
-    id: 'mock-id',
-    name: 'Test org #1',
-    imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
-  };
   const mockConfig = {
-    config: {
-      slack: {
-        channel: 'mock-channel-id',
-      },
-    },
+    getSlackConfig: () => ({
+      channel: 'mock-channel-id',
+    }),
   };
 
   function createMockSlackApp(processEventHandler) {
@@ -80,6 +72,14 @@ describe('SlackController', () => {
       warn: sinon.stub(),
     };
     testPayload = { type: 'event_callback', event: {} };
+
+    mockOrgObject = {
+      getId: () => 'mock-id',
+      getName: () => 'Test org #1',
+      getImsOrgId: () => '1234567890ABCDEF12345678@AdobeOrg',
+      getConfig: () => mockConfig,
+    };
+
     context = {
       env: {
         SLACK_BOT_TOKEN: 'test-bot-token',
@@ -95,7 +95,7 @@ describe('SlackController', () => {
         findLatest: sinon.stub().resolves(mockConfig),
       },
       Organization: {
-        findByImsOrgId: sinon.stub().resolves(createOrganization(mockOrgObject)),
+        findByImsOrgId: sinon.stub().resolves(mockOrgObject),
       },
     };
     context.dataAccess = mockDataAccess;
@@ -303,6 +303,7 @@ describe('SlackController', () => {
     });
 
     it('should not find a Slack channel for the given organization', async () => {
+      mockOrgObject.getConfig = sinon.stub().returns({ getSlackConfig: () => ({}) });
       const response = await controller.inviteUserToChannel(context);
       expect(response.status).to.equal(404);
       expect(response.headers.plain()['x-error']).to.equal('Slack channel not found for this organization.');
@@ -316,7 +317,7 @@ describe('SlackController', () => {
         ...mockOrgObject,
         ...mockConfig,
       };
-      mockDataAccess.Organization.findByImsOrgId.resolves(createOrganization(orgWithSlackConfig));
+      mockDataAccess.Organization.findByImsOrgId.resolves(orgWithSlackConfig);
 
       const response = await controller.inviteUserToChannel(context);
       expect(response.status).to.equal(500);
@@ -328,7 +329,7 @@ describe('SlackController', () => {
         ...mockOrgObject,
         ...mockConfig,
       };
-      mockDataAccess.Organization.findByImsOrgId.resolves(createOrganization(orgWithSlackConfig));
+      mockDataAccess.Organization.findByImsOrgId.resolves(orgWithSlackConfig);
 
       let validatedSlackCall = false;
       context.slack.elevatedClient = {
