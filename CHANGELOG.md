@@ -1,3 +1,10 @@
+## [1.84.15](https://github.com/adobe/spacecat-api-service/compare/v1.84.14...v1.84.15) (2025-01-11)
+
+
+### Bug Fixes
+
+* **deps:** update to data-access-2.0.0 ([#685](https://github.com/adobe/spacecat-api-service/issues/685)) ([5de0050](https://github.com/adobe/spacecat-api-service/commit/5de0050f157ab0ad9884aefc4ca877f9fd18e91f))
+
 ## [1.84.14](https://github.com/adobe/spacecat-api-service/compare/v1.84.13...v1.84.14) (2025-01-10)
 
 
