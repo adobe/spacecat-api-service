@@ -11,14 +11,16 @@
  */
 import {
   badRequest,
+  createResponse,
+  noContent,
   notFound,
   ok,
-  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
   isArray,
   isObject,
+  isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
@@ -34,7 +36,13 @@ function SuggestionsController(dataAccess) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
-  const { Suggestion } = dataAccess;
+
+  const { Opportunity, Suggestion } = dataAccess;
+
+  if (!isObject(Opportunity)) {
+    throw new Error('Data access required');
+  }
+
   if (!isObject(Suggestion)) {
     throw new Error('Data access required');
   }
@@ -375,13 +383,51 @@ function SuggestionsController(dataAccess) {
     return createResponse(fullResponse, 207);
   };
 
+  const removeSuggestion = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+    const suggestionId = context.params?.suggestionId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+
+    const opportunity = await Opportunity.findById(siteId, opportunityId);
+
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+
+    if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
+      return notFound('Suggestion not found');
+    }
+
+    try {
+      await suggestion.remove();
+      return noContent();
+    } catch (e) {
+      return createResponse({ message: 'Error removing suggestion' }, 500);
+    }
+  };
+
   return {
-    getAllForOpportunity,
-    getByStatus,
-    getByID,
     createSuggestions,
+    getAllForOpportunity,
+    getByID,
+    getByStatus,
     patchSuggestion,
     patchSuggestionsStatus,
+    removeSuggestion,
   };
 }
 

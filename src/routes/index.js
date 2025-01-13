@@ -131,6 +131,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
+    'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,

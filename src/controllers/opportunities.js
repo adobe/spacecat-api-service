@@ -242,15 +242,7 @@ function OpportunitiesController(dataAccess) {
     }
 
     try {
-      // TODO: eventually suggestions will be removed by the data access layer
-      // and this code should be removed
-      const arraySuggestions = await opportunity.getSuggestions();
-      const removeSuggestionsPromises = arraySuggestions
-        .map(async (suggestion) => suggestion.remove());
-
-      await Promise.all(removeSuggestionsPromises);
-
-      await opportunity.remove();
+      await opportunity.remove(); // also removes suggestions associated with opportunity
       return noContent();
     } catch (e) {
       return handleDataAccessError(e, 'Error removing opportunity');
@@ -258,10 +250,10 @@ function OpportunitiesController(dataAccess) {
   };
 
   return {
-    getAllForSite,
-    getByStatus,
-    getByID,
     createOpportunity,
+    getAllForSite,
+    getByID,
+    getByStatus,
     patchOpportunity,
     removeOpportunity,
   };
