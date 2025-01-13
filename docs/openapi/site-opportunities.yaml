@@ -190,9 +190,7 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
   get:
-    summary: |
-      Not implemented yet.
-      
+    summary: |     
       Retrieve a list of all suggestions for a specific opportunity
     tags:
       - opportunity-suggestions
@@ -203,27 +201,6 @@ site-opportunity-suggestions:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionList'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404'
-      '429':
-        $ref: './responses.yaml#/429'
-      '500':
-        $ref: './responses.yaml#/500'
-      '503':
-        $ref: './responses.yaml#/503'
-    security:
-      - ims_key: [ ]
-
-  delete:
-    summary: |
-      Delete a suggestion
-    tags:
-      - opportunity-suggestions
-    responses:
-      '204':
-        description: Suggestion deleted
       '401':
         $ref: './responses.yaml#/401'
       '404':
@@ -393,6 +370,27 @@ site-opportunity-suggestion:
                 $ref: './examples.yaml#/broken-backlinks-suggestion'
       '400':
         $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+  delete:
+    summary: |
+      Delete a suggestion
+    tags:
+      - opportunity-suggestions
+    responses:
+      '204':
+        description: Suggestion deleted
       '401':
         $ref: './responses.yaml#/401'
       '404':
