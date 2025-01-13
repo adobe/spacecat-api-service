@@ -1,3 +1,10 @@
+# [1.85.0](https://github.com/adobe/spacecat-api-service/compare/v1.84.19...v1.85.0) (2025-01-13)
+
+
+### Features
+
+* add api endpoint to delete a suggestion ([#691](https://github.com/adobe/spacecat-api-service/issues/691)) ([2ca5553](https://github.com/adobe/spacecat-api-service/commit/2ca55537681e29537ff4192b528bc257c603df02))
+
 ## [1.84.19](https://github.com/adobe/spacecat-api-service/compare/v1.84.18...v1.84.19) (2025-01-13)
 
 
