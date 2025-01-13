@@ -26,6 +26,15 @@ use(sinonChai);
 describe('Suggestions Controller', () => {
   const sandbox = sinon.createSandbox();
 
+  const SUGGESTION_IDS = [
+    'a4a6055c-de4b-4552-bc0c-01fdb45b98d5',
+    '930f8070-508a-4d94-a46c-279d4de2adfb',
+  ];
+
+  const OPPORTUNITY_ID = 'a92e2a5e-7b3d-42f0-b3f0-6edd3746a932';
+
+  const SITE_ID = 'f964a7f8-5402-4b01-bd5b-1ab499bcf797';
+
   const mockSuggestionEntity = (suggData, removeStub) => ({
     getId() {
       return suggData.id;
@@ -90,7 +99,7 @@ describe('Suggestions Controller', () => {
     getOpportunity() {
       return {
         getSiteId() {
-          return 'site67890';
+          return SITE_ID;
         },
       };
     },
@@ -115,15 +124,6 @@ describe('Suggestions Controller', () => {
     'patchSuggestionsStatus',
     'removeSuggestion',
   ];
-
-  const SUGGESTION_IDS = [
-    'a4a6055c-de4b-4552-bc0c-01fdb45b98d5',
-    '930f8070-508a-4d94-a46c-279d4de2adfb',
-  ];
-
-  const OPPORTUNITY_ID = 'a92e2a5e-7b3d-42f0-b3f0-6edd3746a932';
-
-  const SITE_ID = 'f964a7f8-5402-4b01-bd5b-1ab499bcf797';
 
   let mockSuggestionDataAccess;
   let mockSuggestion;
@@ -229,7 +229,12 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity and a site', async () => {
-    const response = await suggestionsController.getAllForOpportunity({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID } });
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const suggestions = await response.json();
@@ -246,7 +251,9 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity returns bad request if no opportunity ID is passed', async () => {
-    const response = await suggestionsController.getAllForOpportunity({ params: { siteId: 'site67890' } });
+    const response = await suggestionsController.getAllForOpportunity({
+      params: { siteId: SITE_ID },
+    });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -254,7 +261,12 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity returns not found if passed site ID does not match opportunity site id', async () => {
-    const response = await suggestionsController.getAllForOpportunity({ params: { siteId: 'wrong-site-id', opportunityId: 'op12345' } });
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
+        opportunityId: OPPORTUNITY_ID,
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -262,7 +274,13 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity by status', async () => {
-    const response = await suggestionsController.getByStatus({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID, status: 'NEW' } });
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const suggestions = await response.json();
@@ -271,7 +289,12 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity by status returns bad request if no Site ID is passed', async () => {
-    const response = await suggestionsController.getByStatus({ params: { opportunityId: OPPORTUNITY_ID, status: 'NEW' } });
+    const response = await suggestionsController.getByStatus({
+      params: {
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -279,7 +302,9 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity by status returns bad request if no opportunity ID is passed', async () => {
-    const response = await suggestionsController.getByStatus({ params: { siteId: 'site67890', status: 'NEW' } });
+    const response = await suggestionsController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+    });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -287,7 +312,12 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity by status returns bad request if no status is passed', async () => {
-    const response = await suggestionsController.getByStatus({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID } });
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -295,7 +325,13 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity by status returns not found if site ID passed does not match opportunity site id', async () => {
-    const response = await suggestionsController.getByStatus({ params: { siteId: 'wrong-site-id', opportunityId: OPPORTUNITY_ID, status: 'NEW' } });
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -303,7 +339,13 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets suggestion by ID', async () => {
-    const response = await suggestionsController.getByID({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] } });
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const suggestion = await response.json();
@@ -324,7 +366,12 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets suggestion by ID returns bad request if no opportunity ID is passed', async () => {
-    const response = await suggestionsController.getByID({ params: { siteId: 'site67890', suggestionId: SUGGESTION_IDS[0] } });
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -332,7 +379,12 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets suggestion by ID returns bad request if no suggestion ID is passed', async () => {
-    const response = await suggestionsController.getByID({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID } });
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -341,7 +393,13 @@ describe('Suggestions Controller', () => {
 
   it('gets suggestion by ID returns not found if suggestion is not found', async () => {
     mockSuggestion.findById.resolves(null);
-    const response = await suggestionsController.getByID({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] } });
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -349,7 +407,13 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets suggestion by ID returns not found if suggestion is not associated with the opportunity', async () => {
-    const response = await suggestionsController.getByID({ params: { siteId: 'site67890', opportunityId: 'wrong-oportunity-id', suggestionId: SUGGESTION_IDS[0] } });
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
+        suggestionId: SUGGESTION_IDS[0],
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -357,7 +421,13 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets suggestion by ID returns not found if site id is not associated with the opportunity', async () => {
-    const response = await suggestionsController.getByID({ params: { siteId: 'wrong-site-id', opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] } });
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -365,7 +435,13 @@ describe('Suggestions Controller', () => {
   });
 
   it('creates 2 suggestions success', async () => {
-    const response = await suggestionsController.createSuggestions({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID }, data: suggs });
+    const response = await suggestionsController.createSuggestions({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: suggs,
+    });
     expect(response.status).to.equal(207);
     const createResponse = await response.json();
     expect(createResponse).to.have.property('suggestions');
@@ -387,7 +463,13 @@ describe('Suggestions Controller', () => {
   it('creates bulk suggestion returns 400 and 500 error', async () => {
     suggs[0].throwError = true;
     suggs[1].throwValidationError = true;
-    const response = await suggestionsController.createSuggestions({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID }, data: suggs });
+    const response = await suggestionsController.createSuggestions({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: suggs,
+    });
     expect(response.status).to.equal(207);
     const createResponse = await response.json();
     expect(createResponse).to.have.property('suggestions');
@@ -418,7 +500,10 @@ describe('Suggestions Controller', () => {
   });
 
   it('creates a suggestion returns bad request if no opportunity ID is passed', async () => {
-    const response = await suggestionsController.createSuggestions({ params: { siteId: 'site67890' }, data: suggs });
+    const response = await suggestionsController.createSuggestions({
+      params: { siteId: SITE_ID },
+      data: suggs,
+    });
     expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -426,7 +511,12 @@ describe('Suggestions Controller', () => {
   });
 
   it('creates a suggestion returns bad request if no data is passed', async () => {
-    const response = await suggestionsController.createSuggestions({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID } });
+    const response = await suggestionsController.createSuggestions({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+    });
     expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -434,7 +524,13 @@ describe('Suggestions Controller', () => {
   });
 
   it('creates a suggestion returns bad request if passed data is not an array', async () => {
-    const response = await suggestionsController.createSuggestions({ params: { siteId: 'site67890', opportunityId: OPPORTUNITY_ID }, data: 'not an array' });
+    const response = await suggestionsController.createSuggestions({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: 'not an array',
+    });
     expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -445,7 +541,7 @@ describe('Suggestions Controller', () => {
     const { rank, data, kpiDeltas } = suggs[1];
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
@@ -478,7 +574,7 @@ describe('Suggestions Controller', () => {
     const { rank, data, kpiDeltas } = suggs[1];
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
@@ -492,7 +588,7 @@ describe('Suggestions Controller', () => {
     const { rank, data, kpiDeltas } = suggs[1];
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: { rank, data, kpiDeltas },
@@ -507,7 +603,7 @@ describe('Suggestions Controller', () => {
     const { rank, data, kpiDeltas } = suggs[1];
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
@@ -522,8 +618,8 @@ describe('Suggestions Controller', () => {
     const { rank, data, kpiDeltas } = suggs[1];
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
-        opportunityId: 'wrong-opportunity-id',
+        siteId: SITE_ID,
+        opportunityId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
@@ -537,7 +633,7 @@ describe('Suggestions Controller', () => {
     const { rank, data, kpiDeltas } = suggs[1];
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'wrong-site-id',
+        siteId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
@@ -551,7 +647,7 @@ describe('Suggestions Controller', () => {
   it('patches a suggestion returns bad request if no data is passed', async () => {
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
@@ -564,7 +660,7 @@ describe('Suggestions Controller', () => {
   it('patches a suggestion returns bad request if passed data is not an object', async () => {
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
@@ -579,7 +675,7 @@ describe('Suggestions Controller', () => {
     const { data, kpiDeltas } = suggs[1];
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
@@ -595,7 +691,7 @@ describe('Suggestions Controller', () => {
     suggs[0].throwError = true;
     const response = await suggestionsController.patchSuggestion({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
@@ -609,7 +705,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status 2 successes', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED-updated' }],
@@ -648,7 +744,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status returns bad request if no opportunity ID is passed', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW-NEW' }, { id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }],
     });
@@ -660,7 +756,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status returns bad request if no data is passed', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
     });
@@ -672,7 +768,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status returns bad request if passed data is not an array', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: 'not an array',
@@ -685,7 +781,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status 1 fails passed data does not have id', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { status: 'NEW-APPROVED' }],
@@ -711,7 +807,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status fails if site ID does not match site id of the opportunity', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'wrong-site-id',
+        siteId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { id: SUGGESTION_IDS[0], status: 'NEW-APPROVED' }],
@@ -737,7 +833,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status 1 fails passed data does not have status', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { id: SUGGESTION_IDS[0] }],
@@ -763,7 +859,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status fails passed suggestions not found', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: 'wrong-sugg-id', status: 'NEW-NEW' }, { id: SUGGESTION_IDS[0], status: 'NEW-APPROVED' }],
@@ -789,7 +885,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status fails passed suggestions no status updates', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW' }, { id: SUGGESTION_IDS[1], status: 'APPROVED' }],
@@ -815,7 +911,7 @@ describe('Suggestions Controller', () => {
   it('bulk patches suggestion status fails if validation error in set status', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'throw-error' }, { id: SUGGESTION_IDS[1], status: 'throw-error' }],
@@ -843,7 +939,7 @@ describe('Suggestions Controller', () => {
     suggs[1].throwValidationError = true;
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
-        siteId: 'site67890',
+        siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED updated' }],

@@ -511,7 +511,7 @@ describe('ImportController tests', () => {
 
     it('should respond a job not found for non existent jobs', async () => {
       baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(null);
-      baseContext.params.jobId = 'does-not-exist';
+      baseContext.params.jobId = '3ec88567-c9f8-4fb1-8361-b53985a2898b'; // non existent job
 
       importController = ImportController(baseContext);
       const response = await importController.getImportJobProgress(baseContext);
@@ -561,7 +561,7 @@ describe('ImportController tests', () => {
     });
 
     it('should return 404 when the jobID cannot be found', async () => {
-      baseContext.params.jobId = 'unknown-job-id';
+      baseContext.params.jobId = '3ec88567-c9f8-4fb1-8361-b53985a2898b'; // non existent job
       const response = await importController.getImportJobStatus(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);

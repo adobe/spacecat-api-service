@@ -32,12 +32,15 @@ use(sinonChai);
 
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
+
+  const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
+
   const sites = [
     {
-      siteId: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge', config: Config({}),
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', config: Config({}),
     },
     {
-      siteId: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge', config: Config({}),
+      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', config: Config({}),
     },
   ].map((site) => new Site(
     {
@@ -135,7 +138,7 @@ describe('Sites Controller', () => {
           getFullAuditRef: sandbox.stub().returns('https://site1.com/lighthouse/20210101T000000.000Z/lhs-mobile.json'),
           getIsError: sandbox.stub().returns(false),
           getIsLive: sandbox.stub().returns(true),
-          getSiteId: sandbox.stub().returns('site1'),
+          getSiteId: sandbox.stub().returns(SITE_IDS[0]),
         }),
       },
       KeyEvent: {
@@ -203,7 +206,7 @@ describe('Sites Controller', () => {
     expect(response.status).to.equal(201);
 
     const site = await response.json();
-    expect(site).to.have.property('id', 'site1');
+    expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
@@ -211,7 +214,7 @@ describe('Sites Controller', () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
     const response = await sitesController.updateSite({
-      params: { siteId: 'site1' },
+      params: { siteId: SITE_IDS[0] },
       data: {
         organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
         isLive: false,
@@ -225,7 +228,7 @@ describe('Sites Controller', () => {
     expect(response.status).to.equal(200);
 
     const updatedSite = await response.json();
-    expect(updatedSite).to.have.property('id', 'site1');
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
     expect(updatedSite).to.have.property('baseURL', 'https://site1.com');
     expect(updatedSite).to.have.property('deliveryType', 'other');
     expect(updatedSite).to.have.property('gitHubURL', 'https://github.com/blah/bluh');
@@ -247,7 +250,7 @@ describe('Sites Controller', () => {
     site.save = sandbox.spy(site.save);
     mockDataAccess.Site.findById.resolves(null);
 
-    const response = await sitesController.updateSite({ params: { siteId: 'site1' } });
+    const response = await sitesController.updateSite({ params: { siteId: SITE_IDS[0] } });
     const error = await response.json();
 
     expect(site.save).to.have.not.been.called;
@@ -258,7 +261,7 @@ describe('Sites Controller', () => {
   it('returns bad request when updating a site without payload', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
-    const response = await sitesController.updateSite({ params: { siteId: 'site1' } });
+    const response = await sitesController.updateSite({ params: { siteId: SITE_IDS[0] } });
     const error = await response.json();
 
     expect(site.save).to.have.not.been.called;
@@ -269,7 +272,10 @@ describe('Sites Controller', () => {
   it('returns bad request when updating a site without modifications', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
-    const response = await sitesController.updateSite({ params: { siteId: 'site1' }, data: {} });
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {},
+    });
     const error = await response.json();
 
     expect(site.save).to.have.not.been.called;
@@ -280,7 +286,7 @@ describe('Sites Controller', () => {
   it('removes a site', async () => {
     const site = sites[0];
     site.remove = sandbox.stub();
-    const response = await sitesController.removeSite({ params: { siteId: 'site1' } });
+    const response = await sitesController.removeSite({ params: { siteId: SITE_IDS[0] } });
 
     expect(site.remove).to.have.been.calledOnce;
     expect(response.status).to.equal(204);
@@ -302,7 +308,7 @@ describe('Sites Controller', () => {
     site.remove = sandbox.stub();
     mockDataAccess.Site.findById.resolves(null);
 
-    const response = await sitesController.removeSite({ params: { siteId: 'site1' } });
+    const response = await sitesController.removeSite({ params: { siteId: SITE_IDS[0] } });
     const error = await response.json();
 
     expect(site.remove).to.have.not.been.called;
@@ -318,9 +324,9 @@ describe('Sites Controller', () => {
 
     expect(mockDataAccess.Site.all).to.have.been.calledOnce;
     expect(resultSites).to.be.an('array').with.lengthOf(2);
-    expect(resultSites[0]).to.have.property('id', 'site1');
+    expect(resultSites[0]).to.have.property('id', SITE_IDS[0]);
     expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
-    expect(resultSites[1]).to.have.property('id', 'site2');
+    expect(resultSites[1]).to.have.property('id', SITE_IDS[1]);
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
   });
 
@@ -332,7 +338,7 @@ describe('Sites Controller', () => {
 
     expect(mockDataAccess.Site.allByDeliveryType).to.have.been.calledOnce;
     expect(resultSites).to.be.an('array').with.lengthOf(2);
-    expect(resultSites[0]).to.have.property('id', 'site1');
+    expect(resultSites[0]).to.have.property('id', SITE_IDS[0]);
     expect(resultSites[0]).to.have.property('deliveryType', 'other');
   });
 
@@ -344,7 +350,7 @@ describe('Sites Controller', () => {
       getFullAuditRef: () => 'https://site1.com/lighthouse/20210101T000000.000Z/lhs-mobile.json',
       getIsError: () => false,
       getIsLive: () => true,
-      getSiteId: () => 'site1',
+      getSiteId: () => SITE_IDS[0],
     };
     sites.forEach((site) => {
       // eslint-disable-next-line no-param-reassign
@@ -355,9 +361,9 @@ describe('Sites Controller', () => {
 
     expect(mockDataAccess.Site.allWithLatestAudit).to.have.been.calledOnceWith('lhs-mobile', 'desc');
     expect(resultSites).to.be.an('array').with.lengthOf(2);
-    expect(resultSites[0]).to.have.property('id', 'site1');
+    expect(resultSites[0]).to.have.property('id', SITE_IDS[0]);
     expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
-    expect(resultSites[1]).to.have.property('id', 'site2');
+    expect(resultSites[1]).to.have.property('id', SITE_IDS[1]);
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
   });
 
@@ -404,13 +410,13 @@ describe('Sites Controller', () => {
   });
 
   it('gets a site by ID', async () => {
-    const result = await sitesController.getByID({ params: { siteId: 'site1' } });
+    const result = await sitesController.getByID({ params: { siteId: SITE_IDS[0] } });
     const site = await result.json();
 
     expect(mockDataAccess.Site.findById).to.have.been.calledOnce;
 
     expect(site).to.be.an('object');
-    expect(site).to.have.property('id', 'site1');
+    expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
@@ -421,7 +427,7 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
 
     expect(site).to.be.an('object');
-    expect(site).to.have.property('id', 'site1');
+    expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
@@ -453,7 +459,11 @@ describe('Sites Controller', () => {
         getStoredMetrics,
       },
     });
-    const result = await (await sitesControllerMock.default(mockDataAccess, context.log).getLatestSiteMetrics({ ...context, params: { siteId: 'site1' } }));
+    const result = await (
+      await sitesControllerMock
+        .default(mockDataAccess, context.log)
+        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
+    );
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
@@ -484,7 +494,11 @@ describe('Sites Controller', () => {
         getStoredMetrics,
       },
     });
-    const result = await (await sitesControllerMock.default(mockDataAccess, context.log).getLatestSiteMetrics({ ...context, params: { siteId: 'site1' } }));
+    const result = await (
+      await sitesControllerMock
+        .default(mockDataAccess, context.log)
+        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
+    );
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
@@ -509,7 +523,7 @@ describe('Sites Controller', () => {
     mockDataAccess.Site.findById.resolves(null);
 
     const response = await sitesController.getLatestSiteMetrics({
-      params: { siteId: 'site1' },
+      params: { siteId: SITE_IDS[0] },
     });
 
     const error = await response.json();
@@ -521,7 +535,7 @@ describe('Sites Controller', () => {
   it('gets specific audit for a site', async () => {
     const result = await sitesController.getAuditForSite({
       params: {
-        siteId: 'site1',
+        siteId: SITE_IDS[0],
         auditType: 'lhs-mobile',
         auditedAt: '2021-01-01T00:00:00.000Z',
       },
@@ -531,7 +545,7 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Audit.findBySiteIdAndAuditTypeAndAuditedAt).to.have.been.calledOnce;
 
     expect(audit).to.be.an('object');
-    expect(audit).to.have.property('siteId', 'site1');
+    expect(audit).to.have.property('siteId', SITE_IDS[0]);
     expect(audit).to.have.property('auditType', 'lhs-mobile');
     expect(audit).to.have.property('auditedAt', '2021-01-01T00:00:00.000Z');
     expect(audit).to.have.property('fullAuditRef', 'https://site1.com/lighthouse/20210101T000000.000Z/lhs-mobile.json');
@@ -554,7 +568,7 @@ describe('Sites Controller', () => {
   it('returns bad request if audit type is not provided when getting audit for site', async () => {
     const result = await sitesController.getAuditForSite({
       params: {
-        siteId: 'site1',
+        siteId: SITE_IDS[0],
         auditedAt: '2021-01-01T00:00:00.000Z',
       },
     });
@@ -567,7 +581,7 @@ describe('Sites Controller', () => {
   it('returns bad request if audit date is not provided when getting audit for site', async () => {
     const result = await sitesController.getAuditForSite({
       params: {
-        siteId: 'site1',
+        siteId: SITE_IDS[0],
         auditType: 'lhs-mobile',
       },
     });
@@ -582,7 +596,7 @@ describe('Sites Controller', () => {
 
     const result = await sitesController.getAuditForSite({
       params: {
-        siteId: 'site1',
+        siteId: SITE_IDS[0],
         auditType: 'lhs-mobile',
         auditedAt: '2021-01-01T00:00:00.000Z',
       },
@@ -596,7 +610,7 @@ describe('Sites Controller', () => {
   it('returns not found when site is not found by id', async () => {
     mockDataAccess.Site.findById.resolves(null);
 
-    const result = await sitesController.getByID({ params: { siteId: 'site1' } });
+    const result = await sitesController.getByID({ params: { siteId: SITE_IDS[0] } });
     const error = await result.json();
 
     expect(result.status).to.equal(404);
