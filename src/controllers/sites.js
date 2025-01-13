@@ -405,12 +405,18 @@ function SitesController(dataAccess, log, env) {
       domainkey,
       interval: 2 * MONTH_DAYS,
     });
-    const organicTrafficMetric = await getStoredMetrics(
+    const organicTraffic = await getStoredMetrics(
       { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
       context,
     );
-    const cpc = organicTrafficMetric[organicTrafficMetric.length - 1].cost
-        / organicTrafficMetric[organicTrafficMetric.length - 1].value;
+
+    let cpc = 0;
+
+    if (organicTraffic.length > 0) {
+      const metric = organicTraffic[organicTraffic.length - 1];
+      cpc = metric.cost / metric.value;
+    }
+
     const previousRumMetrics = {};
     previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
         - currentRumMetrics.totalPageViews;
