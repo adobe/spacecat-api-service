@@ -1,3 +1,10 @@
+## [1.85.1](https://github.com/adobe/spacecat-api-service/compare/v1.85.0...v1.85.1) (2025-01-13)
+
+
+### Bug Fixes
+
+* cpc 0 if no stored metrics ([#692](https://github.com/adobe/spacecat-api-service/issues/692)) ([562209c](https://github.com/adobe/spacecat-api-service/commit/562209c166236c6276b0238695470dd028bdf534))
+
 # [1.85.0](https://github.com/adobe/spacecat-api-service/compare/v1.84.19...v1.85.0) (2025-01-13)
 
 
