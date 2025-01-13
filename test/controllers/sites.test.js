@@ -463,6 +463,37 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('gets the latest site metrics with no stored metrics', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 0.20,
+      totalClicks: 4901,
+      totalPageViews: 24173,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 0.21,
+      totalClicks: 9723,
+      totalPageViews: 46944,
+    });
+    const storedMetrics = [];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+      },
+    });
+    const result = await (await sitesControllerMock.default(mockDataAccess, context.log).getLatestSiteMetrics({ ...context, params: { siteId: 'site1' } }));
+    const metrics = await result.json();
+
+    expect(metrics).to.deep.equal({
+      ctrChange: -5.553712152633755,
+      pageViewsChange: 6.156954020464625,
+      projectedTrafficValue: 0,
+    });
+  });
+
   it('returns bad request if site ID is not provided', async () => {
     const response = await sitesController.getLatestSiteMetrics({
       params: {},
