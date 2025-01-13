@@ -1,3 +1,10 @@
+## [1.85.2](https://github.com/adobe/spacecat-api-service/compare/v1.85.1...v1.85.2) (2025-01-13)
+
+
+### Bug Fixes
+
+* prevent error on invalid uuid ([#693](https://github.com/adobe/spacecat-api-service/issues/693)) ([f07690a](https://github.com/adobe/spacecat-api-service/commit/f07690ab04171c42543b2e0d578b807040a72ce9))
+
 ## [1.85.1](https://github.com/adobe/spacecat-api-service/compare/v1.85.0...v1.85.1) (2025-01-13)
 
 
