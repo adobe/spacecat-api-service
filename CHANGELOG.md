@@ -1,3 +1,10 @@
+## [1.84.19](https://github.com/adobe/spacecat-api-service/compare/v1.84.18...v1.84.19) (2025-01-13)
+
+
+### Bug Fixes
+
+* config dto ([#689](https://github.com/adobe/spacecat-api-service/issues/689)) ([aed0428](https://github.com/adobe/spacecat-api-service/commit/aed0428da88972534fa6ab32dba9cce23cd51677))
+
 ## [1.84.18](https://github.com/adobe/spacecat-api-service/compare/v1.84.17...v1.84.18) (2025-01-12)
 
 
