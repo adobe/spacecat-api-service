@@ -10,8 +10,41 @@
  * governing permissions and limitations under the License.
  */
 
-export default function approveOrg() {
-  return async ({ ack }) => {
-    await ack();
+import { Blocks, Message } from 'slack-block-builder';
+
+export default function approveOrg(lambdaContext) {
+  const { log } = lambdaContext;
+
+  return async ({ ack, body, respond }) => {
+    try {
+      const { message = {}, user } = body;
+      const { blocks } = message;
+
+      log.info(JSON.stringify(body));
+
+      await ack(); // slack expects acknowledgement within 3s
+
+      const replyText = Message()
+        .blocks(
+          Blocks.Section()
+            .blockId(blocks[0]?.block_id)
+            .text(blocks[0]?.text?.text),
+          Blocks.Section().text(`Approved by @${user.username} :checked:`),
+        )
+        .buildToObject();
+
+      const reply = {
+        ...replyText,
+        text: blocks[0]?.text?.text,
+        replace_original: true,
+      };
+
+      log.info(`Responding site candidate ignore with: ${JSON.stringify(reply)}`);
+
+      await respond(reply);
+    } catch (e) {
+      log.error('Error occurred while acknowledging site candidate ignore', e);
+      throw e;
+    }
   };
 }
