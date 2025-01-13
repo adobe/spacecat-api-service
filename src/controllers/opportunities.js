@@ -21,7 +21,7 @@ import {
   hasText,
   isObject,
   isNonEmptyObject,
-  arrayEquals,
+  arrayEquals, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
@@ -67,7 +67,7 @@ function OpportunitiesController(dataAccess) {
   const getAllForSite = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -86,7 +86,7 @@ function OpportunitiesController(dataAccess) {
     const siteId = context.params?.siteId;
     const status = context.params?.status;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
     if (!hasText(status)) {
@@ -108,11 +108,11 @@ function OpportunitiesController(dataAccess) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(opptyId)) {
+    if (!isValidUUID(opptyId)) {
       return badRequest('Opportunity ID required');
     }
 
@@ -130,7 +130,7 @@ function OpportunitiesController(dataAccess) {
    */
   const createOpportunity = async (context) => {
     const siteId = context.params?.siteId;
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
     if (!isNonEmptyObject(context.data)) {
@@ -155,10 +155,10 @@ function OpportunitiesController(dataAccess) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     // validate parameters
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
-    if (!hasText(opportunityId)) {
+    if (!isValidUUID(opportunityId)) {
       return badRequest('Opportunity ID required');
     }
 
@@ -228,11 +228,11 @@ function OpportunitiesController(dataAccess) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(opportunityId)) {
+    if (!isValidUUID(opportunityId)) {
       return badRequest('Opportunity ID required');
     }
 

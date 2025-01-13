@@ -24,7 +24,7 @@ import { ExperimentDto } from '../../src/dto/experiment.js';
 
 use(chaiAsPromised);
 
-const siteId = 'site1';
+const siteId = '3f1c3ab1-9ad0-4231-ac87-8159acf52cb6';
 
 describe('Experiments Controller', () => {
   const sandbox = sinon.createSandbox();

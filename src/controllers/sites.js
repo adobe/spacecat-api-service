@@ -22,7 +22,7 @@ import {
   hasText,
   isBoolean,
   isObject,
-  getStoredMetrics, getRUMDomainKey,
+  getStoredMetrics, getRUMDomainKey, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
@@ -142,7 +142,7 @@ function SitesController(dataAccess, log, env) {
     const auditType = context.params?.auditType;
     const auditedAt = context.params?.auditedAt;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -171,7 +171,7 @@ function SitesController(dataAccess, log, env) {
   const getByID = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -215,7 +215,7 @@ function SitesController(dataAccess, log, env) {
   const removeSite = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -238,7 +238,7 @@ function SitesController(dataAccess, log, env) {
   const updateSite = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -316,7 +316,7 @@ function SitesController(dataAccess, log, env) {
   const getKeyEventsBySiteID = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -358,7 +358,7 @@ function SitesController(dataAccess, log, env) {
     const metric = context.params?.metric;
     const source = context.params?.source;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -383,7 +383,7 @@ function SitesController(dataAccess, log, env) {
   const getLatestSiteMetrics = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 

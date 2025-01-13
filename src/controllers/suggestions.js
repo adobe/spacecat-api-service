@@ -56,11 +56,11 @@ function SuggestionsController(dataAccess) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(opptyId)) {
+    if (!isValidUUID(opptyId)) {
       return badRequest('Opportunity ID required');
     }
 
@@ -85,10 +85,10 @@ function SuggestionsController(dataAccess) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
-    if (!hasText(opptyId)) {
+    if (!isValidUUID(opptyId)) {
       return badRequest('Opportunity ID required');
     }
     if (!hasText(status)) {
@@ -117,15 +117,15 @@ function SuggestionsController(dataAccess) {
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(opptyId)) {
+    if (!isValidUUID(opptyId)) {
       return badRequest('Opportunity ID required');
     }
 
-    if (!hasText(suggestionId)) {
+    if (!isValidUUID(suggestionId)) {
       return badRequest('Suggestion ID required');
     }
 
@@ -149,11 +149,11 @@ function SuggestionsController(dataAccess) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId || undefined;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(opptyId)) {
+    if (!isValidUUID(opptyId)) {
       return badRequest('Opportunity ID required');
     }
 
@@ -211,15 +211,15 @@ function SuggestionsController(dataAccess) {
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(opportunityId)) {
+    if (!isValidUUID(opportunityId)) {
       return badRequest('Opportunity ID required');
     }
 
-    if (!hasText(suggestionId)) {
+    if (!isValidUUID(suggestionId)) {
       return badRequest('Suggestion ID required');
     }
 
@@ -277,11 +277,11 @@ function SuggestionsController(dataAccess) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(opportunityId)) {
+    if (!isValidUUID(opportunityId)) {
       return badRequest('Opportunity ID required');
     }
 

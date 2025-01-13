@@ -30,6 +30,8 @@ use(sinonChai);
 describe('Audits Controller', () => {
   const sandbox = sinon.createSandbox();
 
+  const SITE_ID = 'ad945937-b07b-4230-ab3f-729a7fd9375a';
+
   const auditFunctions = [
     'getAllForSite',
     'getAllLatest',
@@ -40,7 +42,7 @@ describe('Audits Controller', () => {
 
   const mockRawAudits = [
     {
-      siteId: 'site1',
+      siteId: SITE_ID,
       auditType: 'lhs-mobile',
       auditedAt: '2022-04-10T00:00:00.000Z',
       isError: false,
@@ -56,7 +58,7 @@ describe('Audits Controller', () => {
       },
     },
     {
-      siteId: 'site1',
+      siteId: SITE_ID,
       auditType: 'lhs-mobile',
       auditedAt: '2021-01-01T00:00:00.000Z',
       isError: false,
@@ -72,7 +74,7 @@ describe('Audits Controller', () => {
       },
     },
     {
-      siteId: 'site1',
+      siteId: SITE_ID,
       auditType: 'cwv',
       auditedAt: '2021-03-12T01:00:00.000Z',
       isError: false,
@@ -175,7 +177,7 @@ describe('Audits Controller', () => {
 
   describe('getAllForSite', () => {
     it('retrieves all audits for a site', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
 
       mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
 
@@ -187,7 +189,7 @@ describe('Audits Controller', () => {
     });
 
     it('retrieves all audits of a type for a site', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'lhs-mobile';
 
       mockDataAccess.Audit.allBySiteIdAndAuditType.resolves([mockAudits[0]]);
@@ -200,7 +202,7 @@ describe('Audits Controller', () => {
     });
 
     it('retrieves all audits ascending for a site', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
 
       mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
 
@@ -256,7 +258,7 @@ describe('Audits Controller', () => {
 
   describe('getAllLatestForSite', () => {
     it('retrieves all latest audits for a site', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
 
       mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
 
@@ -276,7 +278,7 @@ describe('Audits Controller', () => {
 
   describe('getLatestForSite', () => {
     it('retrieves the latest audit for a site', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'security';
       const expectedAudit = AuditDto.toJSON(mockLatestAudits[0]);
 
@@ -297,7 +299,7 @@ describe('Audits Controller', () => {
     });
 
     it('handles missing audit type', async () => {
-      const result = await auditsController.getLatestForSite({ params: { siteId: 'site1' } });
+      const result = await auditsController.getLatestForSite({ params: { siteId: SITE_ID } });
 
       expect(result.status).to.equal(400);
     });
@@ -305,7 +307,7 @@ describe('Audits Controller', () => {
     it('handles audit not found', async () => {
       mockDataAccess.getLatestAuditForSite.resolves(null);
 
-      const result = await auditsController.getLatestForSite({ params: { siteId: 'site1', auditType: 'lhs-mobile' } });
+      const result = await auditsController.getLatestForSite({ params: { siteId: SITE_ID, auditType: 'lhs-mobile' } });
 
       expect(result.status).to.equal(404);
     });
@@ -333,12 +335,12 @@ describe('Audits Controller', () => {
     });
 
     it('returns bad request if audit type is missing', async () => {
-      const result = await auditsController.patchAuditForSite({ params: { siteId: 'site1' } });
+      const result = await auditsController.patchAuditForSite({ params: { siteId: SITE_ID } });
       expect(result.status).to.equal(400);
     });
 
     it('returns bad request if no updates are provided', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
 
       const context = {
@@ -354,7 +356,7 @@ describe('Audits Controller', () => {
     });
 
     it('returns bad request if excludedURLs is not an array', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = 'http://valid-url.com';
 
@@ -371,7 +373,7 @@ describe('Audits Controller', () => {
     });
 
     it('returns bad request if excludedURLs contains invalid URLs', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = ['invalid-url', 'http://valid-url.com'];
 
@@ -388,7 +390,7 @@ describe('Audits Controller', () => {
     });
 
     it('updates excluded URLs when excludedURLs is empty', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = [];
 
@@ -420,7 +422,7 @@ describe('Audits Controller', () => {
     });
 
     it('updates excluded URLs when excludedURLs is undefined', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = ['https://foo.com', 'https://bar.com'];
 
@@ -453,7 +455,7 @@ describe('Audits Controller', () => {
     });
 
     it('updates excluded URLs when excludedURLs has items', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = ['https://example.com/page1', 'https://example.com/page2'];
 
@@ -491,7 +493,7 @@ describe('Audits Controller', () => {
     });
 
     it('handles duplicates in excludedURLs', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = ['https://example.com/page1', 'https://example.com/page1'];
 
@@ -527,7 +529,7 @@ describe('Audits Controller', () => {
     });
 
     it('returns not found if site is not found', async () => {
-      const siteId = 'nonexistent-site';
+      const siteId = 'e46adb57-9dde-4e43-9aa8-598c52347c41'; // Non-existent site ID
       const auditType = 'broken-backlinks';
 
       const context = {
@@ -545,7 +547,7 @@ describe('Audits Controller', () => {
     });
 
     it('returns not found if audit type is not found', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'nonexistent-audit-type';
 
       const context = {
@@ -565,7 +567,7 @@ describe('Audits Controller', () => {
     });
 
     it('merges manual overwrites correctly', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -605,7 +607,7 @@ describe('Audits Controller', () => {
     });
 
     it('does not merge manual overwrites if manualOverwrites is empty', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [];
 
@@ -640,7 +642,7 @@ describe('Audits Controller', () => {
     });
 
     it('validates URLs in manual overwrites', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -677,7 +679,7 @@ describe('Audits Controller', () => {
     });
 
     it('validates manual overwrites as objects', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -714,7 +716,7 @@ describe('Audits Controller', () => {
     });
 
     it('returns badRequest when manualOverwrites contains an empty object', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -750,7 +752,7 @@ describe('Audits Controller', () => {
     });
 
     it('returns badRequest when manualOverwrites contains an object with missing brokenTargetURL or targetURL', async () => {
-      const siteId = 'site1';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -787,7 +789,7 @@ describe('Audits Controller', () => {
     });
 
     describe('process groupedURLs parameter', () => {
-      const siteId = 'site0';
+      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
 
       let siteConfig;

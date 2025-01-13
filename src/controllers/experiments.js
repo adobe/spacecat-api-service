@@ -14,7 +14,7 @@ import {
   badRequest,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import { isObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ExperimentDto } from '../dto/experiment.js';
 
@@ -40,7 +40,7 @@ function ExperimentsController(dataAccess) {
   const getExperiments = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
