@@ -90,14 +90,15 @@ function RunScrapeCommand(context) {
       for (let i = 0; i < urls.length; i += 50) {
         batches.push(urls.slice(i, i + 50));
       }
+      say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
       const promises = batches.map((urlsBatch) => triggerScraperRun(
         `${site.getId()}`,
         urlsBatch,
         slackContext,
         context,
       ));
-      log.info(`Triggered scrape runs for site ${baseURL}`);
-      await Promise.all(promises).then(() => say(`:adobe-run: Triggered scrape run for site \`${baseURL}\``));
+      await Promise.all(promises);
+      log.info(`Completed triggering scrape runs for site ${baseURL}`);
       await say(`:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` — Total URLs: ${urls.length}`);
     } catch (error) {
       log.error(error);
