@@ -16,10 +16,11 @@ import {
   SiteCandidate as SiteCandidateModel,
 } from '@adobe/spacecat-shared-data-access';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
-import { Blocks, Message } from 'slack-block-builder';
+import { Blocks, Elements, Message } from 'slack-block-builder';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
+import OrgDetectorAgent from '../../../agents/org-detector/agent.js';
 
 async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
   const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
@@ -56,8 +57,7 @@ export default function approveSiteCandidate(lambdaContext) {
 
       log.info(`Creating a new site: ${baseURL}`);
 
-      const orgId = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
-        && friendsFamilyOrgId;
+      const isFnF = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY;
 
       let site = await Site.findByBaseURL(siteCandidate.getBaseURL());
 
@@ -67,7 +67,7 @@ export default function approveSiteCandidate(lambdaContext) {
           baseURL: siteCandidate.getBaseURL(),
           hlxConfig: siteCandidate.getHlxConfig(),
           isLive: true,
-          ...(orgId
+          ...(isFnF
             ? { organizationId: friendsFamilyOrgId }
             : { organizationId: defaultOrgId }),
         });
@@ -98,7 +98,7 @@ export default function approveSiteCandidate(lambdaContext) {
       const reply = composeReply({
         blocks,
         username: user.username,
-        orgId,
+        isFnF,
         approved: true,
       });
 
@@ -106,14 +106,52 @@ export default function approveSiteCandidate(lambdaContext) {
 
       await respond(reply);
 
-      const discoveryMsg = await announceSiteDiscovery(
+      const { channelId, threadId } = await announceSiteDiscovery(
         lambdaContext,
         baseURL,
         siteCandidate.getSource(),
         siteCandidate.getHlxConfig(),
       );
 
-      log.info(`Discovery message: ${JSON.stringify(discoveryMsg)}`);
+      if (!isFnF) {
+        const orgDetectorAgent = OrgDetectorAgent.fromContext(lambdaContext);
+        const org = await orgDetectorAgent.detect(
+          siteCandidate.getBaseURL().replace('https://', ''),
+          siteCandidate.getHlxConfig()?.rso?.owner,
+        );
+
+        log.info(`Detected org: ${JSON.stringify(org)}`);
+
+        if (org) {
+          const { name, imsOrgId } = org;
+
+          const orgMsg = Message()
+            .channel(channelId)
+            .threadTs(threadId)
+            .blocks(
+              Blocks.Section()
+                .text(`:agent_smith: Detected IMS organization \`${name}\` with IMS org ID \`${imsOrgId}\` for *<${baseURL}|${baseURL}>*. Would you approve? @${user.username}`),
+              Blocks.Actions()
+                .elements(
+                  Elements.Button()
+                    .text('Yes')
+                    .actionId('approveOrg')
+                    .primary(),
+                  Elements.Button()
+                    .text('No')
+                    .actionId('rejectOrg')
+                    .danger(),
+                ),
+            )
+            .buildToObject();
+
+          const slackClient = BaseSlackClient.createFrom(
+            lambdaContext,
+            SLACK_TARGETS.WORKSPACE_INTERNAL,
+          );
+          await slackClient.postMessage(orgMsg);
+        }
+      }
     } catch (e) {
       log.error('Error occurred while acknowledging site candidate approval', e);
       throw e;

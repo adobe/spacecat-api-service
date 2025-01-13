@@ -45,7 +45,7 @@ describe('approveSiteCandidate', () => {
     clock = sinon.useFakeTimers();
 
     slackClient = {
-      postMessage: sinon.mock(),
+      postMessage: sinon.mock().resolves({ channelId: 'channel-id', threadId: 'thread-ts' }),
     };
 
     context = {
@@ -71,6 +71,9 @@ describe('approveSiteCandidate', () => {
       },
       slackClients: {
         WORKSPACE_INTERNAL_STANDARD: slackClient,
+      },
+      orgDetectorAgent: {
+        detect: sinon.stub(),
       },
     };
 

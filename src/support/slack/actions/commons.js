@@ -11,7 +11,6 @@
  */
 
 import { Blocks, Message } from 'slack-block-builder';
-import { hasText } from '@adobe/spacecat-shared-utils';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 
 export function extractURLFromSlackMessage(inputString) {
@@ -26,12 +25,12 @@ export function composeReply(opts) {
   const {
     blocks,
     username,
-    orgId,
+    isFnF,
     approved,
   } = opts;
 
   const reaction = approved
-    ? `Added by @${username} \`${hasText(orgId) ? BUTTON_LABELS.APPROVE_FRIENDS_FAMILY : BUTTON_LABELS.APPROVE_CUSTOMER}\` :checked:`
+    ? `Added by @${username} \`${isFnF ? BUTTON_LABELS.APPROVE_FRIENDS_FAMILY : BUTTON_LABELS.APPROVE_CUSTOMER}\` :checked:`
     : `Ignored by @${username} :cross-x:`;
 
   const message = Message()
