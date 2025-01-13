@@ -101,9 +101,9 @@ const githubOrgNameRetrieverTool = (ignoredGithubOrgs, log) => tool(
  * Tool #4: Main Content Retriever
  * Retrieves the text content found in the `<main>` element of a webpage given its URL
  */
-const mainContentRetrieverTool = (apiKey, apiUrl) => tool(
+const mainContentRetrieverTool = (apiKey, apiUrl, log) => tool(
   async ({ url }) => {
-    const mainContent = await retrieveMainContent(url, apiKey, apiUrl);
+    const mainContent = await retrieveMainContent(url, apiKey, apiUrl, log);
     return mainContent || '';
   },
   {
@@ -120,9 +120,9 @@ const mainContentRetrieverTool = (apiKey, apiUrl) => tool(
  * Tool #5: Link extractor
  * Extracts all links from raw HTML and converts them to absolute URLs
  */
-const linkExtractorTool = tool(
+const linkExtractorTool = (log) => tool(
   async ({ html, domain }) => {
-    const links = await extractLinks(html, domain);
+    const links = await extractLinks(html, domain, log);
     // Return as a JSON array string
     return JSON.stringify(links);
   },
@@ -183,11 +183,11 @@ export default class OrgDetectorAgent {
 
     // gather the tools
     const tools = [
-      footerRetrieverTool(spacecatApiKey, spacecatApiBaseUrl),
+      footerRetrieverTool(spacecatApiKey, spacecatApiBaseUrl, this.log),
       companyMatcherTool(dataAccess),
-      githubOrgNameRetrieverTool(ignoredGithubOrgs),
-      mainContentRetrieverTool(spacecatApiKey, spacecatApiBaseUrl),
-      linkExtractorTool,
+      githubOrgNameRetrieverTool(ignoredGithubOrgs, this.log),
+      mainContentRetrieverTool(spacecatApiKey, spacecatApiBaseUrl, this.log),
+      linkExtractorTool(this.log),
     ];
     const toolsNode = new ToolNode(tools);
 
@@ -243,7 +243,7 @@ export default class OrgDetectorAgent {
       return 'tools';
     }
 
-    this.log('Agent reached to conclusion. Finishing the process');
+    this.log.info('Agent reached to conclusion. Finishing the process');
     return END;
   }
 
