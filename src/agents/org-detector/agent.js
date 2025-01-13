@@ -348,7 +348,7 @@ Output absolutely no text except for that final JSON.
     try {
       const parsed = JSON.parse(finalText);
       if (isObject(parsed?.matchedCompany)) {
-        return parsed;
+        return parsed.matchedCompany;
       } else {
         return noFoundFallback;
       }

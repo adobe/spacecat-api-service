@@ -44,8 +44,10 @@ export default function approveSiteCandidate(lambdaContext) {
 
   return async ({ ack, body, respond }) => {
     try {
-      const { actions = [], message = {}, user } = body;
-      const { blocks } = message;
+      const {
+        actions = [], channel, message = {}, user,
+      } = body;
+      const { blocks, ts: threadTs } = message;
 
       log.info(JSON.stringify(body));
 
@@ -106,7 +108,7 @@ export default function approveSiteCandidate(lambdaContext) {
 
       await respond(reply);
 
-      const { channelId, threadId } = await announceSiteDiscovery(
+      await announceSiteDiscovery(
         lambdaContext,
         baseURL,
         siteCandidate.getSource(),
@@ -126,8 +128,8 @@ export default function approveSiteCandidate(lambdaContext) {
           const { name, imsOrgId } = org;
 
           const orgMsg = Message()
-            .channel(channelId)
-            .threadTs(threadId)
+            .channel(channel.id)
+            .threadTs(threadTs)
             .blocks(
               Blocks.Section()
                 .text(`:agent_smith: Detected IMS organization \`${name}\` with IMS org ID \`${imsOrgId}\` for *<${baseURL}|${baseURL}>*. Would you approve? @${user.username}`),
