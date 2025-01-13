@@ -12,17 +12,18 @@
 
 /* eslint-env mocha */
 
-import { use, expect } from 'chai';
-import chaiAsPromised from 'chai-as-promised';
-import sinonChai from 'sinon-chai';
-import sinon, { stub } from 'sinon';
-import esmock from 'esmock';
-
 import { KeyEvent, Site } from '@adobe/spacecat-shared-data-access';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import { hasText } from '@adobe/spacecat-shared-utils';
+
+import { use, expect } from 'chai';
+import chaiAsPromised from 'chai-as-promised';
+import esmock from 'esmock';
 import nock from 'nock';
+import sinonChai from 'sinon-chai';
+import sinon, { stub } from 'sinon';
 
 import SitesController from '../../src/controllers/sites.js';
 
@@ -32,8 +33,12 @@ use(sinonChai);
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
   const sites = [
-    { siteId: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge' },
-    { siteId: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge' },
+    {
+      siteId: 'site1', baseURL: 'https://site1.com', deliveryType: 'aem_edge', config: Config({}),
+    },
+    {
+      siteId: 'site2', baseURL: 'https://site2.com', deliveryType: 'aem_edge', config: Config({}),
+    },
   ].map((site) => new Site(
     {
       entities: {
@@ -42,11 +47,11 @@ describe('Sites Controller', () => {
             indexes: {},
             schema: {
               attributes: {
-                config: { type: 'any', name: 'config' },
-                deliveryType: { type: 'string', name: 'deliveryType' },
-                gitHubURL: { type: 'string', name: 'gitHubURL' },
-                isLive: { type: 'boolean', name: 'isLive' },
-                organizationId: { type: 'string', name: 'organizationId' },
+                config: { type: 'any', name: 'config', get: (value) => Config(value) },
+                deliveryType: { type: 'string', name: 'deliveryType', get: (value) => value },
+                gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
+                isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
+                organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
               },
             },
           },

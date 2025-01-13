@@ -12,15 +12,17 @@
 
 /* eslint-env mocha */
 
+import { Organization, Site } from '@adobe/spacecat-shared-data-access';
+import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
+
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
-import { Organization, Site } from '@adobe/spacecat-shared-data-access';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
-import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
 
@@ -31,10 +33,18 @@ describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();
   const sites = [
     {
-      siteId: 'site1', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28', baseURL: 'https://site1.com', deliveryType: 'aem_edge',
+      siteId: 'site1',
+      organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+      baseURL: 'https://site1.com',
+      deliveryType: 'aem_edge',
+      config: Config({}),
     },
     {
-      siteId: 'site2', organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f', baseURL: 'https://site2.com', deliveryType: 'aem_edge',
+      siteId: 'site2',
+      organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
+      baseURL: 'https://site2.com',
+      deliveryType: 'aem_edge',
+      config: Config({}),
     },
   ].map((site) => new Site(
     { entities: { site: { model: {} } } },
@@ -50,22 +60,20 @@ describe('Organizations Controller', () => {
     console,
   ));
 
-  const sampleConfig1 = {
-    getSlackConfig: sinon.stub().returns({
+  const sampleConfig1 = Config({
+    slack: {
       channel: 'C0123456789',
       workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
-    }),
-    getHandlers: sinon.stub().returns([]),
-    getImports: sinon.stub().returns([]),
-  };
+    },
+    handlers: {},
+    imports: [],
+  });
 
-  const sampleConfig2 = {
-    getSlackConfig: sinon.stub().returns({
-      workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
-    }),
-    getHandlers: sinon.stub().returns([]),
-    getImports: sinon.stub().returns([]),
-  };
+  const sampleConfig2 = Config({
+    slack: { workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL },
+    handlers: {},
+    imports: [],
+  });
 
   const organizations = [
     { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28', name: 'Org 1' },
@@ -87,10 +95,10 @@ describe('Organizations Controller', () => {
             indexes: {},
             schema: {
               attributes: {
-                organizationId: { type: 'string' },
-                config: { type: 'any' },
-                name: { type: 'string' },
-                imsOrgId: { type: 'string' },
+                organizationId: { type: 'string', get: (value) => value },
+                config: { type: 'any', get: (value) => Config(value) },
+                name: { type: 'string', get: (value) => value },
+                imsOrgId: { type: 'string', get: (value) => value },
               },
             },
           },

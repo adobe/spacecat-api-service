@@ -38,7 +38,7 @@ const createImportJob = (data) => (new ImportJob(
     entities: {
       importJob: {
         model: {
-          schema: { attributes: { status: { type: 'string' } } },
+          schema: { attributes: { status: { type: 'string', get: (value) => value } } },
         },
         patch: sinon.stub().returns({ go: () => {}, set: () => {} }),
         remove: sinon.stub().returns({ go: () => {} }),
