@@ -39,11 +39,11 @@ export default function approveOrg(lambdaContext) {
         replace_original: true,
       };
 
-      log.info(`Responding site candidate ignore with: ${JSON.stringify(reply)}`);
+      log.info(`Responding org approval with: ${JSON.stringify(reply)}`);
 
       await respond(reply);
     } catch (e) {
-      log.error('Error occurred while acknowledging site candidate ignore', e);
+      log.error('Error occurred while acknowledging org approval', e);
       throw e;
     }
   };
