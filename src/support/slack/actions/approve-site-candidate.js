@@ -106,12 +106,14 @@ export default function approveSiteCandidate(lambdaContext) {
 
       await respond(reply);
 
-      await announceSiteDiscovery(
+      const discoveryMsg = await announceSiteDiscovery(
         lambdaContext,
         baseURL,
         siteCandidate.getSource(),
         siteCandidate.getHlxConfig(),
       );
+
+      log.info(`Discovery message: ${JSON.stringify(discoveryMsg)}`);
     } catch (e) {
       log.error('Error occurred while acknowledging site candidate approval', e);
       throw e;
