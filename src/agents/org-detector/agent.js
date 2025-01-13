@@ -343,7 +343,8 @@ Output absolutely no text except for that final JSON.
       return noFoundFallback;
     }
 
-    const finalText = lastMsg.content.trim();
+    let finalText = lastMsg.content.trim();
+    finalText = finalText.startsWith('```json') ? finalText.slice(7, -3) : finalText;
 
     try {
       const parsed = JSON.parse(finalText);

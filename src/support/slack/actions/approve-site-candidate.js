@@ -17,6 +17,7 @@ import {
 } from '@adobe/spacecat-shared-data-access';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { Blocks, Elements, Message } from 'slack-block-builder';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
@@ -124,7 +125,7 @@ export default function approveSiteCandidate(lambdaContext) {
 
         log.info(`Detected org: ${JSON.stringify(org)}`);
 
-        if (org) {
+        if (hasText(org?.name) && hasText(org?.imsOrgId)) {
           const { name, imsOrgId } = org;
 
           const orgMsg = Message()
