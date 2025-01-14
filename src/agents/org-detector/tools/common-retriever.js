@@ -26,7 +26,7 @@ export function resolveUrl(url) {
 }
 
 /**
- * Sends a POST request to the external API and retrieves content.
+ * Sends a POST request to the spacecat content scraper API and retrieves content
  *
  * @param {string} apiUrl - Base URL of the external API endpoint.
  * @param {string} apiKey - API key for authentication.

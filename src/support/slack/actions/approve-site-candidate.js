@@ -133,7 +133,9 @@ export default function approveSiteCandidate(lambdaContext) {
             .threadTs(threadTs)
             .blocks(
               Blocks.Section()
-                .text(`:agent_smith: Detected IMS organization \`${name}\` with IMS org ID \`${imsOrgId}\` for *<${baseURL}|${baseURL}>*. Would you approve? @${user.username}`),
+                .text(`:agent_smith: Detected IMS organization \`${name}\` with IMS org ID \`${imsOrgId}\` for *<${baseURL}|${baseURL}>*`),
+              Blocks.Section()
+                .text(`Would you approve? @${user.username}`),
               Blocks.Actions()
                 .elements(
                   Elements.Button()

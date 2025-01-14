@@ -35,7 +35,6 @@ export default function approveOrg(lambdaContext) {
 
       const reply = {
         ...replyText,
-        text: blocks[0]?.text?.text,
         replace_original: true,
       };
 
