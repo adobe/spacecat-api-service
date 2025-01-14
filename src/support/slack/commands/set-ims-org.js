@@ -17,7 +17,7 @@ import {
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
 
-const PHRASES = ['set org'];
+const PHRASES = ['set imsorg'];
 
 /**
  * Factory function to create the SetSiteOrganizationCommand object.
@@ -28,9 +28,9 @@ const PHRASES = ['set org'];
  */
 function SetSiteOrganizationCommand(context) {
   const baseCommand = BaseCommand({
-    id: 'set-site-org',
-    name: 'Set Site Organization',
-    description: 'Sets (or creates) a SpaceCat org for a site by IMS Org ID.',
+    id: 'set-ims-org',
+    name: 'Set IMS Organization',
+    description: 'Sets (or creates) a Spacecat org for a site by IMS Org ID.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site} {imsOrgId}`,
   });
@@ -42,8 +42,8 @@ function SetSiteOrganizationCommand(context) {
    * Command execution logic:
    *  1. Validate user input (base URL and IMS Org ID).
    *  2. Find the Site by the provided base URL.
-   *  3. Check if the SpaceCat org with the provided IMS Org ID already exists.
-   *  4. If not found, retrieve IMS org details and create a new SpaceCat org.
+   *  3. Check if the Spacecat org with the provided IMS Org ID already exists.
+   *  4. If not found, retrieve IMS org details and create a new Spacecat org.
    *  5. Update the site's organizationId and save.
    *  6. Inform the Slack user about the result (either "set" or "created then set").
    *  7. If IMS org cannot be found, let the user know.
@@ -84,6 +84,7 @@ function SetSiteOrganizationCommand(context) {
           imsOrgDetails = await imsClient.getImsOrganizationDetails(userImsOrgId);
           log.info(`IMS Org Details: ${imsOrgDetails}`);
         } catch (error) {
+          log.error(`Error retrieving IMS Org details: ${error.message}`);
           await say(`:x: Could not find an IMS org with the ID *${userImsOrgId}*.`);
           return;
         }
@@ -103,7 +104,7 @@ function SetSiteOrganizationCommand(context) {
         site.setOrganizationId(spaceCatOrg.getId());
         await site.save();
 
-        // Inform user that we created the org and set it
+        // inform user that we created the org and set it
         await say(
           `:white_check_mark: Successfully *created* a new Spacecat org (Name: *${imsOrgDetails.orgName}*) `
           + `and set it for site <${baseURL}|${baseURL}>!`,
