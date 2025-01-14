@@ -1,3 +1,10 @@
+## [1.85.6](https://github.com/adobe/spacecat-api-service/compare/v1.85.5...v1.85.6) (2025-01-14)
+
+
+### Bug Fixes
+
+* **site-detection:** optional override helix check param ([#700](https://github.com/adobe/spacecat-api-service/issues/700)) ([1392803](https://github.com/adobe/spacecat-api-service/commit/1392803cb1ea4788bf3ba0355e0874dd33c5701f))
+
 ## [1.85.5](https://github.com/adobe/spacecat-api-service/compare/v1.85.4...v1.85.5) (2025-01-14)
 
 
