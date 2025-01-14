@@ -52,7 +52,7 @@ export default function rejectOrg(lambdaContext) {
           Blocks.Section()
             .text(`Please let me know about the correct organization details using ${Md.codeInline('@spacecat set imsorg [url] [imsOrgId]')}. Example:`),
           Blocks.Section()
-            .text(Md.codeBlock('@spacecat set imsorg spacecat.com 000000000000000000000000@AdobeOrg')),
+            .text(Md.codeBlock('@spacecat set imsorg spacecat.com XXXX@AdobeOrg')),
         )
         .buildToObject();
 
