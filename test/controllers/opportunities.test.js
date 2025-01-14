@@ -23,10 +23,14 @@ use(chaiAsPromised);
 
 describe('Opportunities Controller', () => {
   const sandbox = sinon.createSandbox();
+
+  const OPPORTUNITY_ID = '3f1c3ab1-9ad0-4231-ac87-8159acf52cb6';
+  const SITE_ID = 'b9395f92-1c2f-4904-a8f0-e45f30098f9e';
+
   const opptys = [
     {
-      id: 'op12345',
-      siteId: 'site67890',
+      id: OPPORTUNITY_ID,
+      siteId: SITE_ID,
       auditId: 'audit001',
       title: 'Test Opportunity',
       description: 'This is a test opportunity.',
@@ -154,8 +158,8 @@ describe('Opportunities Controller', () => {
 
   beforeEach(() => {
     opptys[0] = {
-      id: 'op12345',
-      siteId: 'site67890',
+      id: OPPORTUNITY_ID,
+      siteId: SITE_ID,
       auditId: 'audit001',
       title: 'Test Opportunity',
       description: 'This is a test opportunity.',
@@ -209,12 +213,12 @@ describe('Opportunities Controller', () => {
   });
 
   it('gets all opportunities for a site', async () => {
-    const response = await opportunitiesController.getAllForSite({ params: { siteId: 'site67890' } });
+    const response = await opportunitiesController.getAllForSite({ params: { siteId: SITE_ID } });
     expect(mockOpportunityDataAccess.Opportunity.allBySiteId.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const opportunities = await response.json();
     expect(opportunities).to.be.an('array').with.lengthOf(1);
-    expect(opportunities[0]).to.have.property('id', 'op12345');
+    expect(opportunities[0]).to.have.property('id', OPPORTUNITY_ID);
   });
 
   it('gets all opportunities for a site returns bad request if no site ID is passed', async () => {
@@ -226,20 +230,25 @@ describe('Opportunities Controller', () => {
   });
 
   it('gets all opportunities for a site by status', async () => {
-    const response = await opportunitiesController.getByStatus({ params: { siteId: 'site67890', status: 'NEW' } });
+    const response = await opportunitiesController.getByStatus({ params: { siteId: SITE_ID, status: 'NEW' } });
     expect(mockOpportunityDataAccess.Opportunity.allBySiteIdAndStatus.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const opportunities = await response.json();
     expect(opportunities).to.be.an('array').with.lengthOf(1);
-    expect(opportunities[0]).to.have.property('id', 'op12345');
+    expect(opportunities[0]).to.have.property('id', OPPORTUNITY_ID);
   });
 
   it('gets opportunity by ID', async () => {
-    const response = await opportunitiesController.getByID({ params: { siteId: 'site67890', opportunityId: 'op12345' } });
+    const response = await opportunitiesController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+    });
     expect(mockOpportunityDataAccess.Opportunity.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const opportunity = await response.json();
-    expect(opportunity).to.have.property('id', 'op12345');
+    expect(opportunity).to.have.property('id', OPPORTUNITY_ID);
   });
 
   it('gets all opportunities for a site by status returns bad request if no site ID is passed', async () => {
@@ -251,7 +260,7 @@ describe('Opportunities Controller', () => {
   });
 
   it('gets all opportunities for a site by status returns bad request if no status is passed', async () => {
-    const response = await opportunitiesController.getByStatus({ params: { siteId: 'site67890' } });
+    const response = await opportunitiesController.getByStatus({ params: { siteId: SITE_ID } });
     expect(mockOpportunityDataAccess.Opportunity.allBySiteIdAndStatus.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -267,7 +276,7 @@ describe('Opportunities Controller', () => {
   });
 
   it('gets opportunity by ID returns bad request if no opportunity ID is passed', async () => {
-    const response = await opportunitiesController.getByID({ params: { siteId: 'site67890' } });
+    const response = await opportunitiesController.getByID({ params: { siteId: SITE_ID } });
     expect(mockOpportunityDataAccess.Opportunity.findById.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -276,7 +285,12 @@ describe('Opportunities Controller', () => {
 
   it('gets opportunity by ID returns not found if opportunity is not found', async () => {
     mockOpportunity.findById.resolves(null);
-    const response = await opportunitiesController.getByID({ params: { siteId: 'site67890', opportunityId: 'op12345' } });
+    const response = await opportunitiesController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+    });
     expect(mockOpportunityDataAccess.Opportunity.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -285,20 +299,23 @@ describe('Opportunities Controller', () => {
 
   // TODO: Complete tests for OpportunitiesController
   it('creates an opportunity', async () => {
-    const response = await opportunitiesController.createOpportunity({ params: { siteId: 'site67890' }, data: opptys[0] });
+    const response = await opportunitiesController.createOpportunity({
+      params: { siteId: SITE_ID },
+      data: opptys[0],
+    });
     expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
     expect(response.status).to.equal(201);
 
     const opportunity = await response.json();
-    expect(opportunity).to.have.property('id', 'op12345');
-    expect(opportunity).to.have.property('siteId', 'site67890');
+    expect(opportunity).to.have.property('id', OPPORTUNITY_ID);
+    expect(opportunity).to.have.property('siteId', SITE_ID);
   });
 
   it('updates an opportunity', async () => {
     const response = await opportunitiesController.patchOpportunity({
       params: {
-        siteId: 'site67890',
-        opportunityId: 'op12345',
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
       },
       data: {
         auditId: 'Audit ID NEW',
@@ -322,8 +339,8 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(200);
 
     const updatedOppty = await response.json();
-    expect(updatedOppty).to.have.property('siteId', 'site67890');
-    expect(updatedOppty).to.have.property('id', 'op12345');
+    expect(updatedOppty).to.have.property('siteId', SITE_ID);
+    expect(updatedOppty).to.have.property('id', OPPORTUNITY_ID);
     expect(updatedOppty).to.have.property('auditId', 'Audit ID NEW');
     expect(updatedOppty).to.have.property('status', 'APPROVED');
   });
@@ -339,7 +356,7 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when creating an opportunity if no data is provided', async () => {
     // eslint-disable-next-line max-len
-    const response = await opportunitiesController.createOpportunity({ params: { siteId: 'site67890' }, data: {} });
+    const response = await opportunitiesController.createOpportunity({ params: { siteId: SITE_ID }, data: {} });
     expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -348,7 +365,10 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when creating an opportunity if there is a validation error', async () => {
     mockOpportunity.create.throws(new ValidationError('Validation error'));
-    const response = await opportunitiesController.createOpportunity({ params: { siteId: 'site67890' }, data: opptys[0] });
+    const response = await opportunitiesController.createOpportunity({
+      params: { siteId: SITE_ID },
+      data: opptys[0],
+    });
     expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -365,7 +385,7 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when updating an opportunity if no opportunity id is provided', async () => {
     // eslint-disable-next-line max-len
-    const response = await opportunitiesController.patchOpportunity({ params: { siteId: 'site67890' }, data: {} });
+    const response = await opportunitiesController.patchOpportunity({ params: { siteId: SITE_ID }, data: {} });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity ID required');
@@ -373,7 +393,7 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when updating an opportunity if no data is provided', async () => {
     // eslint-disable-next-line max-len
-    const response = await opportunitiesController.patchOpportunity({ params: { siteId: 'site67890', opportunityId: 'oppty1234' }, data: {} });
+    const response = await opportunitiesController.patchOpportunity({ params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID }, data: {} });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'No updates provided');
@@ -382,7 +402,7 @@ describe('Opportunities Controller', () => {
   it('returns not found when updating an opportunity if opportunity is not found', async () => {
     mockOpportunity.findById.resolves(null);
     const response = await opportunitiesController.patchOpportunity({
-      params: { siteId: 'site67890', opportunityId: 'op12345' },
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'APPROVED' },
     });
     expect(mockOpportunityDataAccess.Opportunity.findById.calledOnce).to.be.true;
@@ -392,7 +412,13 @@ describe('Opportunities Controller', () => {
   });
 
   it('returns bad request when updating an opportunity without sending any request body', async () => {
-    const response = await opportunitiesController.patchOpportunity({ params: { siteId: 'site67890', opportunityId: 'op12345' }, data: {} });
+    const response = await opportunitiesController.patchOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: {},
+    });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'No updates provided');
@@ -403,7 +429,7 @@ describe('Opportunities Controller', () => {
       throw new ValidationError('Validation error');
     };
     const response = await opportunitiesController.patchOpportunity({
-      params: { siteId: 'site67890', opportunityId: 'op12345' },
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'APPROVED' },
     });
     expect(response.status).to.equal(400);
@@ -413,7 +439,7 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when updating an opportunity if no updates are passed', async () => {
     const response = await opportunitiesController.patchOpportunity({
-      params: { siteId: 'site67890', opportunityId: 'op12345' },
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'NEW' },
     });
     expect(response.status).to.equal(400);
@@ -423,7 +449,7 @@ describe('Opportunities Controller', () => {
 
   it('removes an opportunity', async () => {
     const response = await opportunitiesController.removeOpportunity({
-      params: { siteId: 'site67890', opportunityId: 'op12345' },
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
     });
     expect(response.status).to.equal(204);
   });
@@ -436,7 +462,10 @@ describe('Opportunities Controller', () => {
   });
 
   it('returns bad request when removing an opportunity if opportunity id not provided', async () => {
-    const response = await opportunitiesController.removeOpportunity({ params: { siteId: 'site67890' }, data: {} });
+    const response = await opportunitiesController.removeOpportunity({
+      params: { siteId: SITE_ID },
+      data: {},
+    });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity ID required');
@@ -445,7 +474,7 @@ describe('Opportunities Controller', () => {
   it('returns not found when removing an opportunity if opportunity is not found', async () => {
     mockOpportunity.findById.resolves(null);
     const response = await opportunitiesController.removeOpportunity({
-      params: { siteId: 'site67890', opportunityId: 'op12345' },
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: {},
     });
     expect(response.status).to.equal(404);
@@ -459,7 +488,7 @@ describe('Opportunities Controller', () => {
       throw new Error('internal error not exposed to the client');
     };
     const response = await opportunitiesController.removeOpportunity({
-      params: { siteId: 'site67890', opportunityId: 'op12345' },
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: {},
     });
     expect(response.status).to.equal(500);

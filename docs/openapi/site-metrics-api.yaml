@@ -30,7 +30,10 @@ site-metrics-by-source:
 site-metrics-latest:
   get:
     summary: Get latest site metrics
-    description: Retrieves the latest metrics for a specific site, including RUM (Real User Monitoring) data and organic traffic metrics.
+    description: |
+      Retrieves the latest metrics for a specific site, including RUM (Real User Monitoring)
+      data and organic traffic metrics. Returns zeroed values if no data is available or
+      no RUM domain key is configured.
     parameters:
       - $ref: './parameters.yaml#/siteId'
     responses:

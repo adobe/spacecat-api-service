@@ -146,7 +146,7 @@ function OrganizationsController(dataAccess, env) {
   const getSitesForOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
 
-    if (!hasText(organizationId)) {
+    if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
 
@@ -163,7 +163,7 @@ function OrganizationsController(dataAccess, env) {
   const removeOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
 
-    if (!hasText(organizationId)) {
+    if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
 
@@ -186,7 +186,7 @@ function OrganizationsController(dataAccess, env) {
   const updateOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
 
-    if (!hasText(organizationId)) {
+    if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
 

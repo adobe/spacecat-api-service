@@ -12,7 +12,7 @@
 
 import { ImportJob as ImportJobModel } from '@adobe/spacecat-shared-data-access';
 import { hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from './utils.js';
 import { STATUS_BAD_REQUEST } from '../utils/constants.js';
@@ -232,7 +232,7 @@ function ImportSupervisor(services, config) {
    * @returns {Promise<ImportJob>}
    */
   async function getImportJob(jobId, importApiKey) {
-    if (!hasText(jobId)) {
+    if (!isValidUUID(jobId)) {
       throw new ErrorWithStatusCode('Job ID is required', 400);
     }
 

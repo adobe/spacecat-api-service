@@ -1,3 +1,31 @@
+## [1.85.5](https://github.com/adobe/spacecat-api-service/compare/v1.85.4...v1.85.5) (2025-01-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-gpt-client to v1.4.4 ([#699](https://github.com/adobe/spacecat-api-service/issues/699)) ([13ed655](https://github.com/adobe/spacecat-api-service/commit/13ed6559990bb9deccebc651968fc4c773844e53))
+
+## [1.85.4](https://github.com/adobe/spacecat-api-service/compare/v1.85.3...v1.85.4) (2025-01-14)
+
+
+### Bug Fixes
+
+* find opportunity in removeSuggestion ([#698](https://github.com/adobe/spacecat-api-service/issues/698)) ([117f9e9](https://github.com/adobe/spacecat-api-service/commit/117f9e91b97d6c51d47c63a97ab75bf8bd04e933))
+
+## [1.85.3](https://github.com/adobe/spacecat-api-service/compare/v1.85.2...v1.85.3) (2025-01-14)
+
+
+### Bug Fixes
+
+* graceful handling for missing domain key ([#696](https://github.com/adobe/spacecat-api-service/issues/696)) ([99a0c7a](https://github.com/adobe/spacecat-api-service/commit/99a0c7a276be2f74c081e66e2af2fad86dfbd270))
+
+## [1.85.2](https://github.com/adobe/spacecat-api-service/compare/v1.85.1...v1.85.2) (2025-01-13)
+
+
+### Bug Fixes
+
+* prevent error on invalid uuid ([#693](https://github.com/adobe/spacecat-api-service/issues/693)) ([f07690a](https://github.com/adobe/spacecat-api-service/commit/f07690ab04171c42543b2e0d578b807040a72ce9))
+
 ## [1.85.1](https://github.com/adobe/spacecat-api-service/compare/v1.85.0...v1.85.1) (2025-01-13)
 
 

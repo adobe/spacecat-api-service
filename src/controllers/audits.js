@@ -16,7 +16,11 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  hasText, isNonEmptyArray, isObject, isValidUrl,
+  hasText,
+  isNonEmptyArray,
+  isObject,
+  isValidUUID,
+  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
@@ -48,7 +52,7 @@ function AuditsController(dataAccess) {
     const auditType = context.params?.auditType || undefined;
     const order = context.data?.ascending === 'true' ? 'asc' : 'desc';
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -87,7 +91,7 @@ function AuditsController(dataAccess) {
   const getAllLatestForSite = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -105,7 +109,7 @@ function AuditsController(dataAccess) {
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -147,7 +151,7 @@ function AuditsController(dataAccess) {
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
