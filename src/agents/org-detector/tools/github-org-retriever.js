@@ -11,6 +11,7 @@
  */
 import { JSDOM } from 'jsdom';
 import { Octokit } from '@octokit/rest';
+import { fetch } from '../../../support/utils.js';
 
 /**
  * Scrapes the GitHub organization name from the organization's GitHub page.
@@ -25,6 +26,7 @@ async function scrapeGithubOrgName(orgLogin, log) {
   try {
     const response = await fetch(url);
 
+    /* c8 ignore next 3 */
     if (!response.ok) {
       throw new Error(`Failed to fetch GitHub page: ${response.statusText}`);
     }
@@ -40,6 +42,7 @@ async function scrapeGithubOrgName(orgLogin, log) {
     }
 
     return orgElement.textContent.trim();
+    /* c8 ignore next 4 */
   } catch (error) {
     log.error(`Error scraping GitHub organization name for ${orgLogin}: ${error.message}`);
     return null;

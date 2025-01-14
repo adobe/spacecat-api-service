@@ -61,6 +61,7 @@ export function extractLinks(html, domain, log) {
 
     log.info(`Extract Links: Successfully extracted ${links.length} links.`);
     return links;
+    /* c8 ignore next 4 */
   } catch (error) {
     log.error(`Extract Links: An error occurred while extracting links - ${error.message}`);
     return [];

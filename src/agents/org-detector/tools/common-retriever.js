@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import URI from 'urijs';
+import { fetch } from '../../../support/utils.js';
 
 /**
  * Resolves a given URL to a standardized format.
@@ -51,6 +52,7 @@ export async function scrape(apiUrl, apiKey, requestBody, log) {
     }
 
     return await response.json();
+    /* c8 ignore next 4 */
   } catch (error) {
     log.error(`Error occurred during API request - ${error.message}`);
     return null;

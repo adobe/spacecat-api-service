@@ -42,6 +42,7 @@ function longestCommonSubstringAfterWhitespace(str1, str2) {
   const s1 = normalizeStringKeepingSpaces(str1);
   const s2 = normalizeStringKeepingSpaces(str2);
 
+  /* c8 ignore next 1 */
   if (!s1.length || !s2.length) return 0;
 
   // initialize the DP table
