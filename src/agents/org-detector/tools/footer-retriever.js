@@ -38,6 +38,6 @@ export async function retrieveFooter(url, apiKey, apiUrl, log) {
     return null;
   }
 
-  const content = responseData.results?.[0]?.content || null;
+  const content = responseData.results?.[0]?.content || '';
   return content.match(/<footer[\s\S]*?<\/footer>/)?.[0] || null;
 }
