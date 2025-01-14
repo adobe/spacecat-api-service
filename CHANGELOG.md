@@ -1,3 +1,10 @@
+## [1.85.4](https://github.com/adobe/spacecat-api-service/compare/v1.85.3...v1.85.4) (2025-01-14)
+
+
+### Bug Fixes
+
+* find opportunity in removeSuggestion ([#698](https://github.com/adobe/spacecat-api-service/issues/698)) ([117f9e9](https://github.com/adobe/spacecat-api-service/commit/117f9e91b97d6c51d47c63a97ab75bf8bd04e933))
+
 ## [1.85.3](https://github.com/adobe/spacecat-api-service/compare/v1.85.2...v1.85.3) (2025-01-14)
 
 
