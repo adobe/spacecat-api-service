@@ -1,3 +1,10 @@
+## [1.85.3](https://github.com/adobe/spacecat-api-service/compare/v1.85.2...v1.85.3) (2025-01-14)
+
+
+### Bug Fixes
+
+* graceful handling for missing domain key ([#696](https://github.com/adobe/spacecat-api-service/issues/696)) ([99a0c7a](https://github.com/adobe/spacecat-api-service/commit/99a0c7a276be2f74c081e66e2af2fad86dfbd270))
+
 ## [1.85.2](https://github.com/adobe/spacecat-api-service/compare/v1.85.1...v1.85.2) (2025-01-13)
 
 
