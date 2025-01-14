@@ -12,8 +12,24 @@
 
 import { Blocks, Message } from 'slack-block-builder';
 
+function extractOrg(text) {
+  const regex = /IMS org ID `([^`]+)`.*<([^|>]+)/;
+  const match = text.match(regex);
+
+  if (match) {
+    return {
+      imsOrgId: match[1],
+      baseURL: match[2],
+    };
+  } else {
+    return null;
+  }
+}
+
 export default function approveOrg(lambdaContext) {
-  const { log } = lambdaContext;
+  const { dataAccess, log } = lambdaContext;
+
+  const { Site, Organization } = dataAccess;
 
   return async ({ ack, body, respond }) => {
     try {
@@ -24,11 +40,24 @@ export default function approveOrg(lambdaContext) {
 
       await ack(); // slack expects acknowledgement within 3s
 
+      const messageText = blocks[0]?.text?.text;
+
+      const extractedOrg = extractOrg(messageText);
+
+      if (extractedOrg) {
+        const { imsOrgId, baseURL } = extractedOrg;
+        const org = await Organization.findByImsOrgId(imsOrgId);
+        const site = await Site.findByBaseURL(baseURL);
+
+        site.setOrganizationId(org.getId());
+        await site.save();
+      }
+
       const replyText = Message()
         .blocks(
           Blocks.Section()
             .blockId(blocks[0]?.block_id)
-            .text(blocks[0]?.text?.text),
+            .text(messageText),
           Blocks.Section().text(`Approved by @${user.username} :checked:`),
         )
         .buildToObject();
