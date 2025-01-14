@@ -394,45 +394,58 @@ function SitesController(dataAccess, log, env) {
 
     const rumAPIClient = RUMAPIClient.createFrom(context);
     const domain = wwwUrlResolver(site);
-    const domainkey = await getRUMDomainKey(site.getBaseURL(), context);
-    const currentRumMetrics = await rumAPIClient.query(TOTAL_METRICS, {
-      domain,
-      domainkey,
-      interval: MONTH_DAYS,
-    });
-    const totalRumMetrics = await rumAPIClient.query(TOTAL_METRICS, {
-      domain,
-      domainkey,
-      interval: 2 * MONTH_DAYS,
-    });
-    const organicTraffic = await getStoredMetrics(
-      { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
-      context,
-    );
 
-    let cpc = 0;
+    try {
+      const domainKey = await getRUMDomainKey(site.getBaseURL(), context);
+      const current = await rumAPIClient.query(TOTAL_METRICS, {
+        domain,
+        domainkey: domainKey,
+        interval: MONTH_DAYS,
+      });
+      const total = await rumAPIClient.query(TOTAL_METRICS, {
+        domain,
+        domainkey: domainKey,
+        interval: 2 * MONTH_DAYS,
+      });
+      const organicTraffic = await getStoredMetrics(
+        { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+        context,
+      );
 
-    if (organicTraffic.length > 0) {
-      const metric = organicTraffic[organicTraffic.length - 1];
-      cpc = metric.cost / metric.value;
+      const previousPageViews = total.totalPageViews - current.totalPageViews;
+      const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
+      const pageViewsChange = ((current.totalPageViews - previousPageViews)
+        / previousPageViews) * 100;
+      const ctrChange = ((current.totalCTR - previousCTR) / previousCTR) * 100;
+
+      let cpc = 0;
+
+      if (organicTraffic.length > 0) {
+        const metric = organicTraffic[organicTraffic.length - 1];
+        cpc = metric.cost / metric.value;
+      }
+
+      const projectedTrafficValue = pageViewsChange * cpc;
+
+      log.info(`Got RUM metrics for site ${siteId} current: ${current.length}`);
+
+      return ok({
+        pageViewsChange,
+        ctrChange,
+        projectedTrafficValue,
+      });
+    } catch (error) {
+      if (error.message?.includes('Error retrieving the domain key')) {
+        log.info(`No RUM key configured for site ${siteId}: ${error.message}`);
+      } else {
+        log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
+      }
     }
 
-    const previousRumMetrics = {};
-    previousRumMetrics.totalPageViews = totalRumMetrics.totalPageViews
-        - currentRumMetrics.totalPageViews;
-    previousRumMetrics.totalCTR = (totalRumMetrics.totalClicks - currentRumMetrics.totalClicks)
-        / previousRumMetrics.totalPageViews;
-    const pageViewsChange = ((currentRumMetrics.totalPageViews - previousRumMetrics.totalPageViews)
-        / previousRumMetrics.totalPageViews) * 100;
-    const ctrChange = ((currentRumMetrics.totalCTR - previousRumMetrics.totalCTR)
-        / previousRumMetrics.totalCTR) * 100;
-    const projectedTrafficValue = pageViewsChange * cpc;
-
-    log.info(`Got RUM metrics for site ${siteId} current: ${currentRumMetrics.length} previous: ${previousRumMetrics.length}`);
     return ok({
-      pageViewsChange,
-      ctrChange,
-      projectedTrafficValue,
+      pageViewsChange: 0,
+      ctrChange: 0,
+      projectedTrafficValue: 0,
     });
   };
 
