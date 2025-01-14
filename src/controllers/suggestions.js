@@ -400,7 +400,7 @@ function SuggestionsController(dataAccess) {
       return badRequest('Suggestion ID required');
     }
 
-    const opportunity = await Opportunity.findById(siteId, opportunityId);
+    const opportunity = await Opportunity.findById(opportunityId);
 
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
