@@ -330,10 +330,12 @@ function HooksController(lambdaContext) {
   const { Site, SiteCandidate } = dataAccess;
   const config = getConfigFromContext(lambdaContext);
 
-  async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
+  async function processSiteCandidate(domain, source, log, overrideHelixCheck, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(config, baseURL);
-    await verifyHelixSite(baseURL, hlxConfig);
+    if (!overrideHelixCheck) {
+      await verifyHelixSite(baseURL, hlxConfig);
+    }
 
     const siteCandidate = {
       baseURL,
@@ -386,8 +388,10 @@ function HooksController(lambdaContext) {
 
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
-    // eslint-disable-next-line camelcase,no-unused-vars
-    const { hlxVersion, requestPath, requestXForwardedHost } = context.data;
+    const {
+      // eslint-disable-next-line camelcase,no-unused-vars
+      hlxVersion, requestPath, requestXForwardedHost, overrideHelixCheck,
+    } = context.data;
 
     if (!isInteger(hlxVersion)) {
       log.warn('HLX version is not an integer. Skipping processing CDN site candidate');
@@ -407,7 +411,7 @@ function HooksController(lambdaContext) {
 
     const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
     const source = SiteCandidateModel.SITE_CANDIDATE_SOURCES.CDN;
-    const baseURL = await processSiteCandidate(domain, source, log, hlxConfig);
+    const baseURL = await processSiteCandidate(domain, source, log, overrideHelixCheck, hlxConfig);
     await sendDiscoveryMessage(baseURL, source, hlxConfig);
 
     return ok('CDN site candidate is successfully processed');
