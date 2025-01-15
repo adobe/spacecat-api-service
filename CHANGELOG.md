@@ -1,3 +1,10 @@
+# [1.86.0](https://github.com/adobe/spacecat-api-service/compare/v1.85.6...v1.86.0) (2025-01-15)
+
+
+### Features
+
+* limiting scrape to 50 urls per message ([#619](https://github.com/adobe/spacecat-api-service/issues/619)) ([0f53cf2](https://github.com/adobe/spacecat-api-service/commit/0f53cf2df3b4da37f37ad8ebe73d4cc6ccc50d47))
+
 ## [1.85.6](https://github.com/adobe/spacecat-api-service/compare/v1.85.5...v1.85.6) (2025-01-14)
 
 
