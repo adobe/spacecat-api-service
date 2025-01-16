@@ -24,11 +24,9 @@ runs:
           ${{ runner.os }}-node-
 
     - name: Update NPM (only if cache miss)
-      if: steps.npm-cache.outputs.cache-hit != 'true'
       run: npm install -g npm@10.9.2
       shell: bash
 
     - name: Install dependencies (only if cache miss)
-      if: steps.npm-cache.outputs.cache-hit != 'true'
       run: npm ci
       shell: bash
