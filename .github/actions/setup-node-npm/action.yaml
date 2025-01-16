@@ -11,8 +11,8 @@ runs:
 
     - name: Get npm cache directory
       id: npm-cache-dir
-      shell: bash
       run: echo "dir=$(npm config get cache)" >> $GITHUB_OUTPUT
+      shell: bash
 
     - name: Set up NPM Cache
       uses: actions/cache@v4
@@ -26,7 +26,9 @@ runs:
     - name: Update NPM (only if cache miss)
       if: steps.npm-cache.outputs.cache-hit != 'true'
       run: npm install -g npm@10.9.2
+      shell: bash
 
     - name: Install dependencies (only if cache miss)
       if: steps.npm-cache.outputs.cache-hit != 'true'
       run: npm ci
+      shell: bash
