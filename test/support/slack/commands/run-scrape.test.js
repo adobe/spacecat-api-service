@@ -120,7 +120,7 @@ describe('RunScrapeCommand', () => {
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Found top pages for site `https://example.com`');
-      expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Triggered scrape run for site `https://example.com`');
+      expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Triggering scrape run for site `https://example.com`');
       expect(slackContext.say.thirdCall.args[0]).to.include('white_check_mark: Completed triggering scrape runs for site `https://example.com` — Total URLs: 2');
     });
 
