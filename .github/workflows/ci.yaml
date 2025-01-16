@@ -41,8 +41,16 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: 'false'
+
       - name: Configure Environment
         run: echo -e "LOG_LEVEL=info\n" > .env
+
+      - name: Setup Node & NPM
+        uses: ./.github/actions/setup-node-npm
 
       - name: Configure AWS
         uses: ./.github/actions/configure-aws
@@ -58,6 +66,11 @@ jobs:
     needs: build
     if: github.ref != 'refs/heads/main'
     steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: 'false'
+
       - name: Setup Node & NPM
         uses: ./.github/actions/setup-node-npm
 
