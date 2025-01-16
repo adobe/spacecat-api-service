@@ -1,3 +1,11 @@
+## [1.86.2](https://github.com/adobe/spacecat-api-service/compare/v1.86.1...v1.86.2) (2025-01-16)
+
+
+### Bug Fixes
+
+* branch protection / npm cache ([#702](https://github.com/adobe/spacecat-api-service/issues/702)) ([b0e0c3f](https://github.com/adobe/spacecat-api-service/commit/b0e0c3f2c4634a5c221e09b32f75463d0b17476f))
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.26.4 ([#703](https://github.com/adobe/spacecat-api-service/issues/703)) ([e7f329d](https://github.com/adobe/spacecat-api-service/commit/e7f329d01938879ab3ef298c912f6c91b1e39561))
+
 ## [1.86.1](https://github.com/adobe/spacecat-api-service/compare/v1.86.0...v1.86.1) (2025-01-15)
 
 
