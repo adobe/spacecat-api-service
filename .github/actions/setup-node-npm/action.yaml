@@ -1,0 +1,37 @@
+name: "Setup Node & NPM (with cache)"
+description: "Checks out code, sets up Node, uses NPM cache, installs dependencies"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check out
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: 'false'
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22.12
+
+    - name: Get npm cache directory
+      id: npm-cache-dir
+      shell: bash
+      run: echo "dir=$(npm config get cache)" >> $GITHUB_OUTPUT
+
+    - name: Set up NPM Cache
+      uses: actions/cache@v4
+      id: npm-cache
+      with:
+        path: ${{ steps.npm-cache-dir.outputs.dir }}
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+    - name: Update NPM (only if cache miss)
+      if: steps.npm-cache.outputs.cache-hit != 'true'
+      run: npm install -g npm@10.9.2
+
+    - name: Install dependencies (only if cache miss)
+      if: steps.npm-cache.outputs.cache-hit != 'true'
+      run: npm ci
