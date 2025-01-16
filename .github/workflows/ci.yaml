@@ -1,5 +1,9 @@
 name: Build
 
+defaults:
+  run:
+    shell: bash
+
 permissions:
   id-token: write
   contents: write

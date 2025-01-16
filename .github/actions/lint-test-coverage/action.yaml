@@ -1,10 +1,6 @@
 name: "Lint, Test, and Coverage"
 description: "Runs lint and test commands, plus coverage"
 
-defaults:
-  run:
-    shell: bash
-
 inputs:
   codecov_token:
     description: "Codecov Token (optional)"

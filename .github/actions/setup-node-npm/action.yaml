@@ -1,10 +1,6 @@
 name: "Setup Node & NPM (with cache)"
 description: "Checks out code, sets up Node, uses NPM cache, installs dependencies"
 
-defaults:
-  run:
-    shell: bash
-
 runs:
   using: "composite"
   steps:
