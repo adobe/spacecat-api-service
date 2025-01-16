@@ -4,11 +4,6 @@ description: "Checks out code, sets up Node, uses NPM cache, installs dependenci
 runs:
   using: "composite"
   steps:
-    - name: Check out
-      uses: actions/checkout@v4
-      with:
-        persist-credentials: 'false'
-
     - name: Set up Node
       uses: actions/setup-node@v4
       with:
