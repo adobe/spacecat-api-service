@@ -1,3 +1,10 @@
+## [1.86.6](https://github.com/adobe/spacecat-api-service/compare/v1.86.5...v1.86.6) (2025-01-17)
+
+
+### Bug Fixes
+
+* **sites:** update hlxConfig via API ([#707](https://github.com/adobe/spacecat-api-service/issues/707)) ([1f42265](https://github.com/adobe/spacecat-api-service/commit/1f4226588ebe5a5d9d490fd12780754189168f4b))
+
 ## [1.86.5](https://github.com/adobe/spacecat-api-service/compare/v1.86.4...v1.86.5) (2025-01-17)
 
 
