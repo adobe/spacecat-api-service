@@ -37,10 +37,10 @@ describe('Sites Controller', () => {
 
   const sites = [
     {
-      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', config: Config({}),
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', config: Config({}), hlxConfig: {},
     },
     {
-      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', config: Config({}),
+      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', config: Config({}), hlxConfig: {},
     },
   ].map((site) => new Site(
     {
@@ -55,6 +55,7 @@ describe('Sites Controller', () => {
                 gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
                 isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
                 organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
+                hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
               },
             },
           },
@@ -222,6 +223,9 @@ describe('Sites Controller', () => {
         deliveryType: 'other',
         gitHubURL: 'https://github.com/blah/bluh',
         config: {},
+        hlxConfig: {
+          field: true,
+        },
       },
     });
 
@@ -233,6 +237,7 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('baseURL', 'https://site1.com');
     expect(updatedSite).to.have.property('deliveryType', 'other');
     expect(updatedSite).to.have.property('gitHubURL', 'https://github.com/blah/bluh');
+    expect(updatedSite.hlxConfig).to.deep.equal({ field: true });
   });
 
   it('returns bad request when updating a site if id not provided', async () => {
