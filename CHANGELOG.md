@@ -1,3 +1,32 @@
+## [1.86.2](https://github.com/adobe/spacecat-api-service/compare/v1.86.1...v1.86.2) (2025-01-16)
+
+
+### Bug Fixes
+
+* branch protection / npm cache ([#702](https://github.com/adobe/spacecat-api-service/issues/702)) ([b0e0c3f](https://github.com/adobe/spacecat-api-service/commit/b0e0c3f2c4634a5c221e09b32f75463d0b17476f))
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.26.4 ([#703](https://github.com/adobe/spacecat-api-service/issues/703)) ([e7f329d](https://github.com/adobe/spacecat-api-service/commit/e7f329d01938879ab3ef298c912f6c91b1e39561))
+
+## [1.86.1](https://github.com/adobe/spacecat-api-service/compare/v1.86.0...v1.86.1) (2025-01-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.26.3 ([#701](https://github.com/adobe/spacecat-api-service/issues/701)) ([0a4607f](https://github.com/adobe/spacecat-api-service/commit/0a4607f85531e28437f3d17c4c940d00f8bcca40))
+
+# [1.86.0](https://github.com/adobe/spacecat-api-service/compare/v1.85.6...v1.86.0) (2025-01-15)
+
+
+### Features
+
+* limiting scrape to 50 urls per message ([#619](https://github.com/adobe/spacecat-api-service/issues/619)) ([0f53cf2](https://github.com/adobe/spacecat-api-service/commit/0f53cf2df3b4da37f37ad8ebe73d4cc6ccc50d47))
+
+## [1.85.6](https://github.com/adobe/spacecat-api-service/compare/v1.85.5...v1.85.6) (2025-01-14)
+
+
+### Bug Fixes
+
+* **site-detection:** optional override helix check param ([#700](https://github.com/adobe/spacecat-api-service/issues/700)) ([1392803](https://github.com/adobe/spacecat-api-service/commit/1392803cb1ea4788bf3ba0355e0874dd33c5701f))
+
 ## [1.85.5](https://github.com/adobe/spacecat-api-service/compare/v1.85.4...v1.85.5) (2025-01-14)
 
 
