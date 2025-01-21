@@ -49,7 +49,7 @@ describe('org-detection-agent/footer retriever', () => {
   it('returns null if the scrape API returns a non-OK response', async () => {
     // Arrange
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(500);
 
     // Act
@@ -62,7 +62,7 @@ describe('org-detection-agent/footer retriever', () => {
   it('returns null if scrape api response is empty', async () => {
     // Arrange
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(200, null);
 
     // Act
@@ -75,7 +75,7 @@ describe('org-detection-agent/footer retriever', () => {
   it('returns null if footer is not found in the content', async () => {
     // Arrange
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(200, {
         results: [
           {
@@ -94,7 +94,7 @@ describe('org-detection-agent/footer retriever', () => {
   it('returns null if scrape api content field is null', async () => {
     // Arrange
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(200, {
         results: [
           {
@@ -114,7 +114,7 @@ describe('org-detection-agent/footer retriever', () => {
     // Arrange
     const footerHtml = '<footer>Some site footer content</footer>';
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(200, {
         results: [
           {

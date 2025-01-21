@@ -37,7 +37,7 @@ export function resolveUrl(url) {
  */
 export async function scrape(apiUrl, apiKey, requestBody, log) {
   try {
-    const response = await fetch(apiUrl, {
+    const response = await fetch(`${apiUrl}/scrape`, {
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -47,14 +47,14 @@ export async function scrape(apiUrl, apiKey, requestBody, log) {
     });
 
     if (!response.ok) {
-      log.error(`HTTP error! Status: ${response.status}`);
+      log.error(`Scrape error: scraper returned: ${response.status}. Scrape request: ${JSON.stringify(requestBody)}`);
       return null;
     }
 
     return await response.json();
     /* c8 ignore next 4 */
   } catch (error) {
-    log.error(`Error occurred during API request - ${error.message}`);
+    log.error(`Error occurred during scrape request - ${error.message}`);
     return null;
   }
 }

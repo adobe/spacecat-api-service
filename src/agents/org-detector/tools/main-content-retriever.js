@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import { JSDOM } from 'jsdom';
-import { scrape } from './common-retriever.js';
+import { resolveUrl, scrape } from './common-retriever.js';
 
 /**
  * Retrieves the `<main>` content from a given URL using an external API.
@@ -28,7 +28,7 @@ export async function retrieveMainContent(url, apiKey, apiUrl, log) {
     options: {
       waitForSelector: 'main',
     },
-    urls: [{ url }],
+    urls: [{ url: resolveUrl(url) }],
   };
 
   const responseData = await scrape(apiUrl, apiKey, requestBody, log);
@@ -39,7 +39,7 @@ export async function retrieveMainContent(url, apiKey, apiUrl, log) {
 
   const content = responseData.results?.[0]?.content || '';
   if (!content) {
-    log.info('No content found in the API response.');
+    log.info(`Could not retrieve the main content of URL: ${url}`);
     return null;
   }
 

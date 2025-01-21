@@ -49,7 +49,7 @@ describe('org-detection-agent/main content retriever', () => {
   it('returns null if scrape returns no data', async () => {
     // Arrange
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(200, null);
 
     // Act
@@ -62,7 +62,7 @@ describe('org-detection-agent/main content retriever', () => {
   it('returns null if the API content is empty', async () => {
     // Arrange
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(200, {
         results: [
           {
@@ -76,13 +76,13 @@ describe('org-detection-agent/main content retriever', () => {
 
     // Assert
     expect(result).to.be.null;
-    expect(context.log.info).to.have.been.calledWith('No content found in the API response.');
+    expect(context.log.info).to.have.been.calledWith('Could not retrieve the main content of URL: https://spacecat.com');
   });
 
   it('returns null if no <main> element is found', async () => {
     // Arrange
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(200, {
         results: [
           {
@@ -103,7 +103,7 @@ describe('org-detection-agent/main content retriever', () => {
     // Arrange
     const mainHtml = '<main>some content </main>';
     nock(apiUrl)
-      .post('/')
+      .post('/scrape')
       .reply(200, {
         results: [
           {
