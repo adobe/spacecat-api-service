@@ -30,7 +30,7 @@ import { matchCompanies } from './tools/company-matcher.js';
 import { getGithubOrgName } from './tools/github-org-retriever.js';
 import { retrieveMainContent } from './tools/main-content-retriever.js';
 import { extractLinks } from './tools/link-extractor.js';
-import instructions from './instructions.js';
+import { getInstructions } from './instructions.js';
 
 /**
  * Tool #1: Footer Retriever
@@ -285,6 +285,7 @@ export default class OrgDetectorAgent {
    * If no company match is found, the `matchedCompany` field will be `null`.
    */
   async detect(domain, githubLogin) {
+    const instructions = getInstructions(domain, githubLogin);
     const noFoundFallback = { org: null };
 
     const initialState = {

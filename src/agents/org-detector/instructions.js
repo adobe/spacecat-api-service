@@ -9,8 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-/* eslint-disable no-undef */
-const instructions = `
+export function getInstructions(domain, githubLogin) {
+  return `
 You are an AI assistant. A user wants to identify a matched company for domain "${domain}" and GitHub login "${githubLogin}".
 The "company_matcher" tool returns a JSON array of objects:
   [
@@ -58,5 +58,4 @@ If after all steps you still find no recognized match, finalize with:
 - Do not finalize with 'null' until all steps have been tried.
 - Stop as soon as you are confident in a match.
 `;
-
-export default instructions;
+}
