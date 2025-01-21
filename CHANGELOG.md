@@ -1,3 +1,10 @@
+# [1.88.0](https://github.com/adobe/spacecat-api-service/compare/v1.87.0...v1.88.0) (2025-01-21)
+
+
+### Features
+
+* introduce broken backlink suggestions ([#712](https://github.com/adobe/spacecat-api-service/issues/712)) ([e739940](https://github.com/adobe/spacecat-api-service/commit/e739940e3c5af702f346c435e0b385b39104846f))
+
 # [1.87.0](https://github.com/adobe/spacecat-api-service/compare/v1.86.10...v1.87.0) (2025-01-21)
 
 
