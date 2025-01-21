@@ -1648,9 +1648,6 @@ BrokenBacklink:
     traffic_domain:
       description: The referring domain's estimated monthly organic traffic from search.
       type: number
-    url_suggested:
-      description: The URL suggested for redirecting from the broken backlink.
-      $ref: '#/URL'
 ImportAssistantRequest:
   type: object
   required:
@@ -2213,16 +2210,16 @@ BrokenBacklinksRedirectData:
   type: object
   additionalProperties: true
   properties:
-    referringPageTitle:
+    title:
       description: The title of the referring page
       type: string
-    referringURL:
+    url_from:
       description: The URL of the referring page
       type: string
-    brokenTargetURL:
+    url_to:
       description: The URL of the broken target page
       type: string
-    proposedTargetURLs:
+    urls_suggested:
       description: The proposed target URLs to redirect the broken backlink to
       type: array
       items:
@@ -2230,7 +2227,7 @@ BrokenBacklinksRedirectData:
     manualOverrideURL:
       description: The URL to manually override the proposed target URL
       type: string
-    referringPageTraffic:
+    traffic_domain:
       description: The estimated monthly organic traffic to the referring page
       type: number
 BrokenBacklinksKpiDeltas:

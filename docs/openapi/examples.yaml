@@ -52,14 +52,14 @@ broken-backlinks-suggestion:
     type: 'REDIRECT_UPDATE'
     rank: 571000
     data:
-      referringPageTitle: 'Black Friday Sale at Example Inc.'
-      referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-      brokenTargetURL: 'https://www.example.com/CustomerServiceView.aspx'
-      proposedTargetURLs:
+      title: 'Black Friday Sale at Example Inc.'
+      url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+      url_to: 'https://www.example.com/CustomerServiceView.aspx'
+      urls_suggested:
         - 'https://www.example.com/customer-service/contact'
         - 'https://www.example.com/customer-service'
-      manualOverrideURL: 'https://www.example.com/customer-service/faq'
-      referringPageTraffic: 571000
+      ai_rationale: 'The URL is about customer service, so it should be redirected to the customer service page.'
+      traffic_domain: 571000
     status: 'APPROVED'
     createdAt: '2024-01-22T12:00:00Z'
     updatedAt: '2024-07-26T12:00:00Z'
@@ -69,22 +69,23 @@ broken-backlinks-suggestion-create-list:
     - type: 'REDIRECT_UPDATE'
       rank: 571000
       data:
-        referringPageTitle: 'Black Friday Sale at Example Inc.'
-        referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-        brokenTargetURL: 'https://www.example.com/CustomerServiceView.aspx'
-        proposedTargetURLs:
+      title: 'Black Friday Sale at Example Inc.'
+      url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+      url_to: 'https://www.example.com/CustomerServiceView.aspx'
+      urls_suggested:
         - 'https://www.example.com/customer-service/contact'
         - 'https://www.example.com/customer-service'
-        referringPageTraffic: 571000
+      ai_rationale: 'The URL is about customer service, so it should be redirected to the customer service page.'
+      traffic_domain: 571000
     - type: 'REDIRECT_UPDATE'
       rank: 123000
       data:
-        referringPageTitle: 'Black Friday Sale at Example Inc.'
-        referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-        brokenTargetURL: 'https://www.example.com/get-a-promo-code.aspx'
-        proposedTargetURLs:
+        title: 'Black Friday Sale at Example Inc.'
+        url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+        url_to: 'https://www.example.com/get-a-promo-code.aspx'
+        urls_suggested:
           - 'https://www.example.com/offers/promo-codes'
-        referringPageTraffic: 123000
+        traffic_domain: 123000
 broken-backlinks-suggestion-create-list-response:
   description: Example for a broken backlinks suggestion create list response
   value:
@@ -98,13 +99,13 @@ broken-backlinks-suggestion-create-list-response:
           status: 'NEW'
           rank: 571000
           data:
-            referringPageTitle: 'Black Friday Sale at Example Inc.'
-            referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-            brokenTargetURL: 'https://www.example.com/CustomerServiceView.aspx'
-            proposedTargetURLs:
+            title: 'Black Friday Sale at Example Inc.'
+            url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+            url_to: 'https://www.example.com/CustomerServiceView.aspx'
+            urls_suggested:
               - 'https://www.example.com/customer-service/contact'
               - 'https://www.example.com/customer-service'
-            referringPageTraffic: 571000
+            traffic_domain: 571000
           createdAt: '2024-01-22T12:00:00Z'
           updatedAt: '2024-07-26T12:00:00Z'
       - index: 1
@@ -141,14 +142,13 @@ broken-backlinks-suggestions-status-update-response:
           type: 'REDIRECT_UPDATE'
           rank: 571000
           data:
-            referringPageTitle: 'Black Friday Sale at Example Inc.'
-            referringURL: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-            brokenTargetURL: 'https://www.example.com/CustomerServiceView.aspx'
-            proposedTargetURLs:
+            title: 'Black Friday Sale at Example Inc.'
+            url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+            url_to: 'https://www.example.com/CustomerServiceView.aspx'
+            urls_suggested:
               - 'https://www.example.com/customer-service/contact'
               - 'https://www.example.com/customer-service'
-            manualOverrideURL: 'https://www.example.com/customer-service/faq'
-            referringPageTraffic: 571000
+            traffic_domain: 571000
           status: 'APPROVED'
           createdAt: '2024-01-22T12:00:00Z'
           updatedAt: '2024-07-26T12:00:00Z'
@@ -187,11 +187,12 @@ broken-backlinks-audit:
     fullAuditRef: 'https://api.ahrefs.com/v3/site-explorer/broken-backlinks?select=title%2Curl_from%2Curl_to%2Ctraffic_domain&limit=50&mode=prefix&order_by=domain_rating_source%3Adesc%2Ctraffic_domain%3Adesc&target=example.com&output=json&where=%7B%22and%22%3A%5B%7B%22field%22%3A%22is_dofollow%22%2C%22is%22%3A%5B%22eq%22%2C1%5D%7D%2C%7B%22field%22%3A%22is_content%22%2C%22is%22%3A%5B%22eq%22%2C1%5D%7D%2C%7B%22field%22%3A%22domain_rating_source%22%2C%22is%22%3A%5B%22gte%22%2C29.5%5D%7D%2C%7B%22field%22%3A%22traffic_domain%22%2C%22is%22%3A%5B%22gte%22%2C500%5D%7D%2C%7B%22field%22%3A%22links_external%22%2C%22is%22%3A%5B%22lte%22%2C300%5D%7D%5D%7D'
     auditResult:
       brokenBacklinks:
-        - url_suggested": 'https://www.example.com/article/cats/pet-care/selecting-the-right-toys-for-your-cats-play-preference'
-          url_to: 'https://www.example.com/article/cats/pet-care/safe-and-sound-toys-for-your-cat/'
-          title: 'Choosing the Best Cat Toys: A Comprehensive Guide - Petful'
-          url_from: 'https://www.petful.com/pet-products/choosing-the-best-cat-toys/'
-          traffic_domain: 65272
+        urls_suggested":
+        - 'https://www.example.com/article/cats/pet-care/selecting-the-right-toys-for-your-cats-play-preference'
+        url_to: 'https://www.example.com/article/cats/pet-care/safe-and-sound-toys-for-your-cat/'
+        title: 'Choosing the Best Cat Toys: A Comprehensive Guide - Petful'
+        url_from: 'https://www.petful.com/pet-products/choosing-the-best-cat-toys/'
+        traffic_domain: 65272
 costs-audit:
   summary: Example for a costs audit
   value:
