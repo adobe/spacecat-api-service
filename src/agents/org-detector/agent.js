@@ -25,6 +25,7 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ConsoleCallbackHandler } from '@langchain/core/tracers/console';
 import { isObject } from '@adobe/spacecat-shared-utils';
 
+import fs from 'fs';
 import { retrieveFooter } from './tools/footer-retriever.js';
 import { matchCompanies } from './tools/company-matcher.js';
 import { getGithubOrgName } from './tools/github-org-retriever.js';
@@ -284,44 +285,7 @@ export default class OrgDetectorAgent {
    * If no company match is found, the `matchedCompany` field will be `null`.
    */
   async detect(domain, githubLogin) {
-    const instructions = `
-You are an AI assistant. A user wants to identify a matched company for domain "${domain}" and GitHub login "${githubLogin}".
-The "company_matcher" tool returns a JSON array of objects:
-  [
-    { "id": string, "name": string, "imsOrgId": string },
-    ...
-  ]
-If you find a recognized match, pick one object (the best match). Your final answer must be in JSON with this structure:
-  {
-    "matchedCompany": {
-       "id": "...",
-       "name": "...",
-       "imsOrgId": "..."
-    }
-  }
-If no matches at all, your final JSON must be:
-  {
-    "matchedCompany": null
-  }
-
-Steps:
-1) Use "footer_retriever" to retrieve the footer text from the domain. 
-   - Find candidate phrases that might be a company name (<=100 chars).
-   - For each candidate, call "company_matcher". 
-   - If you find a recognized match (the array from "company_matcher" is not empty), finalize with the single object as described.
-2) If step #1 yields zero recognized matches, use "github_org_name_retriever" to retrieve the GitHub org name, then call "company_matcher" on the result.
-   - If that array is not empty, finalize with the single object as described.
-3) If step #1 and #2 yield zero recognized matches, you *must* call "link_extractor" with { html: <footer>, domain: "${domain}" }.
-   - DO NOT finalize your answer or say "No company identified" until you have done this step if #1 and #2 gave no recognized match.
-   - If recognized, finalize with the single object as described.
-4) For each link returned by "link_extractor":
-   - call "main_content_retriever" => call "company_matcher".
-   - If recognized, finalize your answer.
-5) If after all that, still no recognized matches, finalize with { "matchedCompany": null }.
-
-Important: do not finalize { "matchedCompany": null } if you haven't done step #3 (link_extractor) in the case step #1 and #2 are empty.
-Output absolutely no text except for that final JSON.
-`;
+    const instructions = fs.readFileSync(new URL('./instructions.prompt', import.meta.url), 'utf-8');
 
     const noFoundFallback = { org: null };
 
