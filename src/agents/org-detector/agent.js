@@ -25,12 +25,12 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ConsoleCallbackHandler } from '@langchain/core/tracers/console';
 import { isObject } from '@adobe/spacecat-shared-utils';
 
-import fs from 'fs';
 import { retrieveFooter } from './tools/footer-retriever.js';
 import { matchCompanies } from './tools/company-matcher.js';
 import { getGithubOrgName } from './tools/github-org-retriever.js';
 import { retrieveMainContent } from './tools/main-content-retriever.js';
 import { extractLinks } from './tools/link-extractor.js';
+import instructions from './instructions.js';
 
 /**
  * Tool #1: Footer Retriever
@@ -285,8 +285,6 @@ export default class OrgDetectorAgent {
    * If no company match is found, the `matchedCompany` field will be `null`.
    */
   async detect(domain, githubLogin) {
-    const instructions = fs.readFileSync(new URL('./instructions.prompt', import.meta.url), 'utf-8');
-
     const noFoundFallback = { org: null };
 
     const initialState = {
