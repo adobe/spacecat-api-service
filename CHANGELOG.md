@@ -1,3 +1,10 @@
+# [1.87.0](https://github.com/adobe/spacecat-api-service/compare/v1.86.10...v1.87.0) (2025-01-21)
+
+
+### Features
+
+* **org-detection:** org detection agent ([#697](https://github.com/adobe/spacecat-api-service/issues/697)) ([f65c0ea](https://github.com/adobe/spacecat-api-service/commit/f65c0ea1fbab2a2b4f6ea6dcab0fed811ab098e7))
+
 ## [1.86.10](https://github.com/adobe/spacecat-api-service/compare/v1.86.9...v1.86.10) (2025-01-21)
 
 
