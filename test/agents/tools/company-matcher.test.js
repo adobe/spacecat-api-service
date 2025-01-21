@@ -67,7 +67,7 @@ describe('org-detection-agent/company matcher', () => {
     sandbox.restore();
   });
 
-  it('returns matching organizations when substring length > 4', async () => {
+  it('returns matching organizations', async () => {
     // Arrange
     context.dataAccess.Organization.all.resolves(orgs);
 
@@ -85,38 +85,12 @@ describe('org-detection-agent/company matcher', () => {
     });
   });
 
-  it('filters out organizations when substring length <= 4', async () => {
-    // Arrange
-    const fakeOrgs = [
-      {
-        getId: () => 'org-1',
-        getName: () => 'Test Inc',
-        getImsOrgId: () => 'ims-org-1',
-      },
-      {
-        getId: () => 'org-2',
-        getName: () => 'Big Company',
-        getImsOrgId: () => 'ims-org-2',
-      },
-    ];
-
-    context.dataAccess.Organization.all.resolves(fakeOrgs);
-
-    // Act
-    const query = 'Big';
-    const result = await matchCompanies(context.dataAccess, query);
-
-    // Assert
-    expect(context.dataAccess.Organization.all).to.have.been.calledOnce;
-    expect(result).to.be.an('array').that.is.empty;
-  });
-
   it('returns fuzzy match organizations found in DB', async () => {
     // Arrange
     context.dataAccess.Organization.all.resolves(orgs);
 
     // Act
-    const result = await matchCompanies(context.dataAccess, 'Venture');
+    const result = await matchCompanies(context.dataAccess, 'Ventur');
 
     // Assert
     expect(context.dataAccess.Organization.all).to.have.been.calledOnce;
