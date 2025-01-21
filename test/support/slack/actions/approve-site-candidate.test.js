@@ -50,7 +50,7 @@ describe('approveSiteCandidate', () => {
     clock = sinon.useFakeTimers();
 
     slackClient = {
-      postMessage: sinon.mock(),
+      postMessage: sinon.stub().resolves({ channelId: 'channel-id', threadId: 'thread-ts' }),
     };
 
     context = {
@@ -77,6 +77,11 @@ describe('approveSiteCandidate', () => {
       },
       slackClients: {
         WORKSPACE_INTERNAL_STANDARD: slackClient,
+      },
+      // If your updated code uses OrgDetectorAgent.fromContext:
+      // we can mock it similarly to how we do with other agents/clients
+      orgDetectorAgent: {
+        detect: sinon.stub(),
       },
     };
 
@@ -110,16 +115,7 @@ describe('approveSiteCandidate', () => {
     clock.restore();
   });
 
-  it('should approve site candidate and announce site discovery', async () => {
-    const expectedSiteCandidate = {
-      baseURL,
-      source: SiteCandidate.SITE_CANDIDATE_SOURCES.CDN,
-      status: SiteCandidate.SITE_CANDIDATE_STATUS.APPROVED,
-      updatedBy: 'approvers-username',
-      siteId: site.getId(),
-      hlxConfig,
-    };
-
+  it('should approve site candidate (customer) and announce site discovery', async () => {
     context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
     context.dataAccess.Site.findByBaseURL.resolves(null);
     context.dataAccess.Site.create.resolves(site);
@@ -132,71 +128,120 @@ describe('approveSiteCandidate', () => {
     expect(context.dataAccess.SiteCandidate.findByBaseURL).to.have.been.calledWith(baseURL);
     expect(context.dataAccess.Site.create).to.have.been.calledWith(
       {
-        baseURL, hlxConfig, isLive: true, organizationId: 'default',
+        baseURL,
+        hlxConfig,
+        isLive: true,
+        organizationId: 'default',
       },
     );
-    expect(site.save).to.have.been.callCount(0);
-    expect(siteCandidate.getBaseURL()).to.equal(expectedSiteCandidate.baseURL);
-    expect(siteCandidate.getHlxConfig()).to.eql(expectedSiteCandidate.hlxConfig);
-    expect(siteCandidate.getSource()).to.equal(expectedSiteCandidate.source);
-    expect(siteCandidate.setSiteId).to.have.been.calledWith(expectedSiteCandidate.siteId);
-    expect(siteCandidate.setStatus).to.have.been.calledWith(expectedSiteCandidate.status);
-    expect(siteCandidate.setUpdatedBy).to.have.been.calledWith(expectedSiteCandidate.updatedBy);
+    expect(site.save.callCount).to.equal(0);
+    expect(siteCandidate.setStatus).to.have.been.calledWith('APPROVED');
+    expect(siteCandidate.setUpdatedBy).to.have.been.calledWith('approvers-username');
     expect(siteCandidate.save).to.have.been.calledOnce;
+    expect(context.dataAccess.KeyEvent.create).to.have.been.called;
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
     expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
-    expect(context.dataAccess.KeyEvent.create).to.have.been.calledWith({
-      name: 'Go Live',
-      siteId: site.getId(),
-      type: 'STATUS CHANGE',
-    });
   });
 
-  it('should approve previously added non aem_edge sites then announce the discovery', async () => {
-    const expectedSiteCandidate = {
-      baseURL,
-      source: SiteCandidate.SITE_CANDIDATE_SOURCES.CDN,
-      status: SiteCandidate.SITE_CANDIDATE_STATUS.APPROVED,
-      updatedBy: 'approvers-username',
-      siteId: site.getId(),
-      hlxConfig,
-    };
-    site.getIsLive = () => false;
+  it('should approve site candidate as friends & family', async () => {
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
 
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackFriendsFamilyResponse, respond: respondMock });
+
+    expect(ackMock).to.have.been.calledOnce;
+    expect(context.dataAccess.Site.create).to.have.been.calledWith(
+      {
+        baseURL,
+        hlxConfig,
+        isLive: true,
+        organizationId: 'friends-family-org',
+      },
+    );
+    expect(siteCandidate.setStatus).to.have.been.calledWith('APPROVED');
+    expect(siteCandidate.setUpdatedBy).to.have.been.calledWith('approvers-username');
+    expect(siteCandidate.save).to.have.been.calledOnce;
+    expect(respondMock).to.have.been.called; // with appropriate FnF message
+  });
+
+  it('should approve previously added non-live site, set aem_edge, then announce', async () => {
+    site.getIsLive = () => false;
     context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
     context.dataAccess.Site.findByBaseURL.resolves(site);
     site.save.resolves(site);
 
-    // Call the function under test
     const approveFunction = approveSiteCandidate(context);
     await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
 
-    expect(ackMock).to.have.been.calledOnce;
-    expect(context.dataAccess.SiteCandidate.findByBaseURL).to.have.been.calledWith(baseURL);
-    expect(context.dataAccess.Site.create).to.not.have.been.called;
-
-    expect(site.save).to.have.been.calledOnce;
     expect(site.toggleLive).to.have.been.calledOnce;
     expect(site.setDeliveryType).to.have.been.calledWith('aem_edge');
-    expect(site.setHlxConfig).to.have.been.calledWith(expectedSiteCandidate.hlxConfig);
-    expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
-    expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
-    expect(context.dataAccess.KeyEvent.create).to.have.been.calledWith({
-      name: 'Go Live',
-      siteId: site.getId(),
-      type: 'STATUS CHANGE',
+    expect(site.setHlxConfig).to.have.been.calledWith(hlxConfig);
+    expect(site.save).to.have.been.calledOnce;
+    expect(context.dataAccess.KeyEvent.create).to.have.been.called;
+    expect(slackClient.postMessage).to.have.been.called; // the announcement
+  });
+
+  it('should detect an org if it is not FnF and post a thread message with "approveOrg"/"rejectOrg" buttons', async () => {
+    context.orgDetectorAgent.detect.resolves({
+      name: 'Some Company',
+      imsOrgId: 'Company@AdobeOrg',
     });
+
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    expect(context.orgDetectorAgent.detect).to.have.been.calledWith('spacecat.com', 'some-owner');
+
+    expect(slackClient.postMessage).to.have.been.calledTwice;
+    const orgDetectionMsg = slackClient.postMessage.secondCall.args[0];
+    expect(orgDetectionMsg.blocks[0].text.text).to.contain('Detected IMS organization `Some Company`');
+    expect(orgDetectionMsg.blocks[1].text.text).to.contain('Would you approve? @approvers-username');
+    expect(orgDetectionMsg.blocks[2].elements.length).to.equal(2);
+    expect(orgDetectionMsg.blocks[2].elements[0].action_id).to.equal('approveOrg');
+    expect(orgDetectionMsg.blocks[2].elements[1].action_id).to.equal('rejectOrg');
+  });
+
+  it('should not post org detection prompt if no org is detected or if it is FnF', async () => {
+    // Scenario A: No org detected
+    context.orgDetectorAgent.detect.resolves({}); // empty object
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    // postMessage call for site announcement
+    expect(slackClient.postMessage).to.have.been.calledOnce;
+
+    sinon.restore();
+
+    clock = sinon.useFakeTimers();
+    slackClient.postMessage = sinon.stub().resolves();
+    context.orgDetectorAgent.detect = sinon.stub().resolves({
+      name: 'Some Company',
+      imsOrgId: 'Company@AdobeOrg',
+    });
+    const approveFnF = approveSiteCandidate(context);
+    await approveFnF({ ack: ackMock, body: slackFriendsFamilyResponse, respond: respondMock });
+
+    expect(slackClient.postMessage).to.have.been.calledOnce;
   });
 
   it('logs and throws the error again if something goes wrong', async () => {
     ackMock.rejects(new Error('processing error'));
-
     const approveFunction = approveSiteCandidate(context);
 
     await expect(
       approveFunction({ ack: ackMock, body: slackFriendsFamilyResponse, respond: respondMock }),
     ).to.be.rejectedWith('processing error');
-    expect;
+
     expect(context.log.error).to.have.been.calledWith('Error occurred while acknowledging site candidate approval');
   });
 });

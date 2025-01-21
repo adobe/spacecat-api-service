@@ -77,13 +77,20 @@
     "@aws-sdk/client-s3": "3.731.1",
     "@aws-sdk/client-sqs": "3.731.1",
     "@aws-sdk/s3-request-presigner": "3.731.1",
+    "@langchain/core": "0.3.27",
+    "@langchain/langgraph": "0.2.39",
+    "@langchain/openai": "0.3.16",
+    "@octokit/rest": "21.0.2",
     "@slack/bolt": "4.2.0",
     "busboy": "1.6.0",
+    "fuse.js": "7.0.0",
     "handlebars": "^4.7.8",
     "js-yaml": "4.1.0",
+    "jsdom": "26.0.0",
     "psl": "1.15.0",
     "slack-block-builder": "2.8.0",
-    "urijs": "1.19.11"
+    "urijs": "1.19.11",
+    "zod": "3.24.1"
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.8",
