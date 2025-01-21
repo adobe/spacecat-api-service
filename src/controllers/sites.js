@@ -22,7 +22,7 @@ import {
   hasText,
   isBoolean,
   isObject,
-  getStoredMetrics, getRUMDomainKey, isValidUUID,
+  getStoredMetrics, getRUMDomainKey, isValidUUID, deepEqual,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
@@ -277,6 +277,11 @@ function SitesController(dataAccess, log, env) {
 
     if (isObject(requestBody.config)) {
       site.setConfig(requestBody.config);
+      updates = true;
+    }
+
+    if (isObject(requestBody.hlxConfig) && !deepEqual(requestBody.hlxConfig, site.getHlxConfig())) {
+      site.setHlxConfig(requestBody.hlxConfig);
       updates = true;
     }
 

@@ -1,3 +1,52 @@
+## [1.86.9](https://github.com/adobe/spacecat-api-service/compare/v1.86.8...v1.86.9) (2025-01-20)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#710](https://github.com/adobe/spacecat-api-service/issues/710)) ([7f3042c](https://github.com/adobe/spacecat-api-service/commit/7f3042c9f1b9443cd627f575a0063a82b60bd44f))
+
+## [1.86.8](https://github.com/adobe/spacecat-api-service/compare/v1.86.7...v1.86.8) (2025-01-19)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#709](https://github.com/adobe/spacecat-api-service/issues/709)) ([dad5397](https://github.com/adobe/spacecat-api-service/commit/dad539786e84c8e8d0dacd0019eb06c7dcc19fe3))
+
+## [1.86.7](https://github.com/adobe/spacecat-api-service/compare/v1.86.6...v1.86.7) (2025-01-18)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#708](https://github.com/adobe/spacecat-api-service/issues/708)) ([d48ea9d](https://github.com/adobe/spacecat-api-service/commit/d48ea9db73d62444b5225fd313c7685abf4ca971))
+
+## [1.86.6](https://github.com/adobe/spacecat-api-service/compare/v1.86.5...v1.86.6) (2025-01-17)
+
+
+### Bug Fixes
+
+* **sites:** update hlxConfig via API ([#707](https://github.com/adobe/spacecat-api-service/issues/707)) ([1f42265](https://github.com/adobe/spacecat-api-service/commit/1f4226588ebe5a5d9d490fd12780754189168f4b))
+
+## [1.86.5](https://github.com/adobe/spacecat-api-service/compare/v1.86.4...v1.86.5) (2025-01-17)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.18.5 ([#706](https://github.com/adobe/spacecat-api-service/issues/706)) ([4241b8a](https://github.com/adobe/spacecat-api-service/commit/4241b8af4c5eb69304075bac1f05a720a20910fa))
+
+## [1.86.4](https://github.com/adobe/spacecat-api-service/compare/v1.86.3...v1.86.4) (2025-01-17)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.18.4 ([#705](https://github.com/adobe/spacecat-api-service/issues/705)) ([303e5f4](https://github.com/adobe/spacecat-api-service/commit/303e5f41452e121c5d82d152bc4f81b76b720586))
+
+## [1.86.3](https://github.com/adobe/spacecat-api-service/compare/v1.86.2...v1.86.3) (2025-01-16)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#704](https://github.com/adobe/spacecat-api-service/issues/704)) ([d39ae74](https://github.com/adobe/spacecat-api-service/commit/d39ae74558c7a6354b068185490e5f250fa37565))
+
 ## [1.86.2](https://github.com/adobe/spacecat-api-service/compare/v1.86.1...v1.86.2) (2025-01-16)
 
 
