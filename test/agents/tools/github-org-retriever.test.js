@@ -39,10 +39,8 @@ describe('org-detection-agent/github org retriever', () => {
     ignoredOrgs = ['ignored-org'];
 
     mockOctokit = {
-      rest: {
-        orgs: {
-          get: sandbox.stub(),
-        },
+      users: {
+        getByUsername: sandbox.stub(),
       },
     };
 
@@ -69,21 +67,28 @@ describe('org-detection-agent/github org retriever', () => {
     await esmock.purge();
   });
 
-  it('returns null if orgLogin is in the ignored list', async () => {
+  it('returns an empty string if orgLogin is in the ignored list', async () => {
     const result = await getGithubOrgName('ignored-org', ignoredOrgs, context.log);
     expect(context.log.info).to.have.been.calledWith('Organization ignored-org is in the ignored list.');
-    expect(result).to.be.null;
+    expect(result).to.equal('');
   });
 
   it('returns the organization name from Octokit if call is successful', async () => {
-    mockOctokit.rest.orgs.get.resolves({ data: { name: 'Adobe' } });
+    mockOctokit.users.getByUsername.resolves({ data: { name: 'Adobe' } });
     const result = await getGithubOrgName('adobe', ignoredOrgs, context.log);
-    expect(mockOctokit.rest.orgs.get).to.have.been.calledOnceWith({ org: 'adobe' });
+    expect(mockOctokit.users.getByUsername).to.have.been.calledOnceWith({ username: 'adobe' });
     expect(result).to.equal('Adobe');
   });
 
+  it('returns empty string if octokit call was incomplete', async () => {
+    mockOctokit.users.getByUsername.resolves({ data: null });
+    const result = await getGithubOrgName('adobe', ignoredOrgs, context.log);
+    expect(mockOctokit.users.getByUsername).to.have.been.calledOnceWith({ username: 'adobe' });
+    expect(result).to.equal('');
+  });
+
   it('falls back to scraping for 4xx errors', async () => {
-    mockOctokit.rest.orgs.get.rejects({ status: 404, message: 'Not Found' });
+    mockOctokit.users.getByUsername.rejects({ status: 404, message: 'Not Found' });
     nock('https://github.com')
       .get('/spacecat')
       .reply(200, `
@@ -100,19 +105,19 @@ describe('org-detection-agent/github org retriever', () => {
     expect(result).to.equal('SpaceCat Org');
   });
 
-  it('returns null if scraping fails or the element is missing', async () => {
-    mockOctokit.rest.orgs.get.rejects({ status: 404, message: 'Not Found' });
+  it('returns an empty string if scraping fails or the element is missing', async () => {
+    mockOctokit.users.getByUsername.rejects({ status: 404, message: 'Not Found' });
     nock('https://github.com')
       .get('/mysteryorg')
       .reply(200, '<html><body><h1>No strong org name</h1></body></html>');
     const result = await getGithubOrgName('mysteryorg', ignoredOrgs, context.log);
-    expect(result).to.be.null;
+    expect(result).to.equal('');
   });
 
-  it('returns null if an unexpected error occurs with Octokit', async () => {
-    mockOctokit.rest.orgs.get.rejects({ status: 500, message: 'Server Error' });
+  it('returns an empty string if an unexpected error occurs with Octokit', async () => {
+    mockOctokit.users.getByUsername.rejects({ status: 500, message: 'Server Error' });
     const result = await getGithubOrgName('anyorg', ignoredOrgs, context.log);
     expect(context.log.error).to.have.been.calledWithMatch(/Error fetching organization name for anyorg: Server Error/);
-    expect(result).to.be.null;
+    expect(result).to.equal('');
   });
 });

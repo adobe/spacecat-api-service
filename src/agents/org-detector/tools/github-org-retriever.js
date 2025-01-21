@@ -38,14 +38,14 @@ async function scrapeGithubOrgName(orgLogin, log) {
     const orgElement = document.querySelector('h1[class*="sso-title"] strong');
     if (!orgElement) {
       log.info(`Organization name not found on GitHub page for ${orgLogin}`);
-      return null;
+      return '';
     }
 
     return orgElement.textContent.trim();
     /* c8 ignore next 4 */
   } catch (error) {
     log.error(`Error scraping GitHub organization name for ${orgLogin}: ${error.message}`);
-    return null;
+    return '';
   }
 }
 
@@ -62,14 +62,14 @@ async function scrapeGithubOrgName(orgLogin, log) {
 export async function getGithubOrgName(orgLogin, ignoredGithubOrgs, log) {
   if (ignoredGithubOrgs.includes(orgLogin)) {
     log.info(`Organization ${orgLogin} is in the ignored list.`);
-    return null;
+    return '';
   }
 
   const octokit = new Octokit();
 
   try {
-    const response = await octokit.rest.orgs.get({ org: orgLogin });
-    return response.data.name;
+    const { data } = await octokit.users.getByUsername({ username: orgLogin });
+    return data?.name || '';
   } catch (error) {
     // fall back to scraping for client errors (4xx)
     if (error.status && error.status >= 400 && error.status < 500) {
@@ -78,6 +78,6 @@ export async function getGithubOrgName(orgLogin, ignoredGithubOrgs, log) {
     }
 
     log.error(`Error fetching organization name for ${orgLogin}: ${error.message}`);
-    return null;
+    return '';
   }
 }
