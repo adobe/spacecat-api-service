@@ -18,19 +18,25 @@ import CreateGoogleLinkCommand from '../../../../src/support/slack/commands/crea
 
 describe('CreateGoogleLinkCommand', () => {
   let context;
+  let site;
   let slackContext;
   let dataAccessStub;
 
   beforeEach(() => {
+    site = {
+      getId: () => '123',
+      getDeliveryType: () => 'aem_edge',
+      getBaseURL: () => 'space.cat',
+      getGitHubURL: () => '',
+      getIsLive: () => true,
+      getIsLiveToggledAt: () => '2014-10-17T13:44:00.000Z',
+    };
+
     dataAccessStub = {
-      getSiteByBaseURL: sinon.stub().resolves({
-        getId: () => '123',
-        getDeliveryType: () => 'aem_edge',
-        getBaseURL: () => 'space.cat',
-        getGitHubURL: () => '',
-        isLive: () => true,
-        getIsLiveToggledAt: () => '2014-10-17T13:44:00.000Z',
-      }),
+      Site: {
+        create: sinon.stub(),
+        findByBaseURL: sinon.stub().resolves(site),
+      },
     };
 
     context = { dataAccess: dataAccessStub, log: console };
@@ -62,7 +68,7 @@ describe('CreateGoogleLinkCommand', () => {
       const args = ['space.cat'];
       const command = CreateGoogleLinkCommand(context);
       await command.handleExecution(args, slackContext);
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://space.cat')).to.be.true;
+      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://space.cat')).to.be.true;
       expect(slackContext.say.calledWith('https://spacecat.experiencecloud.live/api/v1/auth/google/123')).to.be.true;
     });
 
@@ -71,7 +77,7 @@ describe('CreateGoogleLinkCommand', () => {
       const args = ['space.cat'];
       const command = CreateGoogleLinkCommand(context);
       await command.handleExecution(args, slackContext);
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://space.cat')).to.be.true;
+      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://space.cat')).to.be.true;
       expect(slackContext.say.calledWith('https://spacecat.experiencecloud.live/api/ci/auth/google/123')).to.be.true;
     });
 
@@ -85,7 +91,7 @@ describe('CreateGoogleLinkCommand', () => {
     });
 
     it('notifies when no site is found', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
 
       const args = ['nonexistent.com'];
       const command = CreateGoogleLinkCommand(context);
@@ -96,7 +102,7 @@ describe('CreateGoogleLinkCommand', () => {
     });
 
     it('notifies when an error occurs', async () => {
-      dataAccessStub.getSiteByBaseURL.rejects(new Error('Test error'));
+      dataAccessStub.Site.findByBaseURL.rejects(new Error('Test error'));
 
       const args = ['nonexistent.com'];
       const command = CreateGoogleLinkCommand(context);

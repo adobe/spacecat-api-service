@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { Site } from '@adobe/spacecat-shared-data-access';
 import { triggerFromData } from './common/trigger.js';
 
 export const INITIAL_BACKLINKS_SLACK_MESSAGE = '*BROKEN BACKLINKS REPORT* for the *last week* :thread:';
@@ -29,7 +29,7 @@ export default async function trigger(context) {
   const config = {
     url,
     auditTypes: [type],
-    deliveryType: DELIVERY_TYPES.AEM_EDGE,
+    deliveryType: Site.DELIVERY_TYPES.AEM_EDGE,
   };
 
   return triggerFromData(context, config, auditContext);

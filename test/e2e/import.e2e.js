@@ -20,7 +20,8 @@ import { fileURLToPath } from 'url';
 import { getNewImportJobRequestData, makeRequest } from './utils/utils.js';
 import {
   createAndValidateNewImportJob,
-  deleteJobs, downloadZipFile,
+  deleteJobs,
+  downloadZipFile,
   getPreSignedZipUrl,
 } from './utils/request-helpers.js';
 import {

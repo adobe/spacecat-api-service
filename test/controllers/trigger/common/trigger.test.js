@@ -12,16 +12,15 @@
 
 /* eslint-env mocha */
 
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
-
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import { triggerFromData } from '../../../../src/controllers/trigger/common/trigger.js';
 
 use(chaiAsPromised);
+use(sinonChai);
 
 describe('Trigger from data access', () => {
   let context;
@@ -39,34 +38,34 @@ describe('Trigger from data access', () => {
       isHandlerEnabledForSite: sandbox.stub(),
     };
     sites = [
-      createSite({
-        id: 'site1',
+      {
+        getId: () => 'site1',
         baseURL: 'http://site1.com',
         organizationId: 'org123',
-      }),
-      createSite({
-        id: 'site2',
+      },
+      {
+        getId: () => 'site2',
         baseURL: 'http://site2.com',
         organizationId: 'org123',
-      }),
-      createSite({
-        id: 'site3',
+      },
+      {
+        getId: () => 'site3',
         baseURL: 'http://site3.com',
         organizationId: 'org124',
-      }),
-      createSite({
-        id: 'site4',
+      },
+      {
+        getId: () => 'site4',
         baseURL: 'http://site2.com',
         organizationId: 'org125',
-      }),
+      },
     ];
 
     orgs = [
-      createOrganization({
+      {
         id: 'org123',
         name: 'ABCD',
-      }),
-      createOrganization({
+      },
+      {
         id: 'org124',
         name: 'ABCD',
         config: {
@@ -74,8 +73,8 @@ describe('Trigger from data access', () => {
             auditsDisabled: true,
           },
         },
-      }),
-      createOrganization({
+      },
+      {
         id: 'org125',
         name: 'ABCD',
         config: {
@@ -88,7 +87,8 @@ describe('Trigger from data access', () => {
             },
           },
         },
-      })];
+      },
+    ];
     configuration.isHandlerEnabledForOrg.withArgs('auditType', orgs[0]).returns(false);
     configuration.isHandlerEnabledForOrg.withArgs('type1', orgs[0]).returns(false);
     configuration.isHandlerEnabledForOrg.withArgs('type2', orgs[0]).returns(false);
@@ -109,12 +109,18 @@ describe('Trigger from data access', () => {
     configuration.isHandlerEnabledForSite.withArgs('type2', sites[3]).returns(false);
 
     dataAccessMock = {
-      getOrganizations: sandbox.stub().resolves(orgs),
-      getSites: sandbox.stub(),
-      getSitesByDeliveryType: sandbox.stub(),
-      getSiteByBaseURL: sandbox.stub(),
-      getSiteByID: sandbox.stub(),
-      getConfiguration: sandbox.stub().resolves(configuration),
+      Configuration: {
+        findLatest: sandbox.stub().resolves(configuration),
+      },
+      Organization: {
+        all: sandbox.stub().resolves(orgs),
+      },
+      Site: {
+        all: sandbox.stub().resolves(sites),
+        allByDeliveryType: sandbox.stub().resolves(sites),
+        findByBaseURL: sandbox.stub().resolves(sites[0]),
+        findById: sandbox.stub().resolves(sites[0]),
+      },
     };
 
     sqsMock = {
@@ -140,12 +146,10 @@ describe('Trigger from data access', () => {
       deliveryType: 'all',
     };
 
-    dataAccessMock.getSites.resolves(sites);
-
     const response = await triggerFromData(context, config);
     const result = await response.json();
 
-    expect(dataAccessMock.getSites.calledOnce).to.be.true;
+    expect(dataAccessMock.Site.all).to.have.been.calledOnce;
     expect(sqsMock.sendMessage.callCount).to.equal(2);
     expect(result.message[0]).to.equal('Triggered auditType audit for all 2 sites');
   });
@@ -164,12 +168,10 @@ describe('Trigger from data access', () => {
       deliveryType: 'aem_edge',
     };
 
-    dataAccessMock.getSitesByDeliveryType.resolves(sites);
-
     const response = await triggerFromData(context, config);
     const result = await response.json();
 
-    expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
+    expect(dataAccessMock.Site.allByDeliveryType).to.have.been.calledOnceWithExactly('aem_edge');
     expect(sqsMock.sendMessage.callCount).to.equal(2);
     expect(result.message[0]).to.equal('Triggered auditType audit for all 2 sites');
   });
@@ -188,12 +190,10 @@ describe('Trigger from data access', () => {
       deliveryType: 'all',
     };
 
-    dataAccessMock.getSites.resolves(sites);
-
     const response = await triggerFromData(context, config);
     const result = await response.json();
 
-    expect(dataAccessMock.getSites.calledOnce).to.be.true;
+    expect(dataAccessMock.Site.all).to.have.been.calledOnce;
     expect(sqsMock.sendMessage.callCount).to.equal(4);
     expect(result.message).to.be.an('array').with.lengthOf(2);
     expect(result.message[0]).to.equal('Triggered type1 audit for all 2 sites');
@@ -214,12 +214,10 @@ describe('Trigger from data access', () => {
       deliveryType: 'all',
     };
 
-    dataAccessMock.getSiteByBaseURL.resolves(sites[0]);
-
     const response = await triggerFromData(context, config);
     const result = await response.json();
 
-    expect(dataAccessMock.getSiteByBaseURL.calledOnceWith('http://site1.com')).to.be.true;
+    expect(dataAccessMock.Site.findByBaseURL).to.have.been.calledOnceWithExactly('http://site1.com');
     expect(sqsMock.sendMessage.calledOnce).to.be.true;
     expect(result.message[0]).to.equal('Triggered auditType audit for site1');
   });
@@ -238,7 +236,7 @@ describe('Trigger from data access', () => {
       deliveryType: 'all',
     };
 
-    dataAccessMock.getSiteByBaseURL.resolves(null);
+    dataAccessMock.Site.findByBaseURL.resolves(null);
 
     const response = await triggerFromData(context, config);
     const result = await response.json();
@@ -264,21 +262,21 @@ describe('Trigger from data access', () => {
       isHandlerEnabledForSite: sandbox.stub(),
     };
     const sites2 = [
-      createSite({
-        id: 'site1',
+      {
+        getId: () => 'site1',
         baseURL: 'http://site1.com',
         organizationId: 'org123',
-      }),
-      createSite({
-        id: 'site2',
+      },
+      {
+        getId: () => 'site2',
         baseURL: 'http://site2.com',
         organizationId: 'org123',
-      }),
+      },
     ];
-    dataAccessMock.getSites.resolves(sites2);
+    dataAccessMock.Site.all.resolves(sites2);
     configuration.isHandlerEnabledForSite.withArgs('auditType', sites2[0]).returns(false);
     configuration.isHandlerEnabledForSite.withArgs('auditType', sites2[1]).returns(true);
-    dataAccessMock.getConfiguration.resolves(configuration);
+    dataAccessMock.Configuration.findLatest.resolves(configuration);
 
     const response = await triggerFromData(context, config);
 
@@ -300,12 +298,12 @@ describe('Trigger from data access', () => {
       deliveryType: 'all',
     };
 
-    dataAccessMock.getSites.resolves([
-      createSite({
-        id: 'site1',
+    dataAccessMock.Site.all.resolves([
+      {
+        getId: () => 'site1',
         baseURL: 'http://site1.com',
         organizationId: 'org123',
-      }),
+      },
     ]);
 
     const response = await triggerFromData(context, config);
@@ -333,21 +331,21 @@ describe('Trigger from data access', () => {
       isHandlerEnabledForSite: sandbox.stub(),
     };
     const sites2 = [
-      createSite({
-        id: 'site1',
+      {
+        getId: () => 'site1',
         baseURL: 'http://site1.com',
         organizationId: 'org123',
-      }),
-      createSite({
-        id: 'site2',
+      },
+      {
+        getId: () => 'site2',
         baseURL: 'http://site2.com',
         organizationId: 'org123',
-      }),
+      },
     ];
-    dataAccessMock.getSites.resolves(sites2);
+    dataAccessMock.Site.all.resolves(sites2);
     configuration.isHandlerEnabledForSite.withArgs('auditType', sites2[0]).returns(false);
     configuration.isHandlerEnabledForSite.withArgs('auditType', sites2[1]).returns(true);
-    dataAccessMock.getConfiguration.resolves(configuration);
+    dataAccessMock.Configuration.findLatest.resolves(configuration);
 
     const response = await triggerFromData(context, config);
 
@@ -369,7 +367,7 @@ describe('Trigger from data access', () => {
       deliveryType: 'all',
     };
 
-    dataAccessMock.getSiteByBaseURL.rejects(new Error('Unexpected error'));
+    dataAccessMock.Site.findByBaseURL.rejects(new Error('Unexpected error'));
 
     await expect(triggerFromData(context, config)).to.be.rejectedWith('Unexpected error');
   });

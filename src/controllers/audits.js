@@ -15,7 +15,13 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  hasText,
+  isNonEmptyArray,
+  isObject,
+  isValidUUID,
+  isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
@@ -31,6 +37,10 @@ function AuditsController(dataAccess) {
     throw new Error('Data access required');
   }
 
+  const {
+    Audit, Configuration, LatestAudit, Site,
+  } = dataAccess;
+
   /**
    * Gets all audits for a given site and audit type. If no audit type is specified,
    * all audits are returned.
@@ -40,14 +50,16 @@ function AuditsController(dataAccess) {
   const getAllForSite = async (context) => {
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType || undefined;
-    const ascending = context.data?.ascending === 'true' || false;
+    const order = context.data?.ascending === 'true' ? 'asc' : 'desc';
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const audits = (await dataAccess.getAuditsForSite(siteId, auditType, ascending))
-      .map((audit) => AuditDto.toAbbreviatedJSON(audit));
+    const method = auditType
+      ? Audit.allBySiteIdAndAuditType(siteId, auditType, { order })
+      : Audit.allBySiteId(siteId, { order });
+    const audits = ((await method).map((audit) => AuditDto.toAbbreviatedJSON(audit)));
 
     return ok(audits);
   };
@@ -60,13 +72,13 @@ function AuditsController(dataAccess) {
    */
   const getAllLatest = async (context) => {
     const auditType = context.params?.auditType;
-    const ascending = context.data?.ascending === 'true' || false;
+    const order = context.data?.ascending === 'true' ? 'asc' : 'desc';
 
     if (!hasText(auditType)) {
       return badRequest('Audit type required');
     }
 
-    const audits = (await dataAccess.getLatestAudits(auditType, ascending))
+    const audits = (await LatestAudit.allByAuditType(auditType, { order }))
       .map((audit) => AuditDto.toAbbreviatedJSON(audit));
 
     return ok(audits);
@@ -79,11 +91,11 @@ function AuditsController(dataAccess) {
   const getAllLatestForSite = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const audits = (await dataAccess.getLatestAuditsForSite(siteId))
+    const audits = (await LatestAudit.allBySiteId(siteId))
       .map((audit) => AuditDto.toJSON(audit));
 
     return ok(audits);
@@ -97,7 +109,7 @@ function AuditsController(dataAccess) {
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -105,12 +117,12 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    const audit = await dataAccess.getLatestAuditForSite(siteId, auditType);
-    if (!audit) {
-      return notFound('Audit not found');
+    const audits = await LatestAudit.allBySiteIdAndAuditType(siteId, auditType);
+    if (isNonEmptyArray(audits)) {
+      return ok(AuditDto.toJSON(audits[0]));
     }
 
-    return ok(AuditDto.toJSON(audit));
+    return notFound('Audit not found');
   };
 
   /**
@@ -126,10 +138,20 @@ function AuditsController(dataAccess) {
       return Object.values(overrides);
     }
 
+    const validateGroupedURLsInput = (groupedURLs) => {
+      groupedURLs.forEach(({ name, pattern }) => {
+        try {
+          RegExp(pattern);
+        } catch (error) {
+          throw new Error(`Invalid regular expression in pattern for "${name}": "${pattern}".`);
+        }
+      });
+    };
+
     const siteId = context.params?.siteId;
     const auditType = context.params?.auditType;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -137,19 +159,23 @@ function AuditsController(dataAccess) {
       return badRequest('Audit type required');
     }
 
-    const { excludedURLs, manualOverwrites } = context.data;
+    const { excludedURLs, manualOverwrites, groupedURLs } = context.data;
     let hasUpdates = false;
 
-    const site = await dataAccess.getSiteByID(siteId);
+    const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
 
-    const config = site.getConfig();
-    const handlerConfig = config.getHandlerConfig(auditType);
-    if (!handlerConfig) {
-      return notFound('Audit type not found');
+    const configuration = await Configuration.findLatest();
+    const registeredAudits = configuration.getHandlers();
+    if (!registeredAudits[auditType]) {
+      return notFound(`The "${auditType}" is not present in the configuration. List of allowed audits:`
+        + ` ${Object.keys(registeredAudits).join(', ')}.`);
     }
+
+    const siteConfig = site.getConfig();
+
     if (Array.isArray(excludedURLs)) {
       for (const url of excludedURLs) {
         if (!isValidUrl(url)) {
@@ -161,9 +187,9 @@ function AuditsController(dataAccess) {
 
       const newExcludedURLs = excludedURLs.length === 0
         ? []
-        : Array.from(new Set([...(config.getExcludedURLs(auditType) || []), ...excludedURLs]));
+        : Array.from(new Set([...(siteConfig.getExcludedURLs(auditType) || []), ...excludedURLs]));
 
-      config.updateExcludedURLs(auditType, newExcludedURLs);
+      siteConfig.updateExcludedURLs(auditType, newExcludedURLs);
     }
 
     if (Array.isArray(manualOverwrites)) {
@@ -185,19 +211,42 @@ function AuditsController(dataAccess) {
 
       hasUpdates = true;
 
-      const existingOverrides = config.getManualOverwrites(auditType);
+      const existingOverrides = siteConfig.getManualOverwrites(auditType);
       const newManualOverwrites = manualOverwrites.length === 0
         ? []
         : mergeOverrides(existingOverrides, manualOverwrites);
 
-      config.updateManualOverwrites(auditType, newManualOverwrites);
+      siteConfig.updateManualOverwrites(auditType, newManualOverwrites);
     }
+
+    if (Array.isArray(groupedURLs)) {
+      try {
+        validateGroupedURLsInput(groupedURLs);
+      } catch (error) {
+        return badRequest(error.message);
+      }
+      hasUpdates = true;
+
+      const currentGroupedURLs = siteConfig.getGroupedURLs(auditType) || [];
+
+      let patchedGroupedURLs = [];
+      if (groupedURLs.length !== 0) {
+        patchedGroupedURLs = Object.values(
+          [...currentGroupedURLs, ...groupedURLs].reduce((acc, item) => {
+            acc[item.pattern] = item;
+            return acc;
+          }, {}),
+        );
+      }
+      siteConfig.updateGroupedURLs(auditType, patchedGroupedURLs);
+    }
+
     if (hasUpdates) {
-      const handlerType = config.getHandlerConfig(auditType);
-      const configObj = Config.toDynamoItem(config);
-      site.updateConfig(configObj);
-      await dataAccess.updateSite(site);
-      return ok(handlerType);
+      const configObj = Config.toDynamoItem(siteConfig);
+      site.setConfig(configObj);
+      await site.save();
+      const auditConfig = siteConfig.getHandlerConfig(auditType);
+      return ok(auditConfig);
     }
     return badRequest('No updates provided');
   };

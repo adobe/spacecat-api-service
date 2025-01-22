@@ -12,13 +12,13 @@
 
 /* eslint-env mocha */
 
-import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import GetSitesCommand, { formatSitesToCSV } from '../../../../src/support/slack/commands/get-sites.js';
+
+use(sinonChai);
 
 /**
  * Generates a specified number of mock sites with mock audits.
@@ -29,36 +29,40 @@ import GetSitesCommand, { formatSitesToCSV } from '../../../../src/support/slack
 function generateSites(count) {
   return Array.from({ length: count }, (_, index) => {
     const siteData = {
-      id: `site-${index}`,
-      baseURL: `https://site-${index}.com`,
-      gitHubURL: (index % 2 === 0) ? `https://github.com/site-${index}` : '',
-      isLive: (index % 2 === 0),
-      createdAt: 'createdAtDate',
-      isLiveToggledAt: (index % 2 === 0) ? 'istoggledLiveAtDate' : null,
-      deliveryType: (index % 2 === 0) ? 'aem_edge' : 'aem_cs',
+      getId: () => `site-${index}`,
+      getBaseURL: () => `https://site-${index}.com`,
+      getGitHubURL: () => ((index % 2 === 0) ? `https://github.com/site-${index}` : ''),
+      getIsLive: () => (index % 2 === 0),
+      getCreatedAt: () => 'createdAtDate',
+      getIsLiveToggledAt: () => ((index % 2 === 0) ? 'istoggledLiveAtDate' : null),
+      getDeliveryType: () => ((index % 2 === 0) ? 'aem_edge' : 'aem_cs'),
+      getOrganizationId: () => 'some-org-id',
     };
 
     const runtimeError = index % 3 === 0 ? { code: 'NO_FCP', message: 'Test LH Error' } : null;
-
-    const auditData = {
-      siteId: siteData.id,
-      auditType: 'lhs-mobile',
-      auditedAt: new Date().toISOString(),
-      fullAuditRef: 'https://example.com',
-      isLive: siteData.isLive,
-      auditResult: {
-        scores: {
-          performance: 0.9,
-          seo: 0.8,
-          accessibility: 0.7,
-          'best-practices': 0.6,
-        },
-        runtimeError,
-      },
+    const scores = {
+      performance: 0.9,
+      seo: 0.8,
+      accessibility: 0.7,
+      'best-practices': 0.6,
     };
 
-    const site = createSite(siteData);
-    site.setAudits([createAudit(auditData)]);
+    const auditData = {
+      getSiteId: () => siteData.id,
+      getAuditType: () => 'lhs-mobile',
+      getAuditedAt: () => new Date().toISOString(),
+      getFullAuditRef: () => 'https://example.com',
+      getIsError: () => !!runtimeError,
+      getIsLive: () => siteData.isLive,
+      getScores: () => scores,
+      getAuditResult: () => ({
+        scores,
+        runtimeError,
+      }),
+    };
+
+    const site = siteData;
+    site.getAudits = () => [auditData];
 
     return site;
   });
@@ -73,7 +77,9 @@ describe('GetSitesCommand', () => {
 
   beforeEach(() => {
     dataAccessStub = {
-      getSitesWithLatestAudit: sinon.stub(),
+      Site: {
+        allWithLatestAudit: sinon.stub(),
+      },
     };
     boltAppStub = {
       action: sinon.stub(),
@@ -108,7 +114,7 @@ describe('GetSitesCommand', () => {
 
   describe('Handle Execution Method', () => {
     it('handles command execution with default parameters', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
       await command.handleExecution([], slackContext);
@@ -118,7 +124,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with specific non-live and desktop', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['non-live', 'desktop'], slackContext);
@@ -127,7 +133,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with live and mobile', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['live', 'mobile'], slackContext);
@@ -136,7 +142,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with all', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['all', 'mobile'], slackContext);
@@ -145,7 +151,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with no results', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves([]);
+      dataAccessStub.Site.allWithLatestAudit.resolves([]);
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['all', 'mobile'], slackContext);
@@ -154,7 +160,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with delivery type aem_edge', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['aem_edge'], slackContext);
@@ -163,7 +169,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with delivery type aem_cs', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['aem_cs'], slackContext);
@@ -172,7 +178,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with delivery type other', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['other'], slackContext);
@@ -181,7 +187,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with unknown arg', async () => {
-      dataAccessStub.getSitesWithLatestAudit.resolves(generateSites(2));
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['unknown', 'unknown'], slackContext);
@@ -190,7 +196,7 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles errors', async () => {
-      dataAccessStub.getSitesWithLatestAudit.rejects(new Error('test error'));
+      dataAccessStub.Site.allWithLatestAudit.rejects(new Error('test error'));
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['all', 'mobile'], slackContext);

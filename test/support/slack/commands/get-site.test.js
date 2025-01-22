@@ -11,10 +11,8 @@
  */
 
 /* eslint-env mocha */
-
-import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
-
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import { CHARACTER_LIMIT } from '../../../../src/utils/slack/base.js';
@@ -23,6 +21,8 @@ import GetSiteCommand, {
   formatAudits,
   formatRows,
 } from '../../../../src/support/slack/commands/get-site.js';
+
+use(sinonChai);
 
 /**
  * Generates a specified number of mock audits.
@@ -36,25 +36,29 @@ function generateMockAudits(count) {
   for (let i = 0; i < count; i += 1) {
     const runtimeError = i % 3 === 0 ? { code: 'NO_FCP', message: 'Test LH Error' } : null;
 
-    const mockAuditData = {
-      siteId: '123',
-      auditType: 'lhs-mobile',
-      auditedAt: '2023-12-16T09:21:09.000Z',
-      isLive: (i % 2 === 0),
-      isLiveToggledAt: (i % 2 === 0 ? '2011-10-05T14:48:00.000Z' : null),
-      fullAuditRef: 'https://example.com',
-      auditResult: {
-        runtimeError,
-        scores: {
-          performance: 0.9,
-          seo: 0.8,
-          accessibility: 0.7,
-          'best-practices': 0.6,
-        },
-      },
+    const scores = {
+      performance: 0.9,
+      seo: 0.8,
+      accessibility: 0.7,
+      'best-practices': 0.6,
     };
 
-    audits.push(createAudit(mockAuditData));
+    const mockAuditData = {
+      getSiteId: () => '123',
+      getAuditType: () => 'lhs-mobile',
+      getAuditedAt: () => '2023-12-16T09:21:09.000Z',
+      getIsError: () => (i % 3 === 0),
+      getIsLive: () => (i % 2 === 0),
+      getIsLiveToggledAt: () => (i % 2 === 0 ? '2011-10-05T14:48:00.000Z' : null),
+      getFullAuditRef: () => 'https://example.com',
+      getScores: () => scores,
+      getAuditResult: () => ({
+        runtimeError,
+        scores,
+      }),
+    };
+
+    audits.push(mockAuditData);
   }
 
   return audits;
@@ -62,21 +66,27 @@ function generateMockAudits(count) {
 
 describe('GetSiteCommand', () => {
   let context;
+  let site;
   let slackContext;
   let dataAccessStub;
 
   beforeEach(() => {
+    site = {
+      getId: () => '123',
+      getDeliveryType: () => 'aem_edge',
+      getBaseURL: () => 'example.com',
+      getGitHubURL: () => '',
+      getIsLive: () => true,
+      getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
+      getAuditsByAuditType: sinon.stub(),
+    };
     dataAccessStub = {
-      getSiteByBaseURL: sinon.stub().resolves({
-        getId: () => '123',
-        getDeliveryType: () => 'aem_edge',
-        getBaseURL: () => 'example.com',
-        getGitHubURL: () => '',
-        isLive: () => true,
-        getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
-      }),
-      getConfiguration: sinon.stub().resolves({ isHandlerEnabledForSite: () => true }),
-      getAuditsForSite: sinon.stub(),
+      Configuration: {
+        findLatest: sinon.stub().resolves({ isHandlerEnabledForSite: () => true }),
+      },
+      Site: {
+        findByBaseURL: sinon.stub().resolves(site),
+      },
     };
     context = { dataAccess: dataAccessStub, log: console };
     slackContext = { say: sinon.spy() };
@@ -94,41 +104,41 @@ describe('GetSiteCommand', () => {
 
   describe('Handle Execution Method', () => {
     it('handles valid input and retrieves site status', async () => {
-      dataAccessStub.getAuditsForSite.resolves(generateMockAudits(10));
+      site.getAuditsByAuditType.resolves(generateMockAudits(10));
 
       const args = ['example.com', 'mobile'];
       const command = GetSiteCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.getAuditsForSite.calledWith('123')).to.be.true;
+      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(site.getAuditsByAuditType).to.have.been.calledWith('lhs-mobile');
       expect(slackContext.say.called).to.be.true;
     });
 
     it('handles valid input and retrieves site status for desktop strategy', async () => {
-      dataAccessStub.getAuditsForSite.resolves(generateMockAudits(10));
+      site.getAuditsByAuditType.resolves(generateMockAudits(10));
 
       const args = ['example.com', 'desktop'];
       const command = GetSiteCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.getAuditsForSite.calledWith('123', 'lhs-desktop')).to.be.true;
+      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(site.getAuditsByAuditType).to.have.been.calledWith('lhs-desktop');
       expect(slackContext.say.called).to.be.true;
     });
 
     it('handles valid input and retrieves site status without latest audit', async () => {
-      dataAccessStub.getAuditsForSite.resolves([]);
+      site.getAuditsByAuditType.resolves([]);
 
       const args = ['example.com', 'desktop'];
       const command = GetSiteCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.getSiteByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.getAuditsForSite.calledWith('123', 'lhs-desktop')).to.be.true;
+      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(site.getAuditsByAuditType).to.have.been.calledWith('lhs-desktop');
       expect(slackContext.say.called).to.be.true;
     });
 
@@ -142,7 +152,7 @@ describe('GetSiteCommand', () => {
     });
 
     it('notifies when no site is found', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
 
       const args = ['nonexistent.com'];
       const command = GetSiteCommand(context);
@@ -153,7 +163,7 @@ describe('GetSiteCommand', () => {
     });
 
     it('notifies when an error occurs', async () => {
-      dataAccessStub.getSiteByBaseURL.rejects(new Error('Test error'));
+      dataAccessStub.Site.findByBaseURL.rejects(new Error('Test error'));
 
       const args = ['nonexistent.com'];
       const command = GetSiteCommand(context);

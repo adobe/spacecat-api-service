@@ -27,12 +27,14 @@ function ConfigurationController(dataAccess) {
     throw new Error('Data access required');
   }
 
+  const { Configuration } = dataAccess;
+
   /**
    * Retrieves all configurations (all versions).
    * @return {Promise<Response>} Array of configurations.
    */
   const getAll = async () => {
-    const configurations = (await dataAccess.getConfigurations())
+    const configurations = (await Configuration.all())
       .map((configuration) => ConfigurationDto.toJSON(configuration));
     return ok(configurations);
   };
@@ -49,7 +51,7 @@ function ConfigurationController(dataAccess) {
       return badRequest('Configuration version required to be an integer');
     }
 
-    const configuration = await dataAccess.getConfigurationByVersion(configurationVersion);
+    const configuration = await Configuration.findByVersion(configurationVersion);
     if (!configuration) {
       return notFound('Configuration not found');
     }
@@ -62,7 +64,7 @@ function ConfigurationController(dataAccess) {
    * @return {Promise<Response>} Configuration response.
    */
   const getLatest = async () => {
-    const configuration = await dataAccess.getConfiguration();
+    const configuration = await Configuration.findLatest();
     if (!configuration) {
       return notFound('Configuration not found');
     }

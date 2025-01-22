@@ -12,12 +12,10 @@
 
 import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
-import {
-  SITE_CANDIDATE_SOURCES,
-} from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 
 import { URL } from 'url';
 
+import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
 
 export const BACKTICKS = '```';
@@ -27,7 +25,8 @@ export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
-const MAX_CHUNK_SIZE = '25';
+const MAX_TEXT_CHUNK_SIZE = 3000;
+const MAX_CHUNK_SIZE = 25;
 
 /**
  * Extracts a URL from a given input string. The input can be in a Slack message
@@ -117,31 +116,40 @@ const splitBlocksIntoChunks = (blocks, chunkSize = MAX_CHUNK_SIZE) => {
  *
  * @param {Function} say - The function to send a message to the user.
  * @param {Object[]} textSections - The sections of the message.
- * @param {Object[]} [additionalBlocks=[]] - Additional blocks to send in the message.
+ * @param {SectionBuilder[]} [additionalBlocks=[]] - Additional blocks to send in the message.
  * @param options - Additional options which can include properties like 'unfurl_links'.
  */
-const sendMessageBlocks = async (say, textSections, additionalBlocks = [], options = {}) => {
-  const blocks = textSections.map((section) => {
-    const block = {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: section.text,
-      },
-    };
+const sendMessageBlocks = async (
+  say,
+  textSections,
+  additionalBlocks = [],
+  options = {},
+) => {
+  const finalSections = textSections.map((section) => {
+    const splitSections = splitBlocksIntoChunks(section.text, MAX_TEXT_CHUNK_SIZE);
+    const formatSections = splitSections.map((text) => ({ text }));
+    formatSections[formatSections.length - 1].accessory = section.accessory;
+    return formatSections;
+  }).flat();
 
-    if (section.accessory) {
-      block.accessory = section.accessory;
-    }
-
-    return block;
-  });
+  const blocks = finalSections.map(
+    (section) => {
+      const block = Blocks.Section().text(section.text);
+      if (section.accessory) {
+        block.accessory(Elements.Button()
+          .text(section.accessory.text)
+          .actionId(section.accessory.actionId));
+      }
+      return block;
+    },
+  );
 
   blocks.push(...additionalBlocks);
   const chunks = splitBlocksIntoChunks(blocks);
   for (const chunk of chunks) {
+    const message = Message().blocks(chunk);
     // eslint-disable-next-line no-await-in-loop
-    await say({ ...options, blocks: chunk });
+    await say({ ...options, ...JSON.parse(message.buildToJSON()) });
   }
 };
 
@@ -274,11 +282,9 @@ const wrapSayForThread = (say, threadTs) => {
   return wrappedFunction;
 };
 
-const getHlxConfigMessagePart = (source, hlxConfig) => {
+const getHlxConfigMessagePart = (hlxConfig) => {
   const { rso, hlxVersion } = hlxConfig;
-  return source === SITE_CANDIDATE_SOURCES.CDN
-    ? `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``
-    : '';
+  return `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``;
 };
 
 export {

@@ -12,7 +12,6 @@
 
 /* eslint-env mocha */
 
-import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 
@@ -40,32 +39,23 @@ describe('Audit DTO', () => {
         fullAuditRef: 'full-audit-ref',
       },
     };
-    const fullPreviousAuditResult = {
-      'https://www.test.com': {
-        brokenBacklinks: [],
-        fullAuditRef: 'full-audit-ref',
-      },
+
+    const audit = {
+      getAuditResult: () => fullAuditResult,
+      getAuditType: () => 'broken-backlinks',
+      getAuditedAt: () => now.toISOString(),
+      getFullAuditRef: () => 'full-audit-ref',
+      getIsLive: () => true,
+      getIsError: () => false,
+      getSiteId: () => 'site-id',
     };
-    const audit = createAudit({
-      auditResult: fullAuditResult,
-      previousAuditResult: fullPreviousAuditResult,
-      auditType: 'broken-backlinks',
-      auditedAt: now.toISOString(),
-      expiresAt: now,
-      fullAuditRef: 'full-audit-ref',
-      isLive: true,
-      isError: false,
-      siteId: 'site-id',
-    });
 
     const auditJson = AuditDto.toAbbreviatedJSON(audit);
 
     expect(auditJson).to.deep.equal({
       auditResult: fullAuditResult,
-      previousAuditResult: fullPreviousAuditResult,
       auditType: 'broken-backlinks',
       auditedAt: now.toISOString(),
-      expiresAt: now.toISOString(),
       fullAuditRef: 'full-audit-ref',
       isLive: true,
       isError: false,

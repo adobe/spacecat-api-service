@@ -12,10 +12,13 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import RunScrapeCommand from '../../../../src/support/slack/commands/run-scrape.js';
+
+use(sinonChai);
 
 describe('RunScrapeCommand', () => {
   let context;
@@ -26,9 +29,12 @@ describe('RunScrapeCommand', () => {
 
   beforeEach(() => {
     dataAccessStub = {
-      getConfiguration: sinon.stub(),
-      getSiteByBaseURL: sinon.stub(),
-      getTopPagesForSite: sinon.stub(),
+      Configuration: {
+        findLatest: sinon.stub(),
+      },
+      Site: {
+        findByBaseURL: sinon.stub(),
+      },
     };
     const getConfigStub = {
       getSlackRoles: sinon.stub().returns({
@@ -36,7 +42,7 @@ describe('RunScrapeCommand', () => {
         scrape: ['USER123'],
       }),
     };
-    dataAccessStub.getConfiguration.returns(getConfigStub);
+    dataAccessStub.Configuration.findLatest.returns(getConfigStub);
     logStub = {
       info: sinon.stub(),
       error: sinon.stub(),
@@ -66,50 +72,55 @@ describe('RunScrapeCommand', () => {
   });
 
   describe('Handle Execution Method', () => {
-    it('handles null result from getTopPagesForSite', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({ getId: () => '123' });
-      dataAccessStub.getTopPagesForSite.resolves(null);
+    it('handles null result from SiteTopPage.allBySiteId', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({
+        getId: () => '123',
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves(null),
+      });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], slackContext);
       expect(slackContext.say.calledWith(':warning: No top pages found for site `https://example.com`')).to.be.true;
     });
 
-    it('handles empty array result from getTopPagesForSite', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({ getId: () => '123' });
-      dataAccessStub.getTopPagesForSite.resolves([]);
+    it('handles empty array result from SiteTopPage.allBySiteId', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({
+        getId: () => '123',
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([]),
+      });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], slackContext);
       expect(slackContext.say.calledWith(':warning: No top pages found for site `https://example.com`')).to.be.true;
     });
 
     it('parses SLACK_IDS_RUN_IMPORT correctly when present', async () => {
-      dataAccessStub.getConfiguration.resolves({ getSlackRoles: () => ({ scrape: ['USER123', 'USER456'] }) });
+      dataAccessStub.Configuration.findLatest.resolves({ getSlackRoles: () => ({ scrape: ['USER123', 'USER456'] }) });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], slackContext);
       expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.false;
     });
 
     it('handles missing SLACK_IDS_RUN_IMPORT', async () => {
-      dataAccessStub.getConfiguration.resolves({ getSlackRoles: () => null });
+      dataAccessStub.Configuration.findLatest.resolves({ getSlackRoles: () => null });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], { ...slackContext, user: 'ANYUSER' });
       expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.true;
     });
     it('triggers a scrape for a valid site with top pages', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({
+      dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+          { getUrl: () => 'https://example.com/page1' },
+          { getUrl: () => 'https://example.com/page2' },
+        ]),
       });
-      dataAccessStub.getTopPagesForSite.resolves([
-        { getURL: () => 'https://example.com/page1' },
-        { getURL: () => 'https://example.com/page2' },
-      ]);
+
       const command = RunScrapeCommand(context);
 
       await command.handleExecution(['https://example.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Found top pages for site `https://example.com`');
-      expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Triggered scrape run for site `https://example.com`');
+      expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Triggering scrape run for site `https://example.com`');
       expect(slackContext.say.thirdCall.args[0]).to.include('white_check_mark: Completed triggering scrape runs for site `https://example.com` — Total URLs: 2');
     });
 
@@ -131,10 +142,11 @@ describe('RunScrapeCommand', () => {
     });
 
     it('informs user if no top pages are found', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves({
+      dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([]),
       });
-      dataAccessStub.getTopPagesForSite.resolves([]);
+
       const command = RunScrapeCommand(context);
 
       await command.handleExecution(['https://example.com'], slackContext);
@@ -143,7 +155,7 @@ describe('RunScrapeCommand', () => {
     });
 
     it('informs user if the site was not found', async () => {
-      dataAccessStub.getSiteByBaseURL.resolves(null);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
       const command = RunScrapeCommand(context);
 
       await command.handleExecution(['https://unknownsite.com'], slackContext);
@@ -152,7 +164,7 @@ describe('RunScrapeCommand', () => {
     });
 
     it('informs user when error occurs', async () => {
-      dataAccessStub.getSiteByBaseURL.rejects(new Error('Test Error'));
+      dataAccessStub.Site.findByBaseURL.rejects(new Error('Test Error'));
       const command = RunScrapeCommand(context);
 
       await command.handleExecution(['https://example.com'], slackContext);

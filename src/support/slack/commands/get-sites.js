@@ -31,7 +31,7 @@ export function formatSitesToCSV(sites = []) {
     const siteData = {
       'Base URL': site.getBaseURL(),
       'Delivery Type': site.getDeliveryType(),
-      'Live Status': site.isLive() ? 'Live' : 'Non-Live',
+      'Live Status': site.getIsLive() ? 'Live' : 'Non-Live',
       'Go Live Date': (site.getIsLiveToggledAt() || site.getCreatedAt()).split('T')[0],
       'GitHub URL': site.getGitHubURL() || '',
       'Performance Score': '---',
@@ -44,7 +44,7 @@ export function formatSitesToCSV(sites = []) {
     if (audits.length) {
       const lastAudit = audits[0];
 
-      if (lastAudit.isError()) {
+      if (lastAudit.getIsError()) {
         siteData.Error = formatLighthouseError(lastAudit.getAuditResult().runtimeError);
       } else {
         const {
@@ -83,9 +83,10 @@ function GetSitesCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Site } = dataAccess;
 
   async function fetchAndFormatSites(threadTs, filterStatus, psiStrategy, deliveryType) {
-    let sites = await dataAccess.getSitesWithLatestAudit(`lhs-${psiStrategy}`, true, deliveryType);
+    let sites = await Site.allWithLatestAudit(`lhs-${psiStrategy}`, 'asc', deliveryType);
 
     // filter sites from friends and family org
     sites = sites.filter(
@@ -93,7 +94,7 @@ function GetSitesCommand(context) {
     );
 
     if (filterStatus !== 'all') {
-      sites = sites.filter((site) => (filterStatus === 'live' ? site.isLive() : !site.isLive()));
+      sites = sites.filter((site) => (filterStatus === 'live' ? site.getIsLive() : !site.getIsLive()));
     }
 
     const totalSites = sites.length;

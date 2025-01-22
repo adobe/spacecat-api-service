@@ -40,6 +40,7 @@ function RunScrapeCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Configuration, Site } = dataAccess;
 
   /**
      * Validates input and triggers a new scrape run for the given site.
@@ -51,7 +52,7 @@ function RunScrapeCommand(context) {
      */
   const handleExecution = async (args, slackContext) => {
     const { say, user } = slackContext;
-    const config = await dataAccess.getConfiguration();
+    const config = await Configuration.findLatest();
     const slackRoles = config.getSlackRoles() || {};
     const admins = slackRoles?.scrape || [];
 
@@ -69,34 +70,36 @@ function RunScrapeCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
       if (!isObject(site)) {
         await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 
-      const result = await dataAccess.getTopPagesForSite(site.getId(), 'ahrefs', 'global');
+      const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
       const topPages = result || [];
 
       if (topPages.length === 0) {
         await say(`:warning: No top pages found for site \`${baseURL}\``);
         return;
       }
-      const urls = topPages.map((page) => ({ url: page.getURL() }));
+      const urls = topPages.map((page) => ({ url: page.getUrl() }));
       await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
-      const jobId = site.getId();
-      await triggerScraperRun(
-        jobId,
-        urls,
+      const batches = [];
+      for (let i = 0; i < urls.length; i += 50) {
+        batches.push(urls.slice(i, i + 50));
+      }
+      say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
+      const promises = batches.map((urlsBatch) => triggerScraperRun(
+        `${site.getId()}`,
+        urlsBatch,
         slackContext,
         context,
-      );
-      await say(`:adobe-run: Triggered scrape run for site \`${baseURL}\` — Total ${urls.length} URLs`);
-
-      const message = `:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` — Total URLs: ${urls.length}`;
-
-      await say(message);
+      ));
+      await Promise.all(promises);
+      log.info(`Completed triggering scrape runs for site ${baseURL}`);
+      await say(`:white_check_mark: Completed triggering scrape runs for site \`${baseURL}\` — Total URLs: ${urls.length}`);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
@@ -111,4 +114,3 @@ function RunScrapeCommand(context) {
 }
 
 export default RunScrapeCommand;
-/* c8 ignore end */

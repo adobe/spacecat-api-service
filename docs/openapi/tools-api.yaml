@@ -109,6 +109,44 @@ import-job-status:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - import
+    summary: Patch an import job
+    description: |
+      This endpoint can be used to stop an import job, given its jobId. This operation will prevent
+      any further scraping of the import job URLs, and mark the job status as STOPPED. The results
+      will not be saved to storage, allowing the user to start a new import immediately.
+    operationId: stopImportJob
+    security:
+      - scoped_api_key: [ ]
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: './schemas.yaml#/ImportJobStopRequest'
+    parameters:
+      - $ref: './parameters.yaml#/jobId'
+      - in: header
+        name: x-api-key
+        schema:
+          type: string
+        description: |
+          Client-specific import API key. Must match the key used to start the import job, and
+          include the imports.write scope.
+    responses:
+      '204':
+        description: Import job stopped successfully.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
 import-job-progress:
   get:
     tags:
@@ -184,8 +222,8 @@ import-assistant:
     summary: Send a prompt to the import assistant
     description: |
       Note: Not implemented yet.
-      
-      This endpoint can be used to send prompts to the import assistant. 
+
+      This endpoint can be used to send prompts to the import assistant.
       Each prompt will make use of AI to analyze a URL and return
       choices in response to the request.
     operationId: processImportAssistant
@@ -202,7 +240,7 @@ import-assistant:
         schema:
           type: string
         description: |
-          Client-specific import API key.
+          Client-specific import API key with the 'imports.assistant' scope.
     responses:
       '200':
         description: Contents of the response from the import AI assistant.
@@ -224,10 +262,8 @@ api-keys:
       - api-keys
     summary: Create a new API key
     description: |
-      Note: Not implemented yet.
-      
       This endpoint can be used to create a new API key with a set of scopes. The scoped API key will be
-      returned in the response only once. The scoped API key can be used to authenticate the Spacecat APIs by 
+      returned in the response only once. The scoped API key can be used to authenticate the Spacecat APIs by
       including it in the x-api-key header.
     operationId: createApiKey
     security:
@@ -264,9 +300,7 @@ api-keys:
     tags:
       - api-keys
     summary: Get all API keys owned by the given IMS client
-    description: |
-      Note: Not implemented yet.
-      
+    description:  |
       This endpoint can be used to list all the API keys created by the client.
     operationId: getApiKeys
     security:
@@ -281,7 +315,8 @@ api-keys:
         example: '1234567890ABCDEF12345678@AdobeOrg'
     responses:
       '200':
-        description: API key metadata returned successfully. Note that the API key itself will not be included in this list, as it's only displayed once (at creation).
+        description:  |
+          API key metadata returned successfully. Note that the API key itself will not be included in this list, as it's only displayed once (at creation).
         content:
           application/json:
             schema:
@@ -299,9 +334,7 @@ api-key-deletion:
     tags:
       - api-keys
     summary: Delete an API key
-    description: |
-      Note: Not implemented yet.
-      
+    description:  |
       This endpoint can be used to delete an API key. The API key will be marked as deleted in the system and
       will no longer be valid for authentication. Only keys created by this IMS client can be deleted by it.
     operationId: deleteApiKey

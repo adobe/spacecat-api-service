@@ -1,0 +1,406 @@
+site-opportunities:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    summary: |
+      Retrieve a list of all opportunities for a specific site
+    tags:
+      - opportunities
+    responses:
+      '200':
+        description: A list of opportunities
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OpportunityList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+  post:
+    summary: |
+      Create a new opportunity for a specific site
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/OpportunityCreate'
+          examples:
+            broken-backlinks-opportunity:
+              $ref: './examples.yaml#/broken-backlinks-opportunity-create'
+    responses:
+      '201':
+        description: Opportunity created
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Opportunity'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunities-by-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: status
+      in: path
+      required: true
+      schema:
+        type: string
+  get:
+    summary: |      
+      Retrieve opportunities for a specific site filtered by status
+    tags:
+      - opportunities
+    responses:
+      '200':
+        description: A list of opportunities filtered by status
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OpportunityList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  get:
+    summary: |      
+      Retrieve details of a specific opportunity
+    tags:
+      - opportunities
+    responses:
+      '200':
+        description: Details of the opportunity
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Opportunity'
+            examples:
+              broken-backlinks-opportunity:
+                $ref: './examples.yaml#/broken-backlinks-opportunity'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+  patch:
+    summary: |      
+      Update specific attributes of an existing opportunity
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/OpportunityUpdate'
+          examples:
+            broken-backlinks-opportunity-update:
+              $ref: './examples.yaml#/broken-backlinks-opportunity-update'
+    responses:
+      '200':
+        description: Opportunity updated
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Opportunity'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+  delete:
+    summary: |
+      Delete an opportunity and associated suggestions + fixes
+    tags:
+      - opportunities
+    responses:
+      '204':
+        description: Opportunity deleted
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  get:
+    summary: |     
+      Retrieve a list of all suggestions for a specific opportunity
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A list of suggestions
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+  post:
+    summary: |     
+      Create and add a list of one or more suggestions to an opportunity in one transaction
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SuggestionCreateList'
+          examples:
+            broken-backlinks-suggestion-create-list:
+              $ref: './examples.yaml#/broken-backlinks-suggestion-create-list'
+    responses:
+      '207':
+        description: |
+          A list of suggestions created and added to the opportunity, 
+          or the status code and error message for the ones failed.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionCreateListResponse'
+            examples:
+              broken-backlinks-suggestion-create-list-response:
+                $ref: './examples.yaml#/broken-backlinks-suggestion-create-list-response'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestions-by-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - name: status
+      in: path
+      required: true
+      schema:
+        type: string
+  get:
+    summary: |
+      Retrieve suggestions for a specific opportunity filtered by status
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A list of suggestions filtered by status
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestions-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  patch:
+    summary: |
+      Update the status of one or multiple suggestions in one transaction
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SuggestionStatusUpdate'
+          examples:
+            broken-backlinks-suggestions-status-update:
+              $ref: './examples.yaml#/broken-backlinks-suggestions-status-update'
+    responses:
+      '207':
+        description: |
+          A list of suggestions updated, 
+          or the status code and error message for the ones failed.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionStatusUpdateListResponse'
+            examples:
+              broken-backlinks-suggestions-status-update-response:
+                $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestion:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionId'
+  get:
+    summary: |
+      Retrieve details of a specific suggestion
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: Details of the suggestion
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Suggestion'
+            examples:
+              broken-backlinks-suggestion:
+                $ref: './examples.yaml#/broken-backlinks-suggestion'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+  patch:
+    summary: |     
+      Update specific attributes of an existing suggestion
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SuggestionUpdate'
+          examples:
+            broken-backlinks-suggestion-update:
+              $ref: './examples.yaml#/broken-backlinks-suggestion-update'
+    responses:
+      '200':
+        description: Suggestion updated
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Suggestion'
+            examples:
+              broken-backlinks-suggestion:
+                $ref: './examples.yaml#/broken-backlinks-suggestion'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+  delete:
+    summary: |
+      Delete a suggestion
+    tags:
+      - opportunity-suggestions
+    responses:
+      '204':
+        description: Suggestion deleted
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+

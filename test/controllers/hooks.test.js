@@ -18,7 +18,6 @@ import sinonChai from 'sinon-chai';
 import nock from 'nock';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import HooksController from '../../src/controllers/hooks.js';
-import { SiteDto } from '../../src/dto/site.js';
 
 use(sinonChai);
 
@@ -54,12 +53,13 @@ describe('Hooks Controller', () => {
 
     context = {
       dataAccess: {
-        getSiteCandidateByBaseURL: sinon.stub(),
-        addSite: sinon.stub(),
-        updateSite: sinon.stub(),
-        upsertSiteCandidate: sinon.stub(),
-        getSiteByBaseURL: sinon.stub(),
-        siteCandidateExists: sinon.stub(),
+        SiteCandidate: {
+          create: sinon.stub(),
+          findByBaseURL: sinon.stub(),
+        },
+        Site: {
+          findByBaseURL: sinon.stub(),
+        },
       },
       log: {
         info: sinon.stub(),
@@ -69,7 +69,6 @@ describe('Hooks Controller', () => {
       env: {
         HLX_ADMIN_TOKEN: 'hlx-admin-token',
         INCOMING_WEBHOOK_SECRET_CDN: 'hook-secret-for-cdn',
-        INCOMING_WEBHOOK_SECRET_RUM: 'hook-secret-for-rum',
         SITE_DETECTION_IGNORED_DOMAINS: '/helix3.dev/, /fastly.net/, /ngrok-free.app/, /oastify.co/, /fastly-aem.page/, /findmy.media/, /impactful-[0-9]+\\.site/, /shuyi-guan/, /adobevipthankyou/, /alshayauat/, /caseytokarchuk/',
         SITE_DETECTION_IGNORED_SUBDOMAIN_TOKENS: 'demo, dev, stag, qa, --, sitemap, test, preview, cm-verify, owa, mail, ssl, secure, publish',
         SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL: 'channel-id',
@@ -91,30 +90,12 @@ describe('Hooks Controller', () => {
       expect(slackClient.postMessage.notCalled).to.be.true;
     });
 
-    it('return 404 if hook secret env for rum was not set up', async () => {
-      delete context.env.INCOMING_WEBHOOK_SECRET_RUM;
-
-      const resp = await hooksController.processRUMHook(context);
-      expect(resp.status).to.equal(404);
-      expect(slackClient.postMessage.notCalled).to.be.true;
-    });
-
     it('return 404 if cdn secret doesnt match', async () => {
       context.params = {
         hookSecret: 'wrong-secret',
       };
 
       const resp = await hooksController.processCDNHook(context);
-      expect(resp.status).to.equal(404);
-      expect(slackClient.postMessage.notCalled).to.be.true;
-    });
-
-    it('return 404 if rum secret doesnt match', async () => {
-      context.params = {
-        hookSecret: 'wrong-secret',
-      };
-
-      const resp = await hooksController.processRUMHook(context);
       expect(resp.status).to.equal(404);
       expect(slackClient.postMessage.notCalled).to.be.true;
     });
@@ -153,27 +134,27 @@ describe('Hooks Controller', () => {
 
     async function assertInvalidSubdomain(xFwHost) {
       await assertInvalidCase(xFwHost);
-      expect(context.log.warn).to.have.been.calledWith(`Could not process site candidate. Reason: URL most likely contains a non-prod domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
+      expect(context.log.info).to.have.been.calledWith(`Could not process site candidate. Reason: URL most likely contains a non-prod domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
     }
 
     async function assertUnwantedDomain(xFwHost) {
       await assertInvalidCase(xFwHost);
-      expect(context.log.warn).to.have.been.calledWith(`Could not process site candidate. Reason: URL contains an unwanted domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
+      expect(context.log.info).to.have.been.calledWith(`Could not process site candidate. Reason: URL contains an unwanted domain, Source: CDN, Candidate: https://${xFwHost.split(',')[0]}/`);
     }
 
     it('hostnames with path are not accepted', async () => {
       await assertInvalidCase('some.domain/some/path, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/some/path');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/some/path');
     });
 
     it('hostnames with query params are not accepted', async () => {
       await assertInvalidCase('some.domain?param=value, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/?param=value');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Path/search params are not accepted, Source: CDN, Candidate: https://some.domain/?param=value');
     });
 
     it('hostnames in IPs are not accepted', async () => {
       await assertInvalidCase('https://112.12.12.112, some-fw-domain.com');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Hostname is an IP address, Source: CDN, Candidate: https://112.12.12.112/');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Hostname is an IP address, Source: CDN, Candidate: https://112.12.12.112/');
     });
 
     it('hostnames with suspected stage subdomains are not accepted', async () => {
@@ -235,22 +216,6 @@ describe('Hooks Controller', () => {
       context.params = { hookSecret: 'hook-secret-for-cdn' };
     });
 
-    it('URLs with error responses are disregarded', async () => {
-      nock('https://some-domain.com')
-        .get('/')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
-
-      context.data = {
-        hlxVersion: 4,
-        requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
-      };
-
-      const resp = await (await hooksController.processCDNHook(context)).json();
-      expect(resp).to.equal('CDN site candidate disregarded');
-      expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Cannot fetch the site due to rainy weather, Source: CDN, Candidate: https://some-domain.com');
-    });
-
     it('URLs with invalid DOMs are disregarded', async () => {
       nock('https://some-domain.com')
         .get('/')
@@ -264,7 +229,7 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}. Body: <body>some other dome structure</body></html>, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: DOM is not in helix format. Status: 200. Response headers: {}. Body: <body>some other dome structure</body></html>, Source: CDN, Candidate: https://some-domain.com');
     });
   });
 
@@ -283,56 +248,58 @@ describe('Hooks Controller', () => {
     });
 
     it('candidate is disregarded if already added before', async () => {
-      context.dataAccess.siteCandidateExists.resolves(true);
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves({});
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(slackClient.postMessage.notCalled).to.be.true;
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate previously evaluated, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate previously evaluated, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('candidate is disregarded if a live aem_edge site exists with same baseURL', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-      }));
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
+      context.dataAccess.Site.findByBaseURL.resolves({
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({}),
+        setHlxConfig: () => {},
+        save() {},
+      });
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('while candidate is disregarded, hlx config is updated if not present', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
+
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({}),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
 
       const expectedConfig = {
         hlxVersion: 4,
         rso: {},
       };
 
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-      }));
-
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
-      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
-      expect(
-        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
-      ).to.deep.equal(expectedConfig);
+      expect(site.setHlxConfig).to.have.been.calledWith(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
       expect(context.log.info).to.have.been.calledWith('HLX config added for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *4*, _Dev URL_: `https://undefined--undefined--undefined.aem.live`');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
 
     it('hlx 4 config is updated from fstab when accessible with drive.google', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
       context.data = {
         hlxVersion: 4,
         requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
@@ -358,19 +325,23 @@ describe('Hooks Controller', () => {
         },
       };
 
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-        hlxConfig: {
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({
           hlxVersion: 4,
           rso: {
             ref: 'main',
             site: 'some-site',
             owner: 'some-owner',
           },
-        },
-      }));
+        }),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
+
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .once()
@@ -378,15 +349,12 @@ describe('Hooks Controller', () => {
               + '  /: https://drive.google.com/drive/folders/1KmAPZ9bsFnma4cyMXewWKw63OPJaOIvH');
 
       await (await hooksController.processCDNHook(context)).json();
-      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
-      expect(
-        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
-      ).to.deep.equal(expectedConfig);
+      expect(site.setHlxConfig).to.have.been.calledWith(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
     });
 
     it('hlx 4 config is updated from fstab when accessible with onedrive', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
       context.data = {
         hlxVersion: 4,
         requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
@@ -412,19 +380,23 @@ describe('Hooks Controller', () => {
         },
       };
 
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-        hlxConfig: {
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({
           hlxVersion: 4,
           rso: {
             ref: 'main',
             site: 'some-site',
             owner: 'some-owner',
           },
-        },
-      }));
+        }),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
+
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .once()
@@ -432,15 +404,12 @@ describe('Hooks Controller', () => {
               + '  /: https://onedrive.test.com');
 
       await (await hooksController.processCDNHook(context)).json();
-      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
-      expect(
-        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
-      ).to.deep.equal(expectedConfig);
+      expect(site.setHlxConfig).to.have.been.calledWith(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
     });
 
     it('while candidate is disregarded, hlx config is updated if different from site', async () => {
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
       context.data = {
         hlxVersion: 5,
         requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
@@ -471,11 +440,11 @@ describe('Hooks Controller', () => {
         },
       };
 
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        isLive: true,
-        deliveryType: 'aem_edge',
-        hlxConfig: {
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({
           cdn: { prod: { host: 'some-cdn-host.com' } },
           content: {
             title: 'helix-website',
@@ -492,8 +461,11 @@ describe('Hooks Controller', () => {
             site: 'some-site',
             owner: 'some-owner',
           },
-        },
-      }));
+        }),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
 
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
@@ -501,12 +473,10 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
-      expect(context.dataAccess.updateSite.calledOnce).to.be.true;
-      expect(
-        context.dataAccess.updateSite.firstCall.args[0].getHlxConfig(),
-      ).to.deep.equal(expectedConfig);
+      expect(site.setHlxConfig).to.have.been.calledWithExactly(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
       expect(context.log.info).to.have.been.calledWith('HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`');
-      expect(context.log.warn).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
   });
 
@@ -516,9 +486,8 @@ describe('Hooks Controller', () => {
         .get('/')
         .reply(200, validHelixDom);
 
-      context.dataAccess.siteCandidateExists.resolves(false);
-      context.dataAccess.upsertSiteCandidate.resolves();
-      context.dataAccess.getSiteByBaseURL.resolves(null);
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
+      context.dataAccess.Site.findByBaseURL.resolves(null);
     });
 
     it('CDN candidate is processed and slack message sent', async () => {
@@ -532,7 +501,6 @@ describe('Hooks Controller', () => {
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(200, hlx5Config);
-
       nock('https://some-cdn-host.com')
         .get('/')
         .reply(200, validHelixDom);
@@ -567,10 +535,6 @@ describe('Hooks Controller', () => {
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
-
       const resp = await (await hooksController.processCDNHook(context)).json();
 
       expect(context.log.info).to.have.been.calledWith('HLX version is 4. Skipping fetching hlx config');
@@ -587,10 +551,6 @@ describe('Hooks Controller', () => {
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(404);
-
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
@@ -609,10 +569,6 @@ describe('Hooks Controller', () => {
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(500, '', { 'x-error': 'test-error' });
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
-
       const resp = await (await hooksController.processCDNHook(context)).json();
 
       expect(context.log.error).to.have.been.calledWith('Error fetching hlx config for some-owner/some-site. Status: 500. Error: test-error');
@@ -629,10 +585,6 @@ describe('Hooks Controller', () => {
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
         .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
-
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
@@ -651,16 +603,13 @@ describe('Hooks Controller', () => {
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(500, '', { 'x-error': 'test-error' });
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .replyWithError('test-error');
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Error: test-error'));
+      expect(context.log.error).to.have.been.calledOnceWith('Error fetching fstab.yaml for some-owner/some-site. Error: test-error');
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
@@ -675,16 +624,13 @@ describe('Hooks Controller', () => {
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(500, '', { 'x-error': 'test-error' });
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .reply(404, 'test-error');
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Status: 404'));
+      expect(context.log.info.getCall(3)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Status: 404'));
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
@@ -699,16 +645,13 @@ describe('Hooks Controller', () => {
         .get('/config/some-owner/aggregated/some-site.json')
         .reply(500, '', { 'x-error': 'test-error' });
 
-      nock('https://some-cdn-host.com')
-        .get('/')
-        .reply(200, validHelixDom);
       nock('https://raw.githubusercontent.com')
         .get('/some-owner/some-site/main/fstab.yaml')
         .reply(200, 'malformed-fstab');
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.error.getCall(0)).to.have.been.calledWith(sinon.match('No content source found for some-owner/some-site in fstab.yaml'));
+      expect(context.log.info.getCall(3)).to.have.been.calledWith(sinon.match('No content source found for some-owner/some-site in fstab.yaml'));
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
@@ -718,30 +661,14 @@ describe('Hooks Controller', () => {
         requestXForwardedHost: 'some-domain.com, some-fw-domain.com',
       };
       context.params = { hookSecret: 'hook-secret-for-cdn' };
-      context.dataAccess.getSiteByBaseURL.resolves(SiteDto.fromJson({
-        baseURL: 'https://some-domain.com',
-        deliveryType: 'aem_cs',
-      }));
+      context.dataAccess.Site.findByBaseURL.resolves({
+        getBaseURL: () => 'https://some-domain.com',
+        getDeliveryType: () => 'aem_cs',
+      });
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
       expect(resp).to.equal('CDN site candidate is successfully processed');
-    });
-
-    it('RUM candidate is processed and slack message sent', async () => {
-      context.data = {
-        domain: 'some-domain.com',
-      };
-      context.params = { hookSecret: 'hook-secret-for-rum' };
-
-      const resp = await (await hooksController.processRUMHook(context)).json();
-
-      expect(resp).to.equal('RUM site candidate is successfully processed');
-      expect(slackClient.postMessage.calledOnceWith(getExpectedSlackMessage(
-        'https://some-domain.com',
-        context.env.SLACK_SITE_DISCOVERY_CHANNEL_INTERNAL,
-        'RUM',
-      ))).to.be.true;
     });
 
     it('Slack message sending fails for CDN candidate', async () => {
@@ -757,20 +684,6 @@ describe('Hooks Controller', () => {
 
       expect(resp.status).to.equal(500);
       expect(context.log.error).to.have.been.calledWith('Unexpected error while processing the CDN site candidate');
-    });
-
-    it('Slack message sending fails for RUM candidate', async () => {
-      context.data = {
-        domain: 'some-domain.com',
-      };
-      context.params = { hookSecret: 'hook-secret-for-rum' };
-
-      slackClient.postMessage.rejects(new Error('Slack message failure'));
-
-      const resp = await hooksController.processRUMHook(context);
-
-      expect(resp.status).to.equal(500);
-      expect(context.log.error).to.have.been.calledWith('Unexpected error while processing the RUM site candidate');
     });
   });
 });

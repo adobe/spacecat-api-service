@@ -37,6 +37,7 @@ function CreateGoogleLinkCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Site } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
@@ -49,7 +50,7 @@ function CreateGoogleLinkCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
       if (!site) {
         await postSiteNotFoundMessage(say, baseURL);
         return;

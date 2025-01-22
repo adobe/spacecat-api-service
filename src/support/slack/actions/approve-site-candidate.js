@@ -10,19 +10,23 @@
  * governing permissions and limitations under the License.
  */
 
-import { SITE_CANDIDATE_STATUS } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { KEY_EVENT_TYPES } from '@adobe/spacecat-shared-data-access/src/models/key-event.js';
+import {
+  KeyEvent as KeyEventModel,
+  Site as SiteModel,
+  SiteCandidate as SiteCandidateModel,
+} from '@adobe/spacecat-shared-data-access';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
-import { Blocks, Message } from 'slack-block-builder';
+import { Blocks, Elements, Message } from 'slack-block-builder';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
+import OrgDetectorAgent from '../../../agents/org-detector/agent.js';
 
 async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
   const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
   const slackClient = BaseSlackClient.createFrom(context, SLACK_TARGETS.WORKSPACE_INTERNAL);
-  const hlxConfigMessagePart = getHlxConfigMessagePart(source, hlxConfig);
+  const hlxConfigMessagePart = getHlxConfigMessagePart(hlxConfig);
   const announcementMessage = Message()
     .channel(channel)
     .blocks(
@@ -35,12 +39,16 @@ async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
 
 export default function approveSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
+  const { KeyEvent, Site, SiteCandidate } = dataAccess;
   const { ORGANIZATION_ID_FRIENDS_FAMILY: friendsFamilyOrgId } = lambdaContext.env;
+  const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = lambdaContext.env;
 
   return async ({ ack, body, respond }) => {
     try {
-      const { actions = [], message = {}, user } = body;
-      const { blocks } = message;
+      const {
+        actions = [], channel, message = {}, user,
+      } = body;
+      const { blocks, ts: threadTs } = message;
 
       log.info(JSON.stringify(body));
 
@@ -48,51 +56,52 @@ export default function approveSiteCandidate(lambdaContext) {
 
       const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
-      const siteCandidate = await dataAccess.getSiteCandidateByBaseURL(baseURL);
+      const siteCandidate = await SiteCandidate.findByBaseURL(baseURL);
 
       log.info(`Creating a new site: ${baseURL}`);
 
-      const orgId = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY
-        && friendsFamilyOrgId;
+      const isFnF = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY;
 
-      let site = await dataAccess.getSiteByBaseURL(siteCandidate.getBaseURL());
+      let site = await Site.findByBaseURL(siteCandidate.getBaseURL());
 
       // if site didn't exist before, then directly save it
       if (!site) {
-        site = await dataAccess.addSite({
+        site = await Site.create({
           baseURL: siteCandidate.getBaseURL(),
           hlxConfig: siteCandidate.getHlxConfig(),
           isLive: true,
-          ...(orgId && { organizationId: friendsFamilyOrgId }),
+          ...(isFnF
+            ? { organizationId: friendsFamilyOrgId }
+            : { organizationId: defaultOrgId }),
         });
       } else {
         // site might've been added before manually. In that case, make sure it is promoted to live
         // and set delivery type to aem_edge then update
-        if (!site.isLive()) {
+        if (!site.getIsLive()) {
           site.toggleLive();
         }
         // make sure hlx config is set
-        site.updateHlxConfig(siteCandidate.getHlxConfig());
-        site.updateDeliveryType(DELIVERY_TYPES.AEM_EDGE);
-        site = await dataAccess.updateSite(site);
+        site.setHlxConfig(siteCandidate.getHlxConfig());
+        site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_EDGE);
+        site = await site.save();
       }
 
       siteCandidate.setSiteId(site.getId());
-      siteCandidate.setStatus(SITE_CANDIDATE_STATUS.APPROVED);
+      siteCandidate.setStatus(SiteCandidateModel.SITE_CANDIDATE_STATUS.APPROVED);
       siteCandidate.setUpdatedBy(user.username);
 
-      await dataAccess.updateSiteCandidate(siteCandidate);
+      await siteCandidate.save();
 
-      await dataAccess.createKeyEvent({
+      await KeyEvent.create({
         name: 'Go Live',
         siteId: site.getId(),
-        type: KEY_EVENT_TYPES.STATUS_CHANGE,
+        type: KeyEventModel.KEY_EVENT_TYPES.STATUS_CHANGE,
       });
 
       const reply = composeReply({
         blocks,
         username: user.username,
-        orgId,
+        isFnF,
         approved: true,
       });
 
@@ -106,6 +115,48 @@ export default function approveSiteCandidate(lambdaContext) {
         siteCandidate.getSource(),
         siteCandidate.getHlxConfig(),
       );
+
+      if (!isFnF) {
+        const orgDetectorAgent = OrgDetectorAgent.fromContext(lambdaContext);
+        const org = await orgDetectorAgent.detect(
+          siteCandidate.getBaseURL().replace('https://', ''),
+          siteCandidate.getHlxConfig()?.rso?.owner,
+        );
+
+        log.info(`Detected org: ${JSON.stringify(org)}`);
+
+        if (hasText(org?.name) && hasText(org?.imsOrgId)) {
+          const { name, imsOrgId } = org;
+
+          const orgMsg = Message()
+            .channel(channel.id)
+            .threadTs(threadTs)
+            .blocks(
+              Blocks.Section()
+                .text(`:agent_smith: Detected IMS organization \`${name}\` with IMS org ID \`${imsOrgId}\` for *<${baseURL}|${baseURL}>*`),
+              Blocks.Section()
+                .text(`Would you approve? @${user.username}`),
+              Blocks.Actions()
+                .elements(
+                  Elements.Button()
+                    .text('Yes')
+                    .actionId('approveOrg')
+                    .primary(),
+                  Elements.Button()
+                    .text('No')
+                    .actionId('rejectOrg')
+                    .danger(),
+                ),
+            )
+            .buildToObject();
+
+          const slackClient = BaseSlackClient.createFrom(
+            lambdaContext,
+            SLACK_TARGETS.WORKSPACE_INTERNAL,
+          );
+          await slackClient.postMessage(orgMsg);
+        }
+      }
     } catch (e) {
       log.error('Error occurred while acknowledging site candidate approval', e);
       throw e;

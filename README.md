@@ -6,6 +6,18 @@
 
 https://opensource.adobe.com/spacecat-api-service/
 
+### Build documentation locally
+
+```bash
+$ npm docs
+```
+
+### Serve the documentation locally
+
+```bash
+$ npm docs:serve
+```
+
 ## Installation
 
 ```bash
@@ -26,7 +38,8 @@ To set up local development for `spacecat-api-service`, follow these steps:
 AWS_REGION=your_aws_region
 AWS_ACCESS_KEY_ID=your_access_key_id
 AWS_SECRET_ACCESS_KEY=your_secret_access_key
-```   
+```
+
 2. Start the development server
 
 ```
@@ -49,31 +62,6 @@ $ npm test
 
 ```bash
 $ npm run lint
-```
-
-## Message Body Formats
-
-Spacecat-api-service queues audit jobs to `AUDIT_JOBS_QUEUE` to be processed later on.
-
-Output message body format sent to `AUDIT_JOBS_QUEUE` is:
-
-```json
-{
-  "type": "string",
-  "url": "string",
-  "auditContext": "object|optional"
-}
-```
-
-Currently, only `slackContext` property exist in the `auditContext`:
-
-```json
-{
-  "slackContext": {
-    "channel": "string",
-    "thread_ts": "string|optional"
-  }
-}
 ```
 
 ## Required ENV Variables

@@ -28,6 +28,9 @@ AuditType:
     - 'sitemap'
     - 'structured-data'
     - 'costs'
+    - 'meta-tags'
+    - 'broken-internal-links'
+    - 'experimentation-opportunities'
   example: 'cwv'
 URL:
   type: string
@@ -42,6 +45,7 @@ ScopeName:
   enum:
     - 'imports.write'
     - 'imports.read'
+    - 'imports.assistant'
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
@@ -71,6 +75,18 @@ HandlerConfig:
       items:
         type: string
         format: uri
+    groupedURLs:
+      description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            description: Name of the URL group
+            type: string
+          pattern:
+            description: Pattern representing the URL path structure to group
+            type: string
   patternProperties:
     "^(404|broken-backlinks)$":
       type: object
@@ -78,6 +94,15 @@ HandlerConfig:
         mentions:
           $ref: '#/SlackMentionConfig'
         # Define other properties specific to the alert type here
+  example:
+    excludedURLs:
+      - 'https://www.adobe.com/excluded-page'
+      - 'https://www.adobe.com/another-excluded-page'
+    groupedURLs:
+      - name: 'catalog'
+        pattern: '/products/'
+      - name: 'blog'
+        pattern: '/post/'
 SlackConfig:
   type: object
   additionalProperties: true
@@ -285,6 +310,18 @@ Site:
             items:
               type: string
               format: uri'
+          groupedURLs:
+            description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
+            type: array
+            items:
+              type: object
+              properties:
+                name:
+                  description: Name of the URL group
+                  type: string
+                pattern:
+                  description: Pattern representing the URL path structure to group
+                  type: string
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -377,14 +414,31 @@ UpdateHandlerTypeConfig:
   type: object
   properties:
     excludedURLs:
-      description: Set of urls to exclude. If empty, will remove previously excluded URLs.
+      description: Set of URLs to exclude. If empty, previously excluded URLs will be removed
       type: array
       items:
         type: string
+    groupedURLs:
+      description: List of grouped URL patterns for categorization. Each entry should include a name and a URL pattern. If empty, previously grouped URLs will be removed
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            description: Name of the URL group
+            type: string
+          pattern:
+            description: Pattern representing the URL path structure to group
+            type: string
   example:
     excludedURLs:
       - 'https://www.adobe.com/some-page'
       - 'https://www.adobe.com/another-page'
+    groupedURLs:
+      - name: 'catalog'
+        pattern: '/products/'
+      - name: 'blog'
+        pattern: '/post/'
 ConfigurationSitesAuditsUpdateResult:
   type: object
   properties:
@@ -482,52 +536,131 @@ AuditResult:
                 A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
               type: string
     - type: object
+      description: |
+        The result of a meta-tags audit.
+      properties:
+        auditResult:
+          type: object
+          properties:
+            detectedTags:
+              description: |
+                A mapping of URLs to their detected meta-tags issues and recommendations.
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  title:
+                    type: object
+                    properties:
+                      seoRecommendation:
+                        description: |
+                          SEO recommendation for the title tag.
+                        type: string
+                      issue:
+                        description: |
+                          The issue detected in the title tag.
+                        type: string
+                      issueDetails:
+                        description: |
+                          Detailed explanation of the issue detected in the title tag.
+                        type: string
+                      seoImpact:
+                        description: |
+                          The impact of the detected issue on SEO.
+                        type: string
+            finalUrl:
+              description: |
+                The final URL for the audited page.
+              type: string
+    - type: object
       description: The result of CWV audit
       properties:
         cwv:
           type: array
-          description: A list of CWV metrics per url.
+          description: A list of CWV metrics per device type
           items:
-            $ref: './schemas.yaml#/CWVResult'
+            type: object
+            properties:
+              type:
+                type: string
+                enum: ["group", "url"]
+                description: "Specifies if the metric applies to a 'group' or an individual 'url'"
+              name:
+                type: string
+                description: "Name of the group (only applicable when type is 'group')"
+                example: "Homepage Group"
+              pattern:
+                type: string
+                description: "URL pattern for the group (only applicable when type is 'group')"
+                example: "https://www.aem.live/home*"
+              url:
+                description: "URL of the page (only applicable when type is 'url')"
+                $ref: '#/URL'
+              pageviews:
+                type: integer
+                description: "Total pageviews for this group or URL"
+                example: 4620
+              organic:
+                type: integer
+                description: "Total organic traffic for this group or URL"
+                example: 2510
+              metrics:
+                type: array
+                description: "Array of performance metrics by device type"
+                items:
+                  $ref: './schemas.yaml#/CWVMetric'
 AuditList:
   type: array
   items:
     $ref: './schemas.yaml#/Audit'
-CWVResult:
+CWVMetric:
   type: object
   properties:
-    url:
-      $ref: '#/URL'
+    deviceType:
+      type: string
+      description: "The type of device"
+      enum: ["mobile", "desktop"]
+      example: "mobile"
     pageviews:
       type: integer
-      example: 349900
+      description: "Total pageviews for this device type"
+      example: 2120
     lcp:
       type: number
       format: float
-      example: 3303.300000000745
+      description: "Largest Contentful Paint (LCP) metric"
+      example: 2099.7
     lcpCount:
       type: integer
-      example: 4873
+      description: "The count of LCP samples"
+      example: 9
     cls:
       type: number
       format: float
-      example: 0.0138671875
+      description: "Cumulative Layout Shift (CLS) metric"
+      example: 0.02066
     clsCount:
       type: integer
-      example: 4216
+      description: "The count of CLS samples"
+      example: 7
     inp:
       type: integer
-      example: 72
+      format: float
+      description: "Interaction to Next Paint (INP) metric"
+      example: 12
     inpCount:
       type: integer
-      example: 1952
+      description: "The count of INP samples"
+      example: 3
     ttfb:
       type: number
       format: float
-      example: 732.0500007271767
+      description: "Time to First Byte (TTFB) metric"
+      example: 520.45
     ttfbCount:
       type: integer
-      example: 5678
+      description: "The count of TTFB samples"
+      example: 18
 ExperimentationOpportunity:
   type: object
   readOnly: true
@@ -576,6 +709,18 @@ ExperimentationOpportunity:
       description: The metrics for the experimentation opportunity
       items:
         type: object
+    recommendations:
+      type: array
+      description: The recommendations for the experimentation opportunity
+      items:
+        type: object
+      example:
+        - type: 'guidance'
+          insight: 'The main CTAs ("Buy now", "Free trial") are not prominently visible above the fold for users coming from platforms like TikTok.'
+          recommendation: 'Relocate one of the primary CTAs, such as "Buy now", to a more prominent position above the fold where it is immediately visible upon landing on the page.'
+        - type: 'guidance'
+          insight: 'The current design and layout of the page, while visually appealing, might be overwhelming for users coming from TikTok who prefer short and concise content.'
+          recommendation: 'Simplify the page by reducing the amount of text and focusing on key features with visually engaging images or short videos, particularly near the top of the page.'
 StructuredData:
   type: object
   readOnly: true
@@ -1393,14 +1538,28 @@ ScrapeRequest:
   required:
     - urls
   properties:
+    jobId:
+      description: Optional ID of the scrape job
+      $ref: '#/Id'
+    options:
+      description: Optional configuration params, defined as a JSON object
+      $ref: '#/ImportOptions'
+    customHeaders:
+      description: Optional custom headers to send with each HTTP request
+      type: object
     urls:
       description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
       type: array
       items:
-        $ref: '#/URL'
+        type: object
+        properties:
+          url:
+            description: The URL to scrape
+            $ref: '#/URL'
       example:
-        - 'https://example.com/en/page1'
-        - 'https://example.com/fr/page2'
+        urls:
+          - url: 'https://example.com/en/page1'
+          - url: 'https://example.com/fr/page2'
 ScrapeResponse:
   type: object
   properties:
@@ -1489,31 +1648,31 @@ BrokenBacklink:
     traffic_domain:
       description: The referring domain's estimated monthly organic traffic from search.
       type: number
-    url_suggested:
-      description: The URL suggested for redirecting from the broken backlink.
-      $ref: '#/URL'
 ImportAssistantRequest:
   type: object
   required:
-    - url
     - command
   properties:
-    url:
-      description: The URL to analyze
-      $ref: '#/URL'
     command:
-      description: Assistant command to execute. Examples are 'start', 'cleanup', 'block', 'cells'.
+      description: Assistant command to execute. Examples 'findMainContent', 'findRemovalSelectors', 'findBlockSelectors', 'findBlockCells', 'generatePageTransformation'.
       type: string
     prompt:
-      description: Optional prompt to provide context for the analysis.
+      description: Optional prompt to provide context for the analysis. It is required for all commands except 'findMainContent'.
       type: string
-    options:
-      description: Optional configuration options required by the command.
-      type: object
+    htmlContent:
+      description: The HTML to be inspected. It is required for most commands. Removing unnecessary content and properties will reduce the number of credits used.
+      type: string
+    imageUrl:
+      description: A base64 encoded image.  It is required for specific commands like 'findBlockSelectors'.
+      type: string
+    selector:
+      description: A CSS selector indicating the element to inspect in the provided htmlContent. It is required for specific commands like 'findBlockCells'.
+      type: string
   example:
-    url: 'https://example.com/en/page2'
-    command: 'cleanup'
-    prompt: 'breadcrumbs'
+    command: 'findBlockSelectors'
+    prompt: 'rectangle with blue background, a heading and paragraph text'
+    imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...'
+    htmlContent: '<html>...</html>'
 ImportAssistantResponse:
   type: object
   properties:
@@ -1533,7 +1692,7 @@ ImportAssistantResponse:
   example:
     choices:
       - message:
-          content: '.breadcrumbs'
+          content: 'div.main div.product'
 ApiKeyRequest:
   type: object
   required:
@@ -1590,6 +1749,12 @@ ApiKeyMetadataResponse:
     expiresAt:
       description: The date and time when the API key expires
       $ref: '#/DateTime'
+    deletedAt:
+      description: The date and time when the API key was deleted
+      $ref: '#/DateTime'
+    revokedAt:
+      description: The date and time when the API key was revoked
+      $ref: '#/DateTime'
 ApiKeyResponse:
   allOf:
     - $ref: '#/ApiKeyMetadataResponse'
@@ -1598,3 +1763,526 @@ ApiKeyResponse:
         apiKey:
           description: The API key
           type: string
+OpportunityStatus:
+  description: Status of an opportunity
+  type: string
+  enum:
+    - 'NEW'
+    - 'IN_PROGRESS'
+    - 'IGNORED'
+    - 'RESOLVED'
+  example: 'IN_PROGRESS'
+OpportunityType:
+  description: Type of opportunity
+  type: string
+  enum:
+    - 'broken-backlinks'
+    - 'broken-internal-backlinks'
+  example: 'broken-backlinks'
+OpportunityOrigin:
+  description: |
+    Origin of opportunity.
+    - AUTOMATION: generated by automation
+    - ESS_OPS: generated manually by Experience Success Engineers
+    - AI: generated by AI
+  type: string
+  enum:
+    - 'AUTOMATION'
+    - 'ESS_OPS'
+    - 'AI'
+  example: 'ESS_OPS'
+Opportunity:
+  type: object
+  properties:
+    id:
+      description: UUID of this opportunity
+      $ref: '#/Id'
+    siteId:
+      description: UUID of the site this opportunity is for
+      $ref: '#/Id'
+    auditId:
+      description: UUID of the audit result that triggered this opportunity
+      $ref: '#/Id'
+    runbook:
+      description: URL to the runbook for this opportunity
+      type: string
+      format: url
+      example: 'https://example.com/runbook/broken-backlinks'
+    type:
+      $ref: '#/OpportunityType'
+    data:
+      description: Optional map of type-specific data relevant to this opportunity
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksOpportunityData'
+        - $ref: '#/CWVOpportunityData'
+    origin:
+      $ref: '#/OpportunityOrigin'
+    title:
+      description: Title of this opportunity
+      type: string
+      example: 'Authoritative domains are linking to invalid SecurBank URLs. This could impact your SEO.'
+    description:
+      description: Description of this opportunity
+      type: string
+      example: 'Provide the correct target URL that each of the broken backlinks should be redirected to.'
+    status:
+      description: Status of this opportunity
+      $ref: '#/OpportunityStatus'
+    guidance:
+      description: Guidance text specific to this opportunity
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksGuidance'
+        - $ref: '#/CWVGuidance'
+    tags:
+      type: array
+      items:
+        type: string
+      description: Optional list of tags
+      example:
+        - 'Traffic acquisition'
+    createdAt:
+      description: UTC timestamp of when the opportunity was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the opportunity was last updated
+      $ref: '#/DateTime'
+  required:
+    - id
+    - siteId
+    - auditId
+    - runbook
+    - type
+    - origin
+    - title
+    - status
+    - createdAt
+    - updatedAt
+OpportunityList:
+  type: array
+  items:
+    $ref: '#/Opportunity'
+OpportunityCreate:
+  type: object
+  properties:
+    auditId:
+      description: UUID of the audit result that triggered this opportunity
+      readOnly: false
+      $ref: '#/Id'
+    runbook:
+      description: URL to the runbook for this opportunity
+      type: string
+      format: url
+      example: 'https://example.com/runbook/broken-backlinks'
+    type:
+      $ref: '#/OpportunityType'
+    data:
+      description: Optional map of type-specific data relevant to this opportunity
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksOpportunityData'
+    origin:
+      description: Origin of opportunity
+      $ref: '#/OpportunityOrigin'
+    title:
+      description: Title of this opportunity
+      type: string
+      example: 'Authoritative domains are linking to invalid SecurBank URLs. This could impact your SEO.'
+    description:
+      description: Description of this opportunity
+      type: string
+      example: 'Provide the correct target URL that each of the broken backlinks should be redirected to.'
+    guidance:
+      description: Guidance text specific to this opportunity
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksGuidance'
+    tags:
+      type: array
+      items:
+        type: string
+      description: Optional list of tags
+      example:
+        - 'Traffic acquisition'
+  required:
+    - auditId
+    - runbook
+    - type
+    - origin
+    - title
+OpportunityUpdate:
+  type: object
+  properties:
+    runbook:
+      description: URL to the runbook for this opportunity
+      type: string
+      format: url
+      example: 'https://example.com/runbook/broken-backlinks'
+    data:
+      description: Optional map of type-specific data relevant to this opportunity
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksOpportunityData'
+    title:
+      description: Title of this opportunity
+      type: string
+      example: 'Authoritative domains are linking to invalid SecurBank URLs. This could impact your SEO.'
+    description:
+      description: Description of this opportunity
+      type: string
+      example: 'Provide the correct target URL that each of the broken backlinks should be redirected to.'
+    status:
+      description: Status of this opportunity
+      $ref: '#/OpportunityStatus'
+    guidance:
+      description: Guidance text specific to this opportunity
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksGuidance'
+    tags:
+      type: array
+      items:
+        type: string
+      description: Optional list of tags
+      example:
+        - 'Traffic acquisition'
+SuggestionStatus:
+  description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
+  type: string
+  enum:
+      - 'NEW'
+      - 'APPROVED'
+      - 'SKIPPED'
+      - 'FIXED'
+      - 'ERROR'
+  example: 'NEW'
+SuggestionType:
+  description: |
+    Type of suggestion:
+    - REDIRECT_UPDATE: Add or update a redirect as suggested
+    - EXPERIMENT: Run the experiment with the given suggestions
+    - CONTENT_UPDATE: Update the content to the suggested
+    - METADATA_UPDATE: Update the metadata to the suggested
+  type: string
+  enum:
+    - 'REDIRECT_UPDATE'
+    - 'EXPERIMENT'
+    - 'CONTENT_UPDATE'
+    - 'METADATA_UPDATE'
+  example: 'REDIRECT_UPDATE'
+Suggestion:
+  type: object
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    opportunityId:
+      description: UUID of the opportunity this suggestion belongs to
+      $ref: '#/Id'
+    type:
+      $ref: '#/SuggestionType'
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+      example: 45600
+    data:
+      description: Map containing type-specific details of what fix is suggested
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksRedirectData'
+    kpiDeltas:
+      description: Map containing metrics estimated to experience lifts or losses due to the issue
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksKpiDeltas'
+    status:
+      description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
+      $ref: '#/SuggestionStatus'
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+  required:
+    - id
+    - opportunityId
+    - type
+    - rank
+    - data
+    - status
+    - createdAt
+    - updatedAt
+SuggestionList:
+  type: array
+  items:
+    $ref: '#/Suggestion'
+SuggestionCreate:
+  type: object
+  properties:
+    type:
+      $ref: '#/SuggestionType'
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+      example: 45600
+    data:
+      description: Map containing type-specific details of what fix is suggested
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksRedirectData'
+    kpiDeltas:
+      description: Map containing metrics estimated to experience lifts or losses due to the issue
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksKpiDeltas'
+  required:
+    - opportunityId
+    - type
+    - rank
+    - data
+SuggestionCreateList:
+  type: array
+  items:
+    $ref: '#/SuggestionCreate'
+SuggestionOperationSuccess:
+  type: object
+  description: Success response for a suggestion operation
+  properties:
+    index:
+      description: Index of this suggestion in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of success
+      type: integer
+    suggestion:
+      $ref: '#/Suggestion'
+  required:
+    - index
+    - statusCode
+    - suggestion
+SuggestionCreateFailure:
+  type: object
+  description: Suggestion create failure response
+  properties:
+    index:
+      description: Index of this suggestion in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of failure
+      type: integer
+    message:
+      description: Error message describing the failure
+      type: string
+  required:
+    - index
+    - statusCode
+    - message
+SuggestionCreateListResponse:
+  type: object
+  description: Suggestion create list response
+  properties:
+    suggestions:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/SuggestionOperationSuccess'
+          - $ref: '#/SuggestionCreateFailure'
+    metadata:
+      type: object
+      properties:
+        total:
+          description: Total number of suggestions in the response
+          type: integer
+        success:
+          description: Number of suggestions successfully create
+          type: integer
+        failure:
+          description: Number of suggestions that failed to create
+          type: integer
+      required:
+        - total
+        - success
+        - failure
+  required:
+    - suggestions
+    - metadata
+SuggestionUpdate:
+  type: object
+  properties:
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+      example: 12300
+    data:
+      description: Map containing type-specific details of what fix is suggested
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksRedirectData'
+    kpiDeltas:
+      description: Map containing metrics estimated to experience lifts or losses due to the issue
+      type: object
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/BrokenBacklinksKpiDeltas'
+SuggestionStatusUpdate:
+  type: array
+  items:
+    type: object
+    properties:
+      id:
+        description: UUID of this suggestion
+        readOnly: false
+        $ref: '#/Id'
+      status:
+        description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
+        $ref: '#/SuggestionStatus'
+    required:
+      - id
+      - status
+SuggestionUpdateFailure:
+  type: object
+  description: Suggestion update failure
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    index:
+      description: Index of this suggestion in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of failure
+      type: integer
+    message:
+      description: Error message describing the failure
+      type: string
+  required:
+    - id
+    - index
+    - statusCode
+    - message
+SuggestionStatusUpdateListResponse:
+  type: object
+  description: Suggestions status update response
+  properties:
+    suggestions:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/SuggestionOperationSuccess'
+          - $ref: '#/SuggestionUpdateFailure'
+    metadata:
+      type: object
+      properties:
+        total:
+          description: Total number of suggestions in the response
+          type: integer
+        success:
+          description: Number of suggestions successfully updated
+          type: integer
+        failure:
+          description: Number of suggestions that failed to update
+          type: integer
+      required:
+        - total
+        - success
+        - failure
+  required:
+    - suggestions
+    - metadata
+BrokenBacklinksRedirectData:
+  description: Data specific to redirect suggestion for broken backlinks opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    title:
+      description: The title of the referring page
+      type: string
+    url_from:
+      description: The URL of the referring page
+      type: string
+    url_to:
+      description: The URL of the broken target page
+      type: string
+    urls_suggested:
+      description: The proposed target URLs to redirect the broken backlink to
+      type: array
+      items:
+        type: string
+    manualOverrideURL:
+      description: The URL to manually override the proposed target URL
+      type: string
+    traffic_domain:
+      description: The estimated monthly organic traffic to the referring page
+      type: number
+BrokenBacklinksKpiDeltas:
+  description: KPI deltas specific to redirect suggestion for broken backlinks opportunity
+  type: object
+  additionalProperties: true
+BrokenBacklinksOpportunityData:
+  description: Data specific to broken backlinks opportunity
+  type: object
+  additionalProperties: true
+BrokenBacklinksGuidance:
+  description: Guidance specific to broken backlinks opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    steps:
+      description: The steps to resolve the broken backlinks opportunity
+      type: array
+      items:
+        type: string
+ImportJobStopRequest:
+  type: object
+  properties:
+    op:
+      description: The operation to perform on the import job
+      type: string
+      enum:
+        - 'replace'
+    path:
+      description: The path of the attribute to update
+      type: string
+      example: '/status'
+    value:
+      description: The value to set
+      type: string
+      enum:
+        - 'STOPPED'
+CWVOpportunityData:
+  description: Data specific to Core Web Vitals improvements opportunity
+  type: object
+  properties:
+    projectedTrafficLost:
+      type: number
+      description: Projected Traffic Lost, representing the estimated loss of organic traffic
+    projectedTrafficValue:
+      type: number
+      description: Projected Traffic Value, calculated by multiplying the Projected Traffic Lost by the Cost Per Click (CPC) value.
+  additionalProperties: true
+CWVGuidance:
+  description: Guidance specific to Core Web Vitals improvements opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    steps:
+      description: The recommended steps to resolve Core Web Vitals issues and improve site performance.
+      type: array
+      items:
+        type: string

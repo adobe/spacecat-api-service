@@ -12,7 +12,6 @@
 import { isString } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
-import { ConfigurationDto } from '../../../dto/configuration.js';
 
 const PHRASE = 'audit';
 const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
@@ -28,6 +27,7 @@ export default (context) => {
   });
 
   const { log, dataAccess } = context;
+  const { Configuration, Site } = dataAccess;
 
   const validateInput = (enableAudit, baseURL, auditType) => {
     if (isString(enableAudit) === false || ['enable', 'disable'].includes(enableAudit) === false) {
@@ -59,11 +59,18 @@ export default (context) => {
     }
 
     try {
-      const configuration = await dataAccess.getConfiguration();
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const configuration = await Configuration.findLatest();
+      const site = await Site.findByBaseURL(baseURL);
 
       if (site === null) {
         await say(`${ERROR_MESSAGE_PREFIX}Cannot update site with baseURL: "${baseURL}", site not found.`);
+        return;
+      }
+
+      const registeredAudits = configuration.getHandlers();
+      if (!registeredAudits[auditType]) {
+        await say(`${ERROR_MESSAGE_PREFIX}The "${auditType}" is not present in the configuration.\nList of allowed`
+            + ` audits:\n${Object.keys(registeredAudits).join('\n')}.`);
         return;
       }
 
@@ -76,7 +83,7 @@ export default (context) => {
         successMessage = `${SUCCESS_MESSAGE_PREFIX}The audit "${auditType}" has been *disabled* for the "${site.getBaseURL()}".`;
       }
 
-      await dataAccess.updateConfiguration(ConfigurationDto.toJSON(configuration));
+      await configuration.save();
       await say(successMessage);
     } catch (error) {
       log.error(error);

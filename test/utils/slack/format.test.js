@@ -93,7 +93,7 @@ describe('Utility Functions', () => {
         getDeliveryType: sinon.stub().returns('aem_edge'),
         getBaseURL: sinon.stub(),
         getGitHubURL: sinon.stub(),
-        isLive: sinon.stub(),
+        getIsLive: sinon.stub(),
         getIsLiveToggledAt: sinon.stub().returns('2011-10-05T14:48:00.000Z'),
       };
     });
@@ -105,7 +105,7 @@ describe('Utility Functions', () => {
     it('prints details for a live site with GitHub URL', () => {
       mockSite.getBaseURL.returns('https://example.com');
       mockSite.getGitHubURL.returns('https://github.com/example/repo');
-      mockSite.isLive.returns(true);
+      mockSite.getIsLive.returns(true);
 
       const expectedOutput = `
       :identification_card: some-id
@@ -136,11 +136,11 @@ describe('Utility Functions', () => {
     it('prints details for a site with latest audit error', () => {
       mockSite.getBaseURL.returns('https://example.com');
       mockSite.getGitHubURL.returns('https://github.com/example/repo');
-      mockSite.isLive.returns(true);
+      mockSite.getIsLive.returns(true);
 
       const mockAudit = {
         getFullAuditRef: sinon.stub().returns('https://psi-result/1'),
-        isError: sinon.stub().returns(true),
+        getIsError: sinon.stub().returns(true),
       };
 
       const expectedOutput = `
@@ -157,11 +157,11 @@ describe('Utility Functions', () => {
     it('prints details for a site with latest audit', () => {
       mockSite.getBaseURL.returns('https://example.com');
       mockSite.getGitHubURL.returns('https://github.com/example/repo');
-      mockSite.isLive.returns(true);
+      mockSite.getIsLive.returns(true);
 
       const mockAudit = {
         getFullAuditRef: sinon.stub().returns('https://psi-result/1'),
-        isError: sinon.stub().returns(false),
+        getIsError: sinon.stub().returns(false),
       };
 
       const expectedOutput = `
@@ -178,7 +178,7 @@ describe('Utility Functions', () => {
     it('prints details for a non-live site without GitHub URL', () => {
       mockSite.getBaseURL.returns('https://example.com');
       mockSite.getGitHubURL.returns(null);
-      mockSite.isLive.returns(false);
+      mockSite.getIsLive.returns(false);
 
       const expectedOutput = `
       :identification_card: some-id

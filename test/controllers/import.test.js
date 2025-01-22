@@ -16,21 +16,60 @@ import { Response } from '@adobe/fetch';
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
-import sinon from 'sinon';
+import sinon, { stub } from 'sinon';
 
-import { ImportUrlStatus } from '@adobe/spacecat-shared-data-access/src/models/importer/import-constants.js';
-import { createImportJob } from '@adobe/spacecat-shared-data-access/src/models/importer/import-job.js';
-import { createImportUrl } from '@adobe/spacecat-shared-data-access/src/models/importer/import-url.js';
 import fs from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { ErrorWithStatusCode } from '../../src/support/utils.js';
+
+import { ImportJob, ImportUrl } from '@adobe/spacecat-shared-data-access';
+import ImportJobSchema from '@adobe/spacecat-shared-data-access/src/models/import-job/import-job.schema.js';
+import ImportUrlSchema from '@adobe/spacecat-shared-data-access/src/models/import-url/import-url.schema.js';
 import ImportController from '../../src/controllers/import.js';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 use(sinonChai);
 use(chaiAsPromised);
 
 const thisDirectory = dirname(fileURLToPath(import.meta.url));
+
+const createImportJob = (data) => (new ImportJob(
+  {
+    entities: {
+      importJob: {
+        model: {
+          schema: { attributes: { status: { type: 'string', get: (value) => value } } },
+        },
+        patch: sinon.stub().returns({ go: () => {}, set: () => {} }),
+        remove: sinon.stub().returns({ go: () => {} }),
+      },
+    },
+  },
+  {
+    log: console,
+    getCollection: stub().returns({
+      schema: ImportJobSchema,
+      findById: stub(),
+    }),
+  },
+  ImportJobSchema,
+  data,
+  console,
+));
+
+const createImportUrl = (data) => (new ImportUrl(
+  { entities: { importUrl: {} } },
+  {
+    log: console,
+    getCollection: stub().returns({
+      schema: ImportUrlSchema,
+      findById: stub(),
+    }),
+  },
+  ImportUrlSchema,
+  data,
+  console,
+));
 
 describe('ImportController tests', () => {
   let sandbox;
@@ -52,7 +91,7 @@ describe('ImportController tests', () => {
   };
 
   const exampleJob = {
-    id: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
+    importJobId: 'f91afda0-afc8-467e-bfa3-fdbeba3037e8',
     status: 'RUNNING',
     options: {},
     baseURL: 'https://www.example.com',
@@ -81,6 +120,7 @@ describe('ImportController tests', () => {
 
     mockSqsClient = {
       sendMessage: sandbox.stub(),
+      purgeQueue: sandbox.stub(),
     };
 
     mockAuth = {
@@ -99,18 +139,23 @@ describe('ImportController tests', () => {
     };
 
     mockDataAccess = {
-      getImportJobsByStatus: sandbox.stub().resolves([]), // Simulate no running jobs
-      createNewImportJob: (data) => createImportJob(data),
-      createNewImportUrl: (data) => createImportUrl(data),
-      getImportJobByID: sandbox.stub(),
-      getImportJobProgress: sandbox.stub(),
-      getImportUrlsByJobId: sandbox.stub().resolves([]),
-      getApiKeyByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
-      removeImportJob: sandbox.stub().resolves(),
+      ApiKey: {
+        allByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
+      },
+      ImportJob: {
+        allByDateRange: sandbox.stub().resolves([]),
+        allByStatus: sandbox.stub().resolves([]),
+        create: (data) => createImportJob(data),
+        findById: sandbox.stub(),
+      },
+      ImportUrl: {
+        allByImportJobId: sandbox.stub().resolves([]),
+        create: (data) => createImportUrl(data),
+      },
     };
 
-    mockDataAccess.getImportJobByID.callsFake(async (jobId) => {
-      if (jobId !== exampleJob.id) {
+    mockDataAccess.ImportJob.findById.callsFake(async (jobId) => {
+      if (jobId !== exampleJob.importJobId) {
         throw new ErrorWithStatusCode('Not found', 404);
       }
       return createImportJob(exampleJob);
@@ -131,6 +176,7 @@ describe('ImportController tests', () => {
     importConfiguration = {
       queues: ['spacecat-import-queue-1', 'spacecat-import-queue-2'],
       importWorkerQueue: 'https://sqs.us-east-1.amazonaws.com/1234567890/import-worker-queue',
+      importQueueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
       options: {
         enableJavascript: true,
       },
@@ -211,7 +257,10 @@ describe('ImportController tests', () => {
     });
 
     it('should create an import job for the user scope imports.write', async () => {
-      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'imports.write', domains: ['https://www.example.com'] }, { name: 'imports.read', domains: ['https://www.example.com'] }];
+      baseContext.attributes.authInfo.profile.getScopes = () => [
+        { name: 'imports.write', domains: ['https://www.example.com'] },
+        { name: 'imports.read', domains: ['https://www.example.com'] },
+      ];
       const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(202);
@@ -259,7 +308,7 @@ describe('ImportController tests', () => {
     });
 
     it('should reject when the given API key is already running an import job', async () => {
-      baseContext.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
+      baseContext.dataAccess.ImportJob.allByStatus = sandbox.stub().resolves([
         createImportJob({
           ...exampleJob,
           hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
@@ -339,7 +388,7 @@ describe('ImportController tests', () => {
     });
 
     it('should fail when all (both) available queues are in use', async () => {
-      baseContext.dataAccess.getImportJobsByStatus = sandbox.stub().resolves([
+      baseContext.dataAccess.ImportJob.allByStatus = sandbox.stub().resolves([
         createImportJob({
           ...exampleJob,
           importQueueId: 'spacecat-import-queue-1',
@@ -434,19 +483,19 @@ describe('ImportController tests', () => {
 
       // only need to provide enough import url data to satisfy the import-supervisor, no need
       // for all the other properties of a ImportUrl object.
-      baseContext.dataAccess.getImportUrlsByJobId = sandbox.stub().resolves([
-        { state: { status: ImportUrlStatus.COMPLETE } },
-        { state: { status: ImportUrlStatus.COMPLETE } },
+      baseContext.dataAccess.ImportUrl.allByImportJobId = sandbox.stub().resolves([
+        { getStatus: () => ImportJob.ImportUrlStatus.COMPLETE },
+        { getStatus: () => ImportJob.ImportUrlStatus.COMPLETE },
         // setting a status to RUNNING should not affect the result
         // as no process will flip a ImportUrl status to running at this time, therefore
         // the code will ignore running in the results
-        { state: { status: ImportUrlStatus.RUNNING } },
-        { state: { status: ImportUrlStatus.PENDING } },
-        { state: { status: ImportUrlStatus.REDIRECT } },
-        { state: { status: ImportUrlStatus.FAILED } },
+        { getStatus: () => ImportJob.ImportUrlStatus.RUNNING },
+        { getStatus: () => ImportJob.ImportUrlStatus.PENDING },
+        { getStatus: () => ImportJob.ImportUrlStatus.REDIRECT },
+        { getStatus: () => ImportJob.ImportUrlStatus.FAILED },
       ]);
 
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
       importController = ImportController(baseContext);
       const response = await importController.getImportJobProgress(baseContext);
       expect(response).to.be.an.instanceOf(Response);
@@ -462,7 +511,7 @@ describe('ImportController tests', () => {
 
     it('should respond a job not found for non existent jobs', async () => {
       baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(null);
-      baseContext.params.jobId = 'does-not-exist';
+      baseContext.params.jobId = '3ec88567-c9f8-4fb1-8361-b53985a2898b'; // non existent job
 
       importController = ImportController(baseContext);
       const response = await importController.getImportJobProgress(baseContext);
@@ -476,7 +525,7 @@ describe('ImportController tests', () => {
         createImportJob({ ...exampleJob, hashedApiKey: '123' }),
       ]);
 
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
       importController = ImportController(baseContext);
 
       const response = await importController.getImportJobProgress(baseContext);
@@ -494,7 +543,7 @@ describe('ImportController tests', () => {
 
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
       baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
       const response = await importController.getImportJobProgress(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
@@ -512,7 +561,7 @@ describe('ImportController tests', () => {
     });
 
     it('should return 404 when the jobID cannot be found', async () => {
-      baseContext.params.jobId = 'unknown-job-id';
+      baseContext.params.jobId = '3ec88567-c9f8-4fb1-8361-b53985a2898b'; // non existent job
       const response = await importController.getImportJobStatus(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
@@ -522,7 +571,7 @@ describe('ImportController tests', () => {
 
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
       baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
       const response = await importController.getImportJobStatus(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
@@ -531,7 +580,7 @@ describe('ImportController tests', () => {
     });
 
     it('should return job details for a valid jobId', async () => {
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
       const response = await importController.getImportJobStatus(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
@@ -547,7 +596,7 @@ describe('ImportController tests', () => {
   describe('getImportJobResult', () => {
     beforeEach(() => {
       baseContext.pathInfo.headers['x-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
     });
 
     it('should fail to fetch the import result for a running job', async () => {
@@ -581,7 +630,7 @@ describe('ImportController tests', () => {
 
       // Verify that GetObjectCommand was called with the expected key
       expect(mockS3.GetObjectCommand).to.have.been.calledOnce;
-      expect(mockS3.GetObjectCommand.getCall(0).args[0].Key).to.equal(`imports/${exampleJob.id}/import-result.zip`);
+      expect(mockS3.GetObjectCommand.getCall(0).args[0].Key).to.equal(`imports/${exampleJob.importJobId}/import-result.zip`);
     });
 
     it('should handle an unexpected promise rejection from the AWS presigner', async () => {
@@ -614,7 +663,7 @@ describe('ImportController tests', () => {
 
     it('should return an array of import jobs', async () => {
       const job = createImportJob(exampleJob);
-      baseContext.dataAccess.getImportJobsByDateRange = sandbox.stub().resolves([job]);
+      baseContext.dataAccess.ImportJob.allByDateRange = sandbox.stub().resolves([job]);
       baseContext.params.startDate = '2022-10-05T14:48:00.000Z';
       baseContext.params.endDate = '2022-10-07T14:48:00.000Z';
 
@@ -632,38 +681,153 @@ describe('ImportController tests', () => {
   describe('deleteImportJob', () => {
     it('should fail when api key does not have the correct scopes', async () => {
       baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
       const response = await importController.deleteImportJob(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(401);
       expect(response.headers.get('x-error')).to.equal('Missing required scopes');
 
-      expect(mockDataAccess.removeImportJob).to.not.have.been.called;
+      expect(mockDataAccess.ImportJob.findById).to.not.have.been.called;
     });
 
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
       baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
+      const job = await mockDataAccess.ImportJob.findById(exampleJob.importJobId);
+      job.remove = sandbox.stub().resolves();
+
       const response = await importController.deleteImportJob(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
       expect(response.headers.get('x-error')).to.equal('Not found');
 
-      expect(mockDataAccess.removeImportJob).to.not.have.been.called;
+      expect(job.remove).to.not.have.been.called;
     });
 
     it('should delete the specified job', async () => {
-      baseContext.params.jobId = exampleJob.id;
+      baseContext.params.jobId = exampleJob.importJobId;
+      const job = createImportJob(exampleJob);
+      job.remove = sandbox.stub().resolves();
+      baseContext.dataAccess.ImportJob.findById = sandbox.stub().resolves(job);
+
       const response = await importController.deleteImportJob(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(204);
 
       // Check that removeImportJob was invoked with the expected jobId
-      expect(mockDataAccess.removeImportJob).to.have.been.calledOnce;
-      expect(mockDataAccess.removeImportJob.getCall(0).args[0].getId()).to.equal(exampleJob.id);
+      expect(job.remove).to.have.been.calledOnce;
+    });
+  });
+
+  describe('stopImportJob', () => {
+    it('should fail when api key does not have the correct scopes', async () => {
+      baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
+      baseContext.params.jobId = exampleJob.importJobId;
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(401);
+      expect(response.headers.get('x-error')).to.equal('Missing required scopes');
+
+      expect(mockSqsClient.purgeQueue).to.not.have.been.called;
+    });
+
+    it('should fail when request data is not an array', async () => {
+      baseContext.data = 'not an array';
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to be an array');
+    });
+
+    it('should fail when request data is an empty array', async () => {
+      baseContext.data = [];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to contain exactly one operation');
+    });
+
+    it('should fail when request data does not contain an object', async () => {
+      baseContext.data = ['not an object'];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request data needs to be an array of objects');
+    });
+
+    it('should fail when request data does not contain an operation', async () => {
+      baseContext.data = [{ notAnOperation: 'not an operation' }];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following operations: ["replace"]');
+    });
+
+    it('should fail when request data does not contain a valid path', async () => {
+      baseContext.data = [{ op: 'replace', path: '/not-a-valid-path', value: 'not a valid value' }];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following paths: ["/status"]');
+    });
+
+    it('should fail when request data does not contain a valid value', async () => {
+      baseContext.data = [{ op: 'replace', path: '/status', value: 'not a valid value' }];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: Patch request supports the following values: ["STOPPED"]');
+    });
+
+    it('should fail when import job is not provided', async () => {
+      baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(null);
+      baseContext.data = [{ op: 'replace', path: '/status', value: 'STOPPED' }];
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Job ID is required');
+    });
+
+    it('should fail when import job is not running', async () => {
+      baseContext.dataAccess.getImportJobByID = sandbox.stub().resolves(createImportJob({
+        ...exampleJob,
+        status: 'STOPPED',
+      }));
+      baseContext.data = [{ op: 'replace', path: '/status', value: 'STOPPED' }];
+      baseContext.params.jobId = 'f91afda0-afc8-467e-bfa3-fdbeba3037e8';
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Job with jobId: f91afda0-afc8-467e-bfa3-fdbeba3037e8 cannot be stopped as it is already in a terminal state');
+    });
+
+    it('should successfully stop an import job', async () => {
+      const job = createImportJob({
+        ...exampleJob,
+        status: 'RUNNING',
+      });
+      job.save = sandbox.stub().resolves();
+      baseContext.dataAccess.ImportJob.findById = sandbox.stub().resolves(job);
+      baseContext.data = [{ op: 'replace', path: '/status', value: 'STOPPED' }];
+      baseContext.params.jobId = 'f91afda0-afc8-467e-bfa3-fdbeba3037e8';
+      const response = await importController.stopImportJob(baseContext);
+
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(204);
+      expect(job.save).to.have.been.calledOnce;
+      expect(mockSqsClient.purgeQueue).to.have.been.calledOnce;
     });
   });
 });

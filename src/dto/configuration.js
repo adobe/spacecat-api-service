@@ -10,29 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { createConfiguration } from '@adobe/spacecat-shared-data-access/src/models/configuration.js';
-
 /**
  * Data transfer object for Configuration.
  */
 export const ConfigurationDto = {
-
-  /**
-   * Converts a JSON object into a Configuration object.
-   * @param {object } jsonObject - JSON object.
-   * @returns {Readonly<Configuration>} Configuration object.
-   */
-  fromJson: (jsonObject) => {
-    const configurationData = {
-      version: jsonObject.version,
-      jobs: jsonObject.jobs,
-      ...(jsonObject.handlers ? { handlers: jsonObject.handlers } : {}),
-      queues: jsonObject.queues,
-    };
-
-    return createConfiguration(configurationData);
-  },
-
   /**
    * Converts a Configuration object into a JSON object.
    * @param {Readonly<Configuration>} configuration - Configuration object.
@@ -44,5 +25,6 @@ export const ConfigurationDto = {
     jobs: configuration.getJobs(),
     ...(configuration.getHandlers() ? { handlers: configuration.getHandlers() } : {}),
     queues: configuration.getQueues(),
+    ...(configuration.getSlackRoles() ? { slackRoles: configuration.getSlackRoles() } : {}),
   }),
 };

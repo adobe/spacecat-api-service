@@ -13,11 +13,13 @@
 /* eslint-env mocha */
 
 import { Request } from '@adobe/fetch';
-import { createAudit } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import { main } from '../src/index.js';
+
+use(sinonChai);
 
 const baseUrl = 'https://base.spacecat';
 
@@ -30,12 +32,13 @@ describe('Index Tests', () => {
   let request;
 
   const mockAuditData = {
-    siteId: '123',
-    auditType: 'lhs-mobile',
-    auditedAt: '2023-12-16T09:21:09.000Z',
-    isLive: true,
-    fullAuditRef: 'https://example.com',
-    auditResult: {
+    getSiteId: () => '123',
+    getAuditType: () => 'lhs-mobile',
+    getAuditedAt: () => '2023-12-16T09:21:09.000Z',
+    getIsError: () => false,
+    getIsLive: () => true,
+    getFullAuditRef: () => 'https://example.com',
+    getAuditResult: () => ({
       runtimeError: {},
       scores: {
         performance: 0.9,
@@ -43,7 +46,7 @@ describe('Index Tests', () => {
         accessibility: 0.7,
         'best-practices': 0.6,
       },
-    },
+    }),
   };
 
   beforeEach('setup', () => {
@@ -72,20 +75,28 @@ describe('Index Tests', () => {
         IMPORT_CONFIGURATION: '{}',
       },
       dataAccess: {
-        getSitesWithLatestAudit: sinon.stub().resolves([]),
-        getOrganizationByID: sinon.stub().resolves({
-          getId: () => 'default',
-          getName: () => 'default',
-          getImsOrgId: () => 'default',
-          getCreatedAt: () => '2023-12-16T09:21:09.000Z',
-          getUpdatedAt: () => '2023-12-16T09:21:09.000Z',
-          getConfig: () => ({
-            getSlackConfig: () => {},
-            getHandlers: () => {},
-            getImports: () => [],
+        Audit: {
+          findBySiteIdAndAuditTypeAndAuditedAt: sinon.stub().resolves(mockAuditData),
+        },
+        Organization: {
+          findById: sinon.stub().resolves({
+            getId: () => 'default',
+            getName: () => 'default',
+            getImsOrgId: () => 'default',
+            getCreatedAt: () => '2023-12-16T09:21:09.000Z',
+            getUpdatedAt: () => '2023-12-16T09:21:09.000Z',
+            getConfig: () => ({
+              getSlackConfig: () => {},
+              getHandlers: () => {},
+              getImports: () => [],
+            }),
           }),
-        }),
-        getAuditForSite: sinon.stub().resolves(createAudit(mockAuditData)),
+        },
+        Site: {
+          allWithLatestAudit: sinon.stub().resolves([]),
+        },
+        Opportunity: {},
+        Suggestion: {},
       },
       s3Client: {
         send: sinon.stub(),
@@ -167,17 +178,6 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
   });
 
-  it('handles organizationId is default', async () => {
-    context.pathInfo.suffix = '/organizations/default';
-
-    request = new Request(`${baseUrl}/organizations/default`, { headers: { 'x-api-key': apiKey } });
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(200);
-    expect(context.dataAccess.getOrganizationByID.calledOnce).to.be.true;
-  });
-
   it('handles dynamic route errors', async () => {
     context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
 
@@ -186,7 +186,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('dataAccess.getSiteByID is not a function');
+    expect(resp.headers.plain()['x-error']).to.equal('Site.findById is not a function');
   });
 
   it('handles dynamic route', async () => {
@@ -197,7 +197,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(200);
-    expect(context.dataAccess.getSitesWithLatestAudit.calledOnce).to.be.true;
+    expect(context.dataAccess.Site.allWithLatestAudit).to.have.been.calledOnce;
   });
 
   it('handles dynamic route with three params', async () => {
@@ -208,6 +208,6 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(200);
-    expect(context.dataAccess.getAuditForSite.calledOnce).to.be.true;
+    expect(context.dataAccess.Audit.findBySiteIdAndAuditTypeAndAuditedAt).to.have.been.calledOnce;
   });
 });
