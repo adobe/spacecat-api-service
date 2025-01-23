@@ -80,6 +80,9 @@ describe('GetSitesCommand', () => {
       Site: {
         allWithLatestAudit: sinon.stub(),
       },
+      Organization: {
+        findByImsOrgId: sinon.stub().resolves(),
+      },
     };
     boltAppStub = {
       action: sinon.stub(),
@@ -182,6 +185,25 @@ describe('GetSitesCommand', () => {
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['other'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('handles command execution with non existing ims org id', async () => {
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(3));
+      const command = GetSitesCommand(context);
+
+      await command.handleExecution(['ASASASASASASASASASASASAS@AdobeOrg'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('handles command execution with ims org id', async () => {
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(3));
+      dataAccessStub.Organization.findByImsOrgId.resolves({ getId: () => 'some-org-id' });
+      const command = GetSitesCommand(context);
+
+      await command.handleExecution(['ASASASASASASASASASASASAS@AdobeOrg'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
     });
