@@ -199,8 +199,13 @@ describe('GetSitesCommand', () => {
     });
 
     it('handles command execution with ims org id', async () => {
-      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(3));
-      dataAccessStub.Organization.findByImsOrgId.resolves({ getId: () => 'some-org-id' });
+      const sites = generateSites(3);
+      const org = {
+        getId: () => 'some-org-id',
+        getSites: () => sites,
+      };
+      dataAccessStub.Site.allWithLatestAudit.resolves(sites);
+      dataAccessStub.Organization.findByImsOrgId.resolves(org);
       const command = GetSitesCommand(context);
 
       await command.handleExecution(['ASASASASASASASASASASASAS@AdobeOrg'], slackContext);

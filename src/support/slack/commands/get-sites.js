@@ -86,7 +86,7 @@ function GetSitesCommand(context) {
   const { Organization, Site } = dataAccess;
 
   async function fetchAndFormatSites(threadTs, filterStatus, psiStrategy, deliveryType, imsOrgId) {
-    let orgFilter = (s) => s.getOrganizationId() !== context.env.ORGANIZATION_ID_FRIENDS_FAMILY;
+    let sites = [];
 
     if (imsOrgId !== 'all') {
       const org = await Organization.findByImsOrgId(imsOrgId);
@@ -99,12 +99,13 @@ function GetSitesCommand(context) {
           additionalBlocks: [],
         };
       }
-      orgFilter = (site) => site.getOrganizationId() === organizationId;
+      sites = await org.getSites();
+    } else {
+      sites = await Site.allWithLatestAudit(`lhs-${psiStrategy}`, 'asc', deliveryType);
+      sites = sites.filter(
+        (site) => site.getOrganizationId() !== context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
+      );
     }
-
-    let sites = await Site.allWithLatestAudit(`lhs-${psiStrategy}`, 'asc', deliveryType);
-
-    sites = sites.filter(orgFilter);
 
     if (filterStatus !== 'all') {
       sites = sites.filter((site) => (filterStatus === 'live' ? site.getIsLive() : !site.getIsLive()));
