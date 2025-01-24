@@ -1,3 +1,10 @@
+# [1.89.0](https://github.com/adobe/spacecat-api-service/compare/v1.88.1...v1.89.0) (2025-01-24)
+
+
+### Features
+
+* **slack:** get sites by ims org id ([#715](https://github.com/adobe/spacecat-api-service/issues/715)) ([79e351a](https://github.com/adobe/spacecat-api-service/commit/79e351a41a42c26c82eeb285da2b22ca86082f04))
+
 ## [1.88.1](https://github.com/adobe/spacecat-api-service/compare/v1.88.0...v1.88.1) (2025-01-23)
 
 
