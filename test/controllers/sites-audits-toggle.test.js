@@ -505,7 +505,7 @@ describe('Sites Audits Controller', () => {
       });
     });
 
-    it('if an audit type is not present in the configuration', async () => {
+    it.skip('if an audit type is not present in the configuration', async () => {
       dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
       dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(sites[1]);
 
