@@ -81,15 +81,16 @@ export default (dataAccess) => {
           if (site === null) {
             return { status: 404, message: `Site with baseURL: ${baseURL} not found.` };
           }
-
-          // const registeredAudits = configuration.getHandlers();
-          // if (!registeredAudits[auditType]) {
-          //   return {
-          //     status: 404,
-          //     message: `The "${auditType}" is not present in the configuration. List of allowed audits:`
-          //       + ` ${Object.keys(registeredAudits).join(', ')}.`,
-          //   };
-          // }
+/*
+          const registeredAudits = configuration.getHandlers();
+          if (!registeredAudits[auditType]) {
+            return {
+              status: 404,
+              message: `The "${auditType}" is not present in the configuration. List of allowed audits:`
+                + ` ${Object.keys(registeredAudits).join(', ')}.`,
+            };
+          }
+ */
 
           hasUpdates = true;
           let successMessage;
