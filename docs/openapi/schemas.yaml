@@ -512,6 +512,19 @@ AuditResult:
           description: |
             A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
           type: string
+    - type: object
+      description: |
+        The result of broken-internal-links audit.
+      properties:
+        brokenInternalLinks:
+          type: array
+          description: A list of broken internal links.
+          items:
+            $ref: './schemas.yaml#/BrokenInternalLink'
+        fullAuditRef:
+          description: |
+            A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+          type: string
     - type: array
       description: Information about the provided URLs in the Google index.
       items:
@@ -1648,6 +1661,24 @@ BrokenBacklink:
     traffic_domain:
       description: The referring domain's estimated monthly organic traffic from search.
       type: number
+BrokenInternalLink:
+  type: object
+  properties:
+    url_to:
+      description: The URL of the broken internal link.
+      $ref: '#/URL'
+    title:
+      description: The title of the internal page referring to the broken internal link.
+      type: string
+    url_from:
+      description: The URL of the internal page referring to the broken link.
+      $ref: '#/URL'
+    traffic_domain:
+      description: The referring page's estimated monthly organic traffic.
+      type: number
+    priority:
+      description: The priority of the broken internal link
+      $ref: '#/Priority'
 ImportAssistantRequest:
   type: object
   required:
@@ -1777,7 +1808,7 @@ OpportunityType:
   type: string
   enum:
     - 'broken-backlinks'
-    - 'broken-internal-backlinks'
+    - 'broken-internal-links'
   example: 'broken-backlinks'
 OpportunityOrigin:
   description: |
@@ -1816,6 +1847,7 @@ Opportunity:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksOpportunityData'
+        - $ref: '#/BrokenInternalLinksOpportunityData'
         - $ref: '#/CWVOpportunityData'
     origin:
       $ref: '#/OpportunityOrigin'
@@ -1836,6 +1868,7 @@ Opportunity:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksGuidance'
+        - $ref: '#/BrokenInternalLinksGuidance'
         - $ref: '#/CWVGuidance'
     tags:
       type: array
@@ -1885,6 +1918,7 @@ OpportunityCreate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksOpportunityData'
+        - $ref: '#/BrokenInternalLinksOpportunityData'
     origin:
       description: Origin of opportunity
       $ref: '#/OpportunityOrigin'
@@ -1902,6 +1936,7 @@ OpportunityCreate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksGuidance'
+        - $ref: '#/BrokenInternalLinksGuidance'
     tags:
       type: array
       items:
@@ -1929,6 +1964,7 @@ OpportunityUpdate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksOpportunityData'
+        - $ref: '#/BrokenInternalLinksOpportunityData'
     title:
       description: Title of this opportunity
       type: string
@@ -1946,6 +1982,7 @@ OpportunityUpdate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksGuidance'
+        - $ref: '#/BrokenInternalLinksGuidance'
     tags:
       type: array
       items:
@@ -1998,12 +2035,14 @@ Suggestion:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksRedirectData'
+        - $ref: '#/BrokenInternalLinksSuggestionData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
+        - $ref: '#/BrokenInternalLinksKpiDeltas'
     status:
       description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
       $ref: '#/SuggestionStatus'
@@ -2041,12 +2080,14 @@ SuggestionCreate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksRedirectData'
+        - $ref: '#/BrokenInternalLinksSuggestionData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
+        - $ref: '#/BrokenInternalLinksKpiDeltas'
   required:
     - opportunityId
     - type
@@ -2133,12 +2174,14 @@ SuggestionUpdate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksRedirectData'
+        - $ref: '#/BrokenInternalLinksSuggestionData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
+        - $ref: '#/BrokenInternalLinksKpiDeltas'
 SuggestionStatusUpdate:
   type: array
   items:
@@ -2230,6 +2273,34 @@ BrokenBacklinksRedirectData:
     traffic_domain:
       description: The estimated monthly organic traffic to the referring page
       type: number
+BrokenInternalLinksSuggestionData:
+  description: Data specific to redirect suggestion for broken internal links opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    title:
+      description: The title of the referring page
+      type: string
+    url_from:
+      description: The URL of the referring page
+      type: string
+    url_to:
+      description: The URL of the broken target page
+      type: string
+    urls_suggested:
+      description: The proposed internal target URLs to point the broken internal link to
+      type: array
+      items:
+        type: string
+    manualOverrideURL:
+      description: The URL to manually override the proposed target URL
+      type: string
+    traffic_domain:
+      description: The estimated monthly organic traffic to the referring page
+      type: number
+    priority:
+      description: The priority of the broken internal link
+      $ref: '#/Priority'
 BrokenBacklinksKpiDeltas:
   description: KPI deltas specific to redirect suggestion for broken backlinks opportunity
   type: object
@@ -2245,6 +2316,31 @@ BrokenBacklinksGuidance:
   properties:
     steps:
       description: The steps to resolve the broken backlinks opportunity
+      type: array
+      items:
+        type: string
+BrokenInternalLinksKpiDeltas:
+  description: KPI deltas specific to redirect suggestion for broken internal links opportunity
+  type: object
+  additionalProperties: true
+BrokenInternalLinksOpportunityData:
+  description: Data specific to broken internal links opportunity
+  type: object
+  properties:
+    projectedTrafficLost:
+      type: number
+      description: Projected Traffic Lost, representing the estimated loss of organic traffic
+    projectedTrafficValue:
+      type: number
+      description: Projected Traffic Value, calculated by multiplying the Projected Traffic Lost by the Cost Per Click (CPC) value.
+  additionalProperties: true
+BrokenInternalLinksGuidance:
+  description: Guidance specific to broken internal links opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    steps:
+      description: The steps to resolve the broken internal links opportunity
       type: array
       items:
         type: string
@@ -2286,3 +2382,10 @@ CWVGuidance:
       type: array
       items:
         type: string
+Priority:
+      type: string
+      enum:
+        - 'high'
+        - 'medium'
+        - 'low'
+      example: 'high'
