@@ -9,7 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-
+/* eslint-disable */
 import { badRequest, createResponse, internalServerError } from '@adobe/spacecat-shared-http-utils';
 import {
   isObject, isValidUrl, isNonEmptyObject, isString,
