@@ -73,7 +73,7 @@ describe('AddSiteCommand', () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+        .replyWithError('rainy weather');
 
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
@@ -119,7 +119,7 @@ describe('AddSiteCommand', () => {
     it('handles error during site addition', async () => {
       nock('https://example.com')
         .get('/')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+        .replyWithError('rainy weather');
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves(null);
 
@@ -135,7 +135,7 @@ describe('AddSiteCommand', () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+        .replyWithError('rainy weather');
       dataAccessStub.Site.findByBaseURL.resolves(null);
       const site = {
         getId: () => 'site1',
@@ -162,7 +162,7 @@ describe('AddSiteCommand', () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+        .replyWithError('rainy weather');
       dataAccessStub.Site.findByBaseURL.resolves(null);
       const site = {
         getBaseURL: () => baseURL,
@@ -187,7 +187,7 @@ describe('AddSiteCommand', () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+        .replyWithError('rainy weather');
       dataAccessStub.Site.findByBaseURL.resolves(null);
       const site = {
         getBaseURL: () => baseURL,
@@ -211,7 +211,7 @@ describe('AddSiteCommand', () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+        .replyWithError('rainy weather');
       dataAccessStub.Site.findByBaseURL.rejects(new Error('test error'));
 
       const args = ['example.com'];
