@@ -17,11 +17,9 @@ import { hasPermisson, pathSorter } from '../../../src/util/auth.js';
 describe('haspermission', () => {
   it.only('test haspermission', () => {
     const aclCtx = {
-      user: { ident: 'AA@BB.e' },
       acls: [
         {
-          ident: 'AA@BB.e',
-          identType: 'ident',
+          role: 'some-role',
           acl: [
             { path: '/someapi', actions: ['R'] },
             { path: '/someapi/**', actions: ['C', 'R', 'U', 'D'] },

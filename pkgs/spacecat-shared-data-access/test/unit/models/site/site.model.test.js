@@ -155,10 +155,8 @@ describe('SiteModel', () => {
   describe('test permissions', () => {
     function getAllowAllCtx() {
       return {
-        user: { email: 'foo@bar.org' },
         acls: [{
-          ident: 'foo@bar.org',
-          identType: 'email',
+          role: 'foo@bar.org',
           acl: [
             { path: '/', actions: ['C', 'R', 'U', 'D'] },
             { path: '/**', actions: ['C', 'R', 'U', 'D'] },
@@ -169,10 +167,8 @@ describe('SiteModel', () => {
 
     function getAclCtx() {
       return {
-        user: { email: 'foo@bar.org' },
         acls: [{
-          ident: 'foo@bar.org',
-          identType: 'email',
+          role: 'foo@bar.org',
           acl: [
             { path: '/organization/aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee/site/*', actions: ['U'] },
             { path: '/organization/*/site/*', actions: ['R'] },

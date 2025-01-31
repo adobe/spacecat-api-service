@@ -100,27 +100,16 @@ describe('OrganizationModel', () => {
   describe('access control', () => {
     function getAclCtx1() {
       return {
-        user: {
-          email: 'joe@bloggs.org',
-          ident: '18ABAA98@BBA90AB.e',
-          org: { name: 'IMS-ORG-1', ident: 'AFAA9891' },
-          groups: [
-            { name: 'staff', ident: 1289110921 },
-            { name: 'editor', ident: 1289110922 },
-          ],
-        },
         acls: [
           {
-            ident: 'joe@bloggs.org',
-            identType: 'email',
+            role: 'joe@bloggs.org',
             acl: [
               { path: '/organization/**', actions: ['C', 'R', 'U', 'D'] },
               { path: '/configuration/*', actions: ['R', 'U'] },
             ],
           },
           {
-            ident: 'AFAA9891/editor',
-            identType: 'orgID/group',
+            role: 'AFAA9891/editor',
             acl: [
               { path: '/import-job/**', actions: ['C'] },
             ],
@@ -138,19 +127,9 @@ describe('OrganizationModel', () => {
 
     function getAclCtx2() {
       return {
-        user: {
-          email: 'joe@bloggs.org',
-          ident: '18ABAA98@BBA90AB.e',
-          org: { name: 'IMS-ORG-1', ident: 'AFAA9891' },
-          groups: [
-            { name: 'staff', ident: 1289110921 },
-            { name: 'editor', ident: 1289110922 },
-          ],
-        },
         acls: [
           {
-            ident: 'AFAA9891/editor',
-            identType: 'orgID/group',
+            role: 'AFAA9891/editor',
             acl: [
               { path: '/organization/**', actions: ['R'] },
             ],

@@ -57,6 +57,23 @@ export default class AuthenticationManager {
         this.log.info(`Authenticated with ${handler.name}`);
 
         context.attributes = context.attributes || {};
+
+        // The acls are looked up per role
+        authInfo.acls = [
+          {
+            role: 'org-viewer',
+            acl: [
+              { path: '/organization/49968537-8983-45bb-b694-42d2013fec55', actions: [] },
+              { path: '/organization/*', actions: ['R'] },
+            ],
+          },
+          {
+            role: 'cust1-editor',
+            acl: [
+              { path: '/organization/0f8ff270-968e-4007-aea1-2fa1c5e3332c', actions: ['C', 'R', 'U', 'D'] }, // july11
+            ],
+          },
+        ];
         context.attributes.authInfo = authInfo;
         console.log('§§§ Set context.attributes.authInfo to:', authInfo);
 

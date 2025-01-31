@@ -30,7 +30,7 @@ function prepSingleStarWildcard(entityPath, permPath) {
 
 function getPermissions(entityPath, permissions) {
   if (!permissions) {
-    return [];
+    return { actions: [] };
   }
 
   const match = permissions.find((p) => {
@@ -44,43 +44,41 @@ function getPermissions(entityPath, permissions) {
   });
 
   if (!match) {
-    return [];
+    return { actions: [] };
   }
-  return match.actions;
-}
-
-function identStr(prefix, val) {
-  if (!val) {
-    return undefined;
-  }
-  return prefix.concat(val);
+  return { actions: match.actions, trace: match };
 }
 
 export function hasPermisson(entityPath, aclCtx, perm) {
-  const { user } = aclCtx;
-  const org = user.org?.ident;
-  const idents = (user.groups || [])
-    .map((g) => `orgID/group:${org}/${g.name}`)
-    .concat(identStr('email:', user.email))
-    .concat(identStr('ident:', user.ident))
-    .concat(identStr('orgID:', org))
-    .filter((e) => e !== undefined);
-
-  const permissions = new Map();
-  aclCtx.acls.forEach((a) => permissions.set(`${a.identType}:${a.ident}`, a.acl));
-
-  const actions = [];
-  idents.forEach((i) => {
-    actions.push(...getPermissions(entityPath, permissions.get(i)));
+  const allActions = [];
+  const traces = [];
+  aclCtx.acls.forEach((a) => {
+    const { actions, trace } = getPermissions(entityPath, a.acl);
+    allActions.push(...actions);
+    if (actions.includes(perm)) {
+      traces.push({ role: a.role, ...trace });
+    }
   });
-  return actions.includes(perm);
+
+  const permission = allActions.includes(perm);
+  if (permission) {
+    console.log('§§§ Permission granted for', entityPath, 'with', perm, 'traces:', traces);
+  }
+  return permission;
 }
 
 export function ensurePermission(path, aclCtx, perm) {
-  console.log('§§§ Calling ensurepermission with path:', path, 'aclCtx:', aclCtx, 'perm:', perm);
-  // if (!hasPermisson(path, aclCtx, perm)) {
-  //   throw new Error('Permission denied');
-  // }
+  console.log(
+    '§§§ Calling ensurePermission with path:',
+    path,
+    'aclCtx:',
+    JSON.stringify(aclCtx),
+    'perm:',
+    perm,
+  );
+  if (!hasPermisson(path, aclCtx, perm)) {
+    throw new Error('Permission denied');
+  }
 }
 
 function prepPathForSort(path) {
