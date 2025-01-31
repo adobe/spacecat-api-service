@@ -59,6 +59,9 @@ export default class AuthenticationManager {
         context.attributes = context.attributes || {};
 
         // The acls are looked up per role
+        authInfo.aclEntities = {
+          model: ['organization'],
+        };
         authInfo.acls = [
           {
             role: 'org-viewer',

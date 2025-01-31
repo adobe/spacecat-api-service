@@ -71,6 +71,9 @@ class BaseModel {
 
     this.#initializeReferences();
     this.#initializeAttributes();
+
+    console.log('Constructing model instance', this.entityName, this.getId());
+    console.trace();
   }
 
   /**
