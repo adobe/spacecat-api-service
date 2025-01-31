@@ -71,10 +71,6 @@ class BaseModel {
 
     this.#initializeReferences();
     this.#initializeAttributes();
-
-    console.log('§§§ Constructing model instance', this.entityName, this.getId(), 'aclCtx:', this.aclCtx);
-    const stackTrace = Error().stack;
-    console.log(stackTrace);
   }
 
   /**
@@ -105,6 +101,14 @@ class BaseModel {
     return `/${decapitalize(refs[0].target)}/${ownerID}/${this.entityName}/${this.getId()}`;
   }
 
+  ensurePermission(action) {
+    if (this.aclCtx.aclEntities.includes(this.entityName)) {
+      ensurePermission(this.getACLPath(), this.aclCtx, action);
+    } else {
+      console.log('Entity ', this.entityName, 'is excluded from ACL checking');
+    }
+  }
+
   /**
    * Initializes the attributes for the current entity. This method is called during the
    * construction of the entity instance to set up the getter and setter methods for
@@ -133,6 +137,7 @@ class BaseModel {
 
       if (!this[getterMethodName] || name === this.idName) {
         this[getterMethodName] = () => {
+          this.ensurePermission('R');
           ensurePermission(this.getACLPath(), this.aclCtx, 'R');
           return this.record[name];
         };
@@ -143,7 +148,7 @@ class BaseModel {
 
         if (!this[setterMethodName] && !attr.readOnly) {
           this[setterMethodName] = (value) => {
-            ensurePermission(this.getACLPath(), this.aclCtx, 'U');
+            this.ensurePermission('U');
             this.patcher.patchValue(name, value, isReference);
             return this;
           };
