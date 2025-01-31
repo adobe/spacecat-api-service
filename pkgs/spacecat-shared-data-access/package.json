@@ -1,0 +1,54 @@
+{
+  "name": "@adobe/spacecat-shared-data-access",
+  "version": "2.0.5",
+  "description": "Shared modules of the Spacecat Services - Data Access",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0 <23.0.0",
+    "npm": ">=10.9.0 <12.0.0"
+  },
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "test:it": "mocha --require ./test/it/fixtures.js --spec \"test/it/**/*.test.js\"",
+    "test": "c8 mocha --spec \"test/unit/**/*.test.js\"",
+    "lint": "eslint .",
+    "clean": "rm -rf package-lock.json node_modules"
+  },
+  "mocha": {
+    "require": "test/setup-env.js",
+    "reporter": "mocha-multi-reporters",
+    "reporter-options": "configFile=.mocha-multi.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adobe/spacecat-shared.git"
+  },
+  "author": "",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/adobe/spacecat-shared/issues"
+  },
+  "homepage": "https://github.com/adobe/spacecat-shared#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@adobe/spacecat-shared-utils": "1.26.4",
+    "@aws-sdk/client-dynamodb": "3.734.0",
+    "@aws-sdk/lib-dynamodb": "3.734.0",
+    "@types/joi": "17.2.3",
+    "aws-xray-sdk": "3.10.3",
+    "electrodb": "3.0.1",
+    "joi": "17.13.3",
+    "pluralize": "8.0.0",
+    "uuid": "11.0.5"
+  },
+  "devDependencies": {
+    "chai": "5.1.2",
+    "chai-as-promised": "8.0.1",
+    "dynamo-db-local": "9.4.0",
+    "sinon": "19.0.2",
+    "sinon-chai": "4.0.0"
+  }
+}

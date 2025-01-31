@@ -1,0 +1,1361 @@
+{
+  "ModelName": "StarCatalogue",
+  "ModelMetadata": {
+    "Author": "SpaceCat Team",
+    "DateCreated": "Nov 23, 2023, 07:00 AM",
+    "DateLastModified": "Nov 15, 2024, 2:00 PM",
+    "AWSService": "Amazon DynamoDB",
+    "Version": "3.0"
+  },
+  "DataModel": [
+    {
+      "TableName": "spacecat-services-data",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "pk",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "sk",
+          "AttributeType": "S"
+        }
+      },
+      "AttributeDefinitions": [
+        {
+          "AttributeName": "gsi1pk",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "gsi1sk",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "gsi2pk",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "gsi2sk",
+          "AttributeType": "S"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "spacecat-data-gsi1pk-gsi1sk",
+          "KeyAttributes": {
+            "PartitionKey": { "AttributeName": "gsi1pk", "AttributeType": "S" },
+            "SortKey": { "AttributeName": "gsi1sk", "AttributeType": "S" }
+          },
+          "Projection": { "ProjectionType": "ALL" }
+        },
+        {
+          "IndexName": "spacecat-data-gsi2pk-gsi2sk",
+          "KeyAttributes": {
+            "PartitionKey": { "AttributeName": "gsi2pk", "AttributeType": "S" },
+            "SortKey": { "AttributeName": "gsi2sk", "AttributeType": "S" }
+          },
+          "Projection": { "ProjectionType": "ALL" }
+        },
+        {
+          "IndexName": "spacecat-data-gsi3pk-gsi3sk",
+          "KeyAttributes": {
+            "PartitionKey": { "AttributeName": "gsi3pk", "AttributeType": "S" },
+            "SortKey": { "AttributeName": "gsi3sk", "AttributeType": "S" }
+          },
+          "Projection": { "ProjectionType": "ALL" }
+        },
+        {
+          "IndexName": "spacecat-data-gsi4pk-gsi4sk",
+          "KeyAttributes": {
+            "PartitionKey": { "AttributeName": "gsi4pk", "AttributeType": "S" },
+            "SortKey": { "AttributeName": "gsi4sk", "AttributeType": "S" }
+          },
+          "Projection": { "ProjectionType": "ALL" }
+        },
+        {
+          "IndexName": "spacecat-data-gsi5pk-gsi5sk",
+          "KeyAttributes": {
+            "PartitionKey": { "AttributeName": "gsi5pk", "AttributeType": "S" },
+            "SortKey": { "AttributeName": "gsi5sk", "AttributeType": "S" }
+          },
+          "Projection": { "ProjectionType": "ALL" }
+        }
+      ]
+    },
+    {
+      "TableName": "spacecat-services-sites",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "id",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "baseURL",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "gitHubURL",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "organizationId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "isLive",
+          "AttributeType": "B"
+        },
+        {
+          "AttributeName": "isLiveToggledAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "deliveryType",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "GSI1PK",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "hlxConfig",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "config",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "createdAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedAt",
+          "AttributeType": "S"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "spacecat-services-all-sites",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "GSI1PK",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "baseURL",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        },
+        {
+          "IndexName": "spacecat-services-all-sites-organizations",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "organizationId",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        },
+        {
+          "IndexName": "spacecat-services-all-sites-by-delivery-type",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "GSI1PK",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "deliveryType",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "id": [
+          "identifiers",
+          "UUID"
+        ],
+        "baseURL": [
+          "identifiers",
+          "URL"
+        ],
+        "organizationId": [
+          "identifiers",
+          "UUID"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-organizations",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "id",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "name",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "imsOrgId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "GSI1PK",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "config",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "fulfillableItems",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "createdAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedAt",
+          "AttributeType": "S"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "spacecat-services-all-organizations",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "GSI1PK",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        },
+        {
+          "IndexName": "spacecat-services-all-organizations-by-ims-org-id",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "imsOrgId",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "id": [
+          "identifiers",
+          "UUID"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-audits",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "siteId",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "SK",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "auditedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "auditResult",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "auditType",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "expiresAt",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "fullAuditRef",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "isLive",
+          "AttributeType": "B"
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "siteId": [
+          "identifiers",
+          "UUID"
+        ],
+        "auditedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "fullAuditRef": [
+          "identifiers",
+          "URL"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-latest-audits",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "siteId",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "auditType",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "auditedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "auditResult",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "previousAuditResult",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "expiresAt",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "fullAuditRef",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "isLive",
+          "AttributeType": "B"
+        },
+        {
+          "AttributeName": "GSI1PK",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "GSI1SK",
+          "AttributeType": "S"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "spacecat-services-all-latest-audit-scores",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "GSI1PK",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "GSI1SK",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "siteId": [
+          "identifiers",
+          "UUID"
+        ],
+        "auditedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "fullAuditRef": [
+          "identifiers",
+          "URL"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-site-candidates",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "baseURL",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "status",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "hlxConfig",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "createdAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedBy",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "siteId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "source",
+          "AttributeType": "S"
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "lastModifiedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "discoveredAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "createdAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "updatedBy": [
+          "identifiers",
+          "Full name"
+        ],
+        "updatedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "baseUrl": [
+          "identifiers",
+          "URL"
+        ],
+        "siteId": [
+          "identifiers",
+          "UUID"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-configurations",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "PK",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "version",
+          "AttributeType": "N"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "queues",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "jobs",
+          "AttributeType": "L"
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "version": [
+          "identifiers"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-site-top-pages",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "siteId",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "SK",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "url",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "traffic",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "source",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "geo",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "importedAt",
+          "AttributeType": "S"
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "siteId": [
+          "identifiers",
+          "UUID"
+        ],
+        "importedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "url": [
+          "identifiers",
+          "URL"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-key-events",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "id",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "siteId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "time",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "name",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "type",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "createdAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedAt",
+          "AttributeType": "S"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "spacecat-services-key-events-by-site-id",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "siteId",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "time",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "id": [
+          "identifiers",
+          "UUID"
+        ],
+        "siteId": [
+          "identifiers",
+          "UUID"
+        ],
+        "time": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "name": [
+          "dataTypes",
+          "String"
+        ],
+        "type": [
+          "dataTypes",
+          "String"
+        ],
+        "createdAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "updatedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-experiments",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "siteId",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "SK",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "experimentId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "name",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "url",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "status",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "type",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "startDate",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "endDate",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "variants",
+          "AttributeType": "L"
+        },
+        {
+          "AttributeName": "updatedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedBy",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "conversionEventName",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "conversionEventValue",
+          "AttributeType": "S"
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "siteId": [
+          "identifiers",
+          "UUID"
+        ],
+        "name": [
+          "dataTypes",
+          "String"
+        ],
+        "url": [
+          "identifiers",
+          "URL"
+        ],
+        "startDate": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "endDate": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "updatedBy": [
+          "identifiers",
+          "Full name"
+        ],
+        "updatedAt": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "statsig": [
+          "Float"
+        ]
+      },
+      "BillingMode": "PROVISIONED",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-import-jobs",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "id",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "hashedApiKey",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "baseURL",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "duration",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "endTime",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "failedCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "GSI1PK",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "importQueueId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "options",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "startTime",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "status",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "successCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "redirectCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "urlCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "initiatedBy",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "hasCustomHeaders",
+          "AttributeType": "B"
+        },
+        {
+          "AttributeName": "hasCustomImportJs",
+          "AttributeType": "B"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "spacecat-services-all-import-jobs-by-status",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "GSI1PK",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "status",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        },
+        {
+          "IndexName": "spacecat-services-all-import-jobs-by-date-range",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "GSI1PK",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "startTime",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "id": [
+          "identifiers",
+          "UUID"
+        ],
+        "endTime": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "startTime": [
+          "date",
+          "ISO 8601 date and time"
+        ],
+        "importQueueId": [
+          "dataTypes",
+          "String"
+        ]
+      },
+      "BillingMode": "PAY_PER_REQUEST",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-import-urls",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "id",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "expiresAt",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "file",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "jobId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "path",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "status",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "url",
+          "AttributeType": "S"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "spacecat-services-all-import-urls-by-job-id-and-status",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "jobId",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "status",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "id": [
+          "identifiers",
+          "UUID"
+        ],
+        "jobId": [
+          "identifiers",
+          "UUID"
+        ]
+      },
+      "BillingMode": "PAY_PER_REQUEST",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    },
+    {
+      "TableName": "spacecat-services-api-keys",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "id",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        {
+          "AttributeName": "hashedApiKey",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "name",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "imsUserId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "imsOrgId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "createdAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "expiresAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "revokedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "deletedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "scopes",
+          "AttributeType": "M"
+        }
+      ],
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "spacecat-services-api-key-by-ims-user-id-and-ims-org-id",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "imsUserId",
+              "AttributeType": "S"
+            },
+            "SortKey": {
+              "AttributeName": "imsOrgId",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        },
+        {
+          "IndexName": "spacecat-services-api-key-by-hashed-api-key",
+          "KeyAttributes": {
+            "PartitionKey": {
+              "AttributeName": "hashedApiKey",
+              "AttributeType": "S"
+            }
+          },
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "DataAccess": {
+        "MySql": {}
+      },
+      "SampleDataFormats": {
+        "id": [
+          "identifiers",
+          "UUID"
+        ]
+      },
+      "BillingMode": "PAY_PER_REQUEST",
+      "ProvisionedCapacitySettings": {
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 0,
+          "WriteCapacityUnits": 0
+        },
+        "AutoScalingRead": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        },
+        "AutoScalingWrite": {
+          "ScalableTargetRequest": {
+            "MinCapacity": 1,
+            "MaxCapacity": 10,
+            "ServiceRole": "AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+          },
+          "ScalingPolicyConfiguration": {
+            "TargetValue": 70
+          }
+        }
+      }
+    }
+  ]
+}
