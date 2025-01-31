@@ -77,7 +77,7 @@ export function hasPermisson(entityPath, aclCtx, perm) {
 }
 
 export function ensurePermission(path, aclCtx, perm) {
-  console.log('*** Calling ensurepermission with path:', path, 'aclCtx:', aclCtx, 'perm:', perm);
+  console.log('§§§ Calling ensurepermission with path:', path, 'aclCtx:', aclCtx, 'perm:', perm);
   // if (!hasPermisson(path, aclCtx, perm)) {
   //   throw new Error('Permission denied');
   // }
