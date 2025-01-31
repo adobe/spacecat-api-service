@@ -67,6 +67,10 @@ class BaseCollection {
     this.entity = electroService.entities[this.entityName];
 
     this.#initializeCollectionMethods();
+
+    console.log('§§§ Constructing collection instance', this.entity, '-', this.clazz);
+    const stackTrace = Error().stack;
+    console.log(stackTrace);
   }
 
   #logAndThrowError(message, cause) {
@@ -115,6 +119,7 @@ class BaseCollection {
       this.schema,
       record,
       this.log,
+      this.aclCtx,
     );
   }
 
