@@ -40,6 +40,7 @@ export default function dataAccessWrapper(fn, opts = {}) {
       } = context.env;
 
       console.log('§§§ Calling createDataAccess with tableNameData:', DYNAMO_TABLE_NAME_DATA);
+      console.log('§§§ Calling createDataAccess with context.attributes.authInfo', context.attributes.authInfo);
       context.dataAccess = createDataAccess({
         tableNameData: DYNAMO_TABLE_NAME_DATA,
         // aclCtx, e.g. from context.attributes.authInfo
