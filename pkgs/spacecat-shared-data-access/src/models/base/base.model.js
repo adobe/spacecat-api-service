@@ -51,13 +51,13 @@ class BaseModel {
    * @param {Object} record - The initial data for the entity instance.
    * @param {Object} log - A log for capturing logging information.
    */
-  constructor(electroService, entityRegistry, schema, record, log, aclCtx) {
+  constructor(electroService, entityRegistry, schema, record, log) {
     this.electroService = electroService;
     this.entityRegistry = entityRegistry;
     this.schema = schema;
     this.record = record;
     this.log = log;
-    this.aclCtx = aclCtx;
+    this.aclCtx = entityRegistry.aclCtx;
 
     this.entityName = schema.getEntityName();
     this.idName = entityNameToIdName(this.entityName);
@@ -72,7 +72,7 @@ class BaseModel {
     this.#initializeReferences();
     this.#initializeAttributes();
 
-    console.log('§§§ Constructing model instance', this.entityName, this.getId());
+    console.log('§§§ Constructing model instance', this.entityName, this.getId(), 'aclCtx:', this.aclCtx);
     const stackTrace = Error().stack;
     console.log(stackTrace);
   }

@@ -57,8 +57,9 @@ class EntityRegistry {
    * @param {Object} service - The ElectroDB service instance used to manage entities.
    * @param {Object} log - A logger for capturing and logging information.
    */
-  constructor(service, log) {
+  constructor(service, config, log) {
     this.service = service;
+    this.aclCtx = config.aclCtx;
     this.log = log;
     this.collections = new Map();
 
