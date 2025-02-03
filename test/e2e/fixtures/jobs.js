@@ -11,7 +11,7 @@
  */
 
 export const expectedJob1Result = {
-  baseURL: 'https://business.adobe.com',
+  baseURL: 'https://implementationdetails.dev',
   options: {
     enableJavascript: false
   },
@@ -25,7 +25,7 @@ export const expectedJob1Result = {
 };
 
 export const expectedJob2ResultCustomImportJs = {
-  baseURL: 'https://business.adobe.com',
+  baseURL: 'https://implementationdetails.dev',
   options: {
     enableJavascript: false
   },
