@@ -1,3 +1,10 @@
+## [1.89.10](https://github.com/adobe/spacecat-api-service/compare/v1.89.9...v1.89.10) (2025-02-03)
+
+
+### Bug Fixes
+
+* Update URLs used for Import as a Service E2E tests ([#730](https://github.com/adobe/spacecat-api-service/issues/730)) ([bc067d0](https://github.com/adobe/spacecat-api-service/commit/bc067d0d9dc92b2b3dd57df4b74d5a333067ffc1))
+
 ## [1.89.9](https://github.com/adobe/spacecat-api-service/compare/v1.89.8...v1.89.9) (2025-02-03)
 
 
