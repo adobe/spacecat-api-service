@@ -28,8 +28,8 @@ export async function createAndValidateNewImportJob({
 } = {}) {
   const data = getNewImportJobRequestData({
     urls: [
-      'https://business.adobe.com/products/experience-manager/sites/aem-sites.html',
-      'https://business.adobe.com/products/experience-manager/sites/site-performance.html',
+      'https://implementationdetails.dev/blog/2023/10/17/aem-trial-whats-in-the-box/',
+      'https://implementationdetails.dev/',
     ],
     bundledImportJsPath,
   });
@@ -48,7 +48,7 @@ export async function createAndValidateNewImportJob({
   log.info('Created job:', newJob.id);
 
   expect(newJob).to.be.an('object');
-  expect(newJob.baseURL).to.equal('https://business.adobe.com');
+  expect(newJob.baseURL).to.equal('https://implementationdetails.dev');
   expect(newJob.status).to.equal('RUNNING');
 
   // Poll until COMPLETE

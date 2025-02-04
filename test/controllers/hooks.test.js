@@ -584,7 +584,7 @@ describe('Hooks Controller', () => {
 
       nock('https://admin.hlx.page')
         .get('/config/some-owner/aggregated/some-site.json')
-        .replyWithError({ code: 'ECONNREFUSED', syscall: 'connect', message: 'rainy weather' });
+        .replyWithError('rainy weather');
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
