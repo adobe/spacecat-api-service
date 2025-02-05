@@ -96,7 +96,7 @@ export function multipartFormData(func) {
     const { pathInfo: { headers } } = context;
     if (isMultipartFormData(headers) && !isObject(context.multipartFormData)) {
       const {
-        MULTIPART_FORM_FILE_COUNT_LIMIT = 1, // Default to a max of 1 file upload
+        MULTIPART_FORM_FILE_COUNT_LIMIT = 5,
         MULTIPART_FORM_MAX_FILE_SIZE_MB = 20, // Defaults to a 20MB max, per file
       } = context.env;
       try {

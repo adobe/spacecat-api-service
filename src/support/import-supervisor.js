@@ -16,6 +16,7 @@ import { isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from './utils.js';
 import { STATUS_BAD_REQUEST } from '../utils/constants.js';
+import { multipartFormData } from './multipart-form-data.js';
 
 const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
 
@@ -158,8 +159,8 @@ function ImportSupervisor(services, config) {
     await sqs.sendMessage(importWorkerQueue, message);
   }
 
-  async function writeImportScriptToS3(jobId, importScript) {
-    const key = `imports/${jobId}/import.js`;
+  async function writeFileToS3(filename, jobId, importScript) {
+    const key = `imports/${jobId}/${filename}`;
     const command = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: importScript });
     try {
       await s3Client.send(command);
@@ -203,18 +204,28 @@ function ImportSupervisor(services, config) {
       !!importScript,
     );
 
-    log.info('New import job created:\n'
+    log.info(
+      'New import job created:\n'
       + `- baseUrl: ${newImportJob.getBaseURL()}\n`
       + `- urlCount: ${urls.length}\n`
       + `- apiKeyName: ${initiatedBy.apiKeyName}\n`
       + `- jobId: ${newImportJob.getId()}\n`
       + `- importQueueId: ${importQueueId}\n`
       + `- hasCustomImportJs: ${!!importScript}\n`
-      + `- hasCustomHeaders: ${!!customHeaders}`);
+      + `- hasCustomHeaders: ${!!customHeaders}\n`,
+      +`- options: ${JSON.stringify(options)}`,
+    );
 
     // Write the import script to S3, if provided
     if (importScript) {
-      await writeImportScriptToS3(newImportJob.getId(), importScript);
+      await writeFileToS3('import.js', newImportJob.getId(), importScript);
+    }
+
+    // if the job type is 'xwalk', then we need to write the 3 files to S3
+    if (options?.type === 'xwalk') {
+      await writeFileToS3('component-models.json', newImportJob.getId(), multipartFormData.models);
+      await writeFileToS3('component-filters.json', newImportJob.getId(), multipartFormData.filters);
+      await writeFileToS3('component-definition.json', newImportJob.getId(), multipartFormData.definitions);
     }
 
     // Queue all URLs for import as a single message. This enables the controller to respond with

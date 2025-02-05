@@ -18,10 +18,6 @@ import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon, { stub } from 'sinon';
 
-import fs from 'fs';
-import path, { dirname } from 'path';
-import { fileURLToPath } from 'url';
-
 import { ImportJob, ImportUrl } from '@adobe/spacecat-shared-data-access';
 import ImportJobSchema from '@adobe/spacecat-shared-data-access/src/models/import-job/import-job.schema.js';
 import ImportUrlSchema from '@adobe/spacecat-shared-data-access/src/models/import-url/import-url.schema.js';
@@ -30,8 +26,6 @@ import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 use(sinonChai);
 use(chaiAsPromised);
-
-const thisDirectory = dirname(fileURLToPath(import.meta.url));
 
 const createImportJob = (data) => (new ImportJob(
   {
@@ -81,13 +75,24 @@ describe('ImportController tests', () => {
   let importConfiguration;
   let mockAuth;
   let mockAttributes;
+
   const defaultHeaders = {
     'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
     'user-agent': 'Unit test',
     'content-type': 'multipart/form-data; boundary=12345',
   };
+
   const exampleCustomHeaders = {
     Authorization: 'Bearer aXsPb3183G',
+  };
+
+  const xwalkMultipartArgs = {
+    // the values for models, filters, definitions, and the import script just need to be strings
+    options: { type: 'xwalk' },
+    models: 'models',
+    filters: 'filters',
+    definitions: 'definitions',
+    importScript: 'importScript',
   };
 
   const exampleJob = {
@@ -410,10 +415,8 @@ describe('ImportController tests', () => {
 
     it('should reject when s3Client fails to upload the importScript', async () => {
       baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
-
-      const importScriptStream = fs.readFileSync(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
       baseContext.multipartFormData.options = customOptions;
-      baseContext.multipartFormData.importScript = importScriptStream;
+      baseContext.multipartFormData.importScript = 'Filler content to create a file > 10 bytes.';
 
       // Mock a rejection from the S3 API
       mockS3.s3Client.send.rejects(new Error('Cannot send message error'));
@@ -424,9 +427,7 @@ describe('ImportController tests', () => {
 
     it('should pick up the default options when none are provided', async () => {
       baseContext.env.IMPORT_CONFIGURATION = JSON.stringify(importConfiguration);
-
-      const importScriptStream = fs.readFileSync(path.join(thisDirectory, 'fixtures', 'sample-import-script.js'), 'utf8');
-      baseContext.multipartFormData.importScript = importScriptStream;
+      baseContext.multipartFormData.importScript = 'Filler content';
       baseContext.multipartFormData.customHeaders = exampleCustomHeaders;
       const response = await importController.createImportJob(baseContext);
       const importJob = await response.json();
@@ -469,6 +470,68 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
+    });
+
+    /**
+     * Test the xwalk createImportJob use case.
+     */
+    describe('xwalk createImportJob', () => {
+      it('should create an import job with the option.type of doc or xwalk', async () => {
+        baseContext.multipartFormData.options = { type: 'doc' };
+        const response = await importController.createImportJob(baseContext);
+        expect(response.status).to.equal(202);
+
+        Object.assign(baseContext.multipartFormData, xwalkMultipartArgs);
+        const response2 = await importController.createImportJob(baseContext);
+        expect(response2.status).to.equal(202);
+      });
+
+      it('should fail when the option.type is not doc or xwalk', async () => {
+        baseContext.multipartFormData.urls = urls;
+        baseContext.multipartFormData.options = { type: 'invalid' };
+        const response = await importController.createImportJob(baseContext);
+        expect(response.status).to.equal(400);
+        expect(response.headers.get('x-error')).to.equal('Invalid request: type must be either "doc" or "xwalk"');
+      });
+
+      // it should not fail if type is not provided
+      it('should create an import job without the option.type', async () => {
+        baseContext.multipartFormData.urls = urls;
+        const response = await importController.createImportJob(baseContext);
+        expect(response.status).to.equal(202);
+      });
+
+      it('should call the s3client 4 times for the xwalk create job use case', async () => {
+        Object.assign(baseContext.multipartFormData, xwalkMultipartArgs);
+        const response = await importController.createImportJob(baseContext);
+        expect(response.status).to.equal(202);
+        // 4 invokes: 1 for the import script, 1 for models, 1 for filters, 1 for definitions
+        expect(mockS3.s3Client.send.callCount).to.equal(4);
+      });
+
+      // write tests that validate the import job to check for missing models, filters, definitions
+      it('should fail when models, filters, or definitions are missing', async () => {
+        baseContext.multipartFormData.options = { type: 'xwalk' };
+        const response = await importController.createImportJob(baseContext);
+        expect(response.status).to.equal(400);
+        expect(response.headers.get('x-error')).to.contain('Invalid request: models must be an string');
+
+        baseContext.multipartFormData.models = 'models';
+        const response2 = await importController.createImportJob(baseContext);
+        expect(response2.status).to.equal(400);
+        expect(response2.headers.get('x-error')).to.contain('Invalid request: filters must be an string');
+
+        baseContext.multipartFormData.filters = 'filters';
+        const response3 = await importController.createImportJob(baseContext);
+        expect(response3.status).to.equal(400);
+        expect(response3.headers.get('x-error')).to.contain('Invalid request: definitions must be an string');
+
+        baseContext.multipartFormData.definitions = 'definitions';
+        // now all the required fields are present
+        const response4 = await importController.createImportJob(baseContext);
+        expect(response4.status).to.equal(202);
+        expect(response4.headers.get('x-error')).to.be.null;
+      });
     });
   });
 

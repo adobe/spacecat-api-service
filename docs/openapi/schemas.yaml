@@ -1427,6 +1427,9 @@ ImportOptions:
     enableJavascript:
       description: Whether to enable JavaScript on the page
       type: boolean
+    type:
+      description: The type of import job. Options are 'doc' or 'xwalk'. Defaults to 'doc' if not specified.
+      type: string
   example:
     pageLoadTimeout: 100
     enableJavascript: true
