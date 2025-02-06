@@ -212,8 +212,8 @@ function ImportSupervisor(services, config) {
       + `- jobId: ${newImportJob.getId()}\n`
       + `- importQueueId: ${importQueueId}\n`
       + `- hasCustomImportJs: ${!!importScript}\n`
-      + `- hasCustomHeaders: ${!!customHeaders}\n`,
-      +`- options: ${JSON.stringify(options)}`,
+      + `- hasCustomHeaders: ${!!customHeaders}\n`
+      + `- options: ${JSON.stringify(options)}`,
     );
 
     // Write the import script to S3, if provided
@@ -223,6 +223,7 @@ function ImportSupervisor(services, config) {
 
     // if the job type is 'xwalk', then we need to write the 3 files to S3
     if (options?.type === 'xwalk') {
+      log.info('Writing component models, filters, and definitions to S3 for jobId: ', newImportJob.getId());
       await writeFileToS3('component-models.json', newImportJob.getId(), multipartFormData.models);
       await writeFileToS3('component-filters.json', newImportJob.getId(), multipartFormData.filters);
       await writeFileToS3('component-definition.json', newImportJob.getId(), multipartFormData.definitions);
