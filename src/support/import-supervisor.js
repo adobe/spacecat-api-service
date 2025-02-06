@@ -16,7 +16,6 @@ import { isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from './utils.js';
 import { STATUS_BAD_REQUEST } from '../utils/constants.js';
-import { multipartFormData } from './multipart-form-data.js';
 
 const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
 
@@ -177,6 +176,9 @@ function ImportSupervisor(services, config) {
    * @param {string} importScript - Optional custom Base64 encoded import script.
    * @param {object} initiatedBy - Details about the initiator of the import job.
    * @param {object} customHeaders - Optional custom headers to be sent with each request.
+   * @param {string} models - The component-models.json file for the xwalk job.
+   * @param {string} filters - The component-filters.json file for the xwalk job.
+   * @param {string} definitions - The component-definitions.json file for the xwalk job.
    * @returns {Promise<ImportJob>}
    */
   async function startNewJob(
@@ -186,6 +188,9 @@ function ImportSupervisor(services, config) {
     importScript,
     initiatedBy,
     customHeaders,
+    models,
+    filters,
+    definitions,
   ) {
     // Hash the API Key to ensure it is not stored in plain text
     const hashedApiKey = hashWithSHA256(importApiKey);
@@ -224,9 +229,9 @@ function ImportSupervisor(services, config) {
     // if the job type is 'xwalk', then we need to write the 3 files to S3
     if (options?.type === 'xwalk') {
       log.info('Writing component models, filters, and definitions to S3 for jobId: ', newImportJob.getId());
-      await writeFileToS3('component-models.json', newImportJob.getId(), multipartFormData.models);
-      await writeFileToS3('component-filters.json', newImportJob.getId(), multipartFormData.filters);
-      await writeFileToS3('component-definition.json', newImportJob.getId(), multipartFormData.definitions);
+      await writeFileToS3('component-models.json', newImportJob.getId(), models);
+      await writeFileToS3('component-filters.json', newImportJob.getId(), filters);
+      await writeFileToS3('component-definition.json', newImportJob.getId(), definitions);
     }
 
     // Queue all URLs for import as a single message. This enables the controller to respond with

@@ -208,7 +208,7 @@ function ImportController(context) {
       }
 
       const {
-        urls, options, importScript, customHeaders,
+        urls, options, importScript, customHeaders, models, filters, definitions,
       } = multipartFormData;
 
       const scopes = profile.getScopes();
@@ -244,6 +244,9 @@ function ImportController(context) {
         importScript,
         initiatedBy,
         customHeaders,
+        models,
+        filters,
+        definitions,
       );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {
