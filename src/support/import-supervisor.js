@@ -149,7 +149,7 @@ function ImportSupervisor(services, config) {
 
     // Send a single message containing all URLs and the new job ID
     const message = {
-      processingType: 'import',
+      processingType: importJob.getType(),
       jobId: importJob.getId(),
       urls,
       customHeaders,
