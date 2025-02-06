@@ -147,9 +147,18 @@ function ImportSupervisor(services, config) {
       + ` URLs. This new job has claimed: ${importJob.getImportQueueId()} `
       + `(jobId: ${importJob.getId()})`);
 
+    const options = importJob.getOptions();
+    let processingType;
+
+    if (options?.type === undefined || options.type === 'doc') {
+      processingType = 'import';
+    } else if (options.type === 'xwalk') {
+      processingType = 'import-xwalk';
+    }
+
     // Send a single message containing all URLs and the new job ID
     const message = {
-      processingType: importJob.getType(),
+      processingType,
       jobId: importJob.getId(),
       urls,
       customHeaders,
