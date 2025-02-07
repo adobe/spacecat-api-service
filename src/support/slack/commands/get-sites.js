@@ -86,7 +86,7 @@ function GetSitesCommand(context) {
   const { Organization, Site } = dataAccess;
 
   async function fetchAndFormatSites(threadTs, filterStatus, psiStrategy, deliveryType, imsOrgId) {
-    let sites = [];
+    let orgFilter = (s) => s.getOrganizationId() !== context.env.ORGANIZATION_ID_FRIENDS_FAMILY;
 
     if (imsOrgId !== 'all') {
       const org = await Organization.findByImsOrgId(imsOrgId);
@@ -94,18 +94,17 @@ function GetSitesCommand(context) {
       if (!hasText(organizationId)) {
         return {
           textSections: [{
-            text: `*No organization found in Spacecat DB with IMS Org ID: "${imsOrgId}"`,
+            text: `No organization found in Spacecat DB with IMS Org ID: \`${imsOrgId}\``,
           }],
           additionalBlocks: [],
         };
       }
-      sites = await org.getSites();
-    } else {
-      sites = await Site.allWithLatestAudit(`lhs-${psiStrategy}`, 'asc', deliveryType);
-      sites = sites.filter(
-        (site) => site.getOrganizationId() !== context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
-      );
+      orgFilter = (site) => site.getOrganizationId() === organizationId;
     }
+
+    let sites = await Site.allWithLatestAudit(`lhs-${psiStrategy}`, 'asc', deliveryType);
+
+    sites = sites.filter(orgFilter);
 
     if (filterStatus !== 'all') {
       sites = sites.filter((site) => (filterStatus === 'live' ? site.getIsLive() : !site.getIsLive()));
@@ -121,7 +120,7 @@ function GetSitesCommand(context) {
   
 PSI Strategy: *${psiStrategy}*
 Delivery Type: *${deliveryType}*
-IMS Org: ${imsOrgId}'}
+IMS Org: \`${imsOrgId}\`
 `,
         }],
         additionalBlocks: [],
@@ -224,7 +223,9 @@ _Sites are ordered by performance score, then all other scores, ascending._
       const fileName = `sites-${filterStatus}-${psiStrategy}-${deliveryType}-${new Date().toISOString()}.csv`;
 
       await sendMessageBlocks(say, textSections);
-      await sendFile(slackContext, csvFile, fileName);
+      if (csvFile) {
+        await sendFile(slackContext, csvFile, fileName);
+      }
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
