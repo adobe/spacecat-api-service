@@ -37,7 +37,6 @@
     "@adobe/spacecat-shared-utils": "1.26.4",
     "@adobe/spacecat-shared-data-access": "2.0.2",
     "@aws-sdk/client-dynamodb": "3.734.0",
-    "@aws-sdk/lib-dynamodb": "3.734.0",
     "jose": "5.9.6"
   },
   "devDependencies": {

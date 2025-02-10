@@ -9,9 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { DynamoDB } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocument } from '@aws-sdk/lib-dynamodb';
-import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb'; // ES Modules import
+import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
+
 import { isObject } from '@adobe/spacecat-shared-utils';
 
 import NotAuthenticatedError from './errors/not-authenticated.js';
@@ -45,7 +44,6 @@ export default class AuthenticationManager {
     //   tableNameData: 'spacecat-services-acls-dev3',
     // }, this.log);
 
-    // const ddb = new DynamoDB();
     const client = new DynamoDBClient();
     const input = {
       ExpressionAttributeValues: {
@@ -54,7 +52,7 @@ export default class AuthenticationManager {
         },
       },
       KeyConditionExpression: 'orgid = :v1',
-      ProjectionExpression: 'ident',
+      // ProjectionExpression: 'ident',
       TableName: 'spacecat-services-roles-dev4',
     };
     const command = new QueryCommand(input);
