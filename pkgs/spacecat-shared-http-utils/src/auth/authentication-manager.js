@@ -9,8 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+// import { DynamoDB } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocument, DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
-
 import { isObject } from '@adobe/spacecat-shared-utils';
 
 import NotAuthenticatedError from './errors/not-authenticated.js';
@@ -37,7 +38,7 @@ export default class AuthenticationManager {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  async getAcls(authInfo) {
+  async getAclsUsingBareClient(authInfo) {
     console.log('§§§ Profile email:', authInfo.profile?.email);
 
     // const aclDA = dataAccess.createDataAccess({
@@ -58,6 +59,30 @@ export default class AuthenticationManager {
     const command = new QueryCommand(input);
     const resp = await client.send(command);
     console.log('§§§ DynamoDB response:', JSON.stringify(resp));
+  }
+
+  async getAclsUsingDocumentClient(authInfo) {
+    console.log('§§§ using document client');
+    const client = new DynamoDBClient();
+    const docClient = DynamoDBDocumentClient.from(client);
+
+    // const params = {
+    //   TableName: 'spacecat-services-roles-dev4',
+    //   Key: { orgid: 'C52E57EB5489E70A0A4C98A5' },
+    // };
+    const input = {
+      ExpressionAttributeValues: {
+        ':v1': {
+          S: 'C52E57EB5489E70A0A4C98A5',
+        },
+      },
+      KeyConditionExpression: 'orgid = :v1',
+      // ProjectionExpression: 'ident',
+      TableName: 'spacecat-services-roles-dev4',
+    };
+    const command = new QueryCommand(input);
+    const resp = await docClient.send(command);
+    console.log('§§§ docclient response:', JSON.stringify(resp));
   }
 
   /**
@@ -83,8 +108,10 @@ export default class AuthenticationManager {
         this.log.info(`Authenticated with ${handler.name}`);
 
         // eslint-disable-next-line no-await-in-loop
-        const acls = await this.getAcls(authInfo);
+        const acls = await this.getAclsUsingBareClient(authInfo);
         console.log('§§§ acls:', acls);
+        const acls2 = await this.getAclsUsingDocumentClient(authInfo);
+        console.log('§§§ acls:', acls2);
 
         context.attributes = context.attributes || {};
 
