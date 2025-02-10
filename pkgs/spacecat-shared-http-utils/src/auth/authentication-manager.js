@@ -9,6 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { DynamoDB } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocument } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb'; // ES Modules import
 import { isObject } from '@adobe/spacecat-shared-utils';
 
 import NotAuthenticatedError from './errors/not-authenticated.js';
@@ -34,6 +37,31 @@ export default class AuthenticationManager {
     this.handlers.push(new Handler(this.log));
   }
 
+  // eslint-disable-next-line class-methods-use-this
+  async getAcls(authInfo) {
+    console.log('§§§ Profile email:', authInfo.profile?.email);
+
+    // const aclDA = dataAccess.createDataAccess({
+    //   tableNameData: 'spacecat-services-acls-dev3',
+    // }, this.log);
+
+    // const ddb = new DynamoDB();
+    const client = new DynamoDBClient();
+    const input = {
+      ExpressionAttributeValues: {
+        ':v1': {
+          S: 'C52E57EB5489E70A0A4C98A5',
+        },
+      },
+      KeyConditionExpression: 'orgid = :v1',
+      ProjectionExpression: 'ident',
+      TableName: 'spacecat-services-roles-dev4',
+    };
+    const command = new QueryCommand(input);
+    const resp = await client.send(command);
+    console.log('§§§ DynamoDB response:', JSON.stringify(resp));
+  }
+
   /**
    * Authenticate the request with all the handlers.
    * @param {Object} request - The request object
@@ -55,6 +83,10 @@ export default class AuthenticationManager {
 
       if (isObject(authInfo)) {
         this.log.info(`Authenticated with ${handler.name}`);
+
+        // eslint-disable-next-line no-await-in-loop
+        const acls = await this.getAcls(authInfo);
+        console.log('§§§ acls:', acls);
 
         context.attributes = context.attributes || {};
 

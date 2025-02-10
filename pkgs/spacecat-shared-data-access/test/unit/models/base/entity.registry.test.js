@@ -65,6 +65,7 @@ describe('EntityRegistry', () => {
 
     EntityRegistry.registerEntity(MockSchema, MockCollection);
 
+    const config = {}; // TODO
     entityRegistry = new EntityRegistry(electroService, config, console);
   });
 
