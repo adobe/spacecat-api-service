@@ -18,6 +18,9 @@ import { URL } from 'url';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
 
+import axios from 'axios';
+import { parse } from 'csv-parse/sync';
+
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
 export const CHARACTER_LIMIT = 2500;
@@ -281,6 +284,41 @@ const wrapSayForThread = (say, threadTs) => {
 
   return wrappedFunction;
 };
+
+/**
+ * Parses a CSV file from a Slack file URL and returns its records as JSON objects.
+ *
+ * @async
+ * @function parseCSV
+ * @param {Object} file - The Slack file object containing metadata.
+ * @param {string} file.url_private - The private URL to download the file from Slack.
+ * @param {string} token - The Slack Bot OAuth token used for authorization.
+ * @returns {Promise<Object[]>} - A promise that resolves to an array of JSON objects representing the parsed CSV records.
+ *
+ * @throws {Error} - Throws an error if the file cannot be downloaded or parsed.
+ */
+export const parseCSV = async (file, token) => {
+  try {
+    const fileUrl = file.url_private;
+
+    const response = await axios.get(fileUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'arraybuffer',
+    });
+
+    const fileContent = response.data.toString('utf-8'); 
+    const records = parse(fileContent, {
+      columns: true,
+      skip_empty_lines: true,
+    });
+
+    return records;
+  } catch (error) {
+    console.error('Error parsing CSV file:', error);
+    throw new Error('Failed to parse CSV file.');
+  }
+};
+
 
 const getHlxConfigMessagePart = (hlxConfig) => {
   const { rso, hlxVersion } = hlxConfig;
