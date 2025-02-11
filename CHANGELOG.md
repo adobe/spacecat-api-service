@@ -1,3 +1,10 @@
+## [1.89.15](https://github.com/adobe/spacecat-api-service/compare/v1.89.14...v1.89.15) (2025-02-11)
+
+
+### Bug Fixes
+
+* **rum-api-client:** change to new rum api client ([#741](https://github.com/adobe/spacecat-api-service/issues/741)) ([36cb41a](https://github.com/adobe/spacecat-api-service/commit/36cb41a1afd35c1ae36f12f41bafa720d9d68f09))
+
 ## [1.89.14](https://github.com/adobe/spacecat-api-service/compare/v1.89.13...v1.89.14) (2025-02-09)
 
 
