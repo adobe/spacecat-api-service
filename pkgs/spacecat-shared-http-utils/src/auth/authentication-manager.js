@@ -71,9 +71,9 @@ export default class AuthenticationManager {
   // eslint-disable-next-line class-methods-use-this
   async getAcls(dynamoClient, orgId, roles) {
     const input = {
-      // ExpressionAttributeNames: {
-      //   '#role': 'role',
-      // },
+      ExpressionAttributeNames: {
+        '#role': 'role',
+      },
       ExpressionAttributeValues: {
         ':orgid': {
           S: orgId,
@@ -81,9 +81,12 @@ export default class AuthenticationManager {
         ':role1': {
           S: roles[0],
         },
+        ':role2': {
+          S: '12345-writer',
+        },
       },
       KeyConditionExpression: 'imsorgid = :orgid',
-      FilterExpression: 'role = :role1',
+      FilterExpression: '#role IN (:role1, :role2)',
       // ProjectionExpression: 'ident',
       TableName: 'spacecat-services-acls-dev6',
     };
