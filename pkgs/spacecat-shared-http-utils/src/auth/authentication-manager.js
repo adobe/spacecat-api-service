@@ -59,8 +59,19 @@ export default class AuthenticationManager {
     const command = new QueryCommand(input);
     const resp = await client.send(command);
     console.log('§§§ DynamoDB response:', JSON.stringify(resp));
+
+    const idents = [];
+    for (const item of resp.Items) {
+      idents.push({
+        ident: item.ident.S,
+        identtype: item.identtype.S,
+        roles: item.roles.SS,
+      });
+    }
+    console.log('§§§ idents:', idents);
   }
 
+  // eslint-disable-next-line class-methods-use-this
   async getAclsUsingDocumentClient(authInfo) {
     console.log('§§§ using document client');
     const client = new DynamoDBClient();
