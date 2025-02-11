@@ -22,7 +22,7 @@ import {
   hasText,
   isBoolean,
   isObject,
-  getStoredMetrics, getRUMDomainKey, isValidUUID, deepEqual,
+  getStoredMetrics, isValidUUID, deepEqual,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
@@ -401,15 +401,12 @@ function SitesController(dataAccess, log, env) {
     const domain = wwwUrlResolver(site);
 
     try {
-      const domainKey = await getRUMDomainKey(site.getBaseURL(), context);
       const current = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        domainkey: domainKey,
         interval: MONTH_DAYS,
       });
       const total = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        domainkey: domainKey,
         interval: 2 * MONTH_DAYS,
       });
       const organicTraffic = await getStoredMetrics(
@@ -440,11 +437,7 @@ function SitesController(dataAccess, log, env) {
         projectedTrafficValue,
       });
     } catch (error) {
-      if (error.message?.includes('Error retrieving the domain key')) {
-        log.info(`No RUM key configured for site ${siteId}: ${error.message}`);
-      } else {
-        log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
-      }
+      log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
     }
 
     return ok({
