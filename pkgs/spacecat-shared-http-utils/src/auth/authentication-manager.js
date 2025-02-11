@@ -37,19 +37,81 @@ export default class AuthenticationManager {
     this.handlers.push(new Handler(this.log));
   }
 
+  getRoles(authInfo, roleInfo) {
+    const roles = [];
+
+    for (const item of roleInfo) {
+      switch (item.identtype) {
+        case 'email':
+          if (item.ident === authInfo.profile.email) {
+            roles.push(...item.roles);
+          }
+          break;
+        case 'imsorgid':
+          if (item.ident === authInfo.profile.imgOrgID) {
+            roles.push(...item.roles);
+          }
+          break;
+        case 'imsorgid/groupname':
+          for (const group of authInfo.profile.groups) {
+            if (item.ident === `${authInfo.profile.imgOrgID}/${group.name}`) {
+              roles.push(...item.roles);
+            }
+          }
+          break;
+        default:
+          // eslint-disable-next-line no-console
+          console.log('Unknown role identifier type:', item.identtype);
+      }
+    }
+
+    return [...new Set(roles)];
+  }
+
+  // eslint-disable-next-line class-methods-use-this
+  async getAcls(dynamoClient, orgId, roles) {
+    const input = {
+      ExpressionAttributeValues: {
+        ':orgid': {
+          S: orgId,
+        },
+        ':role1': {
+          S: roles[0],
+        },
+      },
+      KeyConditionExpression: 'imsorgid = :orgid',
+      FilterExpression: '(role = :role1)',
+      // ProjectionExpression: 'ident',
+      TableName: 'spacecat-services-acls-dev5',
+    };
+
+    // FilterExpression: '(TimeId = :timeId AND begins_with ( TypeKey , :typeKey))
+    // AND (awayTeam = :teamName OR homeTeam = :teamName)' i
+
+    // use a FilterExpression with or
+
+    console.log('§§§ Get ACLs input:', JSON.stringify(input));
+    const command = new QueryCommand(input);
+    const resp = await dynamoClient.send(command);
+    console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
+  }
+
   // eslint-disable-next-line class-methods-use-this
   async getAclsUsingBareClient(authInfo) {
     console.log('§§§ Profile email:', authInfo.profile?.email);
 
-    // const aclDA = dataAccess.createDataAccess({
-    //   tableNameData: 'spacecat-services-acls-dev3',
-    // }, this.log);
+    // Need to get this from IMS
+    authInfo.profile.imgOrgID = 'C52E57EB5489E70A0A4C98A5';
+    authInfo.profile.groups = [
+      { name: 'admins', id: '12345' },
+      { name: 'readers', id: '999' },
+    ];
 
-    const client = new DynamoDBClient();
+    const dbClient = new DynamoDBClient();
     const input = {
       ExpressionAttributeValues: {
         ':v1': {
-          S: 'C52E57EB5489E70A0A4C98A5',
+          S: authInfo.profile.imgOrgID,
         },
       },
       KeyConditionExpression: 'orgid = :v1',
@@ -57,44 +119,54 @@ export default class AuthenticationManager {
       TableName: 'spacecat-services-roles-dev4',
     };
     const command = new QueryCommand(input);
-    const resp = await client.send(command);
+    const resp = await dbClient.send(command);
     console.log('§§§ DynamoDB response:', JSON.stringify(resp));
 
-    const idents = [];
+    const roleInfo = [];
     for (const item of resp.Items) {
-      idents.push({
+      roleInfo.push({
         ident: item.ident.S,
         identtype: item.identtype.S,
         roles: item.roles.SS,
       });
     }
-    console.log('§§§ idents:', idents);
+    console.log('§§§ idents:', roleInfo);
+
+    const roles = this.getRoles(authInfo, roleInfo);
+    console.log('§§§ roles:', roles);
+
+    if (roles.length === 0) {
+      return [];
+    }
+
+    const acls = await this.getAcls(dbClient, authInfo.profile.imgOrgID, roles);
+    return acls;
   }
 
-  // eslint-disable-next-line class-methods-use-this
-  async getAclsUsingDocumentClient(authInfo) {
-    console.log('§§§ using document client');
-    const client = new DynamoDBClient();
-    const docClient = DynamoDBDocumentClient.from(client);
+  // // eslint-disable-next-line class-methods-use-this
+  // async getAclsUsingDocumentClient(authInfo) {
+  //   console.log('§§§ using document client');
+  //   const client = new DynamoDBClient();
+  //   const docClient = DynamoDBDocumentClient.from(client);
 
-    // const params = {
-    //   TableName: 'spacecat-services-roles-dev4',
-    //   Key: { orgid: 'C52E57EB5489E70A0A4C98A5' },
-    // };
-    const input = {
-      ExpressionAttributeValues: {
-        ':v1': {
-          S: 'C52E57EB5489E70A0A4C98A5',
-        },
-      },
-      KeyConditionExpression: 'orgid = :v1',
-      // ProjectionExpression: 'ident',
-      TableName: 'spacecat-services-roles-dev4',
-    };
-    const command = new QueryCommand(input);
-    const resp = await docClient.send(command);
-    console.log('§§§ docclient response:', JSON.stringify(resp));
-  }
+  //   // const params = {
+  //   //   TableName: 'spacecat-services-roles-dev4',
+  //   //   Key: { orgid: 'C52E57EB5489E70A0A4C98A5' },
+  //   // };
+  //   const input = {
+  //     ExpressionAttributeValues: {
+  //       ':v1': {
+  //         S: 'C52E57EB5489E70A0A4C98A5',
+  //       },
+  //     },
+  //     KeyConditionExpression: 'orgid = :v1',
+  //     // ProjectionExpression: 'ident',
+  //     TableName: 'spacecat-services-roles-dev4',
+  //   };
+  //   const command = new QueryCommand(input);
+  //   const resp = await docClient.send(command);
+  //   console.log('§§§ docclient response:', JSON.stringify(resp));
+  // }
 
   /**
    * Authenticate the request with all the handlers.
@@ -121,8 +193,8 @@ export default class AuthenticationManager {
         // eslint-disable-next-line no-await-in-loop
         const acls = await this.getAclsUsingBareClient(authInfo);
         console.log('§§§ acls:', acls);
-        const acls2 = await this.getAclsUsingDocumentClient(authInfo);
-        console.log('§§§ acls:', acls2);
+        // const acls2 = await this.getAclsUsingDocumentClient(authInfo);
+        // console.log('§§§ acls:', acls2);
 
         context.attributes = context.attributes || {};
 
