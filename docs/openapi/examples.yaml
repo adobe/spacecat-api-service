@@ -206,13 +206,14 @@ broken-internal-links-audit:
     fullAuditRef: 'https://petplace.com' # full audit reference is not available because it depends on RUM data
     auditResult:
       brokenInternalLinks:
-        urls_suggested:
+        urlsSuggested:
         - 'https://www.example.com/article/cats/pet-care/selecting-the-right-toys-for-your-cats-play-preference'
-        url_to: 'https://www.example.com/article/cats/pet-care/safe-and-sound-toys-for-your-cat/'
+        urlTo: 'https://www.example.com/article/cats/pet-care/safe-and-sound-toys-for-your-cat/'
         title: 'Choosing the Best Cat Toys: A Comprehensive Guide'
-        url_from: 'https://www.example.com/article/cats/pet-care/toys-for-your-cat/'
+        urlFrom: 'https://www.example.com/article/cats/pet-care/toys-for-your-cat/'
+        aiRationale: 'The URL is about toys for your cat, so it should be redirected to the toys for your cat page.'
         priority: 'high'
-        traffic_domain: 65272
+        trafficDomain: 65272
 costs-audit:
   summary: Example for a costs audit
   value:

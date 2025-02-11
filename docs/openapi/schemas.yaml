@@ -1664,16 +1664,16 @@ BrokenBacklink:
 BrokenInternalLink:
   type: object
   properties:
-    url_to:
+    urlTo:
       description: The URL of the broken internal link.
       $ref: '#/URL'
     title:
       description: The title of the internal page referring to the broken internal link.
       type: string
-    url_from:
+    urlFrom:
       description: The URL of the internal page referring to the broken link.
       $ref: '#/URL'
-    traffic_domain:
+    trafficDomain:
       description: The referring page's estimated monthly organic traffic.
       type: number
     priority:
@@ -2281,13 +2281,16 @@ BrokenInternalLinksSuggestionData:
     title:
       description: The title of the referring page
       type: string
-    url_from:
+    urlFrom:
       description: The URL of the referring page
       type: string
-    url_to:
+    urlTo:
       description: The URL of the broken target page
       type: string
-    urls_suggested:
+    aiRationale:
+      description: The rationale for the suggested fix
+      type: string
+    urlsSuggested:
       description: The proposed internal target URLs to point the broken internal link to
       type: array
       items:
@@ -2295,7 +2298,7 @@ BrokenInternalLinksSuggestionData:
     manualOverrideURL:
       description: The URL to manually override the proposed target URL
       type: string
-    traffic_domain:
+    trafficDomain:
       description: The estimated monthly organic traffic to the referring page
       type: number
     priority:
