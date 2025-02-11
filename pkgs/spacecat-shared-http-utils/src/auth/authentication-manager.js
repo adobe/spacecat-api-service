@@ -71,6 +71,9 @@ export default class AuthenticationManager {
   // eslint-disable-next-line class-methods-use-this
   async getAcls(dynamoClient, orgId, roles) {
     const input = {
+      ExpressionAttributeNames: {
+        '#role': 'role',
+      },
       ExpressionAttributeValues: {
         ':orgid': {
           S: orgId,
@@ -80,7 +83,7 @@ export default class AuthenticationManager {
         },
       },
       KeyConditionExpression: 'imsorgid = :orgid',
-      FilterExpression: '(role = :role1)',
+      FilterExpression: '#role = :role1',
       // ProjectionExpression: 'ident',
       TableName: 'spacecat-services-acls-dev6',
     };
@@ -91,9 +94,13 @@ export default class AuthenticationManager {
     // use a FilterExpression with or
 
     console.log('§§§ Get ACLs input:', JSON.stringify(input));
-    const command = new QueryCommand(input);
-    const resp = await dynamoClient.send(command);
-    console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
+    try {
+      const command = new QueryCommand(input);
+      const resp = await dynamoClient.send(command);
+      console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
+    } catch (e) {
+      console.error('§§§ DynamoDB getAcls error:', e);
+    }
   }
 
   // eslint-disable-next-line class-methods-use-this
