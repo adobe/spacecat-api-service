@@ -214,6 +214,7 @@ broken-internal-links-audit:
         aiRationale: 'The URL is about toys for your cat, so it should be redirected to the toys for your cat page.'
         priority: 'high'
         trafficDomain: 65272
+      finalUrl: "www.example.com/uk/"
 costs-audit:
   summary: Example for a costs audit
   value:

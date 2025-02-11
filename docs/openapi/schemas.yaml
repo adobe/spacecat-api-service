@@ -525,6 +525,9 @@ AuditResult:
           description: |
             A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
           type: string
+        finalUrl:
+          description: The final URL for the audited page.
+          type: string
     - type: array
       description: Information about the provided URLs in the Google index.
       items:
