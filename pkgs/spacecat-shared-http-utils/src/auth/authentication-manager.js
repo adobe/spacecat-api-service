@@ -75,14 +75,14 @@ export default class AuthenticationManager {
         ':orgid': {
           S: orgId,
         },
-        // ':role1': {
-        //   S: roles[0],
-        // },
+        ':role1': {
+          S: roles[0],
+        },
       },
       KeyConditionExpression: 'imsorgid = :orgid',
-      // FilterExpression: '(role = :role1)',
+      FilterExpression: '(role = :role1)',
       // ProjectionExpression: 'ident',
-      TableName: 'spacecat-services-acls-dev5',
+      TableName: 'spacecat-services-acls-dev6',
     };
 
     // FilterExpression: '(TimeId = :timeId AND begins_with ( TypeKey , :typeKey))
