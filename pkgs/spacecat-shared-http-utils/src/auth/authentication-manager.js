@@ -200,6 +200,15 @@ export default class AuthenticationManager {
       if (isObject(authInfo)) {
         this.log.info(`Authenticated with ${handler.name}`);
 
+        // get ims stufg
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const imsinfo = await context.imsClient.getServiceAccessTokenV3();
+          console.log('§§§ ims token/info:', imsinfo);
+        } catch (e) {
+          console.error('§§§ ims error:', e);
+        }
+
         // eslint-disable-next-line no-await-in-loop
         const acls = await this.getAclsUsingBareClient(authInfo);
         console.log('§§§ acls:', acls);
