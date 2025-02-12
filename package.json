@@ -19,7 +19,7 @@
     "semantic-release-dry": "semantic-release --dry-run --no-ci --branches $CI_BRANCH",
     "build": "hedy -v --test-bundle",
     "deploy": "hedy -v --deploy --test",
-    "deploy-routes": "hedy --no-build -no-hints -l major",
+    "deploy-routes": "hedy --no-build -no-hints -l major --aws-api jg75jg0dv6 ",
     "deploy-ci": "hedy -v --deploy --aws-deploy-bucket spacecat-dev-deploy --aws-account-id 682033462621  --test --pkgVersion=ci$CI_BUILD_NUM -l ci --cleanup-ci=24h",
     "deploy-secrets": "hedy --aws-update-secrets --params-file=secrets/secrets.env",
     "docs": "npm run docs:lint && npm run docs:build",
