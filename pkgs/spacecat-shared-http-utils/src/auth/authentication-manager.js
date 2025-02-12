@@ -202,6 +202,7 @@ export default class AuthenticationManager {
 
         // get ims stufg
         try {
+          console.log('§§§ context: ', JSON.stringify(context));
           // eslint-disable-next-line no-await-in-loop
           const imsinfo = await context.imsClient.getServiceAccessTokenV3();
           console.log('§§§ ims token/info:', imsinfo);
