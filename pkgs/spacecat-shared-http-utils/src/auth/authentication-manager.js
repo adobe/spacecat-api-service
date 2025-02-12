@@ -205,7 +205,10 @@ export default class AuthenticationManager {
           console.log('§§§ context: ', JSON.stringify(context));
 
           // eslint-disable-next-line no-await-in-loop
-          const token = await context.getImsUserToken(context.pathInfo.headers);
+          // const token = await context.imsClient.getImsUserToken(context.pathInfo.headers);
+          // 7 is the length of 'Bearer '
+          const token = context.pathInfo.headers?.authorization?.substring(7);
+
           console.log('§§§ ims token:', token);
           // eslint-disable-next-line no-await-in-loop
           const imsinfo = await context.imsClient.getImsUserProfile(token);
