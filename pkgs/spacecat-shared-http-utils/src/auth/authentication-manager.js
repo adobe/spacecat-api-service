@@ -204,18 +204,23 @@ export default class AuthenticationManager {
         try {
           console.log('§§§ context: ', JSON.stringify(context));
 
-          // eslint-disable-next-line no-await-in-loop
-          // const token = await context.imsClient.getImsUserToken(context.pathInfo.headers);
-          // 7 is the length of 'Bearer '
-          const token = context.pathInfo.headers?.authorization?.substring(7);
+          // TODO pass in aa_id
+          const orgId = context.attributes.authInfo.profile.aa_id;
+          console.log('§§§ orgId:', orgId);
+          const orgDetails = context.imsClient.getImsOrganizationDetails(orgId);
+          console.log('§§§ orgDetails:', orgDetails);
+          // // eslint-disable-next-line no-await-in-loop
+          // // const token = await context.imsClient.getImsUserToken(context.pathInfo.headers);
+          // // 7 is the length of 'Bearer '
+          // const token = context.pathInfo.headers?.authorization?.substring(7);
 
-          console.log('§§§ ims token:', token);
-          // eslint-disable-next-line no-await-in-loop
-          const imsinfo = await context.imsClient.getImsUserProfile(token);
+          // console.log('§§§ ims token:', token);
+          // // eslint-disable-next-line no-await-in-loop
+          // const imsinfo = await context.imsClient.getImsUserProfile(token);
 
-          // eslint-disable-next-line no-await-in-loop
-          // const imsinfo = await context.imsClient.getServiceAccessTokenV3();
-          console.log('§§§ ims token/info:', imsinfo);
+          // // eslint-disable-next-line no-await-in-loop
+          // // const imsinfo = await context.imsClient.getServiceAccessTokenV3();
+          // console.log('§§§ ims token/info:', imsinfo);
         } catch (e) {
           console.error('§§§ ims error:', e);
         }
@@ -248,7 +253,7 @@ export default class AuthenticationManager {
           },
         ];
         context.attributes.authInfo = authInfo;
-        console.log('§§§ Set context.attributes.authInfo to:', authInfo);
+        console.log('§§§ Set context.attributes.authInfo to:', JSON.stringify(authInfo));
 
         return authInfo;
       } else {
