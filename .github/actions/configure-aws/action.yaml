@@ -4,7 +4,7 @@ description: "Configures AWS credentials for use in subsequent steps. Fetches se
 inputs:
   aws_role_to_assume:
     description: "ARN of the IAM role to assume"
-    default: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::640168421876:role/spacecat-role-terraform-deploy-actions' || 'arn:aws:iam::682033462621:role/spacecat-role-terraform-deploy-actions' }}
+    default: ${{ github.ref == 'refs/heads/main' && 'arn:aws:iam::640168421876:role/spacecat-role-github-actions' || 'arn:aws:iam::682033462621:role/spacecat-role-github-actions' }}
     required: true
   secret_ids:
     description: "List of secret IDs to fetch from AWS Secrets Manager"
