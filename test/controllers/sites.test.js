@@ -33,6 +33,12 @@ use(sinonChai);
 describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
 
+  const loggerStub = {
+    info: sandbox.stub(),
+    error: sandbox.stub(),
+    warn: sandbox.stub(),
+  };
+
   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
 
   const sites = [
@@ -67,7 +73,7 @@ describe('Sites Controller', () => {
       },
     },
     {
-      log: console,
+      log: loggerStub,
       getCollection: stub().returns({
         schema: SiteSchema,
         findById: stub(),
@@ -75,7 +81,7 @@ describe('Sites Controller', () => {
     },
     SiteSchema,
     site,
-    console,
+    loggerStub,
   ));
 
   const keyEvents = [{
@@ -96,14 +102,14 @@ describe('Sites Controller', () => {
       },
     },
     {
-      log: console,
+      log: loggerStub,
       getCollection: stub().returns({
         schema: KeyEventSchema,
       }),
     },
     KeyEventSchema,
     keyEvent,
-    console,
+    loggerStub,
   ));
 
   const siteFunctions = [
@@ -123,6 +129,7 @@ describe('Sites Controller', () => {
     'getKeyEventsBySiteID',
     'removeKeyEvent',
     'getSiteMetricsBySource',
+    'getPageMetricsBySource',
   ];
 
   let mockDataAccess;
@@ -156,16 +163,14 @@ describe('Sites Controller', () => {
         findById: sandbox.stub().resolves(sites[0]),
       },
     };
+
     context = {
       runtime: { name: 'aws-lambda', region: 'us-east-1' },
       func: { package: 'spacecat-services', version: 'ci', name: 'test' },
       rumApiClient: {
         query: sandbox.stub(),
       },
-      log: {
-        info: sandbox.stub(),
-        error: sandbox.stub(),
-      },
+      log: loggerStub,
       env: {
         DEFAULT_ORGANIZATION_ID: 'default',
       },
@@ -178,7 +183,7 @@ describe('Sites Controller', () => {
           RUM_DOMAIN_KEY: '42',
         }),
       });
-    sitesController = SitesController(mockDataAccess, console, context.env);
+    sitesController = SitesController(mockDataAccess, loggerStub, context.env);
   });
 
   afterEach(() => {
@@ -514,50 +519,17 @@ describe('Sites Controller', () => {
     });
   });
 
-  it('logs info and returns zeroed metrics when rum api key is not found', async () => {
-    const getRUMDomainKeyStub = sandbox.stub().rejects(
-      new Error('Error retrieving the domain key for https://example.com.  Error: Secrets Manager can\'t find the specified secret.'),
-    );
-    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-      '@adobe/spacecat-shared-utils': {
-        getRUMDomainKey: getRUMDomainKeyStub,
-      },
-    });
-
-    const result = await (
-      await sitesControllerMock
-        .default(mockDataAccess, context.log)
-        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
-    );
-    const metrics = await result.json();
-
-    expect(context.log.info).to.have.been.calledWithMatch('No RUM key configured for site 0b4dcf79-fe5f-410b-b11f-641f0bf56da3');
-    expect(metrics).to.deep.equal({
-      ctrChange: 0,
-      pageViewsChange: 0,
-      projectedTrafficValue: 0,
-    });
-  });
-
   it('logs error and returns zeroed metrics when rum query fails', async () => {
-    const getRUMDomainKeyStub = sandbox.stub().resolves('42');
     const rumApiClient = {
       query: sandbox.stub().rejects(new Error('RUM query failed')),
     };
-    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-      '@adobe/spacecat-shared-utils': {
-        getRUMDomainKey: getRUMDomainKeyStub,
-      },
-    });
 
-    const result = await (
-      await sitesControllerMock
-        .default(mockDataAccess, context.log)
-        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] }, rumApiClient })
+    const result = await sitesController.getLatestSiteMetrics(
+      { ...context, params: { siteId: SITE_IDS[0] }, rumApiClient },
     );
     const metrics = await result.json();
 
-    expect(context.log.error).to.have.been.calledWithMatch('Error getting RUM metrics for site 0b4dcf79-fe5f-410b-b11f-641f0bf56da3');
+    expect(context.log.error).to.have.been.calledWithMatch('Error getting RUM metrics for site 0b4dcf79-fe5f-410b-b11f-641f0bf56da3: RUM query failed');
     expect(metrics).to.deep.equal({
       ctrChange: 0,
       pageViewsChange: 0,
@@ -886,6 +858,145 @@ describe('Sites Controller', () => {
 
     const result = await sitesController.getSiteMetricsBySource({
       params: { siteId, source, metric },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('get page metrics by source returns list of metrics', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+    const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
+
+    const storedMetrics = [{
+      siteId: '123',
+      source: 'ahrefs',
+      time: '2023-03-12T00:00:00Z',
+      metric: 'organic-traffic',
+      value: 100,
+      url: 'https://example.com/foo/bar',
+    },
+    {
+      siteId: '123',
+      source: 'ahrefs',
+      time: '2023-03-13T00:00:00Z',
+      metric: 'organic-traffic',
+      value: 400,
+      url: 'https://example.com/foo/baz',
+    },
+    {
+      siteId: '123',
+      source: 'ahrefs',
+      time: '2023-03-13T00:00:00Z',
+      metric: 'organic-traffic',
+      value: 200,
+      url: 'https://example.com/foo/bar',
+    }];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+      },
+    });
+
+    const resp = await (await sitesControllerMock.default(mockDataAccess).getPageMetricsBySource({
+      params: {
+        siteId, source, metric, base64PageUrl,
+      },
+      log: {
+        info: sandbox.spy(),
+        warn: sandbox.spy(),
+        error: sandbox.spy(),
+      },
+      s3: {
+        s3Client: {
+          send: sinon.stub(),
+        },
+        s3Bucket: 'test-bucket',
+        region: 'us-west-2',
+      },
+    })).json();
+
+    expect(resp).to.deep.equal([storedMetrics[0], storedMetrics[2]]);
+  });
+
+  it('get page metrics by sources returns bad request when siteId is missing', async () => {
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+    const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
+
+    const result = await sitesController.getPageMetricsBySource({
+      params: { source, metric, base64PageUrl },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('get page metrics by sources returns bad request when source is missing', async () => {
+    const siteId = sites[0].getId();
+    const metric = 'organic-traffic';
+    const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
+
+    const result = await sitesController.getPageMetricsBySource({
+      params: { siteId, metric, base64PageUrl },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'source required');
+  });
+
+  it('get page metrics by sources returns bad request when metric is missing', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+    const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
+
+    const result = await sitesController.getPageMetricsBySource({
+      params: { siteId, source, base64PageUrl },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'metric required');
+  });
+
+  it('get page metrics by sources returns bad request when base64PageUrl is missing', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+
+    const result = await sitesController.getPageMetricsBySource({
+      params: { siteId, metric, source },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'base64PageUrl required');
+  });
+
+  it('get page metrics by source returns not found when site is not found', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+    const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
+
+    mockDataAccess.Site.findById.resolves(null);
+
+    const result = await sitesController.getPageMetricsBySource({
+      params: {
+        siteId,
+        source,
+        metric,
+        base64PageUrl,
+      },
     });
     const error = await result.json();
 
