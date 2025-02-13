@@ -90,7 +90,7 @@ const getDBAcls = async (dynamoClient, orgId, roles) => {
 
   return resp.Items.map((it) => ({
     role: it.role.S,
-    acl: it.acls.L.map((a) => ({
+    acl: it.acl.L.map((a) => ({
       path: a.M.path.S,
       actions: a.M.actions.SS,
     })),
