@@ -109,16 +109,19 @@ export default class AuthenticationManager {
   // eslint-disable-next-line class-methods-use-this
   async getRoles(dbClient, { imsUserId, imsOrgId }) {
     const input = {
+      ExpressionAttributeNames: {
+        '#roles': 'roles',
+      },
       ExpressionAttributeValues: {
         ':userid': {
-          S: imsUserId,
+          S: `imsID:${imsUserId}`,
         },
         ':orgid': {
-          S: imsOrgId,
+          S: `imsOrgID:${imsOrgId}`,
         },
       },
-      KeyConditionExpression: 'orgid IN (:userid, :orgid)',
-      ProjectionExpression: 'roles',
+      KeyConditionExpression: 'identifier IN (:userid, :orgid)',
+      ProjectionExpression: '#roles',
       TableName: 'spacecat-services-roles-dev4',
     };
     console.log('§§§ Get roles input:', JSON.stringify(input));
