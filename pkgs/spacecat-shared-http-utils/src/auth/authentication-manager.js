@@ -78,16 +78,9 @@ export default class AuthenticationManager {
         ':orgid': {
           S: orgId,
         },
-        // ':role1': {
-        //   S: roles[0],
-        // },
-        // ':role2': {
-        //   S: '12345-writer',
-        // },
       },
       KeyConditionExpression: 'imsorgid = :orgid',
-      // FilterExpression: '#role IN (:role1, :role2)',
-      ProjectionExpression: 'acls',
+      ProjectionExpression: 'acls, #role',
       TableName: 'spacecat-services-acls-dev6',
     };
 
@@ -103,19 +96,14 @@ export default class AuthenticationManager {
     }
     input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
 
-    // FilterExpression: '(TimeId = :timeId AND begins_with ( TypeKey , :typeKey))
-    // AND (awayTeam = :teamName OR homeTeam = :teamName)' i
-
-    // use a FilterExpression with or
-
     console.log('§§§ Get ACLs input:', JSON.stringify(input));
-    try {
-      const command = new QueryCommand(input);
-      const resp = await dynamoClient.send(command);
-      console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
-    } catch (e) {
-      console.error('§§§ DynamoDB getAcls error:', e);
-    }
+    const command = new QueryCommand(input);
+    const resp = await dynamoClient.send(command);
+    console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
+    return resp.Items.map((it) => ({
+      path: it.M.path.S,
+      actions: it.M.actions.SS,
+    }));
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -151,7 +139,7 @@ export default class AuthenticationManager {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  async getAclsUsingBareClient(authInfo) {
+  async getAclsFromDB(authInfo) {
     console.log('§§§ Profile email/imsUserID:', authInfo.profile?.email);
 
     // Strangely this is in 'email' because it's not an email address
@@ -165,8 +153,7 @@ export default class AuthenticationManager {
       return [];
     }
 
-    const acls = await this.getAcls(dbClient, imsOrgId, roles);
-    return acls;
+    return /* await */ this.getAcls(dbClient, imsOrgId, roles);
   }
 
   /**
@@ -191,40 +178,12 @@ export default class AuthenticationManager {
       if (isObject(authInfo)) {
         this.log.info(`Authenticated with ${handler.name}`);
 
-        // // get ims stufg
-        // try {
-        //   console.log('§§§ context: ', JSON.stringify(context));
-
-        //   // TODO pass in aa_id
-        //   const orgIdEmail = authInfo.profile.aa_id;
-        //   const orgId = orgIdEmail.split('@')[0];
-
-        //   console.log('§§§ orgId:', orgId);
-        //   // eslint-disable-next-line no-await-in-loop
-        //   const orgDetails = await context.imsClient.getImsOrganizationDetails(orgId);
-        //   console.log('§§§ orgDetails:', orgDetails);
-        //   // // eslint-disable-next-line no-await-in-loop
-        //   // // const token = await context.imsClient.getImsUserToken(context.pathInfo.headers);
-        //   // // 7 is the length of 'Bearer '
-        //   // const token = context.pathInfo.headers?.authorization?.substring(7);
-
-        //   // console.log('§§§ ims token:', token);
-        //   // // eslint-disable-next-line no-await-in-loop
-        //   // const imsinfo = await context.imsClient.getImsUserProfile(token);
-
-        //   // // eslint-disable-next-line no-await-in-loop
-        //   // // const imsinfo = await context.imsClient.getServiceAccessTokenV3();
-        //   // console.log('§§§ ims token/info:', imsinfo);
-        // } catch (e) {
-        //   console.error('§§§ ims error:', e);
-        // }
-
         try {
           // eslint-disable-next-line no-await-in-loop
-          const acls = await this.getAclsUsingBareClient(authInfo);
+          const acls = await this.getAclsFromDB(authInfo);
           console.log('§§§ acls:', acls);
         } catch (e) {
-          console.error('§§§ getAclsUsingBareClient error:', e);
+          console.error('§§§ getAclsFromDB error:', e);
         }
 
         context.attributes = context.attributes || {};
