@@ -113,15 +113,18 @@ export default class AuthenticationManager {
         '#roles': 'roles',
       },
       ExpressionAttributeValues: {
-        ':userid': {
+        ':orgid': {
+          S: imsOrgId,
+        },
+        ':userident': {
           S: `imsID:${imsUserId}`,
         },
-        ':orgid': {
+        ':orgident': {
           S: `imsOrgID:${imsOrgId}`,
         },
       },
       KeyConditionExpression: 'orgid = :orgid',
-      FilterExpression: 'identifier IN (:userid, :orgid)',
+      FilterExpression: 'identifier IN (:userident, :orgident)',
       ProjectionExpression: '#roles',
       TableName: 'spacecat-services-roles-dev4',
     };
