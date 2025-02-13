@@ -205,7 +205,7 @@ export default class AuthenticationManager {
           console.log('§§§ context: ', JSON.stringify(context));
 
           // TODO pass in aa_id
-          const orgId = context.attributes.authInfo.profile.aa_id;
+          const orgId = authInfo.profile.aa_id;
           console.log('§§§ orgId:', orgId);
           const orgDetails = context.imsClient.getImsOrganizationDetails(orgId);
           console.log('§§§ orgDetails:', orgDetails);
