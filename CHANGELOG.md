@@ -1,3 +1,10 @@
+# [1.90.0](https://github.com/adobe/spacecat-api-service/compare/v1.89.18...v1.90.0) (2025-02-13)
+
+
+### Features
+
+* **page-metrics:** API to get page level metrics by page URL ([#742](https://github.com/adobe/spacecat-api-service/issues/742)) ([3b03a40](https://github.com/adobe/spacecat-api-service/commit/3b03a40876d44550fcbac73f1b3b425e466d8a31))
+
 ## [1.89.18](https://github.com/adobe/spacecat-api-service/compare/v1.89.17...v1.89.18) (2025-02-12)
 
 
