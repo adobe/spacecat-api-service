@@ -1,3 +1,31 @@
+# [1.90.0](https://github.com/adobe/spacecat-api-service/compare/v1.89.18...v1.90.0) (2025-02-13)
+
+
+### Features
+
+* **page-metrics:** API to get page level metrics by page URL ([#742](https://github.com/adobe/spacecat-api-service/issues/742)) ([3b03a40](https://github.com/adobe/spacecat-api-service/commit/3b03a40876d44550fcbac73f1b3b425e466d8a31))
+
+## [1.89.18](https://github.com/adobe/spacecat-api-service/compare/v1.89.17...v1.89.18) (2025-02-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.2.0 ([#746](https://github.com/adobe/spacecat-api-service/issues/746)) ([f247eeb](https://github.com/adobe/spacecat-api-service/commit/f247eeb105785d9165a2ec719137578c08e9a96e))
+
+## [1.89.17](https://github.com/adobe/spacecat-api-service/compare/v1.89.16...v1.89.17) (2025-02-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.31.0 ([#745](https://github.com/adobe/spacecat-api-service/issues/745)) ([3994d5d](https://github.com/adobe/spacecat-api-service/commit/3994d5de2960f5de91cc3680b4f9a97866a12bea))
+
+## [1.89.16](https://github.com/adobe/spacecat-api-service/compare/v1.89.15...v1.89.16) (2025-02-12)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#740](https://github.com/adobe/spacecat-api-service/issues/740)) ([2b03d50](https://github.com/adobe/spacecat-api-service/commit/2b03d505ac3364a62394deb3f6905d0a7e7977d4))
+
 ## [1.89.15](https://github.com/adobe/spacecat-api-service/compare/v1.89.14...v1.89.15) (2025-02-11)
 
 

@@ -191,6 +191,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/key-events',
       'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
+      'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'DELETE /tools/api-keys/:id',
       'GET /tools/import/jobs/:jobId',
       'PATCH /tools/import/jobs/:jobId',
