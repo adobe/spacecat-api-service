@@ -312,6 +312,10 @@ export const parseCSV = async (file, token) => {
       skip_empty_lines: true,
     });
 
+    if (!Array.isArray(records) || records.length == 0) {
+      throw new Error('CSV parsing resulted in empty or invalid data.');
+    }
+
     return records;
   } catch (error) {
     console.error('Error parsing CSV file:', error);

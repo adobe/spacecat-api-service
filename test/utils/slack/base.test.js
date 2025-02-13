@@ -16,12 +16,15 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 
 import { Blocks } from 'slack-block-builder';
+import MockAdapter from 'axios-mock-adapter';
+import axios from 'axios';
 import {
   extractURLFromSlackInput,
   FALLBACK_SLACK_CHANNEL,
   getSlackContext,
   postErrorMessage, sendFile,
   sendMessageBlocks,
+  parseCSV,
 } from '../../../src/utils/slack/base.js';
 
 describe('Base Slack Utils', () => {
@@ -212,6 +215,62 @@ describe('Base Slack Utils', () => {
         const slackContext = await getSlackContext({ url: 'some-url', log: console });
         expect(slackContext).to.eql({ channel: FALLBACK_SLACK_CHANNEL });
       });
+    });
+  });
+
+  describe('parseCSV', () => {
+    let axiosMock;
+  
+    beforeEach(() => {
+      axiosMock = new MockAdapter(axios); 
+    });
+  
+    afterEach(() => {
+      axiosMock.restore();
+    });
+  
+    it('should correctly fetch and parse a CSV file', async () => {
+      const csvContent = `name,age\nAlice,30\nBob,25`;
+      const file = { url_private: 'https://fake-url.com/file.csv' };
+      const token = 'test-bot-token';
+  
+      axiosMock.onGet(file.url_private).reply(200, csvContent);
+  
+      const records = await parseCSV(file, token);
+  
+      expect(records).to.deep.equal([
+        { name: 'Alice', age: '30' },
+        { name: 'Bob', age: '25' },
+      ]);
+    });
+  
+    it('should throw an error when the file download fails', async () => {
+      const file = { url_private: 'https://fake-url.com/file.csv' };
+      const token = 'test-bot-token';
+  
+      axiosMock.onGet(file.url_private).networkError();
+  
+      try {
+        await parseCSV(file, token);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Failed to parse CSV file.');
+      }
+    });
+  
+    it('should throw an error when the CSV data is invalid', async () => {
+      const invalidCsvContent = `invalid data without headers`;
+      const file = { url_private: 'https://fake-url.com/file.csv' };
+      const token = 'test-bot-token';
+  
+      axiosMock.onGet(file.url_private).reply(200, invalidCsvContent);
+  
+      try {
+        await parseCSV(file, token);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Failed to parse CSV file.');
+      }
     });
   });
 });
