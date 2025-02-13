@@ -101,8 +101,11 @@ export default class AuthenticationManager {
     const resp = await dynamoClient.send(command);
     console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
     return resp.Items.map((it) => ({
-      path: it.M.path.S,
-      actions: it.M.actions.SS,
+      role: it.M.role.S,
+      acls: it.M.acls.L.map((a) => ({
+        path: a.M.path.S,
+        actions: a.M.actions.SS,
+      })),
     }));
   }
 
