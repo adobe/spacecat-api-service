@@ -128,10 +128,10 @@ const getDBRoles = async (dbClient, { imsUserId, imsOrgId }) => {
   return new Set(roles);
 };
 
-const getAcls = async (authInfo) => {
+const getAcls = async (profile) => {
   // Strangely this is in 'email' because it's not an email address
-  const imsUserId = authInfo.profile?.email;
-  const imsOrgIdEmail = authInfo.profile?.aa_id;
+  const imsUserId = profile.email;
+  const imsOrgIdEmail = profile.aa_id;
   const imsOrgId = imsOrgIdEmail?.split('@')[0];
 
   const dbClient = new DynamoDBClient();
