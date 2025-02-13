@@ -78,18 +78,30 @@ export default class AuthenticationManager {
         ':orgid': {
           S: orgId,
         },
-        ':role1': {
-          S: roles[0],
-        },
-        ':role2': {
-          S: '12345-writer',
-        },
+        // ':role1': {
+        //   S: roles[0],
+        // },
+        // ':role2': {
+        //   S: '12345-writer',
+        // },
       },
       KeyConditionExpression: 'imsorgid = :orgid',
-      FilterExpression: '#role IN (:role1, :role2)',
-      // ProjectionExpression: 'ident',
+      // FilterExpression: '#role IN (:role1, :role2)',
+      ProjectionExpression: 'acls',
       TableName: 'spacecat-services-acls-dev6',
     };
+
+    const feRoles = [];
+    let i = 0;
+    for (const role of roles) {
+      const roleID = `:role${i}`;
+      feRoles.push(roleID);
+      input.ExpressionAttributeValues[roleID] = {
+        S: role,
+      };
+      i += 1;
+    }
+    input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
 
     // FilterExpression: '(TimeId = :timeId AND begins_with ( TypeKey , :typeKey))
     // AND (awayTeam = :teamName OR homeTeam = :teamName)' i
@@ -132,6 +144,10 @@ export default class AuthenticationManager {
     const command = new QueryCommand(input);
     const resp = await dbClient.send(command);
     console.log('§§§ DynamoDB getRoles response:', JSON.stringify(resp));
+
+    const roles = resp.Items.flatMap((item) => item.roles.SS);
+    console.log('§§§ roles:', roles);
+    return new Set(roles);
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -143,74 +159,15 @@ export default class AuthenticationManager {
     const imsOrgIdEmail = authInfo.profile?.aa_id;
     const imsOrgId = imsOrgIdEmail?.split('@')[0];
 
-    // Need to get this from IMS
-    // authInfo.profile.imgOrgID = 'C52E57EB5489E70A0A4C98A5';
-    // authInfo.profile.groups = [
-    //   { name: 'admins', id: '12345' },
-    //   { name: 'readers', id: '999' },
-    // ];
-
     const dbClient = new DynamoDBClient();
     const roles = await this.getRoles(dbClient, { imsUserId, imsOrgId });
-    // const input = {
-    //   ExpressionAttributeValues: {
-    //     ':v1': {
-    //       S: authInfo.profile.imgOrgID,
-    //     },
-    //   },
-    //   KeyConditionExpression: 'orgid = :v1',
-    //   // ProjectionExpression: 'ident',
-    //   TableName: 'spacecat-services-roles-dev4',
-    // };
-    // const command = new QueryCommand(input);
-    // const resp = await dbClient.send(command);
-    // console.log('§§§ DynamoDB response:', JSON.stringify(resp));
-
-    // const roleInfo = [];
-    // for (const item of resp.Items) {
-    //   roleInfo.push({
-    //     ident: item.ident.S,
-    //     identtype: item.identtype.S,
-    //     roles: item.roles.SS,
-    //   });
-    // }
-    // console.log('§§§ idents:', roleInfo);
-
-    // const roles = this.getRolesx(authInfo, roleInfo);
-    // console.log('§§§ roles:', roles);
-
-    if (roles === undefined || roles.length === 0) {
+    if (roles === undefined || roles.size === 0) {
       return [];
     }
 
     const acls = await this.getAcls(dbClient, imsOrgId, roles);
     return acls;
   }
-
-  // // eslint-disable-next-line class-methods-use-this
-  // async getAclsUsingDocumentClient(authInfo) {
-  //   console.log('§§§ using document client');
-  //   const client = new DynamoDBClient();
-  //   const docClient = DynamoDBDocumentClient.from(client);
-
-  //   // const params = {
-  //   //   TableName: 'spacecat-services-roles-dev4',
-  //   //   Key: { orgid: 'C52E57EB5489E70A0A4C98A5' },
-  //   // };
-  //   const input = {
-  //     ExpressionAttributeValues: {
-  //       ':v1': {
-  //         S: 'C52E57EB5489E70A0A4C98A5',
-  //       },
-  //     },
-  //     KeyConditionExpression: 'orgid = :v1',
-  //     // ProjectionExpression: 'ident',
-  //     TableName: 'spacecat-services-roles-dev4',
-  //   };
-  //   const command = new QueryCommand(input);
-  //   const resp = await docClient.send(command);
-  //   console.log('§§§ docclient response:', JSON.stringify(resp));
-  // }
 
   /**
    * Authenticate the request with all the handlers.
