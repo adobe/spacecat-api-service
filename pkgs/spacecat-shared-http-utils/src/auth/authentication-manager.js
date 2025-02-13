@@ -207,7 +207,8 @@ export default class AuthenticationManager {
           // TODO pass in aa_id
           const orgId = authInfo.profile.aa_id;
           console.log('§§§ orgId:', orgId);
-          const orgDetails = context.imsClient.getImsOrganizationDetails(orgId);
+          // eslint-disable-next-line no-await-in-loop
+          const orgDetails = await context.imsClient.getImsOrganizationDetails(orgId);
           console.log('§§§ orgDetails:', orgDetails);
           // // eslint-disable-next-line no-await-in-loop
           // // const token = await context.imsClient.getImsUserToken(context.pathInfo.headers);
