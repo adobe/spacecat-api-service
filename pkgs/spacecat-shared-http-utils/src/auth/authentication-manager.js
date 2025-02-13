@@ -120,7 +120,8 @@ export default class AuthenticationManager {
           S: `imsOrgID:${imsOrgId}`,
         },
       },
-      KeyConditionExpression: 'identifier IN (:userid, :orgid)',
+      KeyConditionExpression: 'orgid = :orgid',
+      FilterExpression: 'identifier IN (:userid, :orgid)',
       ProjectionExpression: '#roles',
       TableName: 'spacecat-services-roles-dev4',
     };
