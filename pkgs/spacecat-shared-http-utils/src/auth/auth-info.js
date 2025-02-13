@@ -23,6 +23,16 @@ export default class AuthInfo {
   }
 
   /**
+   * Set the ACLs.
+   * @param {Object} acls - The ACLs
+   * @returns {AuthInfo} The auth info object
+   */
+  withACLs(acls) {
+    this.acls = acls;
+    return this;
+  }
+
+  /**
    * Set the authenticated flag.
    * @param {boolean} value - The value of the authenticated flag
    * @returns {AuthInfo} The auth info object
@@ -71,6 +81,8 @@ export default class AuthInfo {
     this.scopes = scopes;
     return this;
   }
+
+  getACLs() { return this.acls; }
 
   getScopes() { return this.scopes; }
 

@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import {
   createLocalJWKSet,
@@ -35,7 +36,6 @@ const IGNORED_PROFILE_PROPS = [
   'rtea',
   'user_id',
   'fg',
-  // 'aa_id',
 ];
 
 const loadConfig = (context) => {
@@ -54,6 +54,99 @@ const getBearerToken = (context) => {
   }
 
   return authorizationHeader.replace('Bearer ', '');
+};
+
+const getDBAcls = async (dynamoClient, orgId, roles) => {
+  const input = {
+    ExpressionAttributeNames: {
+      '#role': 'role',
+    },
+    ExpressionAttributeValues: {
+      ':orgid': {
+        S: orgId,
+      },
+    },
+    KeyConditionExpression: 'imsorgid = :orgid',
+    ProjectionExpression: 'acl, #role',
+    TableName: 'spacecat-services-acls-dev6',
+  };
+
+  const feRoles = [];
+  let i = 0;
+  for (const role of roles) {
+    const roleID = `:role${i}`;
+    feRoles.push(roleID);
+    input.ExpressionAttributeValues[roleID] = {
+      S: role,
+    };
+    i += 1;
+  }
+  input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
+
+  console.log('§§§ Get ACLs input:', JSON.stringify(input));
+  const command = new QueryCommand(input);
+  const resp = await dynamoClient.send(command);
+  console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
+
+  return resp.Items.map((it) => ({
+    role: it.role.S,
+    acl: it.acls.L.map((a) => ({
+      path: a.M.path.S,
+      actions: a.M.actions.SS,
+    })),
+  }));
+};
+
+const getDBRoles = async (dbClient, { imsUserId, imsOrgId }) => {
+  const input = {
+    ExpressionAttributeNames: {
+      '#roles': 'roles',
+    },
+    ExpressionAttributeValues: {
+      ':orgid': {
+        S: imsOrgId,
+      },
+      ':userident': {
+        S: `imsID:${imsUserId}`,
+      },
+      ':orgident': {
+        S: `imsOrgID:${imsOrgId}`,
+      },
+    },
+    KeyConditionExpression: 'orgid = :orgid',
+    FilterExpression: 'identifier IN (:userident, :orgident)',
+    ProjectionExpression: '#roles',
+    TableName: 'spacecat-services-roles-dev4',
+  };
+  console.log('§§§ Get roles input:', JSON.stringify(input));
+  const command = new QueryCommand(input);
+  const resp = await dbClient.send(command);
+  console.log('§§§ DynamoDB getRoles response:', JSON.stringify(resp));
+
+  const roles = resp.Items.flatMap((item) => item.roles.SS);
+  console.log('§§§ roles:', roles);
+  return new Set(roles);
+};
+
+const getAcls = async (authInfo) => {
+  // Strangely this is in 'email' because it's not an email address
+  const imsUserId = authInfo.profile?.email;
+  const imsOrgIdEmail = authInfo.profile?.aa_id;
+  const imsOrgId = imsOrgIdEmail?.split('@')[0];
+
+  const dbClient = new DynamoDBClient();
+  const roles = await getDBRoles(dbClient, { imsUserId, imsOrgId });
+  if (roles === undefined || roles.size === 0) {
+    return [];
+  }
+
+  const acls = await getDBAcls(dbClient, imsOrgId, roles);
+  return {
+    acls,
+    aclEntities: {
+      model: ['organization'],
+    },
+  };
 };
 
 const transformProfile = (payload) => {
@@ -125,11 +218,13 @@ export default class AdobeImsHandler extends AbstractHandler {
       const config = loadConfig(context);
       const payload = await this.#validateToken(token, config);
       const profile = transformProfile(payload);
+      const acls = await getAcls(profile);
 
       return new AuthInfo()
         .withType(this.name)
         .withAuthenticated(true)
-        .withProfile(profile);
+        .withProfile(profile)
+        .withACLs(acls);
     } catch (e) {
       this.log(`Failed to validate token: ${e.message}`, 'error');
     }
