@@ -124,12 +124,11 @@ const getDBRoles = async (dbClient, { imsUserId, imsOrgId }) => {
   console.log('§§§ DynamoDB getRoles response:', JSON.stringify(resp));
 
   const roles = resp.Items.flatMap((item) => item.roles.SS);
-  console.log('§§§ roles:', roles);
   return new Set(roles);
 };
 
 const getAcls = async (profile) => {
-  // Strangely this is in 'email' because it's not an email address
+  // Strangely the ID is in profile.email, because that's not an email at all
   const imsUserId = profile.email;
   const imsOrgIdEmail = profile.aa_id;
   const imsOrgId = imsOrgIdEmail?.split('@')[0];
@@ -137,7 +136,7 @@ const getAcls = async (profile) => {
   const dbClient = new DynamoDBClient();
   const roles = await getDBRoles(dbClient, { imsUserId, imsOrgId });
   if (roles === undefined || roles.size === 0) {
-    return [];
+    return {};
   }
 
   const acls = await getDBAcls(dbClient, imsOrgId, roles);

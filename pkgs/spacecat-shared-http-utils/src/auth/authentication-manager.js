@@ -9,7 +9,6 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-// import { DynamoDB } from '@aws-sdk/client-dynamodb';
 import { isObject } from '@adobe/spacecat-shared-utils';
 
 import NotAuthenticatedError from './errors/not-authenticated.js';
