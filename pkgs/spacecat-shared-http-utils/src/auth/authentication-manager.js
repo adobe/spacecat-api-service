@@ -37,7 +37,7 @@ export default class AuthenticationManager {
     this.handlers.push(new Handler(this.log));
   }
 
-  getRoles(authInfo, roleInfo) {
+  getRolesx(authInfo, roleInfo) {
     const roles = [];
 
     for (const item of roleInfo) {
@@ -107,49 +107,75 @@ export default class AuthenticationManager {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  async getAclsUsingBareClient(authInfo) {
-    console.log('§§§ Profile email:', authInfo.profile?.email);
-
-    // Need to get this from IMS
-    authInfo.profile.imgOrgID = 'C52E57EB5489E70A0A4C98A5';
-    authInfo.profile.groups = [
-      { name: 'admins', id: '12345' },
-      { name: 'readers', id: '999' },
-    ];
-
-    const dbClient = new DynamoDBClient();
+  async getRoles(dbClient, { imsUserId, imsOrgId }) {
     const input = {
       ExpressionAttributeValues: {
-        ':v1': {
-          S: authInfo.profile.imgOrgID,
+        ':userid': {
+          S: imsUserId,
+        },
+        ':orgid': {
+          S: imsOrgId,
         },
       },
-      KeyConditionExpression: 'orgid = :v1',
-      // ProjectionExpression: 'ident',
+      KeyConditionExpression: 'orgid IN (:userid, :orgid)',
+      ProjectionExpression: 'roles',
       TableName: 'spacecat-services-roles-dev4',
     };
     const command = new QueryCommand(input);
     const resp = await dbClient.send(command);
-    console.log('§§§ DynamoDB response:', JSON.stringify(resp));
+    console.log('§§§ DynamoDB getRoles response:', JSON.stringify(resp));
+  }
 
-    const roleInfo = [];
-    for (const item of resp.Items) {
-      roleInfo.push({
-        ident: item.ident.S,
-        identtype: item.identtype.S,
-        roles: item.roles.SS,
-      });
-    }
-    console.log('§§§ idents:', roleInfo);
+  // eslint-disable-next-line class-methods-use-this
+  async getAclsUsingBareClient(authInfo) {
+    console.log('§§§ Profile email/imsUserID:', authInfo.profile?.email);
 
-    const roles = this.getRoles(authInfo, roleInfo);
-    console.log('§§§ roles:', roles);
+    // Strangely this is in 'email' because it's not an email address
+    const imsUserId = authInfo.profile?.email;
+    const imsOrgIdEmail = authInfo.profile?.aa_id;
+    const imsOrgId = imsOrgIdEmail?.split('@')[0];
 
-    if (roles.length === 0) {
+    // Need to get this from IMS
+    // authInfo.profile.imgOrgID = 'C52E57EB5489E70A0A4C98A5';
+    // authInfo.profile.groups = [
+    //   { name: 'admins', id: '12345' },
+    //   { name: 'readers', id: '999' },
+    // ];
+
+    const dbClient = new DynamoDBClient();
+    const roles = await this.getRoles(dbClient, { imsUserId, imsOrgId });
+    // const input = {
+    //   ExpressionAttributeValues: {
+    //     ':v1': {
+    //       S: authInfo.profile.imgOrgID,
+    //     },
+    //   },
+    //   KeyConditionExpression: 'orgid = :v1',
+    //   // ProjectionExpression: 'ident',
+    //   TableName: 'spacecat-services-roles-dev4',
+    // };
+    // const command = new QueryCommand(input);
+    // const resp = await dbClient.send(command);
+    // console.log('§§§ DynamoDB response:', JSON.stringify(resp));
+
+    // const roleInfo = [];
+    // for (const item of resp.Items) {
+    //   roleInfo.push({
+    //     ident: item.ident.S,
+    //     identtype: item.identtype.S,
+    //     roles: item.roles.SS,
+    //   });
+    // }
+    // console.log('§§§ idents:', roleInfo);
+
+    // const roles = this.getRolesx(authInfo, roleInfo);
+    // console.log('§§§ roles:', roles);
+
+    if (roles === undefined || roles.length === 0) {
       return [];
     }
 
-    const acls = await this.getAcls(dbClient, authInfo.profile.imgOrgID, roles);
+    const acls = await this.getAcls(dbClient, imsOrgId, roles);
     return acls;
   }
 

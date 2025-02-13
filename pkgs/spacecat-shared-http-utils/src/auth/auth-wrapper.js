@@ -35,7 +35,6 @@ export function authWrapper(fn, opts = {}) {
     //   // aclCtx, e.g. from context.attributes.authInfo
     // }, log);
     /* */
-    console.log('§§§ Would call createDataAccess with here');
 
     if (ANONYMOUS_ENDPOINTS.includes(route)
       || route.startsWith('POST /hooks/site-detection/')
