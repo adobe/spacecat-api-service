@@ -37,6 +37,7 @@ export const SiteDto = {
     baseURL: site.getBaseURL(),
     hlxConfig: site.getHlxConfig(),
     deliveryType: site.getDeliveryType(),
+    deliveryConfig: site.getDeliveryConfig(),
     gitHubURL: site.getGitHubURL(),
     organizationId: site.getOrganizationId(),
     isLive: site.getIsLive(),

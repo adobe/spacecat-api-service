@@ -275,6 +275,12 @@ function SitesController(dataAccess, log, env) {
       updates = true;
     }
 
+    if (isObject(requestBody.deliveryConfig)
+        && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
+      site.setDeliveryConfig(requestBody.deliveryConfig);
+      updates = true;
+    }
+
     if (isObject(requestBody.config)) {
       site.setConfig(requestBody.config);
       updates = true;
