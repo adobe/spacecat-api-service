@@ -75,6 +75,8 @@ export function ensurePermission(path, aclCtx, perm) {
     JSON.stringify(aclCtx),
     'perm:',
     perm,
+    'response:',
+    hasPermisson(path, aclCtx, perm),
   );
   if (!hasPermisson(path, aclCtx, perm)) {
     throw new Error('Permission denied');
