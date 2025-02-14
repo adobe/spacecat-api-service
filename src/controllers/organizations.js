@@ -199,6 +199,7 @@ function OrganizationsController(dataAccess, env) {
     if (!isObject(requestBody)) {
       return badRequest('Request body required');
     }
+    console.log('§§§ Request body:', JSON.stringify(requestBody));
 
     let updates = false;
     if (isString(requestBody.name) && requestBody.name !== organization.getName()) {

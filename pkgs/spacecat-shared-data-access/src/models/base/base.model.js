@@ -138,7 +138,6 @@ class BaseModel {
       if (!this[getterMethodName] || name === this.idName) {
         this[getterMethodName] = () => {
           this.ensurePermission('R');
-          ensurePermission(this.getACLPath(), this.aclCtx, 'R');
           return this.record[name];
         };
       }
