@@ -88,7 +88,7 @@ describe('ImportController tests', () => {
 
   const xwalkMultipartArgs = {
     // the values for models, filters, definitions, and the import script just need to be strings
-    options: { type: 'xwalk' },
+    options: { type: 'xwalk', data: { siteName: 'xwalk', assetFolder: 'xwalk' } },
     models: 'models',
     filters: 'filters',
     definitions: 'definitions',
@@ -509,9 +509,8 @@ describe('ImportController tests', () => {
         expect(mockS3.s3Client.send.callCount).to.equal(4);
       });
 
-      // write tests that validate the import job to check for missing models, filters, definitions
       it('should fail when models, filters, or definitions are missing', async () => {
-        baseContext.multipartFormData.options = { type: 'xwalk' };
+        baseContext.multipartFormData.options = xwalkMultipartArgs.options;
         const response = await importController.createImportJob(baseContext);
         expect(response.status).to.equal(400);
         expect(response.headers.get('x-error')).to.contain('Invalid request: models must be an string');
@@ -531,6 +530,21 @@ describe('ImportController tests', () => {
         const response4 = await importController.createImportJob(baseContext);
         expect(response4.status).to.equal(202);
         expect(response4.headers.get('x-error')).to.be.null;
+      });
+
+      it('should create an import job with all required fields', async () => {
+        Object.assign(baseContext.multipartFormData, xwalkMultipartArgs);
+        const response = await importController.createImportJob(baseContext);
+        expect(response.status).to.equal(202);
+      });
+
+      it('should fail to create an import job when options are missing', async () => {
+        // remove the options.data.assetFolder from xwalkMultipartArgs
+        delete xwalkMultipartArgs.options.data.assetFolder;
+        Object.assign(baseContext.multipartFormData, xwalkMultipartArgs);
+        const response = await importController.createImportJob(baseContext);
+        expect(response.status).to.equal(400);
+        expect(response.headers.get('x-error')).to.contain('Missing option(s): { data: { assetFolder, siteName } } are required');
       });
     });
   });
