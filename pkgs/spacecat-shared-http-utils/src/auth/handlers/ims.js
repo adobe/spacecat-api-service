@@ -143,7 +143,7 @@ const getAcls = async (profile) => {
   return {
     acls,
     aclEntities: {
-      model: ['organization'],
+      model: ['organization', 'site'],
     },
   };
 };
