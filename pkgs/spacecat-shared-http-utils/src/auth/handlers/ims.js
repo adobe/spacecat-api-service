@@ -220,10 +220,10 @@ export default class AdobeImsHandler extends AbstractHandler {
       const acls = await getAcls(profile);
 
       try {
-        const imspr = context.imsClient.getImsUserProfile(token);
+        const imspr = await context.imsClient.getImsUserProfile(token);
         console.log('§§§ ims profile:', imspr);
       } catch (e) {
-        console.log('§§§ ims error:', e);
+        console.log('§§§ ims profile error:', e);
       }
 
       return new AuthInfo()
