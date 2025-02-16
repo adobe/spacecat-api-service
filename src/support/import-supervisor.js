@@ -241,11 +241,6 @@ function ImportSupervisor(services, config) {
       await writeFileToS3('component-models.json', newImportJob.getId(), models);
       await writeFileToS3('component-filters.json', newImportJob.getId(), filters);
       await writeFileToS3('component-definition.json', newImportJob.getId(), definitions);
-
-      // verify that the options contain the data property with assetFolder and siteName values
-      if (!options.data || !options.data.assetFolder || !options.data.siteName) {
-        throw new ErrorWithStatusCode('Missing option(s): { data: { assetFolder, siteName } } are required', 400);
-      }
     }
 
     // Queue all URLs for import as a single message. This enables the controller to respond with

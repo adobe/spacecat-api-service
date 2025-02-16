@@ -115,6 +115,9 @@ function ImportController(context) {
       if (!isString(data.definitions)) {
         throw new ErrorWithStatusCode('Invalid request: definitions must be an string', STATUS_BAD_REQUEST);
       }
+      if (!data.options.data || !data.options.data.assetFolder || !data.options.data.siteName) {
+        throw new ErrorWithStatusCode('Missing option(s): { data: { assetFolder, siteName } } are required', 400);
+      }
     }
 
     if (data.customHeaders && !isObject(data.customHeaders)) {
