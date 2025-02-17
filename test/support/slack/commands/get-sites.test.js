@@ -180,6 +180,15 @@ describe('GetSitesCommand', () => {
       expect(slackContext.say.called).to.be.true;
     });
 
+    it('handles command execution with delivery type aem_ams', async () => {
+      dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
+      const command = GetSitesCommand(context);
+
+      await command.handleExecution(['aem_ams'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+    });
+
     it('handles command execution with delivery type other', async () => {
       dataAccessStub.Site.allWithLatestAudit.resolves(generateSites(2));
       const command = GetSitesCommand(context);

@@ -41,6 +41,14 @@ base64BaseUrl:
   schema:
     type: string
     format: base64url
+base64PageUrl:
+  name: base64PageUrl
+  description: Base64-encoded page URL
+  in: path
+  required: true
+  schema:
+    type: string
+    format: base64url
 ascending:
   name: ascending
   description: Whether to sort ascending or descending

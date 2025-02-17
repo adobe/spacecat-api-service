@@ -1405,7 +1405,7 @@ SiteMetric:
   required:
     - siteId
     - source
-    - metric
+    - name
     - value
     - time
   properties:
@@ -1430,10 +1430,71 @@ SiteMetric:
     name: 'organic-traffic'
     value: 37900
     time: '2024-04-29T00:00:00.000Z'
+PageOrganicKeywords:
+  type: object
+  required:
+    - siteId
+    - source
+    - name
+    - time
+    - url
+    - keyword
+    - traffic
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    source:
+      description: The source for retrieving the metric value
+      type: string
+    name:
+      description: The name of the metric
+      type: string
+    time:
+      description: The date and time when the metric was recorded
+      $ref: '#/DateTime'
+    url:
+      description: The URL of the page
+      $ref: '#/URL'
+    keyword:
+      description: The keyword
+      type: string
+    traffic:
+      description: The traffic of the keyword
+      type: integer
+    volume:
+      description: The search volume of the keyword
+      type: integer
+    bestPosition:
+      description: The best position of the keyword
+      type: integer
+    cpc:
+      description: The cost per click of the keyword
+      type: integer
+    isBranded:
+      description: Whether the keyword is branded
+      type: boolean
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    source: 'ahrefs'
+    name: 'organic-keywords'
+    time: '2024-04-29T00:00:00.000Z'
+    url: 'https://example.com/foo/bar'
+    keyword: 'foo bar example'
+    traffic: 2355
+    volume: 2400
+    bestPosition: 1
+    cpc: 89
+    isBranded: true
 SiteMetricList:
   type: array
   items:
     $ref: './schemas.yaml#/SiteMetric'
+PageMetricList:
+  type: array
+  items:
+    oneOf:
+      - $ref: './schemas.yaml#/PageOrganicKeywords'
 ImportOptions:
   type: object
   properties:
