@@ -20,7 +20,7 @@
     "build": "hedy -v --test-bundle",
     "deploy": "hedy -v --deploy --test",
     "deploy-routes": "hedy --no-build -no-hints -l major --aws-api jg75jg0dv6",
-    "deploy-ci": "hedy -v --deploy --aws-deploy-bucket spacecat-dev-deploy --aws-account-id 682033462621 --test",
+    "deploy-ci": "hedy -v --deploy --aws-deploy-bucket spacecat-dev-deploy --aws-account-id 682033462621  --test -l latest --cleanup-ci=24h",
     "deploy-secrets": "hedy --aws-update-secrets --params-file=secrets/secrets.env",
     "docs": "npm run docs:lint && npm run docs:build",
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
