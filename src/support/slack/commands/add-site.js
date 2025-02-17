@@ -35,7 +35,7 @@ function AddSiteCommand(context) {
     name: 'Add Site',
     description: 'Adds a new site to track.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site}`,
+    usageText: `${PHRASES[0]} {site} [deliveryType = aem_edge]`,
   });
 
   const { dataAccess, log, env } = context;
@@ -54,7 +54,7 @@ function AddSiteCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [baseURLInput] = args;
+      const [baseURLInput, deliveryTypeArg] = args;
 
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -70,7 +70,9 @@ function AddSiteCommand(context) {
         return;
       }
 
-      const deliveryType = await findDeliveryType(baseURL);
+      const deliveryType = Object.values(SiteModel.DELIVERY_TYPES).includes(deliveryTypeArg)
+        ? deliveryTypeArg
+        : await findDeliveryType(baseURL);
       const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
       const newSite = await Site.create({
