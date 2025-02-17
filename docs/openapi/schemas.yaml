@@ -263,6 +263,9 @@ Site:
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
+    name:
+      description: The name of the site
+      type: string
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
@@ -286,6 +289,7 @@ Site:
     id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://example-site.com'
+    name: 'Example Site'
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
@@ -338,6 +342,7 @@ SiteWithLatestAudit:
     id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://example-site.com'
+    name: 'Example Site'
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
@@ -373,6 +378,9 @@ SiteCreate:
       description: The optional ID of the organization this site belongs to
       default: null
       $ref: '#/Id'
+    name:
+      description: The name of the site
+      type: string
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
@@ -390,12 +398,16 @@ SiteCreate:
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://www.newsite.com'
     deliveryType: 'aem_cs'
+    name: 'New Site'
 SiteUpdate:
   type: object
   properties:
     organizationId:
       description: The optional ID of the organization this site belongs to
       $ref: '#/Id'
+    name:
+      description: The name of the site
+      type: string
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
@@ -409,6 +421,7 @@ SiteUpdate:
   example:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
+    name: 'New Site'
     goLiveDate: '2024-01-20T10:00:00Z'
 UpdateHandlerTypeConfig:
   type: object
