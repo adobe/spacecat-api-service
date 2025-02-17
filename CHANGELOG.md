@@ -1,3 +1,10 @@
+## [1.91.2](https://github.com/adobe/spacecat-api-service/compare/v1.91.1...v1.91.2) (2025-02-17)
+
+
+### Bug Fixes
+
+* add delivery-configuration to site ([#747](https://github.com/adobe/spacecat-api-service/issues/747)) ([1163437](https://github.com/adobe/spacecat-api-service/commit/11634372980544e275cce35d62667192954eabf8))
+
 ## [1.91.1](https://github.com/adobe/spacecat-api-service/compare/v1.91.0...v1.91.1) (2025-02-17)
 
 
