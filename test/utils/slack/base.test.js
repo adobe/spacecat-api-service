@@ -18,6 +18,7 @@ import sinon from 'sinon';
 import { Blocks } from 'slack-block-builder';
 import MockAdapter from 'axios-mock-adapter';
 import axios from 'axios';
+import fs from 'fs/promises';
 import {
   extractURLFromSlackInput,
   FALLBACK_SLACK_CHANNEL,
@@ -230,17 +231,18 @@ describe('Base Slack Utils', () => {
     });
   
     it('should correctly fetch and parse a CSV file', async () => {
-      const csvContent = `name,age\nAlice,30\nBob,25`;
+      const filePath = 'test/utils/slack/test-entries.csv';
+      const fileContent = await fs.readFile(filePath, 'utf-8');
       const file = { url_private: 'https://fake-url.com/file.csv' };
       const token = 'test-bot-token';
   
-      axiosMock.onGet(file.url_private).reply(200, csvContent);
+      axiosMock.onGet(file.url_private).reply(200, fileContent);
   
       const records = await parseCSV(file, token);
   
       expect(records).to.deep.equal([
-        { name: 'Alice', age: '30' },
-        { name: 'Bob', age: '25' },
+        { "Batch": "1", "Country": "UNITED STATES", "Customer Name": "Foo Inc.", "Delivery Type": "AEM-CS", "Final URL": "https://www.foo.com/en-us/", "Has RUM?": "TRUE", "IMS Org": "", "Status": "200", "Website": "https://www.foo.com" },
+        { "Batch": "1", "Country": "CANADA", "Customer Name": "Bar Limited", "Delivery Type": "AEM-CS", "Final URL": "https://www.bar.com/en/index.html", "Has RUM?": "TRUE", "IMS Org": "", "Status": "200", "Website": "https://www.bar.com" },
       ]);
     });
   
