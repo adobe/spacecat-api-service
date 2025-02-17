@@ -264,6 +264,11 @@ function SitesController(dataAccess, log, env) {
       updates = true;
     }
 
+    if (requestBody.name !== site.getName()) {
+      site.setName(requestBody.name);
+      updates = true;
+    }
+
     if (requestBody.gitHubURL !== site.getGitHubURL() && validateRepoUrl(requestBody.gitHubURL)) {
       site.setGitHubURL(requestBody.gitHubURL);
       updates = true;

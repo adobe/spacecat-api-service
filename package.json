@@ -67,7 +67,7 @@
     "@adobe/helix-shared-wrap": "2.0.2",
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.23",
-    "@adobe/spacecat-shared-data-access": "2.2.1",
+    "@adobe/spacecat-shared-data-access": "https://gitpkg.vercel.app/adobe/spacecat-shared/packages/spacecat-shared-data-access?faee2b224e6ef32d902375e106ab2e4c95db9aa1",
     "@adobe/spacecat-shared-gpt-client": "1.4.6",
     "@adobe/spacecat-shared-http-utils": "1.9.7",
     "@adobe/spacecat-shared-ims-client": "1.5.5",
