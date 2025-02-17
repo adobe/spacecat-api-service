@@ -1,3 +1,24 @@
+## [1.91.2](https://github.com/adobe/spacecat-api-service/compare/v1.91.1...v1.91.2) (2025-02-17)
+
+
+### Bug Fixes
+
+* add delivery-configuration to site ([#747](https://github.com/adobe/spacecat-api-service/issues/747)) ([1163437](https://github.com/adobe/spacecat-api-service/commit/11634372980544e275cce35d62667192954eabf8))
+
+## [1.91.1](https://github.com/adobe/spacecat-api-service/compare/v1.91.0...v1.91.1) (2025-02-17)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-gpt-client to v1.5.0 ([#751](https://github.com/adobe/spacecat-api-service/issues/751)) ([56e1d2d](https://github.com/adobe/spacecat-api-service/commit/56e1d2d0f82038eb48916a7bcb0cfcfb572ba6aa))
+
+# [1.91.0](https://github.com/adobe/spacecat-api-service/compare/v1.90.3...v1.91.0) (2025-02-17)
+
+
+### Features
+
+* add aem_ams to slack commands ([#753](https://github.com/adobe/spacecat-api-service/issues/753)) ([d76dd9e](https://github.com/adobe/spacecat-api-service/commit/d76dd9eafe1835aa5d9cea5463a56c1c0c76d864))
+
 ## [1.90.3](https://github.com/adobe/spacecat-api-service/compare/v1.90.2...v1.90.3) (2025-02-16)
 
 
