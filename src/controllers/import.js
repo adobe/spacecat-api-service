@@ -15,7 +15,9 @@ import {
   noContent,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  isIsoDate, isObject, isString, isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 import psl from 'psl';
 import { ImportJob as ImportJobModel } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
@@ -97,6 +99,25 @@ function ImportController(context) {
 
     if (data.options && !isObject(data.options)) {
       throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
+    }
+
+    if (data.options?.type && !['doc', 'xwalk'].includes(data.options.type)) {
+      throw new ErrorWithStatusCode('Invalid request: type must be either "doc" or "xwalk"', STATUS_BAD_REQUEST);
+    }
+
+    if (data.options?.type === 'xwalk') {
+      if (!isString(data.models)) {
+        throw new ErrorWithStatusCode('Invalid request: models must be an string', STATUS_BAD_REQUEST);
+      }
+      if (!isString(data.filters)) {
+        throw new ErrorWithStatusCode('Invalid request: filters must be an string', STATUS_BAD_REQUEST);
+      }
+      if (!isString(data.definitions)) {
+        throw new ErrorWithStatusCode('Invalid request: definitions must be an string', STATUS_BAD_REQUEST);
+      }
+      if (!data.options.data || !data.options.data.assetFolder || !data.options.data.siteName) {
+        throw new ErrorWithStatusCode('Missing option(s): { data: { assetFolder, siteName } } are required', 400);
+      }
     }
 
     if (data.customHeaders && !isObject(data.customHeaders)) {
@@ -190,7 +211,7 @@ function ImportController(context) {
       }
 
       const {
-        urls, options, importScript, customHeaders,
+        urls, options, importScript, customHeaders, models, filters, definitions,
       } = multipartFormData;
 
       const scopes = profile.getScopes();
@@ -226,6 +247,9 @@ function ImportController(context) {
         importScript,
         initiatedBy,
         customHeaders,
+        models,
+        filters,
+        definitions,
       );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {

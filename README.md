@@ -112,6 +112,6 @@ IMPORT_CONFIGURATION=JSON document which includes the following configuration pr
 The `multipartFormData` wrapper uses the following optional env variables:
 
 ```plaintext
-MULTIPART_FORM_FILE_COUNT_LIMIT=Maximum number of files which can be included in a multipart/form-data request (defaults to 1)
+MULTIPART_FORM_FILE_COUNT_LIMIT=Maximum number of files which can be included in a multipart/form-data request (defaults to 5)
 MULTIPART_FORM_MAX_FILE_SIZE_MB=Maximum file size in MB for a single file in a multipart/form-data request (defaults to 20)
 ```
