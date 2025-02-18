@@ -24,6 +24,7 @@ describe('Data Access Wrapper Tests', () => {
   beforeEach(() => {
     mockFn = sinon.stub().resolves('function response');
     mockContext = {
+      attributes: { authInfo: {} },
       env: {},
       log: {
         info: sinon.spy(),

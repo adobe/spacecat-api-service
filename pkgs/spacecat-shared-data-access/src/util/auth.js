@@ -40,6 +40,9 @@ function getPermissions(entityPath, permissions) {
     if (pp.endsWith('/**')) {
       return ep.startsWith(pp.slice(0, -2));
     }
+    if (pp.endsWith('/+**')) {
+      return ep.concat('/').startsWith(pp.slice(0, -3));
+    }
     return ep === pp;
   });
 

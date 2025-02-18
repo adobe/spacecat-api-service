@@ -40,7 +40,7 @@ const IGNORED_PROFILE_PROPS = [
 
 const loadConfig = (context) => {
   const funcVersion = context.func?.version;
-  const isDev = /^ci\d*$/i.test(funcVersion);
+  const isDev = /^(ci\d*|david)$/i.test(funcVersion); // TODO revert back
   context.log.debug(`Function version: ${funcVersion} (isDev: ${isDev})`);
   /* c8 ignore next */
   return isDev ? configDev : configProd;

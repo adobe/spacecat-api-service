@@ -115,10 +115,13 @@ describe('OrganizationModel', () => {
             ],
           },
         ],
+        aclEntities: {
+          model: ['organization', 'site'],
+        },
       };
     }
 
-    it.only('allowed to set name', () => {
+    it('allowed to set name', () => {
       instance.aclCtx = getAclCtx1();
 
       instance.setName('My Name');
@@ -135,10 +138,13 @@ describe('OrganizationModel', () => {
             ],
           },
         ],
+        aclEntities: {
+          model: ['organization', 'site'],
+        },
       };
     }
 
-    it.only('not allowed to set name', () => {
+    it('not allowed to set name', () => {
       instance.aclCtx = getAclCtx2();
 
       instance.getName();

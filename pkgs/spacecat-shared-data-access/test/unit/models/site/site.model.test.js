@@ -174,10 +174,13 @@ describe('SiteModel', () => {
             { path: '/organization/*/site/*', actions: ['R'] },
           ],
         }],
+        aclEntities: {
+          model: ['organization', 'site'],
+        },
       };
     }
 
-    it.only('specific instance permission', () => {
+    it('specific instance permission', () => {
       instance.aclCtx = getAllowAllCtx();
       instance.setOrganizationId('aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee');
 
@@ -193,7 +196,7 @@ describe('SiteModel', () => {
       expect.fail('Expected error');
     });
 
-    it.only('wildcard instance permission', () => {
+    it('wildcard instance permission', () => {
       instance.aclCtx = getAllowAllCtx();
       instance.setOrganizationId('00000000-bbbb-1ccc-8ddd-eeeeeeeeeeee');
 
