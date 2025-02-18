@@ -1,3 +1,10 @@
+## [1.92.3](https://github.com/adobe/spacecat-api-service/compare/v1.92.2...v1.92.3) (2025-02-18)
+
+
+### Bug Fixes
+
+* npm audit ([#758](https://github.com/adobe/spacecat-api-service/issues/758)) ([93f8141](https://github.com/adobe/spacecat-api-service/commit/93f8141e6d67268ab81a678106713caf8b5581e9))
+
 ## [1.92.2](https://github.com/adobe/spacecat-api-service/compare/v1.92.1...v1.92.2) (2025-02-18)
 
 
