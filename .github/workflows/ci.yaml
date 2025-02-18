@@ -62,7 +62,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.ADOBE_BOT_GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.ADOBE_BOT_NPM_TOKEN }}
           AWS_REGION: us-east-1
-          AWS_S3_BUCKET: spacecat-prod-deploy
+          AWS_DEPLOY_BUCKET: spacecat-prod-deploy
 
 
   branch-deploy:
@@ -87,7 +87,7 @@ jobs:
         run: npm run deploy-ci
         env:
           AWS_REGION: us-east-1
-          AWS_S3_BUCKET: spacecat-dev-deploy
+          AWS_DEPLOY_BUCKET: spacecat-dev-deploy
 
       - name: Post-Deployment Integration Test
         run: npm run test-postdeploy
