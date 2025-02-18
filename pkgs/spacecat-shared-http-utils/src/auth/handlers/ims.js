@@ -129,18 +129,21 @@ const getDBRoles = async (dbClient, { imsUserId, imsOrgId }) => {
 };
 
 const getAcls = async (profile) => {
-  // Strangely the ID is in profile.email, because that's not an email at all
   const imsUserId = profile.userId;
-  const imsOrgIdEmail = profile.organizations[0];
-  const imsOrgId = imsOrgIdEmail?.split('@')[0];
-
   const dbClient = new DynamoDBClient();
-  const roles = await getDBRoles(dbClient, { imsUserId, imsOrgId });
-  if (roles === undefined || roles.size === 0) {
-    return {};
-  }
 
-  const acls = await getDBAcls(dbClient, imsOrgId, roles);
+  const acls = [];
+  profile.organizations.forEach(async (orgid) => {
+    const imsOrgId = orgid.split('@')[0];
+    const roles = await getDBRoles(dbClient, { imsUserId, imsOrgId });
+    if (roles === undefined || roles.size === 0) {
+      return;
+    }
+
+    const aclList = await getDBAcls(dbClient, imsOrgId, roles);
+    acls.push(...aclList);
+  });
+
   return {
     acls,
     aclEntities: {
@@ -216,9 +219,9 @@ export default class AdobeImsHandler extends AbstractHandler {
     }
 
     try {
-      const imspr = await context.imsClient.getImsUserProfile(token);
-      console.log('§§§ ims profile:', JSON.stringify(imspr));
-      const acls = await getAcls(imspr);
+      const imsProfile = await context.imsClient.getImsUserProfile(token);
+      console.log('§§§ ims profile:', JSON.stringify(imsProfile));
+      const acls = await getAcls(imsProfile);
 
       const config = loadConfig(context);
       const payload = await this.#validateToken(token, config);

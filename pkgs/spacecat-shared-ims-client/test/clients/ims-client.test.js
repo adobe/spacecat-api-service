@@ -331,15 +331,7 @@ describe('ImsClient', () => {
         email: 'example-user@example.com',
         userId: '9876547890ABCDEF12345678@abcdef123456789.e',
         organizations: ['1234567890ABCDEF12345678@AdobeOrg'],
-        orgDetails: {
-          '1234567890ABCDEF12345678@AdobeOrg': {
-            roles: [{
-              named_role: 'user_admin_grp',
-            }, {
-              named_role: 'PRODUCT_ADMIN',
-            }],
-          },
-        },
+        orgDetails: {},
       });
     });
   });
@@ -355,7 +347,6 @@ describe('ImsClient', () => {
         .get('/ims/profile/v1')
         .matchHeader('Authorization', (val) => val === `Bearer ${testAccessToken}`)
         .reply(200, {
-          preferred_languages: ['en-us'],
           displayName: 'Example User',
           roles: [
             {
@@ -397,9 +388,6 @@ describe('ImsClient', () => {
         organizations: ['F00FEEFAA123@AdobeOrg'],
         orgDetails: {
           'F00FEEFAA123@AdobeOrg': {
-            roles: [{
-              named_role: 'some_role',
-            }],
             groups: [{
               groupid: '348994793',
               user_visible_name: 'MY_ROLE_PROFILE',

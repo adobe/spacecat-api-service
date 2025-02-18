@@ -328,13 +328,6 @@ export default class ImsClient {
     function getOrgDetails(roles, prodCtx) {
       const details = {};
 
-      roles?.forEach((roleEntry) => {
-        const d = accessProp(details, roleEntry.organization, {});
-        const roleList = accessProp(d, 'roles', []);
-
-        roleList.push({ named_role: roleEntry.named_role });
-      });
-
       prodCtx?.forEach((ctx) => {
         const d = accessProp(details, ctx.prodCtx?.owningEntity, {});
         const groupList = accessProp(d, 'groups', []);
