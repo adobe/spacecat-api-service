@@ -1,0 +1,49 @@
+{
+  "name": "@adobe/spacecat-shared-ims-client",
+  "version": "1.5.4",
+  "description": "Shared modules of the Spacecat Services - IMS Client",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0 <23.0.0",
+    "npm": ">=10.9.0 <12.0.0"
+  },
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "test": "c8 mocha",
+    "lint": "eslint .",
+    "clean": "rm -rf package-lock.json node_modules"
+  },
+  "mocha": {
+    "require": "test/setup-env.js",
+    "reporter": "mocha-multi-reporters",
+    "reporter-options": "configFile=.mocha-multi.json",
+    "spec": "test/**/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adobe/spacecat-shared.git"
+  },
+  "author": "",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/adobe/spacecat-shared/issues"
+  },
+  "homepage": "https://github.com/adobe/spacecat-shared/packages/spacecat-shared-ims-client/#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@adobe/fetch": "4.1.11",
+    "@adobe/helix-universal": "5.0.8",
+    "@adobe/spacecat-shared-utils": "1.26.4"
+  },
+  "devDependencies": {
+    "chai": "5.1.2",
+    "chai-as-promised": "8.0.1",
+    "nock": "13.5.6",
+    "sinon": "19.0.2",
+    "sinon-chai": "4.0.0",
+    "typescript": "5.7.3"
+  }
+}

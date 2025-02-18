@@ -36,6 +36,7 @@ const IGNORED_PROFILE_PROPS = [
   'rtea',
   'user_id',
   'fg',
+  'aa_id',
 ];
 
 const loadConfig = (context) => {
