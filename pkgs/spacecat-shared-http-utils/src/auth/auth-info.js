@@ -23,12 +23,12 @@ export default class AuthInfo {
   }
 
   /**
-   * Set the ACLs.
-   * @param {Object} acls - The ACLs
+   * Set the information for Role Based Access Control.
+   * @param {Object} rbac - The RBAC information
    * @returns {AuthInfo} The auth info object
    */
-  withACLs(acls) {
-    this.acls = acls;
+  withRBAC(rbac) {
+    this.rbac = rbac;
     return this;
   }
 
@@ -82,7 +82,7 @@ export default class AuthInfo {
     return this;
   }
 
-  getACLs() { return this.acls; }
+  getRBAC() { return this.rbac; }
 
   getScopes() { return this.scopes; }
 

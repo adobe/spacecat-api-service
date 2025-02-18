@@ -133,6 +133,8 @@ const getAcls = async (profile) => {
   const dbClient = new DynamoDBClient();
 
   const acls = [];
+  // Generally there is only 1 organization, but the API returns an array so
+  // we'll iterate over it and use all the ACLs we find.
   profile.organizations.forEach(async (orgid) => {
     const imsOrgId = orgid.split('@')[0];
     const roles = await getDBRoles(dbClient, { imsUserId, imsOrgId });
@@ -231,7 +233,7 @@ export default class AdobeImsHandler extends AbstractHandler {
         .withType(this.name)
         .withAuthenticated(true)
         .withProfile(profile)
-        .withACLs(acls);
+        .withRBAC(acls);
     } catch (e) {
       this.log(`Failed to validate token: ${e.message}`, 'error');
       console.log('§§§ ims error:', e);
