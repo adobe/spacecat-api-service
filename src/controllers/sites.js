@@ -264,6 +264,11 @@ function SitesController(dataAccess, log, env) {
       updates = true;
     }
 
+    if (requestBody.name !== site.getName()) {
+      site.setName(requestBody.name);
+      updates = true;
+    }
+
     if (requestBody.gitHubURL !== site.getGitHubURL() && validateRepoUrl(requestBody.gitHubURL)) {
       site.setGitHubURL(requestBody.gitHubURL);
       updates = true;
@@ -272,6 +277,12 @@ function SitesController(dataAccess, log, env) {
     if (requestBody.deliveryType !== site.getDeliveryType()
         && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
       site.setDeliveryType(requestBody.deliveryType);
+      updates = true;
+    }
+
+    if (isObject(requestBody.deliveryConfig)
+        && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
+      site.setDeliveryConfig(requestBody.deliveryConfig);
       updates = true;
     }
 
