@@ -31,7 +31,7 @@
     "target": "aws",
     "name": "spacecat-services/api-service@${version}",
     "memory": 4096,
-    "awsRole!important": "arn:aws:iam::682033462621:role/spacecat-role-lambda-generic",
+    "awsRole!important": "arn:aws:iam::${env.AWS_ACCOUNT_ID}:role/spacecat-role-lambda-generic",
     "testUrl": "/_status_check/healthcheck.json",
     "awsAttachAuthorizer": "spacecat-token-authorizer",
     "dev": {
