@@ -275,5 +275,30 @@ describe('AddSiteCommand', () => {
       });
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
+
+    it('adds a new site with explicit delivery type arg (aem_ams)', async () => {
+      const baseURL = 'https://example.com';
+      nock(baseURL)
+        .get('/')
+        .replyWithError('rainy weather');
+
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Site.create.resolves({
+        getBaseURL: () => baseURL,
+        getDeliveryType: () => 'aem_ams',
+        getIsLive: () => true,
+      });
+
+      const args = ['example.com', 'aem_ams'];
+      const command = AddSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com', deliveryType: 'aem_ams', isLive: false, organizationId: 'default',
+      });
+      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
+    });
   });
 });

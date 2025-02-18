@@ -14,6 +14,26 @@ DeliveryType:
     - 'aem_cs'
     - 'other'
   example: 'aem_edge'
+DeliveryConfig:
+  type: object
+  properties:
+    programId:
+      description: The program ID
+      type: string
+      example: '12652'
+    environmentId:
+      description: The environment ID
+      type: string
+      example: '16854'
+    authorURL:
+      description: The author URL
+      type: string
+      format: url
+      example: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
+    siteId:
+      description: The site ID
+      type: string
+      example: '1234'
 AuditType:
   type: string
   enum:
@@ -269,6 +289,9 @@ Site:
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
+    deliveryConfig:
+        description: The delivery configuration of the site
+        $ref: '#/DeliveryConfig'
     gitHubURL:
       description: The optional GitHub URL of the site
       $ref: '#/URL'
@@ -291,6 +314,11 @@ Site:
     baseURL: 'https://example-site.com'
     name: 'Example Site'
     deliveryType: 'aem_edge'
+    deliveryConfig:
+      programId: '12652'
+      environmentId: '16854'
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
+      siteId: '1234'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
     config:
@@ -411,6 +439,9 @@ SiteUpdate:
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
+    deliveryConfig:
+        description: The delivery configuration of the site
+        $ref: '#/DeliveryConfig'
     goLiveDate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
@@ -422,6 +453,11 @@ SiteUpdate:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
     name: 'New Site'
+    deliveryConfig:
+      programId: '12652'
+      environmentId: '16854'
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
+      siteId: '1234'
     goLiveDate: '2024-01-20T10:00:00Z'
 UpdateHandlerTypeConfig:
   type: object
