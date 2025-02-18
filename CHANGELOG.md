@@ -1,3 +1,10 @@
+# [1.92.0](https://github.com/adobe/spacecat-api-service/compare/v1.91.3...v1.92.0) (2025-02-18)
+
+
+### Features
+
+* update site name in site entity ([#752](https://github.com/adobe/spacecat-api-service/issues/752)) ([06fd024](https://github.com/adobe/spacecat-api-service/commit/06fd024aec8d895f78e8928eb8aaa9c3568331d6))
+
 ## [1.91.3](https://github.com/adobe/spacecat-api-service/compare/v1.91.2...v1.91.3) (2025-02-18)
 
 
