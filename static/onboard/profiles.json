@@ -1,0 +1,29 @@
+{
+	"default":  {
+		"audits": [
+			"backlinks",
+			"cwv",
+			"experimentation-opportunities",
+			"internal-links",
+			"metatags",
+			"sitemap",
+			"structured-data"
+		],
+		"imports": {},
+		"config": {},
+		"integrations": {}
+	},
+	"summit":  {
+		"audits": [
+			"backlinks",
+			"cwv",
+			"internal-links",
+			"metatags",
+			"alt-text",
+			"high-organic-traffic-low-ctr"
+		],
+		"imports": {},
+		"config": {},
+		"integrations": {}
+	}	
+}

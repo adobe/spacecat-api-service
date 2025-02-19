@@ -12,8 +12,10 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import * as chai from 'chai';
 import sinon from 'sinon';
+import fs from 'fs/promises';
+import chaiAsPromised from 'chai-as-promised';
 
 import { Blocks } from 'slack-block-builder';
 import {
@@ -22,7 +24,13 @@ import {
   getSlackContext,
   postErrorMessage, sendFile,
   sendMessageBlocks,
+  parseFlags,
+  loadProfileConfig,
 } from '../../../src/utils/slack/base.js';
+import { DispatchActionOnCharacterEntered } from 'slack-block-builder/dist/internal/index.js';
+
+chai.use(chaiAsPromised);
+const { expect } = chai;
 
 describe('Base Slack Utils', () => {
   describe('extractBaseURLFromInput', () => {
@@ -114,6 +122,46 @@ describe('Base Slack Utils', () => {
       expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html> www.acme.com', false)).to.equal(expected);
       expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html/ extra acme.com/', false)).to.equal(`${expected}/`);
       expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html/> extra acme.com/ <acme.com/> <http://acme.com|acme.com>', false)).to.equal(`${expected}/`);
+    });
+  });
+
+  describe('parseFlags', () => {
+    it('should parse flags correctly', () => {
+      const input = '--verbose --profile=default';
+      const result = parseFlags(input);
+
+      expect(result).to.deep.equal({
+        verbose: true,
+        profile: 'default',
+      });
+    });
+
+    it('should handle single-word flags', () => {
+      const input = '--debug';
+      const result = parseFlags(input);
+
+      expect(result).to.deep.equal({ debug: true });
+    });
+
+    it('should handle flags with spaces in values', () => {
+      const input = '--name="John Doe"';
+      const result = parseFlags(input);
+
+      expect(result).to.deep.equal({ name: 'John Doe' });
+    });
+
+    it('should return an empty object for empty input', () => {
+      expect(parseFlags('')).to.deep.equal({});
+    });
+
+    it('should handle multiple flags', () => {
+      const input = '--profile=summit --verbose';
+      const result = parseFlags(input);
+
+      expect(result).to.deep.equal({
+        profile: 'summit',
+        verbose: true
+      });
     });
   });
 
@@ -212,6 +260,95 @@ describe('Base Slack Utils', () => {
         const slackContext = await getSlackContext({ url: 'some-url', log: console });
         expect(slackContext).to.eql({ channel: FALLBACK_SLACK_CHANNEL });
       });
+    });
+  });
+
+  describe('loadProfileConfig', () => {
+    let fsStub;
+
+    beforeEach(() => {
+      fsStub = sinon.stub(fs, 'readFile');
+    });
+
+    afterEach(() => {
+      fsStub.restore();
+    });
+
+    it('should load the correct profile configuration', async () => {
+      const mockProfileData = JSON.stringify({
+        default:  {
+          audits: [
+            "foo",
+            "bar"
+          ],
+          imports: {},
+          config: {},
+          integrations: {},
+        },
+        other:  {
+          audits: [
+            "audit1",
+            "audit2",
+          ],
+          imports: {},
+          config: {},
+          integrations: {},
+        }
+      });
+      fsStub.resolves(mockProfileData);
+
+      const result = await loadProfileConfig('default');
+
+      expect(result).to.deep.equal({
+        audits: [
+          "foo",
+          "bar"
+        ],
+        imports: {},
+        config: {},
+        integrations: {},
+      });
+    });
+
+    it('should throw an error if profile does not exist', async () => {
+      const mockProfileData = JSON.stringify({
+        default:  {
+          audits: [
+            "foo",
+            "bar"
+          ],
+          imports: {},
+          config: {},
+          integrations: {},
+        },
+        other:  {
+          audits: [
+            "audit1",
+            "audit2",
+          ],
+          imports: {},
+          config: {},
+          integrations: {},
+        }
+      });
+      fsStub.resolves(mockProfileData);
+
+      await expect(loadProfileConfig('nonexistent'))
+        .to.be.rejectedWith('Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in config/profile.json');
+    });
+
+    it('should throw an error if JSON file is invalid', async () => {
+      fsStub.resolves('INVALID_JSON');
+
+      await expect(loadProfileConfig('default'))
+        .to.be.rejectedWith(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`)
+    });
+
+    it('should throw an error if the file cannot be read', async () => {
+      fsStub.rejects(new Error('File not found'));
+
+      await expect(loadProfileConfig('default'))
+        .to.be.rejectedWith('Failed to load profile configuration for "default": File not found');
     });
   });
 });

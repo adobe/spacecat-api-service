@@ -16,6 +16,8 @@
 import {
   extractURLFromSlackInput,
   postErrorMessage,
+  parseFlags,
+  loadProfileConfig,
 } from '../../../utils/slack/base.js';
 
 import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
@@ -71,6 +73,9 @@ function OnboardCommand(context) {
 
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
+      const flags = parseFlags(args.text || "");
+      const profileKey = flags.profile || "default";
+
       if (!baseURL) {
         await say(':warning: Please provide a valid site base URL.');
         return;
@@ -88,6 +93,8 @@ function OnboardCommand(context) {
           baseURL, deliveryType, isLive, organizationId: defaultOrgId,
         });
       }
+
+      const profile = await loadProfileConfig(profileKey);
 
       const configuration = await Configuration.findLatest();
 
