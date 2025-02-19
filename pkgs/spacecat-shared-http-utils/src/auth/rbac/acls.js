@@ -65,7 +65,7 @@ async function getDBRoles(dbClient, { imsUserId, imsOrgId, apiKey }) {
 
   if (apiKey) {
     idents[':apikey'] = {
-      S: `apiKey:${apiKey}`,
+      S: `apiKeyID:${apiKey}`,
     };
   }
 
