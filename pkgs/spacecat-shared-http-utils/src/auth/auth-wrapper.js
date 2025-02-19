@@ -13,6 +13,7 @@
 import { Response } from '@adobe/fetch';
 
 import { isObject } from '@adobe/spacecat-shared-utils';
+import { createDataAccess } from '@adobe/spacecat-shared-data-access/src/index.js';
 import AuthenticationManager from './authentication-manager.js';
 import { checkScopes } from './check-scopes.js';
 
@@ -52,6 +53,18 @@ export function authWrapper(fn, opts = {}) {
     }
 
     try {
+      // Data access for the purpose of authorization
+      console.log('§§§ createDataAccess for auth');
+      context.dataAccess = createDataAccess({
+        tableNameData: 'spacecat-services-data-dev', // TODO pick up from somewhere
+        aclCtx: {
+          aclEntities: {
+            model: [],
+          },
+        },
+      }, log);
+      console.log('§§§ data access for auth', JSON.stringify(context.dataAccess));
+
       const authInfo = await authenticationManager.authenticate(request, context);
 
       // Add a helper function to the context for checking scoped API keys.
@@ -61,8 +74,11 @@ export function authWrapper(fn, opts = {}) {
           checkScopes: (scopes) => checkScopes(scopes, authInfo, log),
         };
       }
-    } catch {
+    } catch (e) {
+      console.log('§§§ Auth Error:', e);
       return new Response('Unauthorized', { status: 401 });
+    } finally {
+      delete context.dataAccess;
     }
 
     return fn(request, context);
