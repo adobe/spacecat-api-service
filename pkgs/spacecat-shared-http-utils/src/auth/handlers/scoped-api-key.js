@@ -68,7 +68,7 @@ export default class ScopedApiKeyHandler extends AbstractHandler {
     }
 
     const acls = await getAcls({
-      userId: apiKeyEntity.getImsUserId(),
+      imsUserId: apiKeyEntity.getImsUserId(),
       imsOrgs: [apiKeyEntity.getImsOrgId()],
       apiKey: apiKeyEntity.getApiKeyId(),
     });

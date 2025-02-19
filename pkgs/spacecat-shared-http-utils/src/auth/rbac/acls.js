@@ -11,6 +11,7 @@
  */
 
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
+import ims from '../handlers/config/ims';
 
 async function getDBAcls(dynamoClient, orgId, roles) {
   const input = {
@@ -65,11 +66,13 @@ async function getDBRoles(dbClient, {
     },
   };
 
-  for (const [org, groups] of Object.entries(imsGroups)) {
-    for (const group of groups) {
-      idents[`:grp${group}`] = {
-        S: `imsOrgID/groupID:${org}/${group}`,
-      };
+  if (imsGroups) {
+    for (const [org, groups] of Object.entries(imsGroups)) {
+      for (const group of groups) {
+        idents[`:grp${group}`] = {
+          S: `imsOrgID/groupID:${org}/${group}`,
+        };
+      }
     }
   }
 
@@ -105,9 +108,11 @@ async function getDBRoles(dbClient, {
 }
 
 export default async function getAcls({
-  userId: imsUserId, imsOrgs, imsGroups, apiKey,
+  imsUserId, imsOrgs, imsGroups, apiKey,
 }) {
-  console.log('§§§ getAcls input:', JSON.stringify({ userId: imsUserId, imsOrgs, apiKey }));
+  console.log('§§§ getAcls input:', JSON.stringify({
+    imsUserId, imsOrgs, imsGroups, apiKey,
+  }));
   const dbClient = new DynamoDBClient();
 
   const acls = [];
