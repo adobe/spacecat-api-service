@@ -63,7 +63,7 @@ export function authWrapper(fn, opts = {}) {
           },
         },
       }, log);
-      console.log('§§§ data access for auth', JSON.stringify(context.dataAccess));
+      console.log('§§§ data access for auth set');
 
       const authInfo = await authenticationManager.authenticate(request, context);
 
