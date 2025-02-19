@@ -90,13 +90,18 @@ async function getDBRoles(dbClient, { imsUserId, imsOrgId, apiKey }) {
     TableName: 'spacecat-services-roles-dev4',
   };
 
-  console.log('§§§ Get roles input:', JSON.stringify(input));
-  const command = new QueryCommand(input);
-  const resp = await dbClient.send(command);
-  console.log('§§§ DynamoDB getRoles response:', JSON.stringify(resp));
+  try {
+    console.log('§§§ Get roles input:', JSON.stringify(input));
+    const command = new QueryCommand(input);
+    const resp = await dbClient.send(command);
+    console.log('§§§ DynamoDB getRoles response:', JSON.stringify(resp));
 
-  const roles = resp.Items.flatMap((item) => item.roles.SS);
-  return new Set(roles);
+    const roles = resp.Items.flatMap((item) => item.roles.SS);
+    return new Set(roles);
+  } catch (e) {
+    console.log('§§§ Error DynamoDB getRoles:', e);
+    return new Set();
+  }
 }
 
 export default async function getAcls({ userId, imsOrgs, apiKey }) {
