@@ -1,3 +1,10 @@
+# [1.93.0](https://github.com/adobe/spacecat-api-service/compare/v1.92.5...v1.93.0) (2025-02-19)
+
+
+### Features
+
+* **sites-28811:** support xwalk in spacecat-api-service ([#759](https://github.com/adobe/spacecat-api-service/issues/759)) ([7098cf1](https://github.com/adobe/spacecat-api-service/commit/7098cf1c02b7254f45592a4257ff4b895f26dce8))
+
 ## [1.92.5](https://github.com/adobe/spacecat-api-service/compare/v1.92.4...v1.92.5) (2025-02-19)
 
 
