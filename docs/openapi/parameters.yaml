@@ -101,6 +101,7 @@ source:
     type: string
     enum:
       - 'ahrefs'
+      - 'google'
     example: 'ahrefs'
 geo:
   name: geo
@@ -119,6 +120,7 @@ metric:
     type: string
     enum:
       - 'organic-traffic'
+      - 'organic-keywords'
     example: 'organic-traffic'
 jobId:
   name: jobId
