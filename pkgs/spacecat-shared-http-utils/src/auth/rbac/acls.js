@@ -37,7 +37,7 @@ async function getDBAcls(dynamoClient, orgId, roles) {
     };
     i += 1;
   }
-  // input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
+  input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
 
   try {
     console.log('§§§ Get DBACLs input:', JSON.stringify(input));
