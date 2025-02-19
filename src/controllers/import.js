@@ -121,7 +121,7 @@ function ImportController(context) {
       if (!isNonEmptyObject(data.options.data)
         || !hasText(data.options.data.assetFolder)
         || !hasText(data.options.data.siteName)) {
-        throw new ErrorWithStatusCode('Missing option(s): { data: { assetFolder, siteName } } are required', 400);
+        throw new ErrorWithStatusCode('Missing option(s): { data: { assetFolder, siteName } } are required', STATUS_BAD_REQUEST);
       }
     }
 
