@@ -37,9 +37,9 @@ async function getDBAcls(dynamoClient, orgId, roles) {
     };
     i += 1;
   }
-  input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
+  // input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
 
-  console.log('§§§ Get ACLs input:', JSON.stringify(input));
+  console.log('§§§ Get DBACLs input:', JSON.stringify(input));
   const command = new QueryCommand(input);
   const resp = await dynamoClient.send(command);
   console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
