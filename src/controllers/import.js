@@ -16,7 +16,8 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  isIsoDate, isObject, isString, isValidUrl,
+  hasText,
+  isIsoDate, isNonEmptyObject, isObject, isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import psl from 'psl';
 import { ImportJob as ImportJobModel } from '@adobe/spacecat-shared-data-access';
@@ -101,21 +102,25 @@ function ImportController(context) {
       throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
     }
 
-    if (data.options?.type && !['doc', 'xwalk'].includes(data.options.type)) {
-      throw new ErrorWithStatusCode('Invalid request: type must be either "doc" or "xwalk"', STATUS_BAD_REQUEST);
+    const types = Object.values(ImportJobModel.ImportOptionTypes);
+    // the type property is optional for backwards compatibility, if it is provided it must be valid
+    if (data.options?.type && !types.includes(data.options.type)) {
+      throw new ErrorWithStatusCode(`Invalid request: type must be either ${types.join(' or ')}`, STATUS_BAD_REQUEST);
     }
 
-    if (data.options?.type === 'xwalk') {
-      if (!isString(data.models)) {
+    if (data.options?.type === ImportJobModel.ImportOptionTypes.XWALK) {
+      if (!hasText(data.models)) {
         throw new ErrorWithStatusCode('Invalid request: models must be an string', STATUS_BAD_REQUEST);
       }
-      if (!isString(data.filters)) {
+      if (!hasText(data.filters)) {
         throw new ErrorWithStatusCode('Invalid request: filters must be an string', STATUS_BAD_REQUEST);
       }
-      if (!isString(data.definitions)) {
+      if (!hasText(data.definitions)) {
         throw new ErrorWithStatusCode('Invalid request: definitions must be an string', STATUS_BAD_REQUEST);
       }
-      if (!data.options.data || !data.options.data.assetFolder || !data.options.data.siteName) {
+      if (!isNonEmptyObject(data.options.data)
+        || !hasText(data.options.data.assetFolder)
+        || !hasText(data.options.data.siteName)) {
         throw new ErrorWithStatusCode('Missing option(s): { data: { assetFolder, siteName } } are required', 400);
       }
     }

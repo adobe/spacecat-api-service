@@ -150,9 +150,9 @@ function ImportSupervisor(services, config) {
     const options = importJob.getOptions();
     let processingType;
 
-    if (options?.type === undefined || options.type === 'doc') {
+    if (options?.type === undefined || options.type === ImportJobModel.ImportOptionTypes.DOC) {
       processingType = 'import';
-    } else if (options.type === 'xwalk') {
+    } else if (options.type === ImportJobModel.ImportOptionTypes.XWALK) {
       processingType = 'import-xwalk';
     }
 
@@ -236,7 +236,7 @@ function ImportSupervisor(services, config) {
     }
 
     // if the job type is 'xwalk', then we need to write the 3 files to S3
-    if (options?.type === 'xwalk') {
+    if (options?.type === ImportJobModel.ImportOptionTypes.XWALK) {
       log.info('Writing component models, filters, and definitions to S3 for jobId: ', newImportJob.getId());
       await writeFileToS3('component-models.json', newImportJob.getId(), models);
       await writeFileToS3('component-filters.json', newImportJob.getId(), filters);
