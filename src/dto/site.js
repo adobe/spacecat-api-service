@@ -25,6 +25,7 @@ export const SiteDto = {
    * @returns {{
    * id: string,
    * baseURL, gitHubURL: string,
+   * name: string,
    * gitHubURL: string,
    * organizationId: string,
    * isLive: boolean,
@@ -35,8 +36,10 @@ export const SiteDto = {
   toJSON: (site, audit) => ({
     id: site.getId(),
     baseURL: site.getBaseURL(),
+    name: site.getName(),
     hlxConfig: site.getHlxConfig(),
     deliveryType: site.getDeliveryType(),
+    deliveryConfig: site.getDeliveryConfig(),
     gitHubURL: site.getGitHubURL(),
     organizationId: site.getOrganizationId(),
     isLive: site.getIsLive(),

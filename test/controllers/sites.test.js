@@ -43,7 +43,7 @@ describe('Sites Controller', () => {
 
   const sites = [
     {
-      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', deliveryConfig: {}, config: Config({}), hlxConfig: {},
     },
     {
       siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', config: Config({}), hlxConfig: {},
@@ -56,12 +56,14 @@ describe('Sites Controller', () => {
             indexes: {},
             schema: {
               attributes: {
+                name: { type: 'string', name: 'name', get: (value) => value },
                 config: { type: 'any', name: 'config', get: (value) => Config(value) },
                 deliveryType: { type: 'string', name: 'deliveryType', get: (value) => value },
                 gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
                 isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
                 organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
                 hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
+                deliveryConfig: { type: 'any', name: 'deliveryConfig', get: (value) => value },
               },
             },
           },
@@ -226,6 +228,12 @@ describe('Sites Controller', () => {
         organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
         isLive: false,
         deliveryType: 'other',
+        deliveryConfig: {
+          programId: '12652',
+          environmentId: '16854',
+          authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+          siteId: '1234',
+        },
         gitHubURL: 'https://github.com/blah/bluh',
         config: {},
         hlxConfig: {
@@ -243,6 +251,12 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('deliveryType', 'other');
     expect(updatedSite).to.have.property('gitHubURL', 'https://github.com/blah/bluh');
     expect(updatedSite.hlxConfig).to.deep.equal({ field: true });
+    expect(updatedSite.deliveryConfig).to.deep.equal({
+      programId: '12652',
+      environmentId: '16854',
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+      siteId: '1234',
+    });
   });
 
   it('returns bad request when updating a site if id not provided', async () => {
@@ -1002,5 +1016,23 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('updates a site name', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        name: 'new-name',
+      },
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('name', 'new-name');
   });
 });
