@@ -39,26 +39,23 @@ async function getDBAcls(dynamoClient, orgId, roles) {
   }
   input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
 
-  try {
-    console.log('§§§ Get DBACLs input:', JSON.stringify(input));
-    const command = new QueryCommand(input);
-    const resp = await dynamoClient.send(command);
-    console.log('§§§ DynamoDB Get DBACLs response:', JSON.stringify(resp));
+  console.log('§§§ Get DBACLs input:', JSON.stringify(input));
+  const command = new QueryCommand(input);
+  const resp = await dynamoClient.send(command);
+  console.log('§§§ DynamoDB Get DBACLs response:', JSON.stringify(resp));
 
-    return resp.Items.map((it) => ({
-      role: it.role.S,
-      acl: it.acl.L.map((a) => ({
-        path: a.M.path.S,
-        actions: a.M.actions.SS,
-      })),
-    }));
-  } catch (e) {
-    console.log('§§§ Error getting DBACLs:', e);
-    return [];
-  }
+  return resp.Items.map((it) => ({
+    role: it.role.S,
+    acl: it.acl.L.map((a) => ({
+      path: a.M.path.S,
+      actions: a.M.actions.SS,
+    })),
+  }));
 }
 
-async function getDBRoles(dbClient, { imsUserId, imsOrgId, apiKey }) {
+async function getDBRoles(dbClient, {
+  imsUserId, imsOrgId, imsGroups, apiKey,
+}) {
   const idents = {
     ':userident': {
       S: `imsID:${imsUserId}`,
@@ -67,6 +64,14 @@ async function getDBRoles(dbClient, { imsUserId, imsOrgId, apiKey }) {
       S: `imsOrgID:${imsOrgId}`,
     },
   };
+
+  for (const [org, groups] of Object.entries(imsGroups)) {
+    for (const group of groups) {
+      idents[`:grp${group}`] = {
+        S: `imsOrgID/groupID:${org}/${group}`,
+      };
+    }
+  }
 
   if (apiKey) {
     idents[':apikey'] = {
@@ -90,22 +95,19 @@ async function getDBRoles(dbClient, { imsUserId, imsOrgId, apiKey }) {
     TableName: 'spacecat-services-roles-dev4',
   };
 
-  try {
-    console.log('§§§ Get roles input:', JSON.stringify(input));
-    const command = new QueryCommand(input);
-    const resp = await dbClient.send(command);
-    console.log('§§§ DynamoDB getRoles response:', JSON.stringify(resp));
+  console.log('§§§ Get roles input:', JSON.stringify(input));
+  const command = new QueryCommand(input);
+  const resp = await dbClient.send(command);
+  console.log('§§§ DynamoDB getRoles response:', JSON.stringify(resp));
 
-    const roles = resp.Items.flatMap((item) => item.roles.SS);
-    return new Set(roles);
-  } catch (e) {
-    console.log('§§§ Error DynamoDB getRoles:', e);
-    return new Set();
-  }
+  const roles = resp.Items.flatMap((item) => item.roles.SS);
+  return new Set(roles);
 }
 
-export default async function getAcls({ userId, imsOrgs, apiKey }) {
-  console.log('§§§ getAcls input:', JSON.stringify({ userId, imsOrgs, apiKey }));
+export default async function getAcls({
+  userId: imsUserId, imsOrgs, imsGroups, apiKey,
+}) {
+  console.log('§§§ getAcls input:', JSON.stringify({ userId: imsUserId, imsOrgs, apiKey }));
   const dbClient = new DynamoDBClient();
 
   const acls = [];
@@ -114,7 +116,9 @@ export default async function getAcls({ userId, imsOrgs, apiKey }) {
   for (const orgid of imsOrgs) {
     const imsOrgId = orgid.split('@')[0];
     // eslint-disable-next-line no-await-in-loop
-    const roles = await getDBRoles(dbClient, { imsUserId: userId, imsOrgId, apiKey });
+    const roles = await getDBRoles(dbClient, {
+      imsUserId, imsOrgId, imsGroups, apiKey,
+    });
     if (roles === undefined || roles.size === 0) {
       // eslint-disable-next-line no-continue
       continue;

@@ -67,13 +67,11 @@ export default class ScopedApiKeyHandler extends AbstractHandler {
       return authInfo.withReason('API key has been revoked');
     }
 
-    console.log('§§§ About to call getAcls()');
     const acls = await getAcls({
       userId: apiKeyEntity.getImsUserId(),
       imsOrgs: [apiKeyEntity.getImsOrgId()],
       apiKey: apiKeyEntity.getApiKeyId(),
     });
-    console.log('§§§ Done calling getAcls()');
 
     // API key is valid: return auth info with scope details from the API key entity
     return authInfo
