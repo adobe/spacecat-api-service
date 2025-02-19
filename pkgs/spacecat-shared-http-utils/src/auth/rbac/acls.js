@@ -53,7 +53,7 @@ async function getDBAcls(dynamoClient, orgId, roles) {
   }));
 }
 
-async function getDBRoles(dbClient, {
+export async function getDBRoles(dbClient, {
   imsUserId, imsOrgId, imsGroups, apiKey,
 }) {
   const idents = {
@@ -67,10 +67,17 @@ async function getDBRoles(dbClient, {
 
   if (imsGroups) {
     for (const [org, groups] of Object.entries(imsGroups)) {
-      for (const group of groups) {
-        idents[`:grp${group}`] = {
-          S: `imsOrgID/groupID:${org}/${group}`,
+      if (!org === imsOrgId) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+
+      let grpCnt = 0;
+      for (const group of groups.groups) {
+        idents[`:grp${grpCnt}`] = {
+          S: `imsOrgID/groupID:${org}/${group.groupid}`,
         };
+        grpCnt += 1;
       }
     }
   }
