@@ -67,7 +67,7 @@ export async function getDBRoles(dbClient, {
 
   if (imsGroups) {
     for (const [org, groups] of Object.entries(imsGroups)) {
-      if (!org === imsOrgId) {
+      if (!(org.split('@')[0] === imsOrgId)) {
         // eslint-disable-next-line no-continue
         continue;
       }
@@ -75,7 +75,7 @@ export async function getDBRoles(dbClient, {
       let grpCnt = 0;
       for (const group of groups.groups) {
         idents[`:grp${grpCnt}`] = {
-          S: `imsOrgID/groupID:${org}/${group.groupid}`,
+          S: `imsOrgID/groupID:${imsOrgId}/${group.groupid}`,
         };
         grpCnt += 1;
       }
