@@ -11,7 +11,6 @@
  */
 
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
-import ims from '../handlers/config/ims';
 
 async function getDBAcls(dynamoClient, orgId, roles) {
   const input = {
