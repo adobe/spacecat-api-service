@@ -39,18 +39,23 @@ async function getDBAcls(dynamoClient, orgId, roles) {
   }
   // input.FilterExpression = `#role IN (${feRoles.join(', ')})`;
 
-  console.log('§§§ Get DBACLs input:', JSON.stringify(input));
-  const command = new QueryCommand(input);
-  const resp = await dynamoClient.send(command);
-  console.log('§§§ DynamoDB getAcls response:', JSON.stringify(resp));
+  try {
+    console.log('§§§ Get DBACLs input:', JSON.stringify(input));
+    const command = new QueryCommand(input);
+    const resp = await dynamoClient.send(command);
+    console.log('§§§ DynamoDB Get DBACLs response:', JSON.stringify(resp));
 
-  return resp.Items.map((it) => ({
-    role: it.role.S,
-    acl: it.acl.L.map((a) => ({
-      path: a.M.path.S,
-      actions: a.M.actions.SS,
-    })),
-  }));
+    return resp.Items.map((it) => ({
+      role: it.role.S,
+      acl: it.acl.L.map((a) => ({
+        path: a.M.path.S,
+        actions: a.M.actions.SS,
+      })),
+    }));
+  } catch (e) {
+    console.log('§§§ Error getting DBACLs:', e);
+    return [];
+  }
 }
 
 async function getDBRoles(dbClient, { imsUserId, imsOrgId, apiKey }) {
