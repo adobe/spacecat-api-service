@@ -111,16 +111,19 @@ export default async function getAcls({ userId, imsOrgs, apiKey }) {
   const acls = [];
   // Generally there is only 1 organization, but the API returns an array so
   // we'll iterate over it and use all the ACLs we find.
-  await imsOrgs.forEach(async (orgid) => {
+  for (const orgid of imsOrgs) {
     const imsOrgId = orgid.split('@')[0];
+    // eslint-disable-next-line no-await-in-loop
     const roles = await getDBRoles(dbClient, { imsUserId: userId, imsOrgId, apiKey });
     if (roles === undefined || roles.size === 0) {
-      return;
+      // eslint-disable-next-line no-continue
+      continue;
     }
 
+    // eslint-disable-next-line no-await-in-loop
     const aclList = await getDBAcls(dbClient, imsOrgId, roles);
     acls.push(...aclList);
-  });
+  }
 
   return {
     acls,
