@@ -305,8 +305,10 @@ const parseFlags = (text) => {
   const regex = /--([\w-]+)(?:[=\s](".*?"|'.*?'|[^\s-][^\s]*))?/g;
   let match;
 
+  // eslint-disable-next-line no-cond-assign
   while ((match = regex.exec(text)) !== null) {
-    let [, key, value] = match;
+    const [, key] = match;
+    let [, , value] = match;
     if (value) {
       value = value.replace(/^['"]|['"]$/g, ''); // Remove surrounding quotes
     } else {

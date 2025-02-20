@@ -27,7 +27,6 @@ import {
   parseFlags,
   loadProfileConfig,
 } from '../../../src/utils/slack/base.js';
-import { DispatchActionOnCharacterEntered } from 'slack-block-builder/dist/internal/index.js';
 
 chai.use(chaiAsPromised);
 const { expect } = chai;
@@ -160,7 +159,7 @@ describe('Base Slack Utils', () => {
 
       expect(result).to.deep.equal({
         profile: 'summit',
-        verbose: true
+        verbose: true,
       });
     });
   });
@@ -276,27 +275,27 @@ describe('Base Slack Utils', () => {
 
     it('should load the correct profile configuration', async () => {
       const mockProfileData = JSON.stringify({
-        default:  {
+        default: {
           audits: [
-            "foo",
-            "bar"
+            'foo',
+            'bar',
           ],
           imports: {
-            "import-foo" : {},
-            "import-bar" : {}
+            'import-foo': {},
+            'import-bar': {},
           },
           config: {},
           integrations: {},
         },
-        other:  {
+        other: {
           audits: [
-            "audit1",
-            "audit2",
+            'audit1',
+            'audit2',
           ],
           imports: {},
           config: {},
           integrations: {},
-        }
+        },
       });
       fsStub.resolves(mockProfileData);
 
@@ -304,12 +303,12 @@ describe('Base Slack Utils', () => {
 
       expect(result).to.deep.equal({
         audits: [
-          "foo",
-          "bar"
+          'foo',
+          'bar',
         ],
         imports: {
-          "import-foo": {},
-          "import-bar": {},
+          'import-foo': {},
+          'import-bar': {},
         },
         config: {},
         integrations: {},
@@ -317,38 +316,38 @@ describe('Base Slack Utils', () => {
 
       expect(result.audits).to.deep.equal(
         [
-          "foo",
-          "bar"
-        ]
-      )
+          'foo',
+          'bar',
+        ],
+      );
       expect(result.imports).to.deep.equal(
         {
-          "import-foo": {},
-          "import-bar": {},
-        }
-      )
+          'import-foo': {},
+          'import-bar': {},
+        },
+      );
     });
 
     it('should throw an error if profile does not exist', async () => {
       const mockProfileData = JSON.stringify({
-        default:  {
+        default: {
           audits: [
-            "foo",
-            "bar"
+            'foo',
+            'bar',
           ],
           imports: {},
           config: {},
           integrations: {},
         },
-        other:  {
+        other: {
           audits: [
-            "audit1",
-            "audit2",
+            'audit1',
+            'audit2',
           ],
           imports: {},
           config: {},
           integrations: {},
-        }
+        },
       });
       fsStub.resolves(mockProfileData);
 
@@ -360,7 +359,8 @@ describe('Base Slack Utils', () => {
       fsStub.resolves('INVALID_JSON');
 
       await expect(loadProfileConfig('default'))
-        .to.be.rejectedWith(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`)
+      // eslint-disable-next-line quotes
+        .to.be.rejectedWith(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`);
     });
 
     it('should throw an error if the file cannot be read', async () => {

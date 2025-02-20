@@ -73,8 +73,8 @@ function OnboardCommand(context) {
 
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
-      const flags = parseFlags(args.text || "");
-      const profileKey = flags.profile || "default";
+      const flags = parseFlags(args.text || '');
+      const profileKey = flags.profile || 'default';
 
       if (!baseURL) {
         await say(':warning: Please provide a valid site base URL.');
@@ -110,7 +110,16 @@ function OnboardCommand(context) {
       }
 
       for (const importType of Object.keys(profile.imports)) {
-        await triggerImportRun(configuration, importType, site.getId(), undefined, undefined, slackContext, context);
+        // eslint-disable-next-line no-await-in-loop
+        await triggerImportRun(
+          configuration,
+          importType,
+          site.getId(),
+          undefined,
+          undefined,
+          slackContext,
+          context,
+        );
       }
 
       let message = `Success Studio onboard completed successfully for ${baseURL} :rocket:\n`;
