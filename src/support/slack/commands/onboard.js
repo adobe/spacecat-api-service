@@ -20,7 +20,7 @@ import {
   loadProfileConfig,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
+import { findDeliveryType, triggerAuditForSite, triggerImportRun } from '../../utils.js';
 
 import BaseCommand from './base.js';
 
@@ -98,15 +98,19 @@ function OnboardCommand(context) {
 
       const configuration = await Configuration.findLatest();
 
-      AUDITS.forEach((auditType) => {
+      profile.audits.forEach((auditType) => {
         configuration.enableHandlerForSite(auditType, site);
       });
 
       await configuration.save();
 
-      for (const auditType of AUDITS) {
+      for (const auditType of profile.audits) {
         // eslint-disable-next-line no-await-in-loop
         await triggerAuditForSite(site, auditType, slackContext, context);
+      }
+
+      for (const importType of Object.keys(profile.imports)) {
+        await triggerImportRun(configuration, importType, site.getId(), undefined, undefined, slackContext, context);
       }
 
       let message = `Success Studio onboard completed successfully for ${baseURL} :rocket:\n`;

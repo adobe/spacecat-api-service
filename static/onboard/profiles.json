@@ -20,9 +20,13 @@
 			"internal-links",
 			"metatags",
 			"alt-text",
-			"high-organic-traffic-low-ctr"
+			"high-organic-traffic-low-ctr",
+			"sitemap"
 		],
-		"imports": {},
+		"imports": {
+			"top-pages" : {},
+			"organic-keywords" : {}
+		},
 		"config": {},
 		"integrations": {}
 	}	

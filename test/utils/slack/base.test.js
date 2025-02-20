@@ -281,7 +281,10 @@ describe('Base Slack Utils', () => {
             "foo",
             "bar"
           ],
-          imports: {},
+          imports: {
+            "import-foo" : {},
+            "import-bar" : {}
+          },
           config: {},
           integrations: {},
         },
@@ -304,10 +307,26 @@ describe('Base Slack Utils', () => {
           "foo",
           "bar"
         ],
-        imports: {},
+        imports: {
+          "import-foo": {},
+          "import-bar": {},
+        },
         config: {},
         integrations: {},
       });
+
+      expect(result.audits).to.deep.equal(
+        [
+          "foo",
+          "bar"
+        ]
+      )
+      expect(result.imports).to.deep.equal(
+        {
+          "import-foo": {},
+          "import-bar": {},
+        }
+      )
     });
 
     it('should throw an error if profile does not exist', async () => {
