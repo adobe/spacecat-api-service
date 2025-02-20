@@ -77,10 +77,6 @@ ImsOrganizationId:
 ImsUserAccessToken:
   type: string
   example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
-EmailAddress:
-  type: string
-  format: email
-  example: 'user@example.com'
 SlackMentionConfig:
   type: object
   properties:
@@ -1555,8 +1551,6 @@ DocImportData:
   properties: {}
 XWalkImportData:
   title: "Xwalk Import"
-  type:
-    enum: ['xwalk']
   properties:
     siteName:
       type: string
