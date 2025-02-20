@@ -115,8 +115,8 @@ function OnboardCommand(context) {
           configuration,
           importType,
           site.getId(),
-          undefined,
-          undefined,
+          profile.imports[importType].startDate,
+          profile.imports[importType].endDate,
           slackContext,
           context,
         );
