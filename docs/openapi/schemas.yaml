@@ -2549,8 +2549,8 @@ Brand:
     createdAt:
       description: The date and time when the brand was created
       $ref: '#/DateTime'
-    modifiedAt:
-      description: The date and time when the brand was modified
+    updatedAt:
+      description: The date and time when the brand was last updated
       $ref: '#/DateTime'
 BrandList:
   type: array
