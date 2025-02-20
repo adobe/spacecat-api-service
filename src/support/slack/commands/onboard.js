@@ -75,6 +75,7 @@ function OnboardCommand(context) {
 
       const flags = parseFlags(args.text || '');
       const profileKey = flags.profile || 'default';
+      await say(`:gear: Applying profile ${profileKey}.`)
 
       if (!baseURL) {
         await say(':warning: Please provide a valid site base URL.');
