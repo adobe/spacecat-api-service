@@ -1,3 +1,15 @@
+# [1.93.0](https://github.com/adobe/spacecat-api-service/compare/v1.92.5...v1.93.0) (2025-02-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.8.1 ([#764](https://github.com/adobe/spacecat-api-service/issues/764)) ([cb96810](https://github.com/adobe/spacecat-api-service/commit/cb96810aa7ccbe859e4f3992efd71d1942a9e169))
+
+
+### Features
+
+* **sites-28811:** support xwalk in spacecat-api-service ([#759](https://github.com/adobe/spacecat-api-service/issues/759)) ([7098cf1](https://github.com/adobe/spacecat-api-service/commit/7098cf1c02b7254f45592a4257ff4b895f26dce8))
+
 # [1.93.0](https://github.com/adobe/spacecat-api-service/compare/v1.92.5...v1.93.0) (2025-02-19)
 
 
