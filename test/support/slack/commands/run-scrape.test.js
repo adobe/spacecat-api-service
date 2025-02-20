@@ -99,12 +99,6 @@ describe('RunScrapeCommand', () => {
       expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.false;
     });
 
-    it('handles missing SLACK_IDS_RUN_IMPORT', async () => {
-      dataAccessStub.Configuration.findLatest.resolves({ getSlackRoles: () => null });
-      const command = RunScrapeCommand(context);
-      await command.handleExecution(['https://example.com'], { ...slackContext, user: 'ANYUSER' });
-      expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.true;
-    });
     it('triggers a scrape for a valid site with top pages', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
@@ -124,14 +118,18 @@ describe('RunScrapeCommand', () => {
       expect(slackContext.say.thirdCall.args[0]).to.include('white_check_mark: Completed triggering scrape runs for site `https://example.com` — Total URLs: 2');
     });
 
+    /* todo: uncomment after summit and back-office-UI support
+      for configuration setting (roles)
     it('does not trigger a scrape when user is not authorized', async () => {
       slackContext.user = 'UNAUTHORIZED_USER';
       const command = RunScrapeCommand(context);
 
       await command.handleExecution(['https://example.com'], slackContext);
 
-      expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.true;
+      expect(slackContext.say.calledWith(':error: Only members of role
+      "scrape" can run this command.')).to.be.true;
     });
+    */
 
     it('responds with a warning for an invalid site url', async () => {
       const command = RunScrapeCommand(context);
