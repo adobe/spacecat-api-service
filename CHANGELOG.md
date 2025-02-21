@@ -1,3 +1,10 @@
+## [1.93.3](https://github.com/adobe/spacecat-api-service/compare/v1.93.2...v1.93.3) (2025-02-21)
+
+
+### Bug Fixes
+
+* range may be undefined ([#769](https://github.com/adobe/spacecat-api-service/issues/769)) ([7118a64](https://github.com/adobe/spacecat-api-service/commit/7118a64faf516763f7f0ff021999b8a481590742))
+
 ## [1.93.2](https://github.com/adobe/spacecat-api-service/compare/v1.93.1...v1.93.2) (2025-02-21)
 
 
