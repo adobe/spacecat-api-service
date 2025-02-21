@@ -2552,6 +2552,12 @@ Brand:
     updatedAt:
       description: The date and time when the brand was last updated
       $ref: '#/DateTime'
+  example:
+    id: "urn:aaid:sc:VA6C2:e64205e7-13ca-51e8-8b83-8d8ef1ebf911"
+    name: "Brand Foo Bar Example"
+    imsOrgId: "1234567890ABCDEF12345678@AdobeOrg"
+    createdAt: "2025-01-01T00:00:00Z"
+    updatedAt: "2025-02-01T00:00:00Z"
 BrandList:
   type: array
   items:
@@ -2592,3 +2598,38 @@ BrandGuidelines:
           type: array
           items:
             $ref: '#/BrandGuideline'
+      example:
+        toneOfVoice: [
+          {
+            "text": "Encourage Action"
+          },
+          {
+            "text": "Be optimistic"
+          }
+        ]
+        coreValues: [
+          {
+            "text": "Inspiring"
+          },
+          {
+            "text": "Human"
+          }
+        ]
+        guidelines: [
+          {
+            "text": "Use gender-neutral pronouns like 'they', 'them', 'theirs'"
+          },
+          {
+            "text": "Always use sentence case"
+          }
+        ]
+        restrictions: [
+          {
+            "text": "Don't use rhetorical questions"
+          }
+        ]
+        additionalGuidelines: [
+          {
+            "text": "Always use sentence case"
+          }
+        ]
