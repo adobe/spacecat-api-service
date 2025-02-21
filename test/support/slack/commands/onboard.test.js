@@ -91,12 +91,12 @@ describe('OnboardCommand', () => {
         getIsLive: () => true,
       });
 
-      const args = ['example.com', '1234abcd@AdobeOrg'];
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('1234abcd@AdobeOrg')).to.be.true;
+      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
       expect(dataAccessStub.Organization.create.calledWith(context)).to.be.true;
       expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(dataAccessStub.Site.create).to.have.been.calledWith({
@@ -109,7 +109,7 @@ describe('OnboardCommand', () => {
     });
 
     it('warns when an invalid site base URL is provided', async () => {
-      const args = ['', '1234abcd@AdobeOrg'];
+      const args = ['', '000000000000000000000000@AdobeOrg'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
@@ -129,12 +129,12 @@ describe('OnboardCommand', () => {
     it('does not create a new organization if one already exists for the given IMS Org ID', async () => {
       dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
 
-      const args = ['example.com', '1234abcd@AdobeOrg'];
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('1234abcd@AdobeOrg')).to.be.true;
+      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
       expect(dataAccessStub.Organization.create.notCalled).to.be.true;
     });
 
@@ -142,7 +142,7 @@ describe('OnboardCommand', () => {
       dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
       dataAccessStub.Site.findByBaseURL.resolves({});
 
-      const args = ['example.com', '1234abcd@AdobeOrg'];
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
@@ -154,12 +154,12 @@ describe('OnboardCommand', () => {
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
       dataAccessStub.Organization.create.rejects(new Error('failed to create organization'));
 
-      const args = ['example.com', '1234abcd@AdobeOrg'];
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('1234abcd@AdobeOrg')).to.be.true;
+      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
       expect(dataAccessStub.Organization.create.calledWith(context)).to.be.true;
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to create organization')).to.be.true;
     });
@@ -170,7 +170,7 @@ describe('OnboardCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.rejects(new Error('failed to add the site'));
 
-      const args = ['example.com', '1234abcd@AdobeOrg'];
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);

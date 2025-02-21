@@ -12,7 +12,8 @@
 
 // todo: prototype - untested
 /* c8 ignore start */
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
+import { hasText } from '@adobe/spacecat-shared-utils';
 
 import {
   extractURLFromSlackInput,
@@ -77,12 +78,12 @@ function OnboardCommand(context) {
       const profileKey = flags.profile || 'default';
       await say(`:gear: Applying profile ${profileKey}.`);
 
-      if (!baseURL) {
+      if (!hasText(baseURL)) {
         await say(':warning: Please provide a valid site base URL.');
         return;
       }
 
-      if (!imsOrgID) {
+      if (!hasText(imsOrgID) || !OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
         await say(':warning: Please provide a valid IMS Org ID.');
         return;
       }
