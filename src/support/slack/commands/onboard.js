@@ -18,7 +18,6 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import {
   extractURLFromSlackInput,
   postErrorMessage,
-  parseFlags,
   loadProfileConfig,
 } from '../../../utils/slack/base.js';
 
@@ -71,12 +70,10 @@ function OnboardCommand(context) {
     const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = context.env;
 
     try {
-      const [baseURLInput, imsOrgID] = args;
+      const [baseURLInput, imsOrgID, profileName = 'default'] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
-      const flags = parseFlags(args.text || '');
-      const profileKey = flags.profile || 'default';
-      await say(`:gear: Applying profile ${profileKey}.`);
+      await say(`:gear: Applying ${profileName} profile.`);
 
       if (!hasText(baseURL)) {
         await say(':warning: Please provide a valid site base URL.');
@@ -105,7 +102,7 @@ function OnboardCommand(context) {
         });
       }
 
-      const profile = await loadProfileConfig(profileKey);
+      const profile = await loadProfileConfig(profileName);
 
       const configuration = await Configuration.findLatest();
 
