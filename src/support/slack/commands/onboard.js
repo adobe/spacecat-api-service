@@ -12,6 +12,7 @@
 
 // todo: prototype - untested
 /* c8 ignore start */
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
 import {
   extractURLFromSlackInput,
@@ -46,14 +47,14 @@ const AUDITS = [
 function OnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-site',
-    name: 'Obboard Site',
+    name: 'Onboard Site',
     description: 'Onboards a new site to Success Studio.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site}`,
   });
 
   const { dataAccess, log } = context;
-  const { Configuration, Site } = dataAccess;
+  const { Configuration, Site, Organization } = dataAccess;
 
   /**
    * Validates input and onboards the site to ESS
@@ -69,8 +70,7 @@ function OnboardCommand(context) {
     const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = context.env;
 
     try {
-      const [baseURLInput] = args;
-
+      const [baseURLInput, imsOrgID] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
       const flags = parseFlags(args.text || '');
@@ -82,13 +82,22 @@ function OnboardCommand(context) {
         return;
       }
 
-      // see if the site was added previously
-      let site = await Site.findByBaseURL(baseURL);
+      if (!imsOrgID) {
+        await say(':warning: Please provide a valid IMS Org ID.');
+        return;
+      }
 
-      // if not, add the site to the star catalogue
+      // check if the organization with IMS Org ID already exists; create if it doesn't
+      let organization = await Organization.findByImsOrgId(imsOrgID);
+      if (!organization) {
+        organization = await Organization.create(context);
+      }
+
+      // check if the site already exists; create if it doesn't
+      let site = await Site.findByBaseURL(baseURL);
       if (!site) {
         const deliveryType = await findDeliveryType(baseURL);
-        const isLive = true;
+        const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
         site = await Site.create({
           baseURL, deliveryType, isLive, organizationId: defaultOrgId,
