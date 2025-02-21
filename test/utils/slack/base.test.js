@@ -352,7 +352,7 @@ describe('Base Slack Utils', () => {
       fsStub.resolves(mockProfileData);
 
       await expect(loadProfileConfig('nonexistent'))
-        .to.be.rejectedWith('Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in config/profile.json');
+        .to.be.rejectedWith('Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in static/onboard/profile.json');
     });
 
     it('should throw an error if JSON file is invalid', async () => {
