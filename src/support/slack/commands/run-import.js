@@ -110,7 +110,7 @@ function RunImportCommand(context) {
         context,
       );
 
-      const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\` and interval ${startDate}-${endDate}\n`;
+      const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}\n`;
       // message += 'Stand by for results. I will post them here when they are ready.';
 
       await say(message);
