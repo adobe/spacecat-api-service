@@ -1,3 +1,10 @@
+## [1.93.1](https://github.com/adobe/spacecat-api-service/compare/v1.93.0...v1.93.1) (2025-02-21)
+
+
+### Bug Fixes
+
+* temporarily disable role check ([#767](https://github.com/adobe/spacecat-api-service/issues/767)) ([f56b9cf](https://github.com/adobe/spacecat-api-service/commit/f56b9cf60b0ca9b9314ca8b707de1a34a2e5699f))
+
 # [1.93.0](https://github.com/adobe/spacecat-api-service/compare/v1.92.5...v1.93.0) (2025-02-20)
 
 
