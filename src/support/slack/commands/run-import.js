@@ -57,14 +57,18 @@ function RunImportCommand(context) {
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say, user } = slackContext;
+    const { say } = slackContext;
 
-    const admins = JSON.parse(context?.env?.SLACK_IDS_RUN_IMPORT || '[]');
+    const config = await Configuration.findLatest();
+    /* todo: uncomment after summit and back-office-UI support for configuration setting (roles)
+    const slackRoles = config.getSlackRoles() || {};
+    const admins = slackRoles?.import || [];
 
     if (!admins.includes(user)) {
-      await say(':error: Only selected SpaceCat fluid team members can run imports.');
+      await say(':error: Only members of role "import" can run this command.');
       return;
     }
+    */
 
     try {
       const [importType, baseURLInput, startDate, endDate] = args;
@@ -82,7 +86,6 @@ function RunImportCommand(context) {
         return;
       }
 
-      const config = await Configuration.findLatest();
       const jobConfig = config.getJobs().filter((job) => job.group === 'imports' && job.type === importType);
 
       if (!Array.isArray(jobConfig) || jobConfig.length === 0) {
