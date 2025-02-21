@@ -24,7 +24,7 @@ export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
 export const CHARACTER_LIMIT = 2500;
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
-export const PROFILE_CONFIG_PATH = 'config/profile.json';
+export const PROFILE_CONFIG_PATH = 'static/onboard/profile.json';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;
