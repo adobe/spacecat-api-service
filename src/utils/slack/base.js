@@ -12,7 +12,7 @@
 
 import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
-import fs from 'fs/promises';
+import fs from 'fs';
 
 import { URL } from 'url';
 
@@ -24,7 +24,7 @@ export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
 export const CHARACTER_LIMIT = 2500;
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
-export const PROFILE_CONFIG_PATH = 'static/onboard/profile.json';
+export const PROFILE_CONFIG_PATH = 'static/onboard/profiles.json';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;
@@ -326,9 +326,9 @@ const parseFlags = (text) => {
  * @param {string} profileKey - The profile key to retrieve.
  * @returns {Object} - The profile configuration object.
  */
-const loadProfileConfig = async (profileKey) => {
+const loadProfileConfig = (profileKey) => {
   try {
-    const data = await fs.readFile(PROFILE_CONFIG_PATH, 'utf-8');
+    const data = fs.readFileSync(PROFILE_CONFIG_PATH, 'utf-8');
     const profiles = JSON.parse(data);
 
     if (!profiles[profileKey]) {

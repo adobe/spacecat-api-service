@@ -14,7 +14,7 @@
 
 import * as chai from 'chai';
 import sinon from 'sinon';
-import fs from 'fs/promises';
+import fs from 'fs';
 import chaiAsPromised from 'chai-as-promised';
 
 import { Blocks } from 'slack-block-builder';
@@ -266,20 +266,17 @@ describe('Base Slack Utils', () => {
     let fsStub;
 
     beforeEach(() => {
-      fsStub = sinon.stub(fs, 'readFile');
+      fsStub = sinon.stub(fs, 'readFileSync');
     });
 
     afterEach(() => {
       fsStub.restore();
     });
 
-    it('should load the correct profile configuration', async () => {
+    it('should load the correct profile configuration', () => {
       const mockProfileData = JSON.stringify({
         default: {
-          audits: [
-            'foo',
-            'bar',
-          ],
+          audits: ['foo', 'bar'],
           imports: {
             'import-foo': {},
             'import-bar': {},
@@ -288,24 +285,19 @@ describe('Base Slack Utils', () => {
           integrations: {},
         },
         other: {
-          audits: [
-            'audit1',
-            'audit2',
-          ],
+          audits: ['audit1', 'audit2'],
           imports: {},
           config: {},
           integrations: {},
         },
       });
-      fsStub.resolves(mockProfileData);
 
-      const result = await loadProfileConfig('default');
+      fsStub.returns(mockProfileData);
+
+      const result = loadProfileConfig('default');
 
       expect(result).to.deep.equal({
-        audits: [
-          'foo',
-          'bar',
-        ],
+        audits: ['foo', 'bar'],
         imports: {
           'import-foo': {},
           'import-bar': {},
@@ -314,60 +306,48 @@ describe('Base Slack Utils', () => {
         integrations: {},
       });
 
-      expect(result.audits).to.deep.equal(
-        [
-          'foo',
-          'bar',
-        ],
-      );
-      expect(result.imports).to.deep.equal(
-        {
-          'import-foo': {},
-          'import-bar': {},
-        },
-      );
+      expect(result.audits).to.deep.equal(['foo', 'bar']);
+      expect(result.imports).to.deep.equal({
+        'import-foo': {},
+        'import-bar': {},
+      });
     });
 
-    it('should throw an error if profile does not exist', async () => {
+    it('should throw an error if profile does not exist', () => {
       const mockProfileData = JSON.stringify({
         default: {
-          audits: [
-            'foo',
-            'bar',
-          ],
+          audits: ['foo', 'bar'],
           imports: {},
           config: {},
           integrations: {},
         },
         other: {
-          audits: [
-            'audit1',
-            'audit2',
-          ],
+          audits: ['audit1', 'audit2'],
           imports: {},
           config: {},
           integrations: {},
         },
       });
-      fsStub.resolves(mockProfileData);
 
-      await expect(loadProfileConfig('nonexistent'))
-        .to.be.rejectedWith('Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in static/onboard/profile.json');
+      fsStub.returns(mockProfileData);
+
+      expect(() => loadProfileConfig('nonexistent'))
+        .to.throw('Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in static/onboard/profiles.json');
     });
 
-    it('should throw an error if JSON file is invalid', async () => {
-      fsStub.resolves('INVALID_JSON');
+    it('should throw an error if JSON file is invalid', () => {
+      fsStub.returns('INVALID_JSON');
 
-      await expect(loadProfileConfig('default'))
+      expect(() => loadProfileConfig('default'))
       // eslint-disable-next-line quotes
-        .to.be.rejectedWith(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`);
+        .to.throw(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`);
     });
 
-    it('should throw an error if the file cannot be read', async () => {
-      fsStub.rejects(new Error('File not found'));
+    it('should throw an error if the file cannot be read', () => {
+      fsStub.throws(new Error('File not found'));
 
-      await expect(loadProfileConfig('default'))
-        .to.be.rejectedWith('Failed to load profile configuration for "default": File not found');
+      expect(() => loadProfileConfig('default'))
+        .to.throw('Failed to load profile configuration for "default": File not found');
     });
   });
 });
