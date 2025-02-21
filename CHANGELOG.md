@@ -1,3 +1,83 @@
+# [1.93.0](https://github.com/adobe/spacecat-api-service/compare/v1.92.5...v1.93.0) (2025-02-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.8.1 ([#764](https://github.com/adobe/spacecat-api-service/issues/764)) ([cb96810](https://github.com/adobe/spacecat-api-service/commit/cb96810aa7ccbe859e4f3992efd71d1942a9e169))
+
+
+### Features
+
+* **sites-28811:** support xwalk in spacecat-api-service ([#759](https://github.com/adobe/spacecat-api-service/issues/759)) ([7098cf1](https://github.com/adobe/spacecat-api-service/commit/7098cf1c02b7254f45592a4257ff4b895f26dce8))
+
+# [1.93.0](https://github.com/adobe/spacecat-api-service/compare/v1.92.5...v1.93.0) (2025-02-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.8.1 ([#764](https://github.com/adobe/spacecat-api-service/issues/764)) ([cb96810](https://github.com/adobe/spacecat-api-service/commit/cb96810aa7ccbe859e4f3992efd71d1942a9e169))
+
+
+### Features
+
+* **sites-28811:** support xwalk in spacecat-api-service ([#759](https://github.com/adobe/spacecat-api-service/issues/759)) ([7098cf1](https://github.com/adobe/spacecat-api-service/commit/7098cf1c02b7254f45592a4257ff4b895f26dce8))
+
+# [1.93.0](https://github.com/adobe/spacecat-api-service/compare/v1.92.5...v1.93.0) (2025-02-19)
+
+
+### Features
+
+* **sites-28811:** support xwalk in spacecat-api-service ([#759](https://github.com/adobe/spacecat-api-service/issues/759)) ([7098cf1](https://github.com/adobe/spacecat-api-service/commit/7098cf1c02b7254f45592a4257ff4b895f26dce8))
+
+## [1.92.5](https://github.com/adobe/spacecat-api-service/compare/v1.92.4...v1.92.5) (2025-02-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.8.0 ([#762](https://github.com/adobe/spacecat-api-service/issues/762)) ([8235559](https://github.com/adobe/spacecat-api-service/commit/823555923733cf6df74c6528b6ce007c188dc31c))
+
+## [1.92.4](https://github.com/adobe/spacecat-api-service/compare/v1.92.3...v1.92.4) (2025-02-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.7.1 ([#761](https://github.com/adobe/spacecat-api-service/issues/761)) ([47f64ed](https://github.com/adobe/spacecat-api-service/commit/47f64ed69ff53f3fd79c291ab9a55278f4007d01))
+
+## [1.92.3](https://github.com/adobe/spacecat-api-service/compare/v1.92.2...v1.92.3) (2025-02-18)
+
+
+### Bug Fixes
+
+* npm audit ([#758](https://github.com/adobe/spacecat-api-service/issues/758)) ([93f8141](https://github.com/adobe/spacecat-api-service/commit/93f8141e6d67268ab81a678106713caf8b5581e9))
+
+## [1.92.2](https://github.com/adobe/spacecat-api-service/compare/v1.92.1...v1.92.2) (2025-02-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.7.0 ([#757](https://github.com/adobe/spacecat-api-service/issues/757)) ([22ee79d](https://github.com/adobe/spacecat-api-service/commit/22ee79d8e178961130eb4b505a3d04cfa6923f05))
+
+## [1.92.1](https://github.com/adobe/spacecat-api-service/compare/v1.92.0...v1.92.1) (2025-02-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.6.0 ([#755](https://github.com/adobe/spacecat-api-service/issues/755)) ([be01176](https://github.com/adobe/spacecat-api-service/commit/be01176bed3df4397fa7af2e69b95bbd26076bfa))
+
+# [1.92.0](https://github.com/adobe/spacecat-api-service/compare/v1.91.3...v1.92.0) (2025-02-18)
+
+
+### Features
+
+* update site name in site entity ([#752](https://github.com/adobe/spacecat-api-service/issues/752)) ([06fd024](https://github.com/adobe/spacecat-api-service/commit/06fd024aec8d895f78e8928eb8aaa9c3568331d6))
+
+## [1.91.3](https://github.com/adobe/spacecat-api-service/compare/v1.91.2...v1.91.3) (2025-02-18)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#754](https://github.com/adobe/spacecat-api-service/issues/754)) ([6521e59](https://github.com/adobe/spacecat-api-service/commit/6521e592a661246a1abd64f6ffa8f059b75d29da))
+
 ## [1.91.2](https://github.com/adobe/spacecat-api-service/compare/v1.91.1...v1.91.2) (2025-02-17)
 
 

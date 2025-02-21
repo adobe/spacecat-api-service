@@ -10,3 +10,4 @@ test-results.xml
 admin-idp-p*.json
 *.env
 .idea
+.nvmrc

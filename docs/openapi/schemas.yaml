@@ -72,10 +72,6 @@ ImsOrganizationId:
 ImsUserAccessToken:
   type: string
   example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
-EmailAddress:
-  type: string
-  format: email
-  example: 'user@example.com'
 SlackMentionConfig:
   type: object
   properties:
@@ -283,6 +279,9 @@ Site:
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
+    name:
+      description: The name of the site
+      type: string
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
@@ -309,6 +308,7 @@ Site:
     id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://example-site.com'
+    name: 'Example Site'
     deliveryType: 'aem_edge'
     deliveryConfig:
       programId: '12652'
@@ -366,6 +366,7 @@ SiteWithLatestAudit:
     id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://example-site.com'
+    name: 'Example Site'
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
@@ -401,6 +402,9 @@ SiteCreate:
       description: The optional ID of the organization this site belongs to
       default: null
       $ref: '#/Id'
+    name:
+      description: The name of the site
+      type: string
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
@@ -418,12 +422,16 @@ SiteCreate:
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://www.newsite.com'
     deliveryType: 'aem_cs'
+    name: 'New Site'
 SiteUpdate:
   type: object
   properties:
     organizationId:
       description: The optional ID of the organization this site belongs to
       $ref: '#/Id'
+    name:
+      description: The name of the site
+      type: string
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
@@ -440,6 +448,7 @@ SiteUpdate:
   example:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
+    name: 'New Site'
     deliveryConfig:
       programId: '12652'
       environmentId: '16854'
@@ -1531,8 +1540,21 @@ PageMetricList:
   items:
     oneOf:
       - $ref: './schemas.yaml#/PageOrganicKeywords'
-ImportOptions:
-  type: object
+DocImportData:
+  title: "Doc Import"
+  description: "There are no data properties available for doc based imports."
+  properties: {}
+XWalkImportData:
+  title: "Xwalk Import"
+  properties:
+    siteName:
+      type: string
+    assetFolder:
+      type: string
+  required:
+    - siteName
+    - assetFolder
+ImportOptionsBase:
   properties:
     pageLoadTimeout:
       description: The time in milliseconds to wait for the page to load
@@ -1543,6 +1565,21 @@ ImportOptions:
   example:
     pageLoadTimeout: 100
     enableJavascript: true
+ImportOptions:
+  allOf: #/ImportOptionsBase
+    - $ref: '#/ImportOptionsBase'
+  properties:
+    type:
+      enum: ['doc', 'xwalk']
+      description: The type of import job. Options are 'doc' or 'xwalk'.
+      type: string
+      default: 'doc'
+    data:
+      description: Optional data to pass to the import job.
+      type: object
+      oneOf:
+        - $ref: '#/DocImportData'
+        - $ref: '#/XWalkImportData'
 ImportJobRequest:
   type: object
   required:
@@ -1656,7 +1693,7 @@ ScrapeRequest:
       $ref: '#/Id'
     options:
       description: Optional configuration params, defined as a JSON object
-      $ref: '#/ImportOptions'
+      $ref: '#/ImportOptionsBase'
     customHeaders:
       description: Optional custom headers to send with each HTTP request
       type: object
