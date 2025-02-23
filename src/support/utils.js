@@ -95,6 +95,18 @@ export const sendRunImportMessage = async (
   endDate,
   slackContext,
 });
+
+export const sendAutofixMessage = async (
+  sqs,
+  queueUrl,
+  type,
+  siteId,
+  suggestionIds,
+) => sqs.sendMessage(queueUrl, {
+  type,
+  siteId,
+  suggestionIds,
+});
 /* c8 ignore end */
 
 /**

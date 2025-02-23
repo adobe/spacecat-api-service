@@ -25,6 +25,7 @@ import {
 
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
+import { sendAutofixMessage } from '../support/utils.js';
 
 /**
  * Suggestions controller.
@@ -32,12 +33,14 @@ import { SuggestionDto } from '../dto/suggestion.js';
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(dataAccess) {
+function SuggestionsController(dataAccess, sqs) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
-  const { Opportunity, Suggestion } = dataAccess;
+  const {
+    Opportunity, Suggestion, Site, Configuration,
+  } = dataAccess;
 
   if (!isObject(Opportunity)) {
     throw new Error('Data access required');
@@ -382,6 +385,53 @@ function SuggestionsController(dataAccess) {
     };
     return createResponse(fullResponse, 207);
   };
+  const autofixSuggestions = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    // validate request body
+    if (!context.data) {
+      return badRequest('No updates provided');
+    }
+    const { suggestionIds } = context.data;
+    if (!isArray(suggestionIds)) {
+      return badRequest('Request body must be an array of suggestionIds');
+    }
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+    const configuration = await Configuration.findLatest();
+    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-autofix`, site)) {
+      return badRequest(`Handler is not enabled for site ${site.getBaseURL()} autofix type ${opportunity.getType()}`);
+    }
+    const suggestionEntities = await Promise.all(suggestionIds.map(async (suggestionId) => {
+      const suggestion = await Suggestion.findById(suggestionId);
+      if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
+        return null;
+      }
+      return suggestion;
+    }));
+    const suggestionsFiltered = suggestionEntities.filter(
+      (suggestion) => suggestion !== null,
+    );
+    await Suggestion.bulkUpdateStatus(suggestionsFiltered, Suggestion.STATUSES.IN_PROGRESS);
+    const { AUTOFIX_JOBS_QUEUE: queueUrl } = context.env;
+    await sendAutofixMessage(sqs, queueUrl, opportunity.getType(), siteId, suggestionIds);
+    return ok('All is good');
+  };
 
   const removeSuggestion = async (context) => {
     const siteId = context.params?.siteId;
@@ -421,6 +471,7 @@ function SuggestionsController(dataAccess) {
   };
 
   return {
+    autofixSuggestions,
     createSuggestions,
     getAllForOpportunity,
     getByID,
