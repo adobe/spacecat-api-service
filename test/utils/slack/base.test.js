@@ -334,7 +334,7 @@ describe('Base Slack Utils', () => {
 
       const profileConfigPath = path.join(
         path.dirname(fileURLToPath(import.meta.url)),
-        '../../../static/onboard/profiles.json',
+        '../../../../static/onboard/profiles.json',
       );
 
       fsStub.returns(mockProfileData);

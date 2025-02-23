@@ -27,7 +27,7 @@ export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 export const PROFILE_CONFIG_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  '../../../static/onboard/profiles.json',
+  '../../../../static/onboard/profiles.json',
 );
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
