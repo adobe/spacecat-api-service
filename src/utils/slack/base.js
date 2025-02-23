@@ -14,7 +14,7 @@ import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
 import fs from 'fs';
 
-import { URL, fileURLToPath } from 'url';
+import { URL } from 'url';
 import path from 'path';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
@@ -25,10 +25,7 @@ export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
 export const CHARACTER_LIMIT = 2500;
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
-export const PROFILE_CONFIG_PATH = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../../static/onboard/profiles.json',
-);
+export const PROFILE_CONFIG_PATH = path.resolve(process.cwd(), 'static/onboard/profiles.json');
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;

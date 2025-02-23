@@ -17,7 +17,6 @@ import sinon from 'sinon';
 import fs from 'fs';
 import chaiAsPromised from 'chai-as-promised';
 
-import { fileURLToPath } from 'url';
 import path from 'path';
 
 import { Blocks } from 'slack-block-builder';
@@ -332,10 +331,7 @@ describe('Base Slack Utils', () => {
         },
       });
 
-      const profileConfigPath = path.join(
-        path.dirname(fileURLToPath(import.meta.url)),
-        '../../../../static/onboard/profiles.json',
-      );
+      const profileConfigPath = path.resolve(process.cwd(), 'static/onboard/profiles.json');
 
       fsStub.returns(mockProfileData);
 
