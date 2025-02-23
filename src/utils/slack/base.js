@@ -12,6 +12,7 @@
 
 import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
+import fs from 'fs';
 
 import { URL } from 'url';
 
@@ -23,6 +24,7 @@ export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
 export const CHARACTER_LIMIT = 2500;
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
+export const PROFILE_CONFIG_PATH = 'static/onboard/profiles.json';
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;
@@ -287,6 +289,58 @@ const getHlxConfigMessagePart = (hlxConfig) => {
   return `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``;
 };
 
+/**
+ * Parses flags from a Slack message.
+ * Supports:
+ *   - `--flag` (boolean)
+ *   - `--key=value` (key-value pairs)
+ *   - `--key "multi word value"` (spaces in values)
+ *   - Handles dashes in flag names (e.g., `--my-flag`)
+ *
+ * @param {string} text - The message text from Slack.
+ * @returns {Object} - Parsed flags as key-value pairs.
+ */
+const parseFlags = (text) => {
+  const flags = {};
+  const regex = /--([\w-]+)(?:[=\s](".*?"|'.*?'|[^\s-][^\s]*))?/g;
+  let match;
+
+  // eslint-disable-next-line no-cond-assign
+  while ((match = regex.exec(text)) !== null) {
+    const [, key] = match;
+    let [, , value] = match;
+    if (value) {
+      value = value.replace(/^['"]|['"]$/g, ''); // Remove surrounding quotes
+    } else {
+      value = true; // Boolean flags
+    }
+    flags[key] = value;
+  }
+  return flags;
+};
+
+/**
+ * Loads profile configuration from JSON file.
+ *
+ * @async
+ * @param {string} profileKey - The profile key to retrieve.
+ * @returns {Object} - The profile configuration object.
+ */
+const loadProfileConfig = (profileKey) => {
+  try {
+    const data = fs.readFileSync(PROFILE_CONFIG_PATH, 'utf-8');
+    const profiles = JSON.parse(data);
+
+    if (!profiles[profileKey]) {
+      throw new Error(`Profile "${profileKey}" not found in ${PROFILE_CONFIG_PATH}`);
+    }
+
+    return profiles[profileKey];
+  } catch (error) {
+    throw new Error(`Failed to load profile configuration for "${profileKey}": ${error.message}`);
+  }
+};
+
 export {
   extractURLFromSlackInput,
   getQueryParams,
@@ -299,4 +353,6 @@ export {
   getHlxConfigMessagePart,
   getMessageFromEvent,
   wrapSayForThread,
+  parseFlags,
+  loadProfileConfig,
 };
