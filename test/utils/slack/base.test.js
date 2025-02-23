@@ -17,6 +17,9 @@ import sinon from 'sinon';
 import fs from 'fs';
 import chaiAsPromised from 'chai-as-promised';
 
+import { fileURLToPath } from 'url';
+import path from 'path';
+
 import { Blocks } from 'slack-block-builder';
 import {
   extractURLFromSlackInput,
@@ -329,10 +332,15 @@ describe('Base Slack Utils', () => {
         },
       });
 
+      const profileConfigPath = path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '../../../static/onboard/profiles.json',
+      );
+
       fsStub.returns(mockProfileData);
 
       expect(() => loadProfileConfig('nonexistent'))
-        .to.throw('Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in static/onboard/profiles.json');
+        .to.throw(`Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in ${profileConfigPath}`);
     });
 
     it('should throw an error if JSON file is invalid', () => {
