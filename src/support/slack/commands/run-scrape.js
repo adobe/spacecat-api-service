@@ -40,7 +40,7 @@ function RunScrapeCommand(context) {
   });
 
   const { dataAccess, log } = context;
-  const { Configuration, Site } = dataAccess;
+  const { Site } = dataAccess;
 
   /**
      * Validates input and triggers a new scrape run for the given site.
@@ -51,7 +51,9 @@ function RunScrapeCommand(context) {
      * @returns {Promise} A promise that resolves when the operation is complete.
      */
   const handleExecution = async (args, slackContext) => {
-    const { say, user } = slackContext;
+    const { say } = slackContext;
+
+    /* todo: uncomment after summit and back-office-UI support for configuration setting (roles)
     const config = await Configuration.findLatest();
     const slackRoles = config.getSlackRoles() || {};
     const admins = slackRoles?.scrape || [];
@@ -60,6 +62,7 @@ function RunScrapeCommand(context) {
       await say(':error: Only members of role "scrape" can run this command.');
       return;
     }
+    */
 
     try {
       const [baseURLInput] = args;

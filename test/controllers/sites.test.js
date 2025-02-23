@@ -56,6 +56,7 @@ describe('Sites Controller', () => {
             indexes: {},
             schema: {
               attributes: {
+                name: { type: 'string', name: 'name', get: (value) => value },
                 config: { type: 'any', name: 'config', get: (value) => Config(value) },
                 deliveryType: { type: 'string', name: 'deliveryType', get: (value) => value },
                 gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
@@ -1015,5 +1016,23 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('updates a site name', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        name: 'new-name',
+      },
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('name', 'new-name');
   });
 });
