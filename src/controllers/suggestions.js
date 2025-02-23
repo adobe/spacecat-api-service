@@ -30,6 +30,7 @@ import { sendAutofixMessage } from '../support/utils.js';
 /**
  * Suggestions controller.
  * @param {DataAccess} dataAccess - Data access.
+ * @param {SQS} sqs - SQS client.
  * @returns {object} Suggestions controller.
  * @constructor
  */

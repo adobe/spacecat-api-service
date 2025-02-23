@@ -104,7 +104,7 @@ async function run(request, context) {
       ApiKeyController(context),
       SitesAuditsToggleController(context.dataAccess),
       OpportunitiesController(context.dataAccess),
-      SuggestionsController(context.dataAccess),
+      SuggestionsController(context.dataAccess, context.sqs),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
