@@ -106,18 +106,22 @@ function OnboardCommand(context) {
 
       const configuration = await Configuration.findLatest();
 
-      profile.audits.forEach((auditType) => {
+      const auditTypes = Object.keys(profile.adutis);
+
+      auditTypes.forEach((auditType) => {
         configuration.enableHandlerForSite(auditType, site);
       });
 
       await configuration.save();
 
-      for (const auditType of profile.audits) {
+      for (const auditType of auditTypes) {
         // eslint-disable-next-line no-await-in-loop
         await triggerAuditForSite(site, auditType, slackContext, context);
       }
 
-      for (const importType of Object.keys(profile.imports)) {
+      const importTypes = Object.keys(profile.imports);
+
+      for (const importType of importTypes) {
         // eslint-disable-next-line no-await-in-loop
         await triggerImportRun(
           configuration,

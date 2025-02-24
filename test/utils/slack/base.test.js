@@ -278,7 +278,10 @@ describe('Base Slack Utils', () => {
     it('should load the correct profile configuration', () => {
       const mockProfileData = JSON.stringify({
         default: {
-          audits: ['foo', 'bar'],
+          audits: {
+            foo: {},
+            bar: {},
+          },
           imports: {
             'import-foo': {},
             'import-bar': {},
@@ -299,7 +302,10 @@ describe('Base Slack Utils', () => {
       const result = loadProfileConfig('default');
 
       expect(result).to.deep.equal({
-        audits: ['foo', 'bar'],
+        audits: {
+          foo: {},
+          bar: {},
+        },
         imports: {
           'import-foo': {},
           'import-bar': {},
@@ -308,7 +314,7 @@ describe('Base Slack Utils', () => {
         integrations: {},
       });
 
-      expect(result.audits).to.deep.equal(['foo', 'bar']);
+      expect(result.audits).to.deep.equal({ foo: {}, bar: {} });
       expect(result.imports).to.deep.equal({
         'import-foo': {},
         'import-bar': {},
@@ -318,7 +324,10 @@ describe('Base Slack Utils', () => {
     it('should throw an error if profile does not exist', () => {
       const mockProfileData = JSON.stringify({
         default: {
-          audits: ['foo', 'bar'],
+          audits: {
+            foo: {},
+            bar: {},
+          },
           imports: {},
           config: {},
           integrations: {},
