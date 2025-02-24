@@ -106,7 +106,7 @@ function OnboardCommand(context) {
 
       const configuration = await Configuration.findLatest();
 
-      const auditTypes = Object.keys(profile.adutis);
+      const auditTypes = Object.keys(profile.audits);
 
       auditTypes.forEach((auditType) => {
         configuration.enableHandlerForSite(auditType, site);
