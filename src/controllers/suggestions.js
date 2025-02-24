@@ -418,15 +418,11 @@ function SuggestionsController(dataAccess, sqs) {
     if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-autofix`, site)) {
       return badRequest(`Handler is not enabled for site ${site.getBaseURL()} autofix type ${opportunity.getType()}`);
     }
-    const suggestionEntities = await Promise.all(suggestionIds.map(async (suggestionId) => {
-      const suggestion = await Suggestion.findById(suggestionId);
-      if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
-        return null;
-      }
-      return suggestion;
-    }));
+    const suggestionEntities = await Promise.all(suggestionIds.map(
+      async (suggestionId) => Suggestion.findById(suggestionId),
+    ));
     const suggestionsFiltered = suggestionEntities.filter(
-      (suggestion) => suggestion !== null,
+      (suggestion) => suggestion !== null && suggestion.getOpportunityId() === opportunityId,
     );
     await Suggestion.bulkUpdateStatus(suggestionsFiltered, SuggestionModel.STATUSES.IN_PROGRESS);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = context.env;
