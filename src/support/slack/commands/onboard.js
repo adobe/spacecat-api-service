@@ -25,7 +25,7 @@ import { findDeliveryType, triggerAuditForSite, triggerImportRun } from '../../u
 
 import BaseCommand from './base.js';
 
-const PHRASES = ['onboard site'];
+const PHRASES = ['onboard site', 'onboard sites'];
 
 /**
  * Factory function to create the OnboardCommand object.
@@ -37,10 +37,10 @@ const PHRASES = ['onboard site'];
 function OnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-site',
-    name: 'Onboard Site',
-    description: 'Onboards a new site to Success Studio.',
+    name: 'Onboard Site(s)',
+    description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site}`,
+    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
   });
 
   const { dataAccess, log } = context;

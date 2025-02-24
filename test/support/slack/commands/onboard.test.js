@@ -66,11 +66,11 @@ describe('OnboardCommand', () => {
     it('initializes correctly with base command properties', () => {
       const command = OnboardCommand(context);
       expect(command.id).to.equal('onboard-site');
-      expect(command.name).to.equal('Onboard Site');
+      expect(command.name).to.equal('Onboard Site(s)');
       expect(command.description).to.equal(
-        'Onboards a new site to Success Studio.',
+        'Onboards a new site (or batch of sites from CSV) to Success Studio.',
       );
-      expect(command.phrases).to.deep.equal(['onboard site']);
+      expect(command.phrases).to.deep.equal(['onboard site', 'onboard sites']);
     });
   });
 
