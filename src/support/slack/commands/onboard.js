@@ -13,7 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 
 import {
   extractURLFromSlackInput,
@@ -65,12 +65,12 @@ function OnboardCommand(context) {
 
       await say(`:gear: Applying ${profileName} profile.`);
 
-      if (!hasText(baseURL)) {
+      if (!isValidUrl(baseURL)) {
         await say(':warning: Please provide a valid site base URL.');
         return;
       }
 
-      if (!hasText(imsOrgID) || !OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
+      if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
         await say(':warning: Please provide a valid IMS Org ID.');
         return;
       }
@@ -79,6 +79,9 @@ function OnboardCommand(context) {
       let organization = await Organization.findByImsOrgId(imsOrgID);
       if (!organization) {
         organization = await Organization.create(context);
+        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.id} Organization name: ${organization.name} IMS Org ID: ${imsOrgID}.`;
+        await say(message);
+        log.info(message);
       }
 
       // check if the site already exists; create if it doesn't

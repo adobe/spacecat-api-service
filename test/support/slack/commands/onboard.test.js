@@ -83,7 +83,7 @@ describe('OnboardCommand', () => {
       nock(baseURL).get('/').replyWithError('rainy weather');
 
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
-      dataAccessStub.Organization.create.resolves({ organizationId: 'new-org-123' });
+      dataAccessStub.Organization.create.resolves({ id: '123', name: 'new-org' });
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
         getBaseURL: () => baseURL,
@@ -105,6 +105,7 @@ describe('OnboardCommand', () => {
         isLive: false,
         organizationId: 'default',
       });
+      expect(slackContext.say.calledWith(':white_check_mark: A new organization has been created. Organization ID: 123 Organization name: new-org IMS Org ID: 000000000000000000000000@AdobeOrg.')).to.be.true;
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
