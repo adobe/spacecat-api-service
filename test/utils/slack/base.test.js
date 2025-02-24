@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import * as chai from 'chai';
+import { expect, use } from 'chai';
 import sinon from 'sinon';
 import fs from 'fs';
 import chaiAsPromised from 'chai-as-promised';
@@ -30,8 +30,7 @@ import {
   loadProfileConfig,
 } from '../../../src/utils/slack/base.js';
 
-chai.use(chaiAsPromised);
-const { expect } = chai;
+use(chaiAsPromised);
 
 describe('Base Slack Utils', () => {
   describe('extractBaseURLFromInput', () => {
