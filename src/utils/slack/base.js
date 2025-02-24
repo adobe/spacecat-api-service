@@ -291,36 +291,6 @@ const getHlxConfigMessagePart = (hlxConfig) => {
 };
 
 /**
- * Parses flags from a Slack message.
- * Supports:
- *   - `--flag` (boolean)
- *   - `--key=value` (key-value pairs)
- *   - `--key "multi word value"` (spaces in values)
- *   - Handles dashes in flag names (e.g., `--my-flag`)
- *
- * @param {string} text - The message text from Slack.
- * @returns {Object} - Parsed flags as key-value pairs.
- */
-const parseFlags = (text) => {
-  const flags = {};
-  const regex = /--([\w-]+)(?:[=\s](".*?"|'.*?'|[^\s-][^\s]*))?/g;
-  let match;
-
-  // eslint-disable-next-line no-cond-assign
-  while ((match = regex.exec(text)) !== null) {
-    const [, key] = match;
-    let [, , value] = match;
-    if (value) {
-      value = value.replace(/^['"]|['"]$/g, ''); // Remove surrounding quotes
-    } else {
-      value = true; // Boolean flags
-    }
-    flags[key] = value;
-  }
-  return flags;
-};
-
-/**
  * Loads profile configuration from JSON file.
  *
  * @async
@@ -354,6 +324,5 @@ export {
   getHlxConfigMessagePart,
   getMessageFromEvent,
   wrapSayForThread,
-  parseFlags,
   loadProfileConfig,
 };

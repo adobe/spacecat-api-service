@@ -26,7 +26,6 @@ import {
   getSlackContext,
   postErrorMessage, sendFile,
   sendMessageBlocks,
-  parseFlags,
   loadProfileConfig,
 } from '../../../src/utils/slack/base.js';
 
@@ -122,46 +121,6 @@ describe('Base Slack Utils', () => {
       expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html|personal.nedbank.co.za/borrow/personal-loans.plain.html> www.acme.com', false)).to.equal(expected);
       expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html/ extra acme.com/', false)).to.equal(`${expected}/`);
       expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html/> extra acme.com/ <acme.com/> <http://acme.com|acme.com>', false)).to.equal(`${expected}/`);
-    });
-  });
-
-  describe('parseFlags', () => {
-    it('should parse flags correctly', () => {
-      const input = '--verbose --profile=default';
-      const result = parseFlags(input);
-
-      expect(result).to.deep.equal({
-        verbose: true,
-        profile: 'default',
-      });
-    });
-
-    it('should handle single-word flags', () => {
-      const input = '--debug';
-      const result = parseFlags(input);
-
-      expect(result).to.deep.equal({ debug: true });
-    });
-
-    it('should handle flags with spaces in values', () => {
-      const input = '--name="John Doe"';
-      const result = parseFlags(input);
-
-      expect(result).to.deep.equal({ name: 'John Doe' });
-    });
-
-    it('should return an empty object for empty input', () => {
-      expect(parseFlags('')).to.deep.equal({});
-    });
-
-    it('should handle multiple flags', () => {
-      const input = '--profile=summit --verbose';
-      const result = parseFlags(input);
-
-      expect(result).to.deep.equal({
-        profile: 'summit',
-        verbose: true,
-      });
     });
   });
 
