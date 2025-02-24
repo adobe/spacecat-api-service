@@ -27,8 +27,8 @@ import { DataAccessError } from '../../../../src/index.js';
 chaiUse(chaiAsPromised);
 chaiUse(sinonChai);
 
-const MockModel = class MockEntityModel extends BaseModel {};
-const MockCollection = class MockEntityCollection extends BaseCollection {};
+const MockModel = class MockEntityModel extends BaseModel { };
+const MockCollection = class MockEntityCollection extends BaseCollection { };
 
 const createSchema = (service, indexes) => new Schema(
   MockModel,
@@ -802,6 +802,9 @@ describe('BaseCollection', () => {
       mockElectroService.entities.mockEntityModel.delete.returns(
         { go: () => Promise.reject(error) },
       );
+      mockElectroService.entities.mockEntityModel.get.returns({
+        go: () => Promise.resolve({ data: mockRecord }),
+      });
 
       await expect(baseCollectionInstance.removeByIds(['ef39921f-9a02-41db-b491-02c98987d956']))
         .to.be.rejectedWith(DataAccessError, 'Failed to remove');
@@ -811,6 +814,10 @@ describe('BaseCollection', () => {
     it('removes entities successfully', async () => {
       const mockIds = ['ef39921f-9a02-41db-b491-02c98987d956', 'ef39921f-9a02-41db-b491-02c98987d957'];
       mockElectroService.entities.mockEntityModel.delete.returns({ go: () => Promise.resolve() });
+      mockElectroService.entities.mockEntityModel.get.returns({
+        // TODO fix! Instead of the mockRecord it should return the record for the ID passed in
+        go: () => Promise.resolve({ data: mockRecord }),
+      });
       await baseCollectionInstance.removeByIds(mockIds);
       expect(mockElectroService.entities.mockEntityModel.delete)
         .to.have.been.calledOnceWithExactly([

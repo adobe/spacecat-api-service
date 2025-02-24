@@ -34,7 +34,7 @@ describe('SiteTopPageCollection', () => {
   let schema;
 
   const mockRecord = {
-    siteTopPageId: 's12345',
+    siteTopPageId: '11111111-2222-1ccc-8ddd-333333333333',
   };
 
   beforeEach(() => {
@@ -66,19 +66,19 @@ describe('SiteTopPageCollection', () => {
     });
 
     it('removes all SiteTopPages for a given siteId', async () => {
-      const siteId = 'site12345';
+      const siteId = '11111111-2222-1ccc-8ddd-333333333333';
 
       instance.allBySiteId = stub().resolves([model]);
 
       await instance.removeForSiteId(siteId);
 
       expect(instance.allBySiteId.calledOnceWith(siteId)).to.be.true;
-      expect(mockElectroService.entities.siteTopPage.delete.calledOnceWith([{ siteTopPageId: 's12345' }]))
+      expect(mockElectroService.entities.siteTopPage.delete.calledOnceWith([{ siteTopPageId: '11111111-2222-1ccc-8ddd-333333333333' }]))
         .to.be.true;
     });
 
     it('does not call remove when there are no SiteTopPages for a given siteId', async () => {
-      const siteId = 'site12345';
+      const siteId = '11111111-2222-1ccc-8ddd-333333333333';
 
       instance.allBySiteId = stub().resolves([]);
 
@@ -89,7 +89,7 @@ describe('SiteTopPageCollection', () => {
     });
 
     it('remove all SiteTopPages for a given siteId, source and geo', async () => {
-      const siteId = 'site12345';
+      const siteId = '11111111-2222-1ccc-8ddd-333333333333';
       const source = 'ahrefs';
       const geo = 'global';
 
@@ -98,7 +98,7 @@ describe('SiteTopPageCollection', () => {
       await instance.removeForSiteId(siteId, source, geo);
 
       expect(instance.allBySiteIdAndSourceAndGeo).to.have.been.calledOnceWith(siteId, source, geo);
-      expect(mockElectroService.entities.siteTopPage.delete).to.have.been.calledOnceWith([{ siteTopPageId: 's12345' }]);
+      expect(mockElectroService.entities.siteTopPage.delete).to.have.been.calledOnceWith([{ siteTopPageId: '11111111-2222-1ccc-8ddd-333333333333' }]);
     });
   });
 });

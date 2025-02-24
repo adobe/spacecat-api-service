@@ -17,7 +17,9 @@ import chaiAsPromised from 'chai-as-promised';
 import { stub } from 'sinon';
 import sinonChai from 'sinon-chai';
 
+import EntityRegistry from '../../../../src/models/base/entity.registry.js';
 import Site from '../../../../src/models/site/site.model.js';
+import schema from '../../../../src/models/site/site.schema.js';
 import siteFixtures from '../../../fixtures/sites.fixture.js';
 import { createElectroMocks } from '../../util.js';
 
@@ -170,7 +172,9 @@ describe('SiteModel', () => {
         acls: [{
           role: 'foo@bar.org',
           acl: [
+            { path: '/organization/12345678-bbbb-1ccc-8ddd-eeeeeeeeeeee/site/88888888-7777-1ccc-8ddd-666666666666', actions: ['D'] },
             { path: '/organization/aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee/site/*', actions: ['U'] },
+            { path: '/organization/ffffffff-bbbb-1ccc-8ddd-eeeeeeeeeeee/site/*', actions: ['C'] },
             { path: '/organization/*/site/*', actions: ['R'] },
           ],
         }],
@@ -180,36 +184,93 @@ describe('SiteModel', () => {
       };
     }
 
+    it('create permission', () => {
+      // Prepare dep objects
+      const es = { entities: { site: {} } };
+      const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, { debug: () => { } });
+
+      const record = {
+        siteId: '123456789',
+        organizationId: 'ffffffff-bbbb-1ccc-8ddd-eeeeeeeeeeee',
+      };
+
+      // Create the instance
+      const site = new Site(es, er, schema, record, {});
+      expect(site.getId()).to.equal('123456789');
+    });
+
+    it('no create permission allows to create a model instance', () => {
+      // Prepare dep objects
+      const es = { entities: { site: {} } };
+      const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, { debug: () => { } });
+
+      const record = {
+        siteId: '123456789',
+        organizationId: 'aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee',
+      };
+
+      // Create the instance should succeed as the create permission checking is done
+      // when the database record is created from the collection.
+      const site = new Site(es, er, schema, record, {});
+      expect(site.getId()).to.equal('123456789');
+    });
+
     it('specific instance permission', () => {
+      // Prepare the instance
       instance.aclCtx = getAllowAllCtx();
       instance.setOrganizationId('aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee');
-
       instance.aclCtx = getAclCtx();
+
+      // Test the instance
       instance.setIsLive(false);
 
-      try {
-        instance.getIsLive();
-      } catch {
-        // good
-        return;
-      }
-      expect.fail('Expected error');
+      expect(() => instance.getIsLive()).to.throw('Permission denied');
     });
 
     it('wildcard instance permission', () => {
+      // Prepare the instance
       instance.aclCtx = getAllowAllCtx();
-      instance.setOrganizationId('00000000-bbbb-1ccc-8ddd-eeeeeeeeeeee');
-
+      instance.setOrganizationId('00000000-1111-1ccc-8ddd-222222222222');
       instance.aclCtx = getAclCtx();
+
+      // Test the instance
       instance.getIsLive(); // Should be allowed
 
-      try {
-        instance.setIsLive(false);
-      } catch {
-        // good
-        return;
-      }
-      expect.fail('Expected error');
+      expect(() => instance.setIsLive(false)).to.throw('Permission denied');
+    });
+
+    it('delete permission', async () => {
+      const removed = [];
+      instance.entity.remove = (el) => ({
+        go: () => removed.push(el),
+      });
+
+      // Prepare the instance
+      instance.aclCtx = getAllowAllCtx();
+      instance.setOrganizationId('12345678-bbbb-1ccc-8ddd-eeeeeeeeeeee');
+      instance.record[instance.idName] = '88888888-7777-1ccc-8ddd-666666666666';
+      instance.aclCtx = getAclCtx();
+
+      // Test the instance
+      await instance.remove();
+      expect(removed).to.have.length(1);
+      expect(removed[0].siteId).to.equal('88888888-7777-1ccc-8ddd-666666666666');
+    });
+
+    it('no delete permission', async () => {
+      const removed = [];
+      instance.entity.remove = (el) => ({
+        go: () => removed.push(el),
+      });
+
+      // Prepare the instance
+      instance.aclCtx = getAllowAllCtx();
+      instance.setOrganizationId('00000000-1111-1ccc-8ddd-222222222222');
+      instance.aclCtx = getAclCtx();
+
+      // Test the instance
+      await expect(instance.remove()).to.be.rejectedWith('Permission denied');
+      expect(removed).to.have.length(0);
     });
   });
 });

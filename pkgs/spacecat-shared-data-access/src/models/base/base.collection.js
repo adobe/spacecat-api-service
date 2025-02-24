@@ -376,11 +376,16 @@ class BaseCollection {
     }
 
     try {
-      const record = upsert
-        ? await this.entity.put(item).go()
-        : await this.entity.create(item).go();
+      const instance = this.#createInstance(item);
 
-      const instance = this.#createInstance(record.data);
+      // Check that the current user has permission to create the entity
+      instance.ensurePermission('C');
+
+      if (upsert) {
+        await this.entity.put(item).go();
+      } else {
+        await this.entity.create(item).go();
+      }
 
       this.#invalidateCache();
 
@@ -441,6 +446,10 @@ class BaseCollection {
     try {
       const { validatedItems, errorItems } = this.#validateItems(newItems);
 
+      const createdItems = this.#createInstances(validatedItems);
+      // Check that the current user has permission to create each entity
+      createdItems.forEach((item) => item.ensurePermission('C'));
+
       if (validatedItems.length > 0) {
         const response = await this.entity.put(validatedItems).go();
 
@@ -448,8 +457,6 @@ class BaseCollection {
           this.log.error(`Failed to process all items in batch write for [${this.entityName}]: ${JSON.stringify(response.unprocessed)}`);
         }
       }
-
-      const createdItems = this.#createInstances(validatedItems);
 
       if (isNonEmptyObject(parent)) {
         createdItems.forEach((record) => {
@@ -521,6 +528,13 @@ class BaseCollection {
       const message = `Failed to remove [${this.entityName}]: ids must be a non-empty array`;
       this.log.error(message);
       throw new DataAccessError(message);
+    }
+
+    // TODO this is quite inefficient, consider a batch lookup
+    for (const id of ids) {
+      // eslint-disable-next-line no-await-in-loop
+      const inst = await this.findById(id);
+      inst?.ensurePermission('D');
     }
 
     try {

@@ -12,7 +12,19 @@
 
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 
-async function getDBAcls(dynamoClient, orgId, roles) {
+function prepPathForSort(path) {
+  if (path.endsWith('/+**')) return path.slice(0, -3);
+  if (path.endsWith('/**')) return path.slice(0, -2);
+  return path;
+}
+
+function pathSorter({ path: path1 }, { path: path2 }) {
+  const sp1 = prepPathForSort(path1);
+  const sp2 = prepPathForSort(path2);
+  return sp2.length - sp1.length;
+}
+
+export async function getDBAcls(dynamoClient, orgId, roles) {
   const input = {
     ExpressionAttributeNames: {
       '#role': 'role',
@@ -44,13 +56,18 @@ async function getDBAcls(dynamoClient, orgId, roles) {
   const resp = await dynamoClient.send(command);
   console.log('§§§ DynamoDB Get DBACLs response:', JSON.stringify(resp));
 
-  return resp.Items.map((it) => ({
+  // TODO sort paths by length
+
+  const acls = resp.Items.map((it) => ({
     role: it.role.S,
     acl: it.acl.L.map((a) => ({
       path: a.M.path.S,
       actions: a.M.actions.SS,
     })),
   }));
+
+  acls.forEach((it) => it.acl.sort(pathSorter));
+  return acls;
 }
 
 export async function getDBRoles(dbClient, {

@@ -18,8 +18,11 @@ import { stub } from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import Site from '../../../../src/models/site/site.model.js';
+import SiteCollection from '../../../../src/models/site/site.collection.js';
+import schema from '../../../../src/models/site/site.schema.js';
 
 import { createElectroMocks } from '../../util.js';
+import EntityRegistry from '../../../../src/models/base/entity.registry.js';
 
 chaiUse(chaiAsPromised);
 chaiUse(sinonChai);
@@ -31,7 +34,7 @@ describe('SiteCollection', () => {
   let mockEntityRegistry;
   let mockLogger;
   let model;
-  let schema;
+  let mockSchema;
 
   const mockRecord = { siteId: 's12345' };
 
@@ -42,7 +45,7 @@ describe('SiteCollection', () => {
       mockLogger,
       collection: instance,
       model,
-      schema,
+      schema: mockSchema,
     } = createElectroMocks(Site, mockRecord));
   });
 
@@ -51,7 +54,7 @@ describe('SiteCollection', () => {
       expect(instance).to.be.an('object');
       expect(instance.electroService).to.equal(mockElectroService);
       expect(instance.entityRegistry).to.equal(mockEntityRegistry);
-      expect(instance.schema).to.equal(schema);
+      expect(instance.schema).to.equal(mockSchema);
       expect(instance.log).to.equal(mockLogger);
 
       expect(model).to.be.an('object');
@@ -112,5 +115,276 @@ describe('SiteCollection', () => {
       expect(result).to.deep.equal([mockSite, mockSiteNoAudit]);
       expect(instance.allByDeliveryType).to.have.been.calledOnce;
     });
+  });
+});
+
+describe('SiteCollection permissions', () => {
+  it('checks permissions on create site', async () => {
+    function getAclCtx() {
+      return {
+        acls: [{
+          acl: [
+            { path: '/organization/o123/site/s12345', actions: ['C'] },
+          ],
+        }],
+        aclEntities: { model: ['site', 'organization'] },
+      };
+    }
+
+    const called = [];
+    const entity = {
+      create: (el) => ({
+        go: () => {
+          called.push(`create:${JSON.stringify(el)}`);
+          return { data: el };
+        },
+      }),
+    };
+
+    const ml = { debug: () => { }, info: () => { } };
+    const es = { entities: { site: entity } };
+    const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, ml);
+    const sc = new SiteCollection(es, er, schema, ml);
+
+    const siteData = { organizationId: 'o123', siteId: 's12345' };
+
+    const site = await sc.create(siteData);
+    expect(site.getId()).to.equal('s12345');
+    expect(called).to.deep.equal(['create:{"organizationId":"o123","siteId":"s12345"}']);
+    expect(() => site.getOrganizationId()).to.throw('Permission denied');
+  });
+
+  it('cannot create site due to lack of permission', async () => {
+    // No permissions at all
+    function getAclCtx() {
+      return {
+        acls: [],
+        aclEntities: { model: ['site', 'organization'] },
+      };
+    }
+
+    const called = [];
+    const entity = {
+      create: (el) => ({
+        go: () => {
+          called.push(`create:${JSON.stringify(el)}`);
+          return { data: el };
+        },
+      }),
+    };
+
+    const ml = { debug: () => { }, info: () => { }, error: () => { } };
+    const es = { entities: { site: entity } };
+    const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, ml);
+    const sc = new SiteCollection(es, er, schema, ml);
+
+    const siteData = { organizationId: 'o123', siteId: 's12345' };
+
+    await expect(sc.create(siteData)).to.be.rejected;
+    expect(called).to.be.empty;
+  });
+
+  it('test create batch permission', async () => {
+    function getAclCtx() {
+      return {
+        acls: [{
+          acl: [
+            { path: '/organization/o123/site/s67890', actions: ['C', 'R'] },
+            { path: '/organization/*/site/**', actions: ['C'] },
+          ],
+        }],
+        aclEntities: { model: ['site', 'organization'] },
+      };
+    }
+
+    const called = [];
+    const entity = {
+      put: (el) => ({
+        params: () => ({
+          Item: el,
+        }),
+        go: () => {
+          called.push(`put:${JSON.stringify(el)}`);
+          return { data: el };
+        },
+      }),
+    };
+
+    const ml = { debug: () => { }, info: () => { }, error: () => { } };
+    const es = { entities: { site: entity } };
+    const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, ml);
+    const sc = new SiteCollection(es, er, schema, ml);
+
+    const siteData1 = { organizationId: 'o123', siteId: 's12345' };
+    const siteData2 = { organizationId: 'o123', siteId: 's67890' };
+    const items = [siteData1, siteData2];
+    const { createdItems } = await sc.createMany(items);
+    expect(createdItems).to.have.length(2);
+    expect(called).to.have.length(1);
+    expect(called[0]).to.equal('put:[{"organizationId":"o123","siteId":"s12345"},{"organizationId":"o123","siteId":"s67890"}]');
+
+    const idx1 = createdItems.findIndex((i) => i.getId() === 's12345');
+    expect(createdItems[idx1].getId()).to.equal('s12345');
+    expect(() => createdItems[idx1].getOrganizationId()).to.throw('Permission denied');
+    expect(createdItems[1 - idx1].getId()).to.equal('s67890');
+    expect(createdItems[1 - idx1].getOrganizationId()).to.equal('o123');
+  });
+
+  it('test create batch no permission', async () => {
+    // no create permissions
+    function getAclCtx() {
+      return {
+        acls: [{
+          acl: [
+            { path: '/organization/o123/site/s67890', actions: ['R'] },
+          ],
+        }],
+        aclEntities: { model: ['site', 'organization'] },
+      };
+    }
+
+    const called = [];
+    const entity = {
+      put: (el) => ({
+        params: () => ({
+          Item: el,
+        }),
+        go: () => {
+          called.push(`put:${JSON.stringify(el)}`);
+          return { data: el };
+        },
+      }),
+    };
+
+    const ml = { debug: () => { }, info: () => { }, error: () => { } };
+    const es = { entities: { site: entity } };
+    const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, ml);
+    const sc = new SiteCollection(es, er, schema, ml);
+
+    const siteData1 = { organizationId: 'o123', siteId: 's12345' };
+    const siteData2 = { organizationId: 'o123', siteId: 's67890' };
+    const items = [siteData1, siteData2];
+
+    await expect(sc.createMany(items)).to.be.rejected;
+    expect(called).to.be.empty;
+  });
+
+  it('can find by it with permission', async () => {
+    function getAclCtx() {
+      return {
+        acls: [{
+          acl: [
+            { path: '/organization/11111111-bbbb-1ccc-8ddd-111111111111/site/aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee', actions: ['R'] },
+          ],
+        }],
+        aclEntities: { model: ['site', 'organization'] },
+      };
+    }
+
+    const entity = {
+      get: (id) => ({
+        go: () => ({ data: { organizationId: '11111111-bbbb-1ccc-8ddd-111111111111', ...id } }),
+      }),
+    };
+
+    const ml = { debug: () => { }, info: () => { } };
+    const es = { entities: { site: entity } };
+    const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, ml);
+    const sc = new SiteCollection(es, er, schema, ml);
+    const site = await sc.findById('aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee');
+    expect(site.getId()).to.equal('aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee');
+    expect(site.getOrganizationId()).to.equal('11111111-bbbb-1ccc-8ddd-111111111111');
+  });
+
+  it('can find by it with no permission', async () => {
+    function getAclCtx() {
+      return {
+        acls: [{
+          acl: [],
+        }],
+        aclEntities: { model: ['site', 'organization'] },
+      };
+    }
+
+    const entity = {
+      get: (id) => ({
+        go: () => ({ data: { organizationId: '11111111-bbbb-1ccc-8ddd-111111111111', ...id } }),
+      }),
+    };
+
+    const ml = { debug: () => { }, info: () => { } };
+    const es = { entities: { site: entity } };
+    const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, ml);
+    const sc = new SiteCollection(es, er, schema, ml);
+    const site = await sc.findById('aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee');
+    expect(site.getId()).to.equal('aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee');
+    expect(() => site.getOrganizationId()).to.throw('Permission denied');
+  });
+
+  it('remove by ids with permission', async () => {
+    function getAclCtx() {
+      return {
+        acls: [{
+          acl: [
+            { path: '/organization/11111111-bbbb-1ccc-8ddd-111111111111/site/aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee', actions: ['D'] },
+          ],
+        }],
+        aclEntities: { model: ['site', 'organization'] },
+      };
+    }
+
+    const deleted = [];
+    const entity = {
+      delete: (id) => ({
+        go: () => {
+          deleted.push(id);
+        },
+      }),
+      get: (id) => ({
+        go: () => ({ data: { organizationId: '11111111-bbbb-1ccc-8ddd-111111111111', ...id } }),
+      }),
+    };
+
+    const ml = { debug: () => { }, info: () => { } };
+    const es = { entities: { site: entity } };
+    const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, ml);
+    const sc = new SiteCollection(es, er, schema, ml);
+    await sc.removeByIds(['aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee']);
+    expect(deleted).to.deep.equal([[{ siteId: 'aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee' }]]);
+  });
+
+  it('remove by ids with no permission', async () => {
+    function getAclCtx() {
+      return {
+        acls: [{
+          acl: [
+            { path: '/organization/11111111-bbbb-1ccc-8ddd-111111111111/site/aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee', actions: ['D'] },
+          ],
+        }],
+        aclEntities: { model: ['site', 'organization'] },
+      };
+    }
+
+    const deleted = [];
+    const entity = {
+      delete: (id) => ({
+        go: () => {
+          deleted.push(id);
+        },
+      }),
+      get: (id) => ({
+        go: () => ({ data: { organizationId: '11111111-bbbb-1ccc-8ddd-111111111111', ...id } }),
+      }),
+    };
+
+    const ml = { debug: () => { }, info: () => { } };
+    const es = { entities: { site: entity } };
+    const er = new EntityRegistry(es, { aclCtx: getAclCtx() }, ml);
+    const sc = new SiteCollection(es, er, schema, ml);
+
+    // Only 1 of these has permission, reject the whole request
+    await expect(sc.removeByIds(['aaaaaaaa-bbbb-1ccc-8ddd-eeeeeeeeeeee', 'bbbbbbbb-bbbb-1ccc-8ddd-eeeeeeeeeeee']))
+      .to.be.rejectedWith('Permission denied');
+    expect(deleted).to.be.empty;
   });
 });

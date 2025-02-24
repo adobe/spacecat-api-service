@@ -92,7 +92,7 @@ class BaseModel {
    * Provide a path representation of the current instance for ACL purposes.
    * @returns The path representation. Always absolute, so starts with a '/'.
    */
-  getACLPath() {
+  #getACLPath() {
     const refs = this.schema.getReferencesByType(Reference.TYPES.BELONGS_TO);
     if (refs.length !== 1) {
       return `/${this.entityName}/${this.getId()}`;
@@ -101,11 +101,18 @@ class BaseModel {
     return `/${decapitalize(refs[0].target)}/${ownerID}/${this.entityName}/${this.getId()}`;
   }
 
+  /**
+   * Checks if the specified action is allowed for the current entity, given the
+   * current ACL context. If the action is permitted, then the method returns.
+   * If the action is not permitted, an error is thrown.
+   * @param {string} action - The action to check permission for.
+   * @throws {Error} - Throws an error if the action is not permitted.
+   */
   ensurePermission(action) {
     if (this.aclCtx?.aclEntities?.model?.includes(this.entityName)) {
-      ensurePermission(this.getACLPath(), this.aclCtx, action);
+      ensurePermission(this.#getACLPath(), action, this.aclCtx);
     } else {
-      console.log('Entity ', this.entityName, 'is excluded from ACL checking');
+      console.log('Entity [', this.entityName, '] is excluded from ACL checking');
     }
   }
 
@@ -262,6 +269,8 @@ class BaseModel {
    * or if the removal operation fails.
    */
   async remove() {
+    this.ensurePermission('D');
+
     if (!this.schema.allowsRemove()) {
       throw new DataAccessError(`The entity ${this.schema.getModelName()} does not allow removal`);
     }
@@ -346,6 +355,8 @@ class BaseModel {
    * @returns {Object} - A JSON representation of the entity attributes.
    */
   toJSON() {
+    this.ensurePermission('R');
+
     const attributes = this.schema.getAttributes();
 
     return Object.keys(attributes).reduce((json, key) => {
