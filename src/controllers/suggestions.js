@@ -23,7 +23,7 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { sendAutofixMessage } from '../support/utils.js';
 
@@ -428,7 +428,7 @@ function SuggestionsController(dataAccess, sqs) {
     const suggestionsFiltered = suggestionEntities.filter(
       (suggestion) => suggestion !== null,
     );
-    await Suggestion.bulkUpdateStatus(suggestionsFiltered, Suggestion.STATUSES.IN_PROGRESS);
+    await Suggestion.bulkUpdateStatus(suggestionsFiltered, SuggestionModel.STATUSES.IN_PROGRESS);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = context.env;
     await sendAutofixMessage(sqs, queueUrl, opportunity.getType(), siteId, suggestionIds);
     return ok('All is good');
