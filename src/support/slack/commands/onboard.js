@@ -27,16 +27,6 @@ import BaseCommand from './base.js';
 
 const PHRASES = ['onboard site'];
 
-const AUDITS = [
-  'backlinks',
-  'cwv',
-  'experimentation-opportunities',
-  'internal-links',
-  'metatags',
-  'sitemap',
-  'structured-data',
-];
-
 /**
  * Factory function to create the OnboardCommand object.
  *
@@ -135,7 +125,7 @@ function OnboardCommand(context) {
       }
 
       let message = `Success Studio onboard completed successfully for ${baseURL} :rocket:\n`;
-      message += `Enabled and triggered following audits: ${AUDITS.join(', ')}`;
+      message += `Enabled and triggered following audits: ${auditTypes.join(', ')}`;
 
       await say(message);
     } catch (error) {
