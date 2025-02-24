@@ -147,9 +147,18 @@ function ImportSupervisor(services, config) {
       + ` URLs. This new job has claimed: ${importJob.getImportQueueId()} `
       + `(jobId: ${importJob.getId()})`);
 
+    const options = importJob.getOptions();
+    let processingType;
+
+    if (options?.type === undefined || options.type === ImportJobModel.ImportOptionTypes.DOC) {
+      processingType = 'import';
+    } else if (options.type === ImportJobModel.ImportOptionTypes.XWALK) {
+      processingType = 'import-xwalk';
+    }
+
     // Send a single message containing all URLs and the new job ID
     const message = {
-      processingType: 'import',
+      processingType,
       jobId: importJob.getId(),
       urls,
       customHeaders,
@@ -158,8 +167,8 @@ function ImportSupervisor(services, config) {
     await sqs.sendMessage(importWorkerQueue, message);
   }
 
-  async function writeImportScriptToS3(jobId, importScript) {
-    const key = `imports/${jobId}/import.js`;
+  async function writeFileToS3(filename, jobId, importScript) {
+    const key = `imports/${jobId}/${filename}`;
     const command = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: importScript });
     try {
       await s3Client.send(command);
@@ -176,6 +185,9 @@ function ImportSupervisor(services, config) {
    * @param {string} importScript - Optional custom Base64 encoded import script.
    * @param {object} initiatedBy - Details about the initiator of the import job.
    * @param {object} customHeaders - Optional custom headers to be sent with each request.
+   * @param {string} models - The component-models.json file for the xwalk job.
+   * @param {string} filters - The component-filters.json file for the xwalk job.
+   * @param {string} definitions - The component-definitions.json file for the xwalk job.
    * @returns {Promise<ImportJob>}
    */
   async function startNewJob(
@@ -185,6 +197,9 @@ function ImportSupervisor(services, config) {
     importScript,
     initiatedBy,
     customHeaders,
+    models,
+    filters,
+    definitions,
   ) {
     // Hash the API Key to ensure it is not stored in plain text
     const hashedApiKey = hashWithSHA256(importApiKey);
@@ -203,18 +218,29 @@ function ImportSupervisor(services, config) {
       !!importScript,
     );
 
-    log.info('New import job created:\n'
+    log.info(
+      'New import job created:\n'
       + `- baseUrl: ${newImportJob.getBaseURL()}\n`
       + `- urlCount: ${urls.length}\n`
       + `- apiKeyName: ${initiatedBy.apiKeyName}\n`
       + `- jobId: ${newImportJob.getId()}\n`
       + `- importQueueId: ${importQueueId}\n`
       + `- hasCustomImportJs: ${!!importScript}\n`
-      + `- hasCustomHeaders: ${!!customHeaders}`);
+      + `- hasCustomHeaders: ${!!customHeaders}\n`
+      + `- options: ${JSON.stringify(options)}`,
+    );
 
     // Write the import script to S3, if provided
     if (importScript) {
-      await writeImportScriptToS3(newImportJob.getId(), importScript);
+      await writeFileToS3('import.js', newImportJob.getId(), importScript);
+    }
+
+    // if the job type is 'xwalk', then we need to write the 3 files to S3
+    if (options?.type === ImportJobModel.ImportOptionTypes.XWALK) {
+      log.info('Writing component models, filters, and definitions to S3 for jobId: ', newImportJob.getId());
+      await writeFileToS3('component-models.json', newImportJob.getId(), models);
+      await writeFileToS3('component-filters.json', newImportJob.getId(), filters);
+      await writeFileToS3('component-definition.json', newImportJob.getId(), definitions);
     }
 
     // Queue all URLs for import as a single message. This enables the controller to respond with

@@ -12,27 +12,20 @@
 
 // todo: prototype - untested
 /* c8 ignore start */
+import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 
 import {
   extractURLFromSlackInput,
   postErrorMessage,
+  loadProfileConfig,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
+import { findDeliveryType, triggerAuditForSite, triggerImportRun } from '../../utils.js';
 
 import BaseCommand from './base.js';
 
-const PHRASES = ['onboard site'];
-
-const AUDITS = [
-  'backlinks',
-  'cwv',
-  'experimentation-opportunities',
-  'internal-links',
-  'metatags',
-  'sitemap',
-  'structured-data',
-];
+const PHRASES = ['onboard site', 'onboard sites'];
 
 /**
  * Factory function to create the OnboardCommand object.
@@ -44,14 +37,14 @@ const AUDITS = [
 function OnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-site',
-    name: 'Obboard Site',
-    description: 'Onboards a new site to Success Studio.',
+    name: 'Onboard Site(s)',
+    description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site}`,
+    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
   });
 
   const { dataAccess, log } = context;
-  const { Configuration, Site } = dataAccess;
+  const { Configuration, Site, Organization } = dataAccess;
 
   /**
    * Validates input and onboards the site to ESS
@@ -67,43 +60,75 @@ function OnboardCommand(context) {
     const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = context.env;
 
     try {
-      const [baseURLInput] = args;
-
+      const [baseURLInput, imsOrgID, profileName = 'default'] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
-      if (!baseURL) {
+      await say(`:gear: Applying ${profileName} profile.`);
+
+      if (!isValidUrl(baseURL)) {
         await say(':warning: Please provide a valid site base URL.');
         return;
       }
 
-      // see if the site was added previously
-      let site = await Site.findByBaseURL(baseURL);
+      if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
+        await say(':warning: Please provide a valid IMS Org ID.');
+        return;
+      }
 
-      // if not, add the site to the star catalogue
+      // check if the organization with IMS Org ID already exists; create if it doesn't
+      let organization = await Organization.findByImsOrgId(imsOrgID);
+      if (!organization) {
+        organization = await Organization.create(context);
+        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.id} Organization name: ${organization.name} IMS Org ID: ${imsOrgID}.`;
+        await say(message);
+        log.info(message);
+      }
+
+      // check if the site already exists; create if it doesn't
+      let site = await Site.findByBaseURL(baseURL);
       if (!site) {
         const deliveryType = await findDeliveryType(baseURL);
-        const isLive = true;
+        const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
         site = await Site.create({
           baseURL, deliveryType, isLive, organizationId: defaultOrgId,
         });
       }
 
+      const profile = await loadProfileConfig(profileName);
+
       const configuration = await Configuration.findLatest();
 
-      AUDITS.forEach((auditType) => {
+      const auditTypes = Object.keys(profile.audits);
+
+      auditTypes.forEach((auditType) => {
         configuration.enableHandlerForSite(auditType, site);
       });
 
       await configuration.save();
 
-      for (const auditType of AUDITS) {
+      for (const auditType of auditTypes) {
         // eslint-disable-next-line no-await-in-loop
         await triggerAuditForSite(site, auditType, slackContext, context);
       }
 
+      const importTypes = Object.keys(profile.imports);
+
+      for (const importType of importTypes) {
+        // eslint-disable-next-line no-await-in-loop
+        await triggerImportRun(
+          configuration,
+          importType,
+          site.getId(),
+          profile.imports[importType].startDate,
+          profile.imports[importType].endDate,
+          slackContext,
+          context,
+        );
+      }
+
       let message = `Success Studio onboard completed successfully for ${baseURL} :rocket:\n`;
-      message += `Enabled and triggered following audits: ${AUDITS.join(', ')}`;
+      message += `Enabled and triggered following audits: ${auditTypes.join(', ')}`;
 
       await say(message);
     } catch (error) {

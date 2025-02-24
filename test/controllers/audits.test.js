@@ -411,6 +411,7 @@ describe('Audits Controller', () => {
         getSlackConfig: () => {},
         getImports: () => [],
         getHandlers: () => (({ [auditType]: {} })),
+        getFetchConfig: () => {},
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -444,6 +445,7 @@ describe('Audits Controller', () => {
         getSlackConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
+        getFetchConfig: () => {},
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -478,6 +480,7 @@ describe('Audits Controller', () => {
         getSlackConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
+        getFetchConfig: () => {},
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -515,6 +518,7 @@ describe('Audits Controller', () => {
         getSlackConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
+        getFetchConfig: () => {},
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -593,6 +597,7 @@ describe('Audits Controller', () => {
         getSlackConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
+        getFetchConfig: () => {},
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -631,6 +636,7 @@ describe('Audits Controller', () => {
         getSlackConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
+        getFetchConfig: () => {},
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -802,6 +808,7 @@ describe('Audits Controller', () => {
           getSlackConfig: () => {},
           getHandlers: () => {},
           getImports: () => {},
+          getFetchConfig: () => {},
         };
 
         site.getConfig = () => siteConfig;

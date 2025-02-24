@@ -115,6 +115,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/key-events': sitesController.createKeyEvent,
     'DELETE /sites/:siteId/key-events/:keyEventId': sitesController.removeKeyEvent,
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
+    'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': sitesController.getPageMetricsBySource,
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
