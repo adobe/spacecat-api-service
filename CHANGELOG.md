@@ -1,3 +1,38 @@
+## [1.93.6](https://github.com/adobe/spacecat-api-service/compare/v1.93.5...v1.93.6) (2025-02-22)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#772](https://github.com/adobe/spacecat-api-service/issues/772)) ([e185e30](https://github.com/adobe/spacecat-api-service/commit/e185e30a14ed3f424e18dd7670e613de297f8374))
+
+## [1.93.5](https://github.com/adobe/spacecat-api-service/compare/v1.93.4...v1.93.5) (2025-02-22)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#771](https://github.com/adobe/spacecat-api-service/issues/771)) ([e214b4d](https://github.com/adobe/spacecat-api-service/commit/e214b4d1b78abd0c2f1ef5871b4beb1689cad015))
+
+## [1.93.4](https://github.com/adobe/spacecat-api-service/compare/v1.93.3...v1.93.4) (2025-02-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.33.0 ([#770](https://github.com/adobe/spacecat-api-service/issues/770)) ([ebf64bd](https://github.com/adobe/spacecat-api-service/commit/ebf64bdc6572fba6be691b3096943940612d215d))
+
+## [1.93.3](https://github.com/adobe/spacecat-api-service/compare/v1.93.2...v1.93.3) (2025-02-21)
+
+
+### Bug Fixes
+
+* range may be undefined ([#769](https://github.com/adobe/spacecat-api-service/issues/769)) ([7118a64](https://github.com/adobe/spacecat-api-service/commit/7118a64faf516763f7f0ff021999b8a481590742))
+
+## [1.93.2](https://github.com/adobe/spacecat-api-service/compare/v1.93.1...v1.93.2) (2025-02-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.8.2 ([#768](https://github.com/adobe/spacecat-api-service/issues/768)) ([848f21d](https://github.com/adobe/spacecat-api-service/commit/848f21d37c11c7d164e586c6e6dd9ce3c7d43ace))
+
 ## [1.93.1](https://github.com/adobe/spacecat-api-service/compare/v1.93.0...v1.93.1) (2025-02-21)
 
 
