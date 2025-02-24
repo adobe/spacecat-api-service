@@ -44,7 +44,10 @@
     },
     "fastlyServiceId!important": "",
     "timeout": 900000,
-    "nodeVersion": 22
+    "nodeVersion": 22,
+    "static": [
+      "static/onboard/profiles.json"
+    ]
   },
   "repository": {
     "type": "git",
