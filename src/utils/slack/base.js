@@ -14,12 +14,11 @@ import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
 
 import { URL } from 'url';
+import Papa from 'papaparse';
+import axios from 'axios';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
-
-import axios from 'axios';
-import { parse } from 'csv-parse/sync';
 
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
@@ -293,7 +292,7 @@ const wrapSayForThread = (say, threadTs) => {
  * @param {Object} file - The Slack file object containing metadata.
  * @param {string} file.url_private - The private URL to download the file from Slack.
  * @param {string} token - The Slack Bot OAuth token used for authorization.
- * @returns {Promise<Object[]>} - A promise that resolves to an array of JSON objects representing the parsed CSV records.
+ * @returns {Promise<Object[]>} - A promise that resolves to an array of JSON objects.
  *
  * @throws {Error} - Throws an error if the file cannot be downloaded or parsed.
  */
@@ -306,23 +305,31 @@ export const parseCSV = async (file, token) => {
       responseType: 'arraybuffer',
     });
 
-    const fileContent = response.data.toString('utf-8'); 
-    const records = parse(fileContent, {
-      columns: true,
-      skip_empty_lines: true,
-    });
-
-    if (!Array.isArray(records) || records.length == 0) {
-      throw new Error('CSV parsing resulted in empty or invalid data.');
+    const csvContent = response.data.toString('utf-8');
+    if (!csvContent.trim()) {
+      throw new Error('CSV data is empty!');
     }
 
-    return records;
+    const parsedData = Papa.parse(csvContent, {
+      delimiter: ',',
+      skipEmptyLines: true,
+      header: false,
+      error: (err) => {
+        throw new Error(`CSV Parsing Error: ${err.message}`);
+      },
+    });
+
+    const hasValidStructure = parsedData.data.some((row) => row.length > 1);
+
+    if (!hasValidStructure) {
+      throw new Error('CSV data is invalid: No proper CSV structure detected.');
+    }
+
+    return parsedData.data;
   } catch (error) {
-    console.error('Error parsing CSV file:', error);
     throw new Error('Failed to parse CSV file.');
   }
 };
-
 
 const getHlxConfigMessagePart = (hlxConfig) => {
   const { rso, hlxVersion } = hlxConfig;

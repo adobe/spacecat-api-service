@@ -11,85 +11,66 @@
  */
 
 import {
-    postErrorMessage,
-    parseCSV,
-  } from '../../../utils/slack/base.js';
-    
-  import BaseCommand from './base.js';
-  
-  const PHRASES = ['onboard batch'];
-  
-  const AUDITS = [
-    'backlinks',
-    'cwv',
-    'experimentation-opportunities',
-    'internal-links',
-    'metatags',
-    'sitemap',
-    'structured-data',
-  ];
-  
+  postErrorMessage,
+} from '../../../utils/slack/base.js';
+
+import BaseCommand from './base.js';
+
+const PHRASES = ['onboard batch'];
+
+/**
+ * Factory function to create the OnboardBatchCommand object.
+ *
+ * @param {Object} context - The context object.
+ * @returns {OnboardBatchCommand} - The OnboardBatchCommand object.
+ * @constructor
+ */
+function OnboardBatchCommand(context) {
+  const baseCommand = BaseCommand({
+    id: 'onboard-batch',
+    name: 'Obboard Batch',
+    description: 'Onboards a new batch of sites to Success Studio.',
+    phrases: PHRASES,
+    usageText: `${PHRASES[0]} {batch-file}`,
+  });
+
+  const { log } = context;
+
   /**
-   * Factory function to create the OnboardBatchCommand object.
+   * Validates input and auto-onboards the batch of sites to ESS
    *
-   * @param {Object} context - The context object.
-   * @returns {OnboardBatchCommand} - The OnboardBatchCommand object.
-   * @constructor
+   * @param {string[]} args - The arguments provided to the command ([batch]).
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
+   * @returns {Promise} A promise that resolves when the operation is complete.
    */
-  function OnboardBatchCommand(context) {
-    const baseCommand = BaseCommand({
-      id: 'onboard-batch',
-      name: 'Obboard Batch',
-      description: 'Onboards a new batch of sites to Success Studio.',
-      phrases: PHRASES,
-      usageText: `${PHRASES[0]} {batch-file}`,
-    });
-  
-    const { dataAccess, log } = context;
-  
-    /**
-     * Validates input and auto-onboards the batch of sites to ESS
-     *
-     * @param {string[]} args - The arguments provided to the command ([batch]).
-     * @param {Object} slackContext - The Slack context object.
-     * @param {Function} slackContext.say - The Slack say function.
-     * @returns {Promise} A promise that resolves when the operation is complete.
-     */
-    const handleExecution = async (args, slackContext) => {
-      const { say } = slackContext;
-      const { 
-        DEFAULT_ORGANIZATION_ID: defaultOrgId,
-        SLACK_BOT_TOKEN: token
-       } = context.env;
-  
-      try {
+  const handleExecution = async (args, slackContext) => {
+    const { say } = slackContext;
 
-        const files = args.files;
-        if (!files || files.length === 0) {
-            await say('No file attached. Please attach a CSV file for batch onboarding, and try again!');
-            return;
-        }
-
-        const file = files[0];
-        if (file.filetype !== 'csv') {
-            await say('Please attach a valid CSV file.');
-            return;
-        }
-
-        const records = await parseCSV(file, token);
-
-      } catch (error) {
-        log.error(error);
-        await postErrorMessage(say, error);
+    try {
+      // eslint-disable-next-line prefer-destructuring
+      const files = args.files;
+      if (!files || files.length === 0) {
+        await say('No file attached. Please attach a CSV file for batch onboarding, and try again!');
+        return;
       }
-    };
-  
-    baseCommand.init(context);
-  
-    return {
-      ...baseCommand,
-      handleExecution,
-    };
-  }
-  
-  export default OnboardBatchCommand;  
+
+      const file = files[0];
+      if (file.filetype !== 'csv') {
+        await say('Please attach a valid CSV file.');
+      }
+    } catch (error) {
+      log.error(error);
+      await postErrorMessage(say, error);
+    }
+  };
+
+  baseCommand.init(context);
+
+  return {
+    ...baseCommand,
+    handleExecution,
+  };
+}
+
+export default OnboardBatchCommand;

@@ -221,37 +221,37 @@ describe('Base Slack Utils', () => {
 
   describe('parseCSV', () => {
     let axiosMock;
-  
+
     beforeEach(() => {
-      axiosMock = new MockAdapter(axios); 
+      axiosMock = new MockAdapter(axios);
     });
-  
+
     afterEach(() => {
       axiosMock.restore();
     });
-  
+
     it('should correctly fetch and parse a CSV file', async () => {
       const filePath = 'test/utils/slack/test-entries.csv';
       const fileContent = await fs.readFile(filePath, 'utf-8');
       const file = { url_private: 'https://fake-url.com/file.csv' };
       const token = 'test-bot-token';
-  
+
       axiosMock.onGet(file.url_private).reply(200, fileContent);
-  
-      const records = await parseCSV(file, token);
-  
+
+      const records = await parseCSV(file, token, false);
+
       expect(records).to.deep.equal([
-        { "Batch": "1", "Country": "UNITED STATES", "Customer Name": "Foo Inc.", "Delivery Type": "AEM-CS", "Final URL": "https://www.foo.com/en-us/", "Has RUM?": "TRUE", "IMS Org": "", "Status": "200", "Website": "https://www.foo.com" },
-        { "Batch": "1", "Country": "CANADA", "Customer Name": "Bar Limited", "Delivery Type": "AEM-CS", "Final URL": "https://www.bar.com/en/index.html", "Has RUM?": "TRUE", "IMS Org": "", "Status": "200", "Website": "https://www.bar.com" },
+        ['https://www.foo.com', '12345@AdobeOrg'],
+        ['https://www.bar.com', '12345@AdobeOrg'],
       ]);
     });
-  
+
     it('should throw an error when the file download fails', async () => {
       const file = { url_private: 'https://fake-url.com/file.csv' };
       const token = 'test-bot-token';
-  
+
       axiosMock.onGet(file.url_private).networkError();
-  
+
       try {
         await parseCSV(file, token);
         throw new Error('Test failed: Error was not thrown');
@@ -259,14 +259,14 @@ describe('Base Slack Utils', () => {
         expect(error.message).to.equal('Failed to parse CSV file.');
       }
     });
-  
+
     it('should throw an error when the CSV data is invalid', async () => {
-      const invalidCsvContent = `invalid data without headers`;
+      const invalidCsvContent = 'invalid data without headers';
       const file = { url_private: 'https://fake-url.com/file.csv' };
       const token = 'test-bot-token';
-  
+
       axiosMock.onGet(file.url_private).reply(200, invalidCsvContent);
-  
+
       try {
         await parseCSV(file, token);
         throw new Error('Test failed: Error was not thrown');
