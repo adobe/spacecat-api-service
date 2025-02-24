@@ -419,15 +419,54 @@ function SuggestionsController(dataAccess, sqs) {
       return badRequest(`Handler is not enabled for site ${site.getBaseURL()} autofix type ${opportunity.getType()}`);
     }
     const suggestionEntities = await Promise.all(suggestionIds.map(
-      async (suggestionId) => Suggestion.findById(suggestionId),
+      async (suggestionId, index) => {
+        const suggestion = await Suggestion.findById(suggestionId);
+        if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
+          return {
+            index,
+            uuid: suggestionId,
+            message: 'Suggestion not found',
+            statusCode: 404,
+          };
+        } else {
+          try {
+            suggestion.setStatus(SuggestionModel.STATUSES.IN_PROGRESS);
+            const updatedSuggestion = await suggestion.save();
+            return {
+              index,
+              uuid: suggestionId,
+              suggestion: SuggestionDto.toJSON(updatedSuggestion),
+              statusCode: 200,
+            };
+          } catch (error) {
+            return {
+              index,
+              uuid: suggestionId,
+              message: error.message,
+              statusCode: error instanceof ValidationError ? 400 : 500,
+            };
+          }
+        }
+      },
     ));
-    const suggestionsFiltered = suggestionEntities.filter(
-      (suggestion) => suggestion !== null && suggestion.getOpportunityId() === opportunityId,
-    );
-    await Suggestion.bulkUpdateStatus(suggestionsFiltered, SuggestionModel.STATUSES.IN_PROGRESS);
+    const succeeded = suggestionEntities.filter((r) => r.statusCode === 200);
+    const fullResponse = {
+      suggestions: suggestionEntities,
+      metadata: {
+        total: suggestionEntities.length,
+        success: succeeded.length,
+        failed: suggestionEntities.length - succeeded,
+      },
+    };
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = context.env;
-    await sendAutofixMessage(sqs, queueUrl, opportunity.getType(), siteId, suggestionIds);
-    return ok('All is good');
+    await sendAutofixMessage(
+      sqs,
+      queueUrl,
+      opportunity.getType(),
+      siteId,
+      succeeded.map((s) => s.uuid),
+    );
+    return createResponse(fullResponse, 207);
   };
 
   const removeSuggestion = async (context) => {
