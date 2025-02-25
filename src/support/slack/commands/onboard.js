@@ -95,12 +95,14 @@ function OnboardCommand(context) {
 
       if (!isValidUrl(baseURL)) {
         await say(':warning: Please provide a valid site base URL.');
-        return;
+        reportLine.errors += 'Invalid Site URL.';
+        return reportLine;
       }
 
       if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
         await say(':warning: Please provide a valid IMS Org ID.');
-        return;
+        reportLine.errors += 'Invalid IMS Org ID.';
+        return reportLine;
       }
 
       let organization = await Organization.findByImsOrgId(imsOrgID);
@@ -257,7 +259,7 @@ function OnboardCommand(context) {
         );
 
         const message = `
-        *Onboarding complete for ${reportLine.site}*
+        *:spacecat: Onboarding complete for ${reportLine.site}*
         :ims: *IMS Org ID:* ${reportLine.imsOrgId}
         :gear: *Profile:* ${reportLine.profile}
         :clipboard: *Audits:* ${reportLine.audits || 'None'}
