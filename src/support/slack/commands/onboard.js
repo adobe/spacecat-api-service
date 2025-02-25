@@ -218,6 +218,7 @@ function OnboardCommand(context) {
           const [baseURL, imsOrgID] = row;
           await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
+          await say(`Onboarding a site with base URL ${baseURL} and IMS org ID ${imsOrgID}`);
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
