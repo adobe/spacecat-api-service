@@ -1,3 +1,10 @@
+## [1.93.10](https://github.com/adobe/spacecat-api-service/compare/v1.93.9...v1.93.10) (2025-02-25)
+
+
+### Bug Fixes
+
+* **data-access:** rollback to 2.8.4 ([#781](https://github.com/adobe/spacecat-api-service/issues/781)) ([09af663](https://github.com/adobe/spacecat-api-service/commit/09af663896cbd48889d45c051e25d5abc08c487f))
+
 ## [1.93.9](https://github.com/adobe/spacecat-api-service/compare/v1.93.8...v1.93.9) (2025-02-25)
 
 
