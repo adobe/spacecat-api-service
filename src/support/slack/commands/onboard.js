@@ -13,7 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, isObject } from '@adobe/spacecat-shared-utils';
 
 import {
   extractURLFromSlackInput,
@@ -96,6 +96,24 @@ function OnboardCommand(context) {
       }
 
       const profile = await loadProfileConfig(profileName);
+
+      if (!isObject(profile)) {
+        await say(`:warning: Profile "${profileName}" not found or invalid. Please try again.`);
+        log.error(`Profile "${profileName}" is missing or invalid.`);
+        return;
+      }
+
+      if (!isObject(profile?.audits)) {
+        await say(`:warning: Profile "${profileName}" does not have a valid audits section.`);
+        log.error(`Profile "${profileName}" has invalid or missing audits.`);
+        return;
+      }
+
+      if (!isObject(profile?.imports)) {
+        await say(`:warning: Profile "${profileName}" does not have a valid imports section.`);
+        log.error(`Profile "${profileName}" has invalid or missing imports.`);
+        return;
+      }
 
       const configuration = await Configuration.findLatest();
 
