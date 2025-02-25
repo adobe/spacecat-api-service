@@ -11,14 +11,16 @@
  */
 
 import { createUrl } from '@adobe/fetch';
-import { hasText, isString } from '@adobe/spacecat-shared-utils';
+import { hasText, isString, isValidUrl } from '@adobe/spacecat-shared-utils';
 import fs from 'fs';
 
 import { URL } from 'url';
-import Papa from 'papaparse';
+import { Readable } from 'stream';
+import csvParser from 'csv-parser';
 import axios from 'axios';
 import path from 'path';
 
+import { Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
 
@@ -288,49 +290,61 @@ const wrapSayForThread = (say, threadTs) => {
 };
 
 /**
- * Parses a CSV file from a Slack file URL and returns its records as JSON objects.
+ * Downloads, validates, and parses a CSV file from Slack.
  *
- * @async
- * @function parseCSV
- * @param {Object} file - The Slack file object containing metadata.
- * @param {string} file.url_private - The private URL to download the file from Slack.
- * @param {string} token - The Slack Bot OAuth token used for authorization.
- * @returns {Promise<Object[]>} - A promise that resolves to an array of JSON objects.
- *
- * @throws {Error} - Throws an error if the file cannot be downloaded or parsed.
+ * @param {string} fileUrl - The private Slack file URL.
+ * @param {string} token - The Slack bot token for authentication.
+ * @param {Object} slackContext - The Slack context for sending messages.
+ * @returns {Promise<Array<{ baseURL: string, imsOrgID: string }>>} - Parsed valid data.
  */
-export const parseCSV = async (file, token) => {
+const parseCSV = async (fileUrl, token, slackContext) => {
   try {
-    const fileUrl = file.url_private;
-
     const response = await axios.get(fileUrl, {
       headers: { Authorization: `Bearer ${token}` },
       responseType: 'arraybuffer',
     });
 
-    const csvContent = response.data.toString('utf-8');
-    if (!csvContent.trim()) {
-      throw new Error('CSV data is empty!');
+    if (!response.data) {
+      throw new Error('Failed to download CSV: No data received.');
     }
 
-    const parsedData = Papa.parse(csvContent, {
-      delimiter: ',',
-      skipEmptyLines: true,
-      header: false,
-      error: (err) => {
-        throw new Error(`CSV Parsing Error: ${err.message}`);
-      },
+    const csvStream = Readable.from(response.data.toString());
+
+    return new Promise((resolve, reject) => {
+      const parsedData = [];
+      let invalidRows = 0;
+
+      csvStream
+        .pipe(csvParser({ headers: false, skipLines: 0, trim: true }))
+        .on('data', (row) => {
+          const rowData = Object.values(row);
+
+          // Ensure there are exactly 2 columns (URL and IMS Org ID)
+          if (rowData.length !== 2) {
+            invalidRows += 1;
+            return;
+          }
+
+          const [baseURL, imsOrgID] = rowData.map((val) => val.trim());
+
+          // Validate baseURL and imsOrgID
+          if (!isValidUrl(baseURL) || !OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
+            invalidRows += 1;
+            return;
+          }
+
+          parsedData.push({ baseURL, imsOrgID });
+        })
+        .on('end', async () => {
+          if (invalidRows > 0) {
+            await slackContext.say(`:warning: Skipped **${invalidRows}** invalid rows in the CSV.`);
+          }
+          resolve(parsedData);
+        })
+        .on('error', (error) => reject(error));
     });
-
-    const hasValidStructure = parsedData.data.some((row) => row.length > 1);
-
-    if (!hasValidStructure) {
-      throw new Error('CSV data is invalid: No proper CSV structure detected.');
-    }
-
-    return parsedData.data;
   } catch (error) {
-    throw new Error('Failed to parse CSV file.');
+    throw new Error(`CSV processing failed: ${error.message}`);
   }
 };
 
@@ -374,4 +388,5 @@ export {
   getMessageFromEvent,
   wrapSayForThread,
   loadProfileConfig,
+  parseCSV,
 };

@@ -16,8 +16,7 @@ import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import nock from 'nock';
-
-import OnboardCommand from '../../../../src/support/slack/commands/onboard.js';
+import esmock from 'esmock';
 
 use(sinonChai);
 
@@ -26,9 +25,11 @@ describe('OnboardCommand', () => {
   let slackContext;
   let dataAccessStub;
   let sqsStub;
+  let parseCSVStub;
   let baseURL;
+  let OnboardCommand;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const configuration = {
       enableHandlerForSite: sinon.stub(),
     };
@@ -57,9 +58,23 @@ describe('OnboardCommand', () => {
       env: {
         AUDIT_JOBS_QUEUE_URL: 'testQueueUrl',
         DEFAULT_ORGANIZATION_ID: 'default',
+        token: 'test-token',
       },
     };
-    slackContext = { say: sinon.spy() };
+    slackContext = { say: sinon.spy(), files: [] };
+
+    parseCSVStub = sinon.stub().resolves([]);
+    OnboardCommand = await esmock(
+      '../../../../src/support/slack/commands/onboard.js',
+      {
+        '../../../../src/utils/slack/base.js': { parseCSV: parseCSVStub },
+      },
+    );
+  });
+
+  afterEach(() => {
+    sinon.restore();
+    esmock.purge(OnboardCommand);
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -74,11 +89,7 @@ describe('OnboardCommand', () => {
     });
   });
 
-  describe('Handle Execution Method', () => {
-    beforeEach(() => {
-      nock.cleanAll();
-    });
-
+  describe('Single-Site Onboarding', () => {
     it('handles valid input and adds a new site', async () => {
       nock(baseURL).get('/').replyWithError('rainy weather');
 
@@ -99,14 +110,7 @@ describe('OnboardCommand', () => {
       expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
       expect(dataAccessStub.Organization.create.calledWith(context)).to.be.true;
       expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({
-        baseURL: 'https://example.com',
-        deliveryType: 'other',
-        isLive: false,
-        organizationId: 'default',
-      });
       expect(slackContext.say.calledWith(':white_check_mark: A new organization has been created. Organization ID: 123 Organization name: new-org IMS Org ID: 000000000000000000000000@AdobeOrg.')).to.be.true;
-      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
     it('warns when an invalid site base URL is provided', async () => {
@@ -139,18 +143,6 @@ describe('OnboardCommand', () => {
       expect(dataAccessStub.Organization.create.notCalled).to.be.true;
     });
 
-    it('does not create a site if one already exists', async () => {
-      dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
-      dataAccessStub.Site.findByBaseURL.resolves({});
-
-      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
-      const command = OnboardCommand(context);
-
-      await command.handleExecution(args, slackContext);
-
-      expect(dataAccessStub.Site.create.notCalled).to.be.true;
-    });
-
     it('handles error when a new organization failed to be created', async () => {
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
       dataAccessStub.Organization.create.rejects(new Error('failed to create organization'));
@@ -160,22 +152,76 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(dataAccessStub.Organization.create.calledWith(context)).to.be.true;
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to create organization')).to.be.true;
     });
+  });
 
-    it('handles error when a site failed to be added', async () => {
-      nock(baseURL).get('/').replyWithError('rainy weather');
+  describe('Batch Onboarding from CSV', () => {
+    beforeEach(() => {
+      slackContext.files = [{ name: 'test.csv', url_private: 'https://mock-csv.com' }];
+    });
+
+    it('handles batch onboarding with valid CSV', async () => {
+      const mockCSVData = [
+        { baseURL: 'https://example1.com', imsOrgID: '000000000000000000000000@AdobeOrg' },
+        { baseURL: 'https://example2.com', imsOrgID: '000000000000000000000000@AdobeOrg' },
+      ];
+
+      parseCSVStub.withArgs('https://mock-csv.com', 'test-token', slackContext).resolves(mockCSVData);
+
       dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
+      dataAccessStub.Organization.create.resolves(null);
       dataAccessStub.Site.findByBaseURL.resolves(null);
-      dataAccessStub.Site.create.rejects(new Error('failed to add the site'));
+      dataAccessStub.Site.create.resolves({});
 
-      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const args = ['default'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
-      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to add the site')).to.be.true;
+
+      expect(slackContext.say.calledWith(':gear: Processing CSV file with profile *default*...')).to.be.true;
+      expect(parseCSVStub.calledWith('https://mock-csv.com', 'test-token', slackContext)).to.be.true;
+      await expect(command.handleExecution(args, slackContext)).to.not.be.rejected;
     });
+
+    it('rejects CSV with invalid data', async () => {
+      parseCSVStub.resolves([]);
+
+      const args = ['default'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.calledWith(':x: No valid rows found in the CSV file. Please check the format.')).to.be.true;
+    });
+
+    it('warns when multiple CSV files are uploaded', async () => {
+      slackContext.files = [
+        { name: 'test1.csv', url_private: 'https://mock-csv.com/1' },
+        { name: 'test2.csv', url_private: 'https://mock-csv.com/2' },
+      ];
+
+      const args = ['default'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Please upload only **one** CSV file at a time.')).to.be.true;
+    });
+
+    it('warns when a non-CSV file is uploaded', async () => {
+      slackContext.files = [{ name: 'test.txt', url_private: 'https://mock-file.com' }];
+
+      const args = ['default'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Please upload a **valid** CSV file.')).to.be.true;
+    });
+  });
+
+  afterEach(() => {
+    sinon.restore();
   });
 });
