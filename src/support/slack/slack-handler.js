@@ -45,6 +45,7 @@ function SlackHandler(commands, log) {
       threadTs,
       client,
       user: event?.user,
+      files: event?.files,
     };
 
     log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);
