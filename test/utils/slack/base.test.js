@@ -262,7 +262,7 @@ describe('Base Slack Utils', () => {
       ]);
     });
 
-    it('should throw an error when the file download fails', async () => {
+    it('should throw an error when the file download fails due to a network error', async () => {
       const fileUrl = 'https://fake-url.com/file.csv';
       const token = 'test-bot-token';
 
@@ -297,7 +297,57 @@ describe('Base Slack Utils', () => {
         await parseCSV(fileUrl, token, slackContext);
         throw new Error('Test failed: Error was not thrown');
       } catch (error) {
-        expect(error.message).to.equal('CSV processing failed: Failed to download CSV: No data received.');
+        expect(error.message).to.equal(
+          'CSV processing failed: Failed to download CSV: No data received.',
+        );
+      }
+    });
+
+    it('should throw an error when authentication fails with 401 Unauthorized', async () => {
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).reply(401);
+
+      try {
+        await parseCSV(fileUrl, token, slackContext);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'CSV processing failed: Authentication failed: Invalid Slack token or insufficient permissions.',
+        );
+      }
+    });
+
+    it('should throw an error when access is forbidden with 403 Forbidden', async () => {
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).reply(403);
+
+      try {
+        await parseCSV(fileUrl, token, slackContext);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'CSV processing failed: Access denied: Slack bot lacks files:read permission.',
+        );
+      }
+    });
+
+    it('should throw an error when the file is not found (404)', async () => {
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).reply(404);
+
+      try {
+        await parseCSV(fileUrl, token, slackContext);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(
+          `CSV processing failed: File not found at: ${fileUrl}.`,
+        );
       }
     });
   });

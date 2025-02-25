@@ -311,7 +311,7 @@ const parseCSV = async (fileUrl, token) => {
     }
 
     if (response.status === 404) {
-      throw new Error(`File not found at: ${fileUrl}`);
+      throw new Error(`File not found at: ${fileUrl}.`);
     }
 
     if (!response.data || response.data.length === 0) {
