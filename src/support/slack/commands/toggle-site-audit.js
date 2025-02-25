@@ -48,8 +48,12 @@ export default (context) => {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  const validateCSVFile = async (file, fileContent) => {
+  const validateCSVFile = async (file, fileContent, say) => {
   // Check file extension
+
+    await say(`file: ${JSON.stringify(file)}`);
+    log.info(`file: ${JSON.stringify(file)}`);
+
     if (!file.name.toLowerCase().endsWith('.csv')) {
       throw new Error('Please upload a CSV file.');
     }
