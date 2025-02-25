@@ -15,6 +15,9 @@ import { hasText, isString, isObject } from '@adobe/spacecat-shared-utils';
 import fs from 'fs';
 
 import { URL } from 'url';
+import { Readable } from 'stream';
+import csvParser from 'csv-parser';
+import axios from 'axios';
 import path from 'path';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
@@ -285,6 +288,46 @@ const wrapSayForThread = (say, threadTs) => {
   return wrappedFunction;
 };
 
+/**
+ * Downloads, validates, and parses a CSV file from Slack.
+ *
+ * @param {string} fileUrl - The private Slack file URL.
+ * @param {string} token - The Slack bot token for authentication.
+ * @returns {Promise<Array<Array<string>>>} Parsed CSV data as an array of rows.
+ */
+const parseCSV = async (fileUrl, token) => {
+  try {
+    const response = await axios.get(fileUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'arraybuffer',
+    });
+
+    if (!response.data) {
+      throw new Error('Failed to download CSV: No data received.');
+    }
+
+    const csvString = Buffer.from(response.data).toString('utf-8');
+    const csvStream = Readable.from(csvString);
+
+    return new Promise((resolve, reject) => {
+      const parsedData = [];
+
+      csvStream
+        .pipe(csvParser({ headers: false, skipLines: 0, trim: true }))
+        .on('data', (row) => {
+          const rowData = Object.values(row);
+          if (rowData.length >= 2) {
+            parsedData.push(rowData.map((val) => val.trim()));
+          }
+        })
+        .on('end', () => resolve(parsedData))
+        .on('error', (error) => reject(error));
+    });
+  } catch (error) {
+    throw new Error(`CSV processing failed: ${error.message}`);
+  }
+};
+
 const getHlxConfigMessagePart = (hlxConfig) => {
   const { rso, hlxVersion } = hlxConfig;
   return `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``;
@@ -325,4 +368,5 @@ export {
   getMessageFromEvent,
   wrapSayForThread,
   loadProfileConfig,
+  parseCSV,
 };

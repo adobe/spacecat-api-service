@@ -19,7 +19,12 @@ import chaiAsPromised from 'chai-as-promised';
 
 import path from 'path';
 
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
+
 import { Blocks } from 'slack-block-builder';
+import MockAdapter from 'axios-mock-adapter';
+import axios from 'axios';
 import {
   extractURLFromSlackInput,
   FALLBACK_SLACK_CHANNEL,
@@ -27,6 +32,7 @@ import {
   postErrorMessage, sendFile,
   sendMessageBlocks,
   loadProfileConfig,
+  parseCSV,
 } from '../../../src/utils/slack/base.js';
 
 use(chaiAsPromised);
@@ -219,6 +225,80 @@ describe('Base Slack Utils', () => {
         const slackContext = await getSlackContext({ url: 'some-url', log: console });
         expect(slackContext).to.eql({ channel: FALLBACK_SLACK_CHANNEL });
       });
+    });
+  });
+
+  describe('parseCSV', () => {
+    let axiosMock;
+    let slackContext;
+    let sandbox;
+
+    beforeEach(() => {
+      axiosMock = new MockAdapter(axios);
+      slackContext = { say: sinon.spy() };
+      sandbox = sinon.createSandbox();
+      sandbox.stub(isValidUrl, 'call').returns(true);
+      sandbox.stub(OrganizationModel.IMS_ORG_ID_REGEX, 'test').returns(true);
+    });
+
+    afterEach(() => {
+      axiosMock.restore();
+      sandbox.restore();
+    });
+
+    it('should correctly fetch and parse a CSV file', async () => {
+      const filePath = 'test/utils/slack/test-entries.csv';
+      const fileContent = fs.readFileSync(filePath, 'utf-8');
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).reply(200, fileContent);
+
+      const records = await parseCSV(fileUrl, token, slackContext);
+
+      expect(records).to.deep.equal([
+        ['https://www.foo.com', '12345@AdobeOrg'],
+        ['https://www.bar.com', '12345@AdobeOrg'],
+      ]);
+    });
+
+    it('should throw an error when the file download fails', async () => {
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).networkError();
+
+      try {
+        await parseCSV(fileUrl, token, slackContext);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.include('CSV processing failed');
+      }
+    });
+
+    it('should correctly handle invalid CSV data', async () => {
+      const invalidCsvContent = 'invalid data';
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).reply(200, invalidCsvContent);
+
+      const records = await parseCSV(fileUrl, token, slackContext);
+
+      expect(records).to.be.an('array').that.is.empty;
+    });
+
+    it('should throw an error when CSV download returns empty data', async () => {
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+      axiosMock.onGet(fileUrl).reply(200, '');
+
+      try {
+        await parseCSV(fileUrl, token, slackContext);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal('CSV processing failed: Failed to download CSV: No data received.');
+      }
     });
   });
 
