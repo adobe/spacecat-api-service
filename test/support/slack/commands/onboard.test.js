@@ -66,11 +66,11 @@ describe('OnboardCommand', () => {
     it('initializes correctly with base command properties', () => {
       const command = OnboardCommand(context);
       expect(command.id).to.equal('onboard-site');
-      expect(command.name).to.equal('Onboard Site');
+      expect(command.name).to.equal('Onboard Site(s)');
       expect(command.description).to.equal(
-        'Onboards a new site to Success Studio.',
+        'Onboards a new site (or batch of sites from CSV) to Success Studio.',
       );
-      expect(command.phrases).to.deep.equal(['onboard site']);
+      expect(command.phrases).to.deep.equal(['onboard site', 'onboard sites']);
     });
   });
 
@@ -82,8 +82,13 @@ describe('OnboardCommand', () => {
     it('handles valid input and adds a new site', async () => {
       nock(baseURL).get('/').replyWithError('rainy weather');
 
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
-      dataAccessStub.Organization.create.resolves({ organizationId: 'new-org-123' });
+      dataAccessStub.Organization.create.resolves(mockOrganization);
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
         getBaseURL: () => baseURL,
@@ -105,6 +110,7 @@ describe('OnboardCommand', () => {
         isLive: false,
         organizationId: 'default',
       });
+      expect(slackContext.say.calledWith(':white_check_mark: A new organization has been created. Organization ID: 123 Organization name: new-org IMS Org ID: 000000000000000000000000@AdobeOrg.')).to.be.true;
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 

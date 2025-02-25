@@ -13,7 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, isObject } from '@adobe/spacecat-shared-utils';
 
 import {
   extractURLFromSlackInput,
@@ -25,7 +25,7 @@ import { findDeliveryType, triggerAuditForSite, triggerImportRun } from '../../u
 
 import BaseCommand from './base.js';
 
-const PHRASES = ['onboard site'];
+const PHRASES = ['onboard site', 'onboard sites'];
 
 /**
  * Factory function to create the OnboardCommand object.
@@ -37,10 +37,10 @@ const PHRASES = ['onboard site'];
 function OnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-site',
-    name: 'Onboard Site',
-    description: 'Onboards a new site to Success Studio.',
+    name: 'Onboard Site(s)',
+    description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site}`,
+    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
   });
 
   const { dataAccess, log } = context;
@@ -65,12 +65,12 @@ function OnboardCommand(context) {
 
       await say(`:gear: Applying ${profileName} profile.`);
 
-      if (!hasText(baseURL)) {
+      if (!isValidUrl(baseURL)) {
         await say(':warning: Please provide a valid site base URL.');
         return;
       }
 
-      if (!hasText(imsOrgID) || !OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
+      if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
         await say(':warning: Please provide a valid IMS Org ID.');
         return;
       }
@@ -79,6 +79,9 @@ function OnboardCommand(context) {
       let organization = await Organization.findByImsOrgId(imsOrgID);
       if (!organization) {
         organization = await Organization.create(context);
+        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
+        await say(message);
+        log.info(message);
       }
 
       // check if the site already exists; create if it doesn't
@@ -93,6 +96,24 @@ function OnboardCommand(context) {
       }
 
       const profile = await loadProfileConfig(profileName);
+
+      if (!isObject(profile)) {
+        await say(`:warning: Profile "${profileName}" not found or invalid. Please try again.`);
+        log.error(`Profile "${profileName}" is missing or invalid.`);
+        return;
+      }
+
+      if (!isObject(profile?.audits)) {
+        await say(`:warning: Profile "${profileName}" does not have a valid audits section.`);
+        log.error(`Profile "${profileName}" has invalid or missing audits.`);
+        return;
+      }
+
+      if (!isObject(profile?.imports)) {
+        await say(`:warning: Profile "${profileName}" does not have a valid imports section.`);
+        log.error(`Profile "${profileName}" has invalid or missing imports.`);
+        return;
+      }
 
       const configuration = await Configuration.findLatest();
 
