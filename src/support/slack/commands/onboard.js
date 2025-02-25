@@ -199,7 +199,7 @@ function OnboardCommand(context) {
         await say(`:gear: Processing CSV file with profile *${profileName}*...`);
 
         // Download & parse CSV
-        const csvData = await parseCSV(file.url_private, context.env.token);
+        const csvData = await parseCSV(file.url_private, botToken);
 
         if (csvData.length === 0) {
           await say(':x: No valid rows found in the CSV file. Please check the format.');

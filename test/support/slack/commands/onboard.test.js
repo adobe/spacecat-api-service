@@ -159,6 +159,7 @@ describe('OnboardCommand', () => {
   describe('Batch Onboarding from CSV', () => {
     beforeEach(() => {
       slackContext.files = [{ name: 'test.csv', url_private: 'https://mock-csv.com' }];
+      slackContext.botToken = 'test-token';
     });
 
     it('handles batch onboarding with valid CSV', async () => {
@@ -167,7 +168,7 @@ describe('OnboardCommand', () => {
         { baseURL: 'https://example2.com', imsOrgID: '000000000000000000000000@AdobeOrg' },
       ];
 
-      parseCSVStub.withArgs('https://mock-csv.com', 'test-token', slackContext).resolves(mockCSVData);
+      parseCSVStub.withArgs('https://mock-csv.com', 'test-token').resolves(mockCSVData);
 
       dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
       dataAccessStub.Organization.create.resolves(null);
