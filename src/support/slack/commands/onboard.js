@@ -66,15 +66,22 @@ function OnboardCommand(context) {
   });
 
   /**
-   * Onboards a single site.
+   * Onboards a single site and writes the report to a file stream.
    *
    * @param {string} baseURLInput - The site URL.
    * @param {string} imsOrgID - The IMS Org ID.
    * @param {string} profileName - The profile name.
    * @param {Object} slackContext - Slack context.
+   * @param {(report: Object) => void} reportHandler - Function to handle report data.
    * @returns {Promise<Object>} - A report line containing execution details.
    */
-  const onboardSingleSite = async (baseURLInput, imsOrgID, profileName, slackContext) => {
+  const onboardSingleSite = async (
+    baseURLInput,
+    imsOrgID,
+    profileName,
+    slackContext,
+    reportHandler = ((report) => report),
+  ) => {
     const { say } = slackContext;
     const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = context.env;
 
@@ -95,14 +102,12 @@ function OnboardCommand(context) {
 
       if (!isValidUrl(baseURL)) {
         await say(':warning: Please provide a valid site base URL.');
-        reportLine.errors += 'Invalid Site URL.';
-        return reportLine;
+        throw new Error('Invalid Site base URL.');
       }
 
       if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
         await say(':warning: Please provide a valid IMS Org ID.');
-        reportLine.errors += 'Invalid IMS Org ID.';
-        return reportLine;
+        throw new Error('Invalid IMS Org ID.');
       }
 
       let organization = await Organization.findByImsOrgId(imsOrgID);
@@ -139,7 +144,7 @@ function OnboardCommand(context) {
         await triggerAuditForSite(site, auditType, slackContext, context);
       }
 
-      reportLine.audits = auditTypes.join(',');
+      reportLine.audits = auditTypes.join(', ');
 
       for (const importType of Object.keys(profile.imports)) {
         /* eslint-disable no-await-in-loop */
@@ -162,8 +167,8 @@ function OnboardCommand(context) {
 
       throw error; // re-throw the error to ensure that the outer function detects failure
     }
-    // eslint-disable-next-line consistent-return
-    return reportLine;
+
+    reportHandler(reportLine);
   };
 
   /**
@@ -218,9 +223,13 @@ function OnboardCommand(context) {
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
           const [baseURL, imsOrgID] = row;
-          const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
-          await say(`Onboarding a site with base URL ${baseURL} and IMS org ID ${imsOrgID}`);
-          fileStream.write(csvStringifier.stringifyRecords([reportLine]));
+          await onboardSingleSite(
+            baseURL,
+            imsOrgID,
+            profileName,
+            slackContext,
+            (reportLine) => fileStream.write(csvStringifier.stringifyRecords([reportLine])),
+          );
         }
 
         fileStream.end();
