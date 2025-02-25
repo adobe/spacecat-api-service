@@ -207,7 +207,7 @@ function OnboardCommand(context) {
         }
 
         const tempFilePath = path.join(os.tmpdir(), `spacecat_onboard_report_${Date.now()}.csv`);
-        const fileStream = fs.createFileStream(tempFilePath);
+        const fileStream = fs.createWriteStream(tempFilePath);
 
         // Write headers to CSV report
         fileStream.write(csvStringifier.getHeaderString());
