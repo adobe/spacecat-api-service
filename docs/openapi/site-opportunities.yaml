@@ -311,6 +311,45 @@ site-opportunity-suggestions-status:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
     security:
       - ims_key: [ ]
+site-opportunity-suggestions-auto-fix:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  patch:
+    summary: |
+        Trigger autofix for one or multiple suggestions, and set them to 'In Progress'
+    tags:
+      - opportunity-suggestions
+    requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                suggestionIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: An array of suggestion IDs to be autofixed.
+              required:
+                - suggestionIds
+
+    responses:
+      '207':
+        description: |
+          A list of suggestions that are sent to autofix, 
+          or the status code and error message for the ones failed.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionStatusUpdateListResponse'
+            examples:
+              broken-backlinks-suggestions-status-update-response:
+                $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
+    security:
+      - ims_key: [ ]
 
 site-opportunity-suggestion:
   parameters:

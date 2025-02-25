@@ -34,7 +34,7 @@ import { sendAutofixMessage } from '../support/utils.js';
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(dataAccess, sqs) {
+function SuggestionsController(dataAccess, sqs, env) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -416,7 +416,7 @@ function SuggestionsController(dataAccess, sqs) {
     }
     const configuration = await Configuration.findLatest();
     if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-autofix`, site)) {
-      return badRequest(`Handler is not enabled for site ${site.getBaseURL()} autofix type ${opportunity.getType()}`);
+      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
     }
     const suggestionEntities = await Promise.all(suggestionIds.map(
       async (suggestionId, index) => {
@@ -430,13 +430,21 @@ function SuggestionsController(dataAccess, sqs) {
           };
         } else {
           try {
-            suggestion.setStatus(SuggestionModel.STATUSES.IN_PROGRESS);
-            const updatedSuggestion = await suggestion.save();
+            if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+              suggestion.setStatus(SuggestionModel.STATUSES.IN_PROGRESS);
+              const updatedSuggestion = await suggestion.save();
+              return {
+                index,
+                uuid: suggestionId,
+                suggestion: SuggestionDto.toJSON(updatedSuggestion),
+                statusCode: 200,
+              };
+            }
             return {
               index,
               uuid: suggestionId,
-              suggestion: SuggestionDto.toJSON(updatedSuggestion),
-              statusCode: 200,
+              message: 'Suggestion is not in NEW status',
+              statusCode: 400,
             };
           } catch (error) {
             return {
@@ -455,10 +463,10 @@ function SuggestionsController(dataAccess, sqs) {
       metadata: {
         total: suggestionEntities.length,
         success: succeeded.length,
-        failed: suggestionEntities.length - succeeded,
+        failed: suggestionEntities.length - succeeded.length,
       },
     };
-    const { AUTOFIX_JOBS_QUEUE: queueUrl } = context.env;
+    const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
     await sendAutofixMessage(
       sqs,
       queueUrl,

@@ -29,11 +29,16 @@ describe('Suggestions Controller', () => {
   const SUGGESTION_IDS = [
     'a4a6055c-de4b-4552-bc0c-01fdb45b98d5',
     '930f8070-508a-4d94-a46c-279d4de2adfb',
+    'a9807173-8e8e-4e8c-96f7-0a22d9dc90b8',
   ];
 
   const OPPORTUNITY_ID = 'a92e2a5e-7b3d-42f0-b3f0-6edd3746a932';
+  const OPPORTUNITY_ID_NOT_FOUND = 'b56ef8d6-996b-4d5c-b308-8e0b0a95e1b6';
+  const OPPORTUNITY_ID_NOT_ENABLED = '7a924451-c461-433c-a5fe-c3d2929ec9fa';
 
   const SITE_ID = 'f964a7f8-5402-4b01-bd5b-1ab499bcf797';
+  const SITE_ID_NOT_FOUND = '3c677e57-9a6a-441c-a556-262eb8b4fc0e';
+  const SITE_ID_NOT_ENABLED = '07efc218-79f6-48b5-970e-deb0f88ce01b';
 
   const mockSuggestionEntity = (suggData, removeStub) => ({
     getId() {
@@ -129,8 +134,14 @@ describe('Suggestions Controller', () => {
   let mockSuggestionDataAccess;
   let mockSuggestion;
   let mockOpportunity;
+  let mockSite;
+  let mockConfiguration;
   let suggestionsController;
+  let mockSqs;
   let opportunity;
+  let site;
+  let siteNotEnabled;
+  let opportunityNotEnabled;
   let removeStub;
   let suggs;
 
@@ -138,6 +149,18 @@ describe('Suggestions Controller', () => {
     opportunity = {
       getId: sandbox.stub().returns(OPPORTUNITY_ID),
       getSiteId: sandbox.stub().returns(SITE_ID),
+      getType: sandbox.stub().returns('broken-backlinks'),
+    };
+    opportunityNotEnabled = {
+      getId: sandbox.stub().returns(OPPORTUNITY_ID_NOT_ENABLED),
+      getSiteId: sandbox.stub().returns(SITE_ID_NOT_ENABLED),
+      getType: sandbox.stub().returns('broken-backlinks'),
+    };
+    site = {
+      getId: sandbox.stub().returns(SITE_ID),
+    };
+    siteNotEnabled = {
+      getId: sandbox.stub().returns(SITE_ID_NOT_ENABLED),
     };
 
     removeStub = sandbox.stub().resolves();
@@ -169,11 +192,43 @@ describe('Suggestions Controller', () => {
           conversionRate: 0.02,
         },
       },
+      {
+        id: SUGGESTION_IDS[2],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'FIX_LINK',
+        status: 'NEW',
+        rank: 2,
+        data: {
+          info: 'broken back link data',
+        },
+        kpiDeltas: {
+          conversionRate: 0.02,
+        },
+      },
     ];
 
+    const isHandlerEnabledForSite = sandbox.stub();
+    isHandlerEnabledForSite.withArgs('broken-backlinks-autofix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('broken-backlinks-autofix', siteNotEnabled).returns(false);
     mockOpportunity = {
-      findById: sandbox.stub().resolves(opportunity),
+      findById: sandbox.stub(),
     };
+
+    mockSite = {
+      findById: sandbox.stub(),
+    };
+
+    mockConfiguration = {
+      findLatest: sandbox.stub().resolves({
+        isHandlerEnabledForSite,
+      }),
+    };
+    mockSite.findById.withArgs(SITE_ID).resolves(site);
+    mockSite.findById.withArgs(SITE_ID_NOT_ENABLED).resolves(siteNotEnabled);
+    mockSite.findById.withArgs(SITE_ID_NOT_FOUND).resolves(null);
+    mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+    mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_ENABLED).resolves(opportunityNotEnabled);
+    mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
 
     mockSuggestion = {
       allByOpportunityId: sandbox.stub().resolves([mockSuggestionEntity(suggs[0])]),
@@ -196,9 +251,14 @@ describe('Suggestions Controller', () => {
     mockSuggestionDataAccess = {
       Opportunity: mockOpportunity,
       Suggestion: mockSuggestion,
+      Site: mockSite,
+      Configuration: mockConfiguration,
+    };
+    mockSqs = {
+      sendMessage: sandbox.stub().resolves(),
     };
 
-    suggestionsController = SuggestionsController(mockSuggestionDataAccess);
+    suggestionsController = SuggestionsController(mockSuggestionDataAccess, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
   });
 
   afterEach(() => {
@@ -441,7 +501,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: suggs,
+      data: [suggs[0], suggs[1]],
     });
     expect(response.status).to.equal(207);
     const createResponse = await response.json();
@@ -469,7 +529,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: suggs,
+      data: [suggs[0], suggs[1]],
     });
     expect(response.status).to.equal(207);
     const createResponse = await response.json();
@@ -963,6 +1023,201 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Validation error');
   });
 
+  describe('auto-fix suggestions', () => {
+    it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('auto-fix suggestions status returns bad request if no site ID is passed', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('auto-fix suggestions status returns bad request if no opportunity ID is passed', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Opportunity ID required');
+    });
+
+    it('auto-fix suggestions status returns bad request if no data is passed', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'No updates provided');
+    });
+
+    it('auto-fix suggestions returns bad request if passed data is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: 'not an array',
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Request body must be an array of suggestionIds');
+    });
+
+    it('auto-fix suggestions returns 404 if site not found', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID_NOT_FOUND,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('auto-fix suggestions returns 404 if opportunity not found', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID_NOT_FOUND,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Opportunity not found');
+    });
+
+    it('auto-fix suggestions returns 400 if site not enabled for autofix', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID_NOT_ENABLED,
+          opportunityId: OPPORTUNITY_ID_NOT_ENABLED,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Handler is not enabled for site 07efc218-79f6-48b5-970e-deb0f88ce01b autofix type broken-backlinks');
+    });
+
+    it('auto-fix suggestions status fails passed suggestions not found', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: ['not-found', SUGGESTION_IDS[2]] },
+      });
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 404);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Suggestion not found');
+    });
+
+    it('autofix suggestion patches suggestion status fails passed suggestions not new', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
+    });
+
+    it('auto-fix suggestions status fails if validation error in save', async () => {
+      suggs[0].throwError = true;
+      suggs[2].throwValidationError = true;
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 0);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 2);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 500);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Unknown error');
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Validation error');
+    });
+  });
+
   describe('removeSuggestion', () => {
     /* create unit test suite for this code:
 
@@ -1041,11 +1296,10 @@ describe('Suggestions Controller', () => {
     });
 
     it('returns not found if opportunity is not found', async () => {
-      mockOpportunity.findById.resolves(null);
       const response = await suggestionsController.removeSuggestion({
         params: {
           siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
+          opportunityId: OPPORTUNITY_ID_NOT_FOUND,
           suggestionId: SUGGESTION_IDS[0],
         },
       });
