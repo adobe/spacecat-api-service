@@ -293,7 +293,6 @@ const wrapSayForThread = (say, threadTs) => {
  *
  * @param {string} fileUrl - The private Slack file URL.
  * @param {string} token - The Slack bot token for authentication.
- * @param {Object} slackContext - The Slack context for sending messages.
  * @returns {Promise<Array<Array<string>>>} Parsed CSV data as an array of rows.
  */
 const parseCSV = async (fileUrl, token) => {
