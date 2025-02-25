@@ -218,7 +218,6 @@ function OnboardCommand(context) {
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
           const [baseURL, imsOrgID] = row;
-          await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
