@@ -177,6 +177,11 @@ export default (context) => {
       // Process the CSV file
       const file = files[0];
 
+      if (!file) {
+        await say(`${ERROR_MESSAGE_PREFIX}No file uploaded.`);
+        return;
+      }
+
       const response = await fetch(file.url_private, {
         headers: {
           Authorization: `Bearer ${context.env.SLACK_BOT_TOKEN}`,
