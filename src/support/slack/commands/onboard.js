@@ -95,12 +95,16 @@ function OnboardCommand(context) {
 
       if (!isValidUrl(baseURL)) {
         await say(':warning: Please provide a valid site base URL.');
-        return;
+        reportLine.errors = 'Invalid site URL';
+        reportLine.status = 'Failure';
+        return reportLine;
       }
 
       if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
         await say(':warning: Please provide a valid IMS Org ID.');
-        return;
+        reportLine.errors = 'Invalid IMS Org ID';
+        reportLine.status = 'Failure';
+        return reportLine;
       }
 
       let organization = await Organization.findByImsOrgId(imsOrgID);
@@ -137,7 +141,7 @@ function OnboardCommand(context) {
         await triggerAuditForSite(site, auditType, slackContext, context);
       }
 
-      reportLine.audits = auditTypes.join(',');
+      reportLine.audits = auditTypes.join(', ');
 
       for (const importType of Object.keys(profile.imports)) {
         /* eslint-disable no-await-in-loop */
@@ -216,9 +220,19 @@ function OnboardCommand(context) {
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
           const [baseURL, imsOrgID] = row;
-          await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           await say(`Onboarding a site with base URL ${baseURL} and IMS org ID ${imsOrgID}`);
+          // TODO: remove below (just for debugging)
+          const tmpMessage = `
+          *Onboarding complete for ${reportLine.site}*
+          :ims: *IMS Org ID:* ${reportLine.imsOrgId}
+          :gear: *Profile:* ${reportLine.profile}
+          :clipboard: *Audits:* ${reportLine.audits || 'None'}
+          :inbox_tray: *Imports:* ${reportLine.imports || 'None'}
+          ${reportLine.errors ? `:cross-x: *Errors:* ${reportLine.errors}` : `:check: *Status:* ${reportLine.status}`}
+          `;
+          await say(tmpMessage);
+          // TODO: remove above
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
