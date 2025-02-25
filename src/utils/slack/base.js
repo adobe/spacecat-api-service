@@ -306,7 +306,8 @@ const parseCSV = async (fileUrl, token) => {
       throw new Error('Failed to download CSV: No data received.');
     }
 
-    const csvStream = Readable.from(response.data.toString());
+    const csvString = Buffer.from(response.data).toString('utf-8');
+    const csvStream = Readable.from(csvString);
 
     return new Promise((resolve, reject) => {
       const parsedData = [];
@@ -315,8 +316,6 @@ const parseCSV = async (fileUrl, token) => {
         .pipe(csvParser({ headers: false, skipLines: 0, trim: true }))
         .on('data', (row) => {
           const rowData = Object.values(row);
-
-          // Ensure there are at least 2 columns
           if (rowData.length >= 2) {
             parsedData.push(rowData.map((val) => val.trim()));
           }
