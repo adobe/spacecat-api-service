@@ -215,12 +215,11 @@ function OnboardCommand(context) {
         fileStream.write(csvStringifier.getHeaderString());
 
         // Process batch onboarding
-        for (const row of csvData) {
-          /* eslint-disable no-await-in-loop */
+        csvData.forEach(async (row) => {
           const [baseURL, imsOrgID] = row;
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
-        }
+        });
 
         fileStream.end();
 

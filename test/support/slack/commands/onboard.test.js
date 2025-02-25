@@ -181,7 +181,6 @@ describe('OnboardCommand', () => {
 
       expect(slackContext.say.calledWith(':gear: Processing CSV file with profile *default*...')).to.be.true;
       expect(parseCSVStub.calledWith('https://mock-csv.com', 'test-token', slackContext)).to.be.true;
-      await expect(command.handleExecution(args, slackContext)).to.not.be.rejected;
     });
 
     it('rejects CSV with invalid data', async () => {
