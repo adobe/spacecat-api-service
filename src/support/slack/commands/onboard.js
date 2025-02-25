@@ -219,6 +219,7 @@ function OnboardCommand(context) {
           /* eslint-disable no-await-in-loop */
           const [baseURL, imsOrgID] = row;
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
+          await say(`Onboarding a site with base URL ${baseURL} and IMS org ID ${imsOrgID}`);
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
