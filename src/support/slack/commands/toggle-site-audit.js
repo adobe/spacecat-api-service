@@ -9,7 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { isString, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  isString, isValidUrl, isNonEmptyArray, hasText,
+} from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, loadProfileConfig } from '../../../utils/slack/base.js';
 
@@ -34,7 +36,7 @@ export default (context) => {
       throw new Error('The "enableAudit" parameter is required and must be set to "enable" or "disable".');
     }
 
-    if (baseURL && (isString(baseURL) === false || baseURL.length === 0)) {
+    if (isValidUrl(baseURL) === false) {
       throw new Error('The site URL is missing or in the wrong format.');
     }
 
@@ -48,18 +50,15 @@ export default (context) => {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  const validateCSVFile = async (file, fileContent, say) => {
+  const validateCSVFile = async (file, fileContent) => {
   // Check file extension
 
-    await say(`file: ${JSON.stringify(file)}`);
-    log.info(`file: ${JSON.stringify(file)}`);
-
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      throw new Error('Please upload a CSV file.');
-    }
+    // if (!file.name.toLowerCase().endsWith('.csv')) {
+    //   throw new Error('Please upload a CSV file.');
+    // }
 
     // Check if file is empty
-    if (!fileContent || fileContent.trim().length === 0) {
+    if (hasText(fileContent) === false) {
       throw new Error('The CSV file is empty.');
     }
 
@@ -67,7 +66,7 @@ export default (context) => {
     const urls = await processCSVContent(fileContent);
 
     // Check if we have any URLs
-    if (urls.length === 0) {
+    if (!isNonEmptyArray(urls)) {
       throw new Error('No valid URLs found in the CSV file.');
     }
 
@@ -80,7 +79,7 @@ export default (context) => {
       }
     });
 
-    if (invalidUrls.length > 0) {
+    if (isNonEmptyArray(invalidUrls)) {
       throw new Error(`Invalid URLs found in CSV:\n${invalidUrls.join('\n')}`);
     }
 
@@ -98,19 +97,33 @@ export default (context) => {
         await say(`${ERROR_MESSAGE_PREFIX}The first argument must be either "enable" or "disable".`);
         return;
       }
+      // #region debug start
+      await say(`enableAuditInput: ${enableAuditInput}`);
+      await say(`auditTypeOrProfileInput: ${auditTypeOrProfileInput}`);
+      // #endregion
 
       const enableAudit = enableAuditInput.toLowerCase();
       const auditTypeOrProfile = auditTypeOrProfileInput
         ? auditTypeOrProfileInput.toLowerCase() : null;
 
+      // #region debug start
+      await say(`auditTypeOrProfile: ${auditTypeOrProfile}`);
+      // #endregion
+
       // Get configuration early to validate audit types
       const configuration = await Configuration.findLatest();
 
       // Check if a file was uploaded
-      if (!files || files.length === 0) {
+      if (isNonEmptyArray(files) === false) {
       // Fall back to original single URL behavior
         const [, baseURLInput, singleAuditType] = args;
-        if (!baseURLInput) {
+
+        // #region debug start
+        await say('Entering single URL behavior');
+        await say(`baseURLInput: ${baseURLInput}, singleAuditType: ${singleAuditType}`);
+        // #endregion
+
+        if (isValidUrl(baseURLInput) === false) {
           await say(`${ERROR_MESSAGE_PREFIX}Please provide either a CSV file or a single baseURL.`);
           return;
         }
@@ -181,7 +194,7 @@ export default (context) => {
       // Process the CSV file
       const file = files[0];
 
-      if (!file) {
+      if (isNonEmptyArray(file) === false) {
         await say(`${ERROR_MESSAGE_PREFIX}No file uploaded.`);
         return;
       }
