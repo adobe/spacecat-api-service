@@ -11,7 +11,7 @@
  */
 
 import { createUrl } from '@adobe/fetch';
-import { hasText, isString, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { hasText, isString } from '@adobe/spacecat-shared-utils';
 import fs from 'fs';
 
 import { URL } from 'url';
@@ -20,7 +20,6 @@ import csvParser from 'csv-parser';
 import axios from 'axios';
 import path from 'path';
 
-import { Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
 
@@ -295,9 +294,9 @@ const wrapSayForThread = (say, threadTs) => {
  * @param {string} fileUrl - The private Slack file URL.
  * @param {string} token - The Slack bot token for authentication.
  * @param {Object} slackContext - The Slack context for sending messages.
- * @returns {Promise<Array<{ baseURL: string, imsOrgID: string }>>} - Parsed valid data.
+ * @returns {Promise<Array<Array<string>>>} Parsed CSV data as an array of rows.
  */
-const parseCSV = async (fileUrl, token, slackContext) => {
+const parseCSV = async (fileUrl, token) => {
   try {
     const response = await axios.get(fileUrl, {
       headers: { Authorization: `Bearer ${token}` },
@@ -312,35 +311,18 @@ const parseCSV = async (fileUrl, token, slackContext) => {
 
     return new Promise((resolve, reject) => {
       const parsedData = [];
-      let invalidRows = 0;
 
       csvStream
         .pipe(csvParser({ headers: false, skipLines: 0, trim: true }))
         .on('data', (row) => {
           const rowData = Object.values(row);
 
-          // Ensure there are exactly 2 columns (URL and IMS Org ID)
-          if (rowData.length !== 2) {
-            invalidRows += 1;
-            return;
+          // Ensure there are at least 2 columns
+          if (rowData.length >= 2) {
+            parsedData.push(rowData.map((val) => val.trim()));
           }
-
-          const [baseURL, imsOrgID] = rowData.map((val) => val.trim());
-
-          // Validate baseURL and imsOrgID
-          if (!isValidUrl(baseURL) || !OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
-            invalidRows += 1;
-            return;
-          }
-
-          parsedData.push({ baseURL, imsOrgID });
         })
-        .on('end', async () => {
-          if (invalidRows > 0) {
-            await slackContext.say(`:warning: Skipped **${invalidRows}** invalid rows in the CSV.`);
-          }
-          resolve(parsedData);
-        })
+        .on('end', () => resolve(parsedData))
         .on('error', (error) => reject(error));
     });
   } catch (error) {

@@ -167,8 +167,9 @@ function OnboardCommand(context) {
         }
 
         // Process batch onboarding
-        for (const { baseURL, imsOrgID } of csvData) {
+        for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
+          const [baseURL, imsOrgID] = row;
           await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
         }
 

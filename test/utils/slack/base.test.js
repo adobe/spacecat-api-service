@@ -257,8 +257,8 @@ describe('Base Slack Utils', () => {
       const records = await parseCSV(fileUrl, token, slackContext);
 
       expect(records).to.deep.equal([
-        { baseURL: 'https://www.foo.com', imsOrgID: '12345@AdobeOrg' },
-        { baseURL: 'https://www.bar.com', imsOrgID: '12345@AdobeOrg' },
+        ['https://www.foo.com', '12345@AdobeOrg'],
+        ['https://www.bar.com', '12345@AdobeOrg'],
       ]);
     });
 
@@ -286,7 +286,6 @@ describe('Base Slack Utils', () => {
       const records = await parseCSV(fileUrl, token, slackContext);
 
       expect(records).to.be.an('array').that.is.empty;
-      expect(slackContext.say.calledWithMatch(':warning: Skipped')).to.be.true;
     });
 
     it('should throw an error when CSV download returns empty data', async () => {
@@ -300,22 +299,6 @@ describe('Base Slack Utils', () => {
       } catch (error) {
         expect(error.message).to.equal('CSV processing failed: Failed to download CSV: No data received.');
       }
-    });
-
-    it('should handle invalid baseURL or IMS Org ID in CSV data', async () => {
-      sandbox.restore();
-      sandbox.stub(isValidUrl, 'call').returns(false);
-      sandbox.stub(OrganizationModel.IMS_ORG_ID_REGEX, 'test').returns(false);
-
-      const fileUrl = 'https://fake-url.com/file.csv';
-      const token = 'test-bot-token';
-      const csvContent = 'https://bad-url,invalid-org-id';
-
-      axiosMock.onGet(fileUrl).reply(200, csvContent);
-      const records = await parseCSV(fileUrl, token, slackContext);
-
-      expect(records).to.be.an('array').that.is.empty;
-      expect(slackContext.say.calledWithMatch(':warning: Skipped **1** invalid rows')).to.be.true;
     });
   });
 
