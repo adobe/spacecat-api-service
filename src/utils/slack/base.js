@@ -12,8 +12,13 @@
 
 import { createUrl } from '@adobe/fetch';
 import { hasText, isString } from '@adobe/spacecat-shared-utils';
+import fs from 'fs';
 
 import { URL } from 'url';
+import { Readable } from 'stream';
+import csvParser from 'csv-parser';
+import axios from 'axios';
+import path from 'path';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
@@ -23,6 +28,7 @@ export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
 export const CHARACTER_LIMIT = 2500;
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
+export const PROFILE_CONFIG_PATH = path.resolve(process.cwd(), 'static/onboard/profiles.json');
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;
@@ -282,9 +288,73 @@ const wrapSayForThread = (say, threadTs) => {
   return wrappedFunction;
 };
 
+/**
+ * Downloads, validates, and parses a CSV file from Slack.
+ *
+ * @param {string} fileUrl - The private Slack file URL.
+ * @param {string} token - The Slack bot token for authentication.
+ * @param {Object} slackContext - The Slack context for sending messages.
+ * @returns {Promise<Array<Array<string>>>} Parsed CSV data as an array of rows.
+ */
+const parseCSV = async (fileUrl, token) => {
+  try {
+    const response = await axios.get(fileUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'arraybuffer',
+    });
+
+    if (!response.data) {
+      throw new Error('Failed to download CSV: No data received.');
+    }
+
+    const csvStream = Readable.from(response.data.toString());
+
+    return new Promise((resolve, reject) => {
+      const parsedData = [];
+
+      csvStream
+        .pipe(csvParser({ headers: false, skipLines: 0, trim: true }))
+        .on('data', (row) => {
+          const rowData = Object.values(row);
+
+          // Ensure there are at least 2 columns
+          if (rowData.length >= 2) {
+            parsedData.push(rowData.map((val) => val.trim()));
+          }
+        })
+        .on('end', () => resolve(parsedData))
+        .on('error', (error) => reject(error));
+    });
+  } catch (error) {
+    throw new Error(`CSV processing failed: ${error.message}`);
+  }
+};
+
 const getHlxConfigMessagePart = (hlxConfig) => {
   const { rso, hlxVersion } = hlxConfig;
   return `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``;
+};
+
+/**
+ * Loads profile configuration from JSON file.
+ *
+ * @async
+ * @param {string} profileKey - The profile key to retrieve.
+ * @returns {Object} - The profile configuration object.
+ */
+const loadProfileConfig = (profileKey) => {
+  try {
+    const data = fs.readFileSync(PROFILE_CONFIG_PATH, 'utf-8');
+    const profiles = JSON.parse(data);
+
+    if (!profiles[profileKey]) {
+      throw new Error(`Profile "${profileKey}" not found in ${PROFILE_CONFIG_PATH}`);
+    }
+
+    return profiles[profileKey];
+  } catch (error) {
+    throw new Error(`Failed to load profile configuration for "${profileKey}": ${error.message}`);
+  }
 };
 
 export {
@@ -299,4 +369,6 @@ export {
   getHlxConfigMessagePart,
   getMessageFromEvent,
   wrapSayForThread,
+  loadProfileConfig,
+  parseCSV,
 };

@@ -12,17 +12,30 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
 import sinon from 'sinon';
+import fs from 'fs';
+import chaiAsPromised from 'chai-as-promised';
+
+import path from 'path';
+
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 
 import { Blocks } from 'slack-block-builder';
+import MockAdapter from 'axios-mock-adapter';
+import axios from 'axios';
 import {
   extractURLFromSlackInput,
   FALLBACK_SLACK_CHANNEL,
   getSlackContext,
   postErrorMessage, sendFile,
   sendMessageBlocks,
+  loadProfileConfig,
+  parseCSV,
 } from '../../../src/utils/slack/base.js';
+
+use(chaiAsPromised);
 
 describe('Base Slack Utils', () => {
   describe('extractBaseURLFromInput', () => {
@@ -212,6 +225,180 @@ describe('Base Slack Utils', () => {
         const slackContext = await getSlackContext({ url: 'some-url', log: console });
         expect(slackContext).to.eql({ channel: FALLBACK_SLACK_CHANNEL });
       });
+    });
+  });
+
+  describe('parseCSV', () => {
+    let axiosMock;
+    let slackContext;
+    let sandbox;
+
+    beforeEach(() => {
+      axiosMock = new MockAdapter(axios);
+      slackContext = { say: sinon.spy() };
+      sandbox = sinon.createSandbox();
+      sandbox.stub(isValidUrl, 'call').returns(true);
+      sandbox.stub(OrganizationModel.IMS_ORG_ID_REGEX, 'test').returns(true);
+    });
+
+    afterEach(() => {
+      axiosMock.restore();
+      sandbox.restore();
+    });
+
+    it('should correctly fetch and parse a CSV file', async () => {
+      const filePath = 'test/utils/slack/test-entries.csv';
+      const fileContent = fs.readFileSync(filePath, 'utf-8');
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).reply(200, fileContent);
+
+      const records = await parseCSV(fileUrl, token, slackContext);
+
+      expect(records).to.deep.equal([
+        ['https://www.foo.com', '12345@AdobeOrg'],
+        ['https://www.bar.com', '12345@AdobeOrg'],
+      ]);
+    });
+
+    it('should throw an error when the file download fails', async () => {
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).networkError();
+
+      try {
+        await parseCSV(fileUrl, token, slackContext);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.include('CSV processing failed');
+      }
+    });
+
+    it('should correctly handle invalid CSV data', async () => {
+      const invalidCsvContent = 'invalid data';
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+
+      axiosMock.onGet(fileUrl).reply(200, invalidCsvContent);
+
+      const records = await parseCSV(fileUrl, token, slackContext);
+
+      expect(records).to.be.an('array').that.is.empty;
+    });
+
+    it('should throw an error when CSV download returns empty data', async () => {
+      const fileUrl = 'https://fake-url.com/file.csv';
+      const token = 'test-bot-token';
+      axiosMock.onGet(fileUrl).reply(200, '');
+
+      try {
+        await parseCSV(fileUrl, token, slackContext);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal('CSV processing failed: Failed to download CSV: No data received.');
+      }
+    });
+  });
+
+  describe('loadProfileConfig', () => {
+    let fsStub;
+
+    beforeEach(() => {
+      fsStub = sinon.stub(fs, 'readFileSync');
+    });
+
+    afterEach(() => {
+      fsStub.restore();
+    });
+
+    it('should load the correct profile configuration', () => {
+      const mockProfileData = JSON.stringify({
+        default: {
+          audits: {
+            foo: {},
+            bar: {},
+          },
+          imports: {
+            'import-foo': {},
+            'import-bar': {},
+          },
+          config: {},
+          integrations: {},
+        },
+        other: {
+          audits: ['audit1', 'audit2'],
+          imports: {},
+          config: {},
+          integrations: {},
+        },
+      });
+
+      fsStub.returns(mockProfileData);
+
+      const result = loadProfileConfig('default');
+
+      expect(result).to.deep.equal({
+        audits: {
+          foo: {},
+          bar: {},
+        },
+        imports: {
+          'import-foo': {},
+          'import-bar': {},
+        },
+        config: {},
+        integrations: {},
+      });
+
+      expect(result.audits).to.deep.equal({ foo: {}, bar: {} });
+      expect(result.imports).to.deep.equal({
+        'import-foo': {},
+        'import-bar': {},
+      });
+    });
+
+    it('should throw an error if profile does not exist', () => {
+      const mockProfileData = JSON.stringify({
+        default: {
+          audits: {
+            foo: {},
+            bar: {},
+          },
+          imports: {},
+          config: {},
+          integrations: {},
+        },
+        other: {
+          audits: ['audit1', 'audit2'],
+          imports: {},
+          config: {},
+          integrations: {},
+        },
+      });
+
+      const profileConfigPath = path.resolve(process.cwd(), 'static/onboard/profiles.json');
+
+      fsStub.returns(mockProfileData);
+
+      expect(() => loadProfileConfig('nonexistent'))
+        .to.throw(`Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in ${profileConfigPath}`);
+    });
+
+    it('should throw an error if JSON file is invalid', () => {
+      fsStub.returns('INVALID_JSON');
+
+      expect(() => loadProfileConfig('default'))
+      // eslint-disable-next-line quotes
+        .to.throw(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`);
+    });
+
+    it('should throw an error if the file cannot be read', () => {
+      fsStub.throws(new Error('File not found'));
+
+      expect(() => loadProfileConfig('default'))
+        .to.throw('Failed to load profile configuration for "default": File not found');
     });
   });
 });
