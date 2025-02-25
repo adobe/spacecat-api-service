@@ -79,7 +79,7 @@ function OnboardCommand(context) {
       let organization = await Organization.findByImsOrgId(imsOrgID);
       if (!organization) {
         organization = await Organization.create(context);
-        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.id} Organization name: ${organization.name} IMS Org ID: ${imsOrgID}.`;
+        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
         await say(message);
         log.info(message);
       }

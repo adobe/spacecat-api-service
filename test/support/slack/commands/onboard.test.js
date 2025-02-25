@@ -82,8 +82,13 @@ describe('OnboardCommand', () => {
     it('handles valid input and adds a new site', async () => {
       nock(baseURL).get('/').replyWithError('rainy weather');
 
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
-      dataAccessStub.Organization.create.resolves({ id: '123', name: 'new-org' });
+      dataAccessStub.Organization.create.resolves(mockOrganization);
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
         getBaseURL: () => baseURL,
