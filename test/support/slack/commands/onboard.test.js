@@ -169,8 +169,8 @@ describe('OnboardCommand', () => {
 
     it('handles batch onboarding with valid CSV', async () => {
       const mockCSVData = [
-        { baseURL: 'https://example1.com', imsOrgID: '000000000000000000000000@AdobeOrg' },
-        { baseURL: 'https://example2.com', imsOrgID: '000000000000000000000000@AdobeOrg' },
+        ['https://example1.com', '000000000000000000000000@AdobeOrg'],
+        ['https://example2.com', '000000000000000000000000@AdobeOrg'],
       ];
 
       parseCSVStub.withArgs('https://mock-csv.com', 'test-token').resolves(mockCSVData);
@@ -186,7 +186,7 @@ describe('OnboardCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith(':gear: Processing CSV file with profile *default*...')).to.be.true;
-      expect(parseCSVStub.calledWith('https://mock-csv.com', 'test-token')).to.be.true;
+      expect(parseCSVStub.calledWith(slackContext.files[0], 'test-token')).to.be.true;
       await expect(command.handleExecution(args, slackContext)).to.not.be.rejected;
     });
 

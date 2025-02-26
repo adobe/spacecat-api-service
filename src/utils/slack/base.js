@@ -15,10 +15,9 @@ import { hasText, isString, isObject } from '@adobe/spacecat-shared-utils';
 import fs from 'fs';
 
 import { URL } from 'url';
-import { Readable } from 'stream';
-import csvParser from 'csv-parser';
 import axios from 'axios';
 import path from 'path';
+import Papa from 'papaparse';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
@@ -289,52 +288,42 @@ const wrapSayForThread = (say, threadTs) => {
 };
 
 /**
- * Downloads, validates, and parses a CSV file from Slack.
+ * Downloads and parses a CSV file from Slack.
  *
  * @param {string} fileUrl - The private Slack file URL.
  * @param {string} token - The Slack bot token for authentication.
  * @returns {Promise<Array<Array<string>>>} Parsed CSV data as an array of rows.
+ * @throws {Error} - Throws an error if the file cannot be downloaded or parsed.
  */
-const parseCSV = async (fileUrl, token) => {
+const parseCSV = async (file, token) => {
   try {
+    const fileUrl = file.url_private;
     const response = await axios.get(fileUrl, {
       headers: { Authorization: `Bearer ${token}` },
       responseType: 'arraybuffer',
       validateStatus: (status) => status < 500,
     });
 
-    if (response.status === 401) {
-      throw new Error('Authentication failed: Invalid Slack token or insufficient permissions.');
-    }
-    if (response.status === 403) {
-      throw new Error('Access denied: Slack bot lacks files:read permission.');
-    }
+    if (response.status === 401) throw new Error('Authentication failed: Invalid Slack token.');
+    if (response.status === 403) throw new Error('Access denied: Missing files:read permission.');
+    if (response.status === 404) throw new Error(`File not found at: ${fileUrl}.`);
 
-    if (response.status === 404) {
-      throw new Error(`File not found at: ${fileUrl}.`);
-    }
-
-    if (!response.data || response.data.length === 0) {
-      throw new Error('Failed to download CSV: No data received.');
-    }
-
-    const csvString = Buffer.from(response.data).toString('utf-8');
-    const csvStream = Readable.from(csvString);
-
-    return new Promise((resolve, reject) => {
-      const parsedData = [];
-
-      csvStream
-        .pipe(csvParser({ headers: false, skipLines: 0, trim: true }))
-        .on('data', (row) => {
-          const rowData = Object.values(row);
-          if (rowData.length >= 2) {
-            parsedData.push(rowData.map((val) => val.trim()));
-          }
-        })
-        .on('end', () => resolve(parsedData))
-        .on('error', (error) => reject(error));
+    const csvString = response.data.toString('utf-8').trim();
+    const parsedData = Papa.parse(csvString, {
+      delimiter: ',',
+      skipEmptyLines: true,
+      dynamicTyping: false,
     });
+
+    if (!Array.isArray(parsedData.data) || parsedData.data.length === 0) {
+      throw new Error('CSV parsing resulted in empty or invalid data.');
+    }
+
+    if (!parsedData.data.some((row) => row.length >= 2)) {
+      throw new Error('CSV format invalid: Each row must have at least 2 columns.');
+    }
+
+    return parsedData.data;
   } catch (error) {
     throw new Error(`CSV processing failed: ${error.message}`);
   }
