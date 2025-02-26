@@ -176,6 +176,12 @@ function OnboardCommand(context) {
     const {
       say, botToken, files, channelId,
     } = slackContext;
+
+    if (!botToken) {
+      await say(':warning: Missing Slack bot token. Please check the configuration.');
+      return;
+    }
+
     const slackClient = new WebClient(botToken);
 
     try {
@@ -216,7 +222,6 @@ function OnboardCommand(context) {
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
           const [baseURL, imsOrgID] = row;
-          await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           await say(`Onboarding a site with base URL ${baseURL} and IMS org ID ${imsOrgID}`);
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));

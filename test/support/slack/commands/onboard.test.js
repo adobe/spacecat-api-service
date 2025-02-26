@@ -62,6 +62,7 @@ describe('OnboardCommand', () => {
       },
     };
     slackContext = { say: sinon.spy(), files: [] };
+    slackContext.botToken = 'test-token';
 
     parseCSVStub = sinon.stub().resolves([]);
     OnboardCommand = await esmock(
