@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -35,10 +35,11 @@ function AddSiteCommand(context) {
     name: 'Add Site',
     description: 'Adds a new site to track.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site}`,
+    usageText: `${PHRASES[0]} {site} [deliveryType = aem_edge]`,
   });
 
-  const { dataAccess, log } = context;
+  const { dataAccess, log, env } = context;
+  const { Configuration, Site } = dataAccess;
 
   /**
    * Validates input and adds the site to db
@@ -53,7 +54,7 @@ function AddSiteCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [baseURLInput] = args;
+      const [baseURLInput, deliveryTypeArg] = args;
 
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -62,17 +63,24 @@ function AddSiteCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
 
       if (site) {
         await say(`:x: '${baseURL}' was already added before. You can run _@spacecat get site ${baseURL}_`);
         return;
       }
 
-      const deliveryType = await findDeliveryType(baseURL);
-      const isLive = deliveryType === DELIVERY_TYPES.AEM_EDGE;
+      const deliveryType = Object.values(SiteModel.DELIVERY_TYPES).includes(deliveryTypeArg)
+        ? deliveryTypeArg
+        : await findDeliveryType(baseURL);
+      const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
-      const newSite = await dataAccess.addSite({ baseURL, deliveryType, isLive });
+      const newSite = await Site.create({
+        baseURL,
+        deliveryType,
+        isLive,
+        organizationId: env.DEFAULT_ORGANIZATION_ID,
+      });
 
       if (!newSite) {
         await say(':x: Problem adding the site. Please contact the admins.');
@@ -83,10 +91,10 @@ function AddSiteCommand(context) {
 
       let message = `:white_check_mark: *Successfully added new site <${baseURL}|${baseURL}>*.\n`;
       message += `:delivrer: *Delivery type:* ${deliveryType}.\n`;
-      if (newSite.isLive()) {
+      if (newSite.getIsLive()) {
         message += ':rocket: Site is set to *live* by default\n';
       }
-      const configuration = await dataAccess.getConfiguration();
+      const configuration = await Configuration.findLatest();
 
       // we still check for auditConfig.auditsDisabled() here as the default audit config may change
       if (configuration.isHandlerEnabledForSite(auditType, newSite)) {

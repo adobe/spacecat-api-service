@@ -10,44 +10,22 @@
  * governing permissions and limitations under the License.
  */
 
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+
 import { AuditDto } from './audit.js';
 
 /**
  * Data transfer object for Site.
  */
 export const SiteDto = {
-
-  /**
-   * Converts a JSON object into a Site object.
-   * @param {object } jsonObject - JSON object.
-   * @returns {Readonly<Site>} Site object.
-   */
-  fromJson: (jsonObject) => {
-    const siteData = {
-      id: jsonObject.id,
-      baseURL: jsonObject.baseURL,
-      hlxConfig: jsonObject.hlxConfig,
-      deliveryType: jsonObject.deliveryType,
-      gitHubURL: jsonObject.gitHubURL,
-      organizationId: jsonObject.organizationId,
-      isLive: jsonObject.isLive,
-      createdAt: jsonObject.createdAt,
-      updatedAt: jsonObject.updatedAt,
-      config: jsonObject.config,
-      audits: jsonObject.audits ? jsonObject.audits.map((audit) => AuditDto.fromJson(audit)) : [],
-    };
-
-    return createSite(siteData);
-  },
-
   /**
    * Converts a Site object into a JSON object.
    * @param {Readonly<Site>} site - Site object.
+   * @param {Audit[]} [audit] - Optional audit object.
    * @returns {{
    * id: string,
    * baseURL, gitHubURL: string,
+   * name: string,
    * gitHubURL: string,
    * organizationId: string,
    * isLive: boolean,
@@ -55,20 +33,21 @@ export const SiteDto = {
    * updatedAt: string
    * }}
    */
-  toJSON: (site) => ({
+  toJSON: (site, audit) => ({
     id: site.getId(),
     baseURL: site.getBaseURL(),
+    name: site.getName(),
     hlxConfig: site.getHlxConfig(),
     deliveryType: site.getDeliveryType(),
+    deliveryConfig: site.getDeliveryConfig(),
     gitHubURL: site.getGitHubURL(),
     organizationId: site.getOrganizationId(),
-    isLive: site.isLive(),
+    isLive: site.getIsLive(),
     isLiveToggledAt: site.getIsLiveToggledAt(),
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
     config: Config.toDynamoItem(site.getConfig()),
-    ...(site.getAudits().length > 0
-      && { audits: [AuditDto.toAbbreviatedJSON(site.getAudits()[0])] }),
+    ...(audit && { audits: [AuditDto.toAbbreviatedJSON(audit)] }),
   }),
 
   // TODO: implement toCSV

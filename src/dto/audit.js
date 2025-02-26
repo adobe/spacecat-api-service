@@ -10,36 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import {
-  createAudit,
-  AUDIT_TYPE_LHS_DESKTOP,
-  AUDIT_TYPE_LHS_MOBILE,
-} from '@adobe/spacecat-shared-data-access/src/models/audit.js';
+import { Audit } from '@adobe/spacecat-shared-data-access';
 
 /**
  * Data transfer object for Site.
  */
 export const AuditDto = {
-
-  /**
-   * Converts a JSON object into an Audit object.
-   * @param {object } jsonObject - JSON object.
-   * @returns {Readonly<Audit>} Audit object.
-   */
-  fromJson: (jsonObject) => {
-    const auditData = {
-      auditResult: jsonObject.auditResult,
-      auditType: jsonObject.auditType,
-      auditedAt: jsonObject.auditedAt,
-      expiresAt: jsonObject.expiresAt,
-      fullAuditRef: jsonObject.fullAuditRef,
-      isLive: jsonObject.isLive,
-      siteId: jsonObject.siteId,
-    };
-
-    return createAudit(auditData);
-  },
-
   /**
    * Converts an Audit object into a JSON object.
    * @param {Readonly<Audit>} audit - Audit object.
@@ -47,7 +23,6 @@ export const AuditDto = {
    * auditResult: string,
    * auditType: string,
    * auditedAt: string,
-   * expiresAt: string,
    * fullAuditRef: string,
    * isLive: boolean,
    * siteId: string
@@ -55,13 +30,11 @@ export const AuditDto = {
    */
   toJSON: (audit) => ({
     auditResult: audit.getAuditResult(),
-    previousAuditResult: audit.getPreviousAuditResult() || {},
     auditType: audit.getAuditType(),
     auditedAt: audit.getAuditedAt(),
-    expiresAt: audit.getExpiresAt().toISOString(),
     fullAuditRef: audit.getFullAuditRef(),
-    isLive: audit.isLive(),
-    isError: audit.isError(),
+    isLive: audit.getIsLive(),
+    isError: audit.getIsError(),
     siteId: audit.getSiteId(),
   }),
 
@@ -72,15 +45,14 @@ export const AuditDto = {
    * auditResult: string,
    * auditType: string,
    * auditedAt: string,
-   * expiresAt: string,
    * fullAuditRef: string,
    * isLive: boolean,
    * siteId: string
    * }} JSON object.
    */
   toAbbreviatedJSON: (audit) => {
-    if (audit.getAuditType() !== AUDIT_TYPE_LHS_DESKTOP
-      && audit.getAuditType() !== AUDIT_TYPE_LHS_MOBILE) {
+    if (audit.getAuditType() !== Audit.AUDIT_TYPES.LHS_DESKTOP
+      && audit.getAuditType() !== Audit.AUDIT_TYPES.LHS_MOBILE) {
       return AuditDto.toJSON(audit);
     }
     return {
@@ -90,21 +62,11 @@ export const AuditDto = {
         scores: audit.getAuditResult()?.scores,
         totalBlockingTime: audit.getAuditResult()?.totalBlockingTime,
       },
-      previousAuditResult: {
-        finalUrl: audit.getPreviousAuditResult()?.finalUrl,
-        runtimeError: audit.getPreviousAuditResult()?.runtimeError,
-        scores: audit.getPreviousAuditResult()?.scores,
-        totalBlockingTime: audit.getPreviousAuditResult()?.totalBlockingTime,
-        fullAuditRef: audit.getPreviousAuditResult()?.fullAuditRef,
-        auditedAt: audit.getPreviousAuditResult()?.auditedAt,
-      },
       auditType: audit.getAuditType(),
       auditedAt: audit.getAuditedAt(),
-      expiresAt: audit.getExpiresAt()
-        .toISOString(),
       fullAuditRef: audit.getFullAuditRef(),
-      isLive: audit.isLive(),
-      isError: audit.isError(),
+      isLive: audit.getIsLive(),
+      isError: audit.getIsError(),
       siteId: audit.getSiteId(),
     };
   },

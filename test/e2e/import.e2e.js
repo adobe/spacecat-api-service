@@ -20,7 +20,8 @@ import { fileURLToPath } from 'url';
 import { getNewImportJobRequestData, makeRequest } from './utils/utils.js';
 import {
   createAndValidateNewImportJob,
-  deleteJobs, downloadZipFile,
+  deleteJobs,
+  downloadZipFile,
   getPreSignedZipUrl,
 } from './utils/request-helpers.js';
 import {
@@ -89,8 +90,8 @@ describe('Import as a Service end-to-end tests', async () => {
       // Look for a specific .docx file and examine its contents
       await extractAndVerifyDocxContent(
         extractedFiles,
-        'docx/products/experience-manager/sites/aem-sites.docx',
-        'Adobe Experience Manager Sites',
+        'docx/blog/2023/10/17/aem-trial-whats-in-the-box/index.docx',
+        'What can you do with an AEM Headless Trial?',
       );
     });
 
@@ -118,7 +119,7 @@ describe('Import as a Service end-to-end tests', async () => {
       // "Importer as a Service - custom import.js test content"
       await extractAndVerifyDocxContent(
         extractedFiles,
-        'docx/products/experience-manager/sites/aem-sites.docx',
+        'docx/blog/2023/10/17/aem-trial-whats-in-the-box/index.docx',
         'Importer as a Service - custom import.js test content',
       );
     });

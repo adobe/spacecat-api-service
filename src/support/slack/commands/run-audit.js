@@ -36,6 +36,7 @@ function RunAuditCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Configuration, Site } = dataAccess;
 
   /**
    * Validates input, fetches the site
@@ -59,7 +60,7 @@ function RunAuditCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
 
       if (!site) {
         await say(`:x: '${baseURL}' was not added previously. You can run '@spacecat add site ${baseURL}`);
@@ -67,7 +68,7 @@ function RunAuditCommand(context) {
       }
 
       const auditType = auditTypeInput || LHS_MOBILE;
-      const configuration = await dataAccess.getConfiguration();
+      const configuration = await Configuration.findLatest();
 
       if (!configuration.isHandlerEnabledForSite(auditType, site)) {
         await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);

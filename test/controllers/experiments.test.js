@@ -12,17 +12,19 @@
 
 /* eslint-env mocha */
 
-import { createExperiment } from '@adobe/spacecat-shared-data-access/src/models/experiment.js';
+import { Experiment } from '@adobe/spacecat-shared-data-access';
+import ExperimentSchema from '@adobe/spacecat-shared-data-access/src/models/experiment/experiment.schema.js';
+
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
-import sinon from 'sinon';
+import sinon, { stub } from 'sinon';
 
 import ExperimentsController from '../../src/controllers/experiments.js';
 import { ExperimentDto } from '../../src/dto/experiment.js';
 
 use(chaiAsPromised);
 
-const siteId = 'site1';
+const siteId = '3f1c3ab1-9ad0-4231-ac87-8159acf52cb6';
 
 describe('Experiments Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -34,7 +36,7 @@ describe('Experiments Controller', () => {
   const mockExperiments = [
     {
       siteId,
-      experimentId: 'experiment-test1',
+      expId: 'experiment-test1',
       name: 'Experiment Test 1',
       url: 'https://example0.com/page-1',
       status: 'active',
@@ -75,7 +77,7 @@ describe('Experiments Controller', () => {
     },
     {
       siteId,
-      experimentId: 'experiment-test2',
+      expId: 'experiment-test2',
       name: 'Experiment Test 2',
       url: 'https://example0.com/page-2',
       status: 'active',
@@ -114,10 +116,25 @@ describe('Experiments Controller', () => {
       conversionEventName: 'click',
       conversionEventValue: '.cta',
     },
-  ].map((experiment) => createExperiment(experiment));
+  ].map((experiment) => new Experiment(
+    { entities: { experiment: {} } },
+    {
+      log: console,
+      getCollection: stub().returns({
+        schema: ExperimentSchema,
+        findById: stub(),
+      }),
+    },
+    ExperimentSchema,
+    experiment,
+    console,
+  ));
 
   const mockDataAccess = {
-    getExperiments: sandbox.stub(),
+    Experiment: {
+      all: sandbox.stub().resolves(mockExperiments),
+      allBySiteId: sandbox.stub().resolves(mockExperiments),
+    },
   };
 
   let experimentsController;
@@ -160,7 +177,6 @@ describe('Experiments Controller', () => {
     });
 
     it('returns all the experiments for the given siteId', async () => {
-      mockDataAccess.getExperiments.resolves(mockExperiments);
       const result = await experimentsController.getExperiments(context);
 
       expect(result.status).to.equal(200);

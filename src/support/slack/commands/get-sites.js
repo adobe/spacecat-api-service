@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Adobe. All rights reserved.
+ * Copyright 2024 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -9,14 +9,14 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-
-import { generateCSVFile } from '@adobe/spacecat-shared-utils';
+import { generateCSVFile, hasText } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 
 import { formatLighthouseError, formatScore } from '../../../utils/slack/format.js';
 import { postErrorMessage, sendFile, sendMessageBlocks } from '../../../utils/slack/base.js';
 
 const PHRASES = ['get sites', 'get all sites'];
+const IMS_ORG_ID_REGEX = /[a-z0-9]{24}@AdobeOrg/i;
 
 /**
  * Formats a list of sites into CSV content.
@@ -31,7 +31,7 @@ export function formatSitesToCSV(sites = []) {
     const siteData = {
       'Base URL': site.getBaseURL(),
       'Delivery Type': site.getDeliveryType(),
-      'Live Status': site.isLive() ? 'Live' : 'Non-Live',
+      'Live Status': site.getIsLive() ? 'Live' : 'Non-Live',
       'Go Live Date': (site.getIsLiveToggledAt() || site.getCreatedAt()).split('T')[0],
       'GitHub URL': site.getGitHubURL() || '',
       'Performance Score': '---',
@@ -44,7 +44,7 @@ export function formatSitesToCSV(sites = []) {
     if (audits.length) {
       const lastAudit = audits[0];
 
-      if (lastAudit.isError()) {
+      if (lastAudit.getIsError()) {
         siteData.Error = formatLighthouseError(lastAudit.getAuditResult().runtimeError);
       } else {
         const {
@@ -79,21 +79,36 @@ function GetSitesCommand(context) {
     name: 'Get All Sites',
     description: 'Retrieves all known sites and includes the latest audit scores',
     phrases: PHRASES,
-    usageText: `${PHRASES.join(' or ')} [desktop|mobile|all] [live|non-live] [aem_edge|aem_cs|other];`,
+    usageText: `${PHRASES.join(' or ')} [desktop|mobile|all] [live|non-live] [aem_edge|aem_cs|other] [<IMSOrgId>];`,
   });
 
   const { dataAccess, log } = context;
+  const { Organization, Site } = dataAccess;
 
-  async function fetchAndFormatSites(threadTs, filterStatus, psiStrategy, deliveryType) {
-    let sites = await dataAccess.getSitesWithLatestAudit(`lhs-${psiStrategy}`, true, deliveryType);
+  async function fetchAndFormatSites(threadTs, filterStatus, psiStrategy, deliveryType, imsOrgId) {
+    let sites = [];
 
-    // filter sites from friends and family org
-    sites = sites.filter(
-      (site) => site.getOrganizationId() !== context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
-    );
+    if (imsOrgId !== 'all') {
+      const org = await Organization.findByImsOrgId(imsOrgId);
+      const organizationId = org?.getId();
+      if (!hasText(organizationId)) {
+        return {
+          textSections: [{
+            text: `*No organization found in Spacecat DB with IMS Org ID: "${imsOrgId}"`,
+          }],
+          additionalBlocks: [],
+        };
+      }
+      sites = await org.getSites();
+    } else {
+      sites = await Site.allWithLatestAudit(`lhs-${psiStrategy}`, 'asc', deliveryType);
+      sites = sites.filter(
+        (site) => site.getOrganizationId() !== context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
+      );
+    }
 
     if (filterStatus !== 'all') {
-      sites = sites.filter((site) => (filterStatus === 'live' ? site.isLive() : !site.isLive()));
+      sites = sites.filter((site) => (filterStatus === 'live' ? site.getIsLive() : !site.getIsLive()));
     }
 
     const totalSites = sites.length;
@@ -106,6 +121,7 @@ function GetSitesCommand(context) {
   
 PSI Strategy: *${psiStrategy}*
 Delivery Type: *${deliveryType}*
+IMS Org: ${imsOrgId}'}
 `,
         }],
         additionalBlocks: [],
@@ -118,6 +134,7 @@ Delivery Type: *${deliveryType}*
 
 PSI Strategy: *${psiStrategy}*
 Delivery Type: *${deliveryType}*
+IMS Org: ${imsOrgId}
 
 _Sites are ordered by performance score, then all other scores, ascending._
     `,
@@ -154,8 +171,14 @@ _Sites are ordered by performance score, then all other scores, ascending._
     let filterStatus = 'live';
     let psiStrategy = 'mobile';
     let deliveryType = 'all';
+    let imsOrgId = 'all';
 
     args.forEach((arg) => {
+      if (IMS_ORG_ID_REGEX.test(arg)) {
+        imsOrgId = arg;
+        return;
+      }
+
       switch (arg) {
         case 'all':
           filterStatus = 'all';
@@ -178,6 +201,9 @@ _Sites are ordered by performance score, then all other scores, ascending._
         case 'aem_cs':
           deliveryType = 'aem_cs';
           break;
+        case 'aem_ams':
+          deliveryType = 'aem_ams';
+          break;
         case 'other':
           deliveryType = 'other';
           break;
@@ -195,6 +221,7 @@ _Sites are ordered by performance score, then all other scores, ascending._
         filterStatus,
         psiStrategy,
         deliveryType,
+        imsOrgId,
       );
 
       const fileName = `sites-${filterStatus}-${psiStrategy}-${deliveryType}-${new Date().toISOString()}.csv`;

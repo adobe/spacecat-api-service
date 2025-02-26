@@ -21,12 +21,8 @@ import {
 import yaml from 'js-yaml';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
-import {
-  SITE_CANDIDATE_SOURCES,
-  SITE_CANDIDATE_STATUS,
-} from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { fetch } from '../support/utils.js';
+import { Site as SiteModel, SiteCandidate as SiteCandidateModel } from '@adobe/spacecat-shared-data-access';
+import { fetch, isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
@@ -62,7 +58,7 @@ function errorHandler(fn, opts) {
       return await fn(context);
     } catch (e) {
       if (e instanceof InvalidSiteCandidate) {
-        log.warn(`Could not process site candidate. Reason: ${e.message}, Source: ${type}, Candidate: ${e.url}`);
+        log.info(`Could not process site candidate. Reason: ${e.message}, Source: ${type}, Candidate: ${e.url}`);
         return ok(`${type} site candidate disregarded`);
       }
       log.error(`Unexpected error while processing the ${type} site candidate`, e);
@@ -86,6 +82,16 @@ function isIPAddress(hostname) {
 
 function containsPathOrSearchParams(url) {
   return url.pathname !== '/' || url.search !== '';
+}
+
+async function verifyHelixSite(url, hlxConfig = {}) {
+  const { isHelix, reason } = await isHelixSite(url, hlxConfig);
+
+  if (!isHelix) {
+    throw new InvalidSiteCandidate(reason, url);
+  }
+
+  return true;
 }
 
 function parseHlxRSO(domain) {
@@ -173,7 +179,7 @@ async function getContentSource(hlxConfig, log) {
   const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
 
   if (fstabResponse.status !== 200) {
-    log.error(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
+    log.info(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
     return null;
   }
 
@@ -185,7 +191,7 @@ async function getContentSource(hlxConfig, log) {
     : null;
 
   if (!isValidUrl(url)) {
-    log.error(`No content source found for ${owner}/${repo} in fstab.yaml`);
+    log.info(`No content source found for ${owner}/${repo} in fstab.yaml`);
     return null;
   }
 
@@ -321,34 +327,38 @@ const getConfigFromContext = (lambdaContext) => {
  */
 function HooksController(lambdaContext) {
   const { dataAccess } = lambdaContext;
+  const { Site, SiteCandidate } = dataAccess;
   const config = getConfigFromContext(lambdaContext);
 
-  async function processSiteCandidate(domain, source, log, hlxConfig = {}) {
+  async function processSiteCandidate(domain, source, log, overrideHelixCheck, hlxConfig = {}) {
     const baseURL = composeBaseURL(domain);
     verifyURLCandidate(config, baseURL);
+    if (!overrideHelixCheck) {
+      await verifyHelixSite(baseURL, hlxConfig);
+    }
 
     const siteCandidate = {
       baseURL,
       source,
-      status: SITE_CANDIDATE_STATUS.PENDING,
+      status: SiteCandidateModel.SITE_CANDIDATE_STATUS.PENDING,
       hlxConfig,
     };
 
-    const site = await dataAccess.getSiteByBaseURL(siteCandidate.baseURL);
+    const site = await Site.findByBaseURL(siteCandidate.baseURL);
 
     // discard the site candidate if the site exists in sites db with deliveryType=aem_edge
-    if (site && site.getDeliveryType() === DELIVERY_TYPES.AEM_EDGE) {
+    if (site && site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
       // for existing site with empty hlxConfig or non-equal hlxConfig, update it now
       // todo: remove after back fill of hlx config for existing sites is complete
-      if (source === SITE_CANDIDATE_SOURCES.CDN && isNonEmptyObject(hlxConfig)) {
+      if (source === SiteCandidateModel.SITE_CANDIDATE_SOURCES.CDN && isNonEmptyObject(hlxConfig)) {
         const siteHlxConfig = site.getHlxConfig();
         const siteHasHlxConfig = isNonEmptyObject(siteHlxConfig);
         const candidateHlxConfig = siteCandidate.hlxConfig;
         const hlxConfigChanged = !deepEqual(siteHlxConfig, candidateHlxConfig);
 
         if (hlxConfigChanged) {
-          site.updateHlxConfig(siteCandidate.hlxConfig);
-          await dataAccess.updateSite(site);
+          site.setHlxConfig(siteCandidate.hlxConfig);
+          await site.save();
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
           log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`);
@@ -358,12 +368,12 @@ function HooksController(lambdaContext) {
     }
 
     // discard the site candidate if previously evaluated
-    const isPreviouslyEvaluated = await dataAccess.siteCandidateExists(siteCandidate.baseURL);
-    if (isPreviouslyEvaluated) {
+    const isPreviouslyEvaluated = await SiteCandidate.findByBaseURL(siteCandidate.baseURL);
+    if (isPreviouslyEvaluated !== null) {
       throw new InvalidSiteCandidate('Site candidate previously evaluated', baseURL);
     }
 
-    await dataAccess.upsertSiteCandidate(siteCandidate);
+    await SiteCandidate.create(siteCandidate);
 
     return baseURL;
   }
@@ -378,8 +388,10 @@ function HooksController(lambdaContext) {
 
     log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
-    // eslint-disable-next-line camelcase,no-unused-vars
-    const { hlxVersion, requestPath, requestXForwardedHost } = context.data;
+    const {
+      // eslint-disable-next-line camelcase,no-unused-vars
+      hlxVersion, requestPath, requestXForwardedHost, overrideHelixCheck,
+    } = context.data;
 
     if (!isInteger(hlxVersion)) {
       log.warn('HLX version is not an integer. Skipping processing CDN site candidate');
@@ -398,8 +410,8 @@ function HooksController(lambdaContext) {
     const hlxConfig = await extractHlxConfig(domains, hlxVersion, config.hlxAdminToken, log);
 
     const domain = hlxConfig.cdn?.prod?.host || primaryDomain;
-    const source = SITE_CANDIDATE_SOURCES.CDN;
-    const baseURL = await processSiteCandidate(domain, source, log, hlxConfig);
+    const source = SiteCandidateModel.SITE_CANDIDATE_SOURCES.CDN;
+    const baseURL = await processSiteCandidate(domain, source, log, overrideHelixCheck, hlxConfig);
     await sendDiscoveryMessage(baseURL, source, hlxConfig);
 
     return ok('CDN site candidate is successfully processed');

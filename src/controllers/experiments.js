@@ -14,7 +14,7 @@ import {
   badRequest,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import { isObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ExperimentDto } from '../dto/experiment.js';
 
@@ -30,6 +30,8 @@ function ExperimentsController(dataAccess) {
     throw new Error('Data access required');
   }
 
+  const { Experiment } = dataAccess;
+
   /**
    * Gets all experiments for a given site
    *
@@ -38,11 +40,11 @@ function ExperimentsController(dataAccess) {
   const getExperiments = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const experiments = (await dataAccess.getExperiments(siteId))
+    const experiments = (await Experiment.allBySiteId(siteId))
       .map((experiment) => ExperimentDto.toJSON(experiment));
 
     return ok(experiments);

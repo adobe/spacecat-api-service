@@ -3,8 +3,6 @@ site-opportunities:
     - $ref: './parameters.yaml#/siteId'
   get:
     summary: |
-      Not implemented yet.
-      
       Retrieve a list of all opportunities for a specific site
     tags:
       - opportunities
@@ -29,8 +27,6 @@ site-opportunities:
       - ims_key: [ ]
   post:
     summary: |
-      Not implemented yet.
-      
       Create a new opportunity for a specific site
     tags:
       - opportunities
@@ -74,9 +70,7 @@ site-opportunities-by-status:
       schema:
         type: string
   get:
-    summary: |
-      Not implemented yet.
-      
+    summary: |      
       Retrieve opportunities for a specific site filtered by status
     tags:
       - opportunities
@@ -107,9 +101,7 @@ site-opportunity:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
   get:
-    summary: |
-      Not implemented yet.
-      
+    summary: |      
       Retrieve details of a specific opportunity
     tags:
       - opportunities
@@ -137,9 +129,7 @@ site-opportunity:
       - ims_key: [ ]
 
   patch:
-    summary: |
-      Not implemented yet.
-      
+    summary: |      
       Update specific attributes of an existing opportunity
     tags:
       - opportunities
@@ -176,8 +166,6 @@ site-opportunity:
 
   delete:
     summary: |
-      Not implemented yet.
-      
       Delete an opportunity and associated suggestions + fixes
     tags:
       - opportunities
@@ -202,9 +190,7 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
   get:
-    summary: |
-      Not implemented yet.
-      
+    summary: |     
       Retrieve a list of all suggestions for a specific opportunity
     tags:
       - opportunity-suggestions
@@ -229,9 +215,7 @@ site-opportunity-suggestions:
       - ims_key: [ ]
 
   post:
-    summary: |
-      Not implemented yet.
-      
+    summary: |     
       Create and add a list of one or more suggestions to an opportunity in one transaction
     tags:
       - opportunity-suggestions
@@ -270,8 +254,6 @@ site-opportunity-suggestions-by-status:
         type: string
   get:
     summary: |
-      Not implemented yet.
-      
       Retrieve suggestions for a specific opportunity filtered by status
     tags:
       - opportunity-suggestions
@@ -303,8 +285,6 @@ site-opportunity-suggestions-status:
     - $ref: './parameters.yaml#/opportunityId'
   patch:
     summary: |
-      Not implemented yet.
-      
       Update the status of one or multiple suggestions in one transaction
     tags:
       - opportunity-suggestions
@@ -339,8 +319,6 @@ site-opportunity-suggestion:
     - $ref: './parameters.yaml#/suggestionId'
   get:
     summary: |
-      Not implemented yet.
-      
       Retrieve details of a specific suggestion
     tags:
       - opportunity-suggestions
@@ -367,9 +345,7 @@ site-opportunity-suggestion:
     security:
       - ims_key: [ ]
   patch:
-    summary: |
-      Not implemented yet.
-      
+    summary: |     
       Update specific attributes of an existing suggestion
     tags:
       - opportunity-suggestions
@@ -394,6 +370,27 @@ site-opportunity-suggestion:
                 $ref: './examples.yaml#/broken-backlinks-suggestion'
       '400':
         $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+  delete:
+    summary: |
+      Delete a suggestion
+    tags:
+      - opportunity-suggestions
+    responses:
+      '204':
+        description: Suggestion deleted
       '401':
         $ref: './responses.yaml#/401'
       '404':

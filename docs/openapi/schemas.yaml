@@ -14,6 +14,26 @@ DeliveryType:
     - 'aem_cs'
     - 'other'
   example: 'aem_edge'
+DeliveryConfig:
+  type: object
+  properties:
+    programId:
+      description: The program ID
+      type: string
+      example: '12652'
+    environmentId:
+      description: The environment ID
+      type: string
+      example: '16854'
+    authorURL:
+      description: The author URL
+      type: string
+      format: url
+      example: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
+    siteId:
+      description: The site ID
+      type: string
+      example: '1234'
 AuditType:
   type: string
   enum:
@@ -28,6 +48,9 @@ AuditType:
     - 'sitemap'
     - 'structured-data'
     - 'costs'
+    - 'meta-tags'
+    - 'broken-internal-links'
+    - 'experimentation-opportunities'
   example: 'cwv'
 URL:
   type: string
@@ -49,10 +72,6 @@ ImsOrganizationId:
 ImsUserAccessToken:
   type: string
   example: 'eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEyMzQ1IiwidHlwZSI6ImFjY2Vzc190b2tlbiIsImNsaWVudF9pZCI6ImV4YW1wbGVfYXBwIiwidXNlcl9pZCI6Ijk4NzY1NDc4OTBBQkNERUYxMjM0NTY3OEBhYmNkZWYxMjM0NTY3ODkuZSIsImFzIjoiaW1zLW5hMSIsImFhX2lkIjoiMTIzNDU2Nzg5MEFCQ0RFRjEyMzQ1Njc4QGFkb2JlLmNvbSIsImNyZWF0ZWRfYXQiOiIxNzEwMjQ3MDAwMDAwIn0.MRDpxgxSHDj4DmA182hPnjMAnKkly-VUJ_bXpQ-J8EQ'
-EmailAddress:
-  type: string
-  format: email
-  example: 'user@example.com'
 SlackMentionConfig:
   type: object
   properties:
@@ -260,9 +279,15 @@ Site:
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
+    name:
+      description: The name of the site
+      type: string
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
+    deliveryConfig:
+        description: The delivery configuration of the site
+        $ref: '#/DeliveryConfig'
     gitHubURL:
       description: The optional GitHub URL of the site
       $ref: '#/URL'
@@ -283,7 +308,13 @@ Site:
     id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://example-site.com'
+    name: 'Example Site'
     deliveryType: 'aem_edge'
+    deliveryConfig:
+      programId: '12652'
+      environmentId: '16854'
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
+      siteId: '1234'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
     config:
@@ -335,6 +366,7 @@ SiteWithLatestAudit:
     id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://example-site.com'
+    name: 'Example Site'
     deliveryType: 'aem_edge'
     gitHubURL: 'https://github.com/example/repo'
     goLiveDate: '2024-01-20T10:00:00Z'
@@ -370,6 +402,9 @@ SiteCreate:
       description: The optional ID of the organization this site belongs to
       default: null
       $ref: '#/Id'
+    name:
+      description: The name of the site
+      type: string
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
@@ -387,15 +422,22 @@ SiteCreate:
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://www.newsite.com'
     deliveryType: 'aem_cs'
+    name: 'New Site'
 SiteUpdate:
   type: object
   properties:
     organizationId:
       description: The optional ID of the organization this site belongs to
       $ref: '#/Id'
+    name:
+      description: The name of the site
+      type: string
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
+    deliveryConfig:
+        description: The delivery configuration of the site
+        $ref: '#/DeliveryConfig'
     goLiveDate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
@@ -406,6 +448,12 @@ SiteUpdate:
   example:
     organizationId: 'u7y6t5r4-e3w2-x1z0-z9y8-x7v6w5u4t3s2'
     deliveryType: 'other'
+    name: 'New Site'
+    deliveryConfig:
+      programId: '12652'
+      environmentId: '16854'
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
+      siteId: '1234'
     goLiveDate: '2024-01-20T10:00:00Z'
 UpdateHandlerTypeConfig:
   type: object
@@ -509,6 +557,22 @@ AuditResult:
           description: |
             A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
           type: string
+    - type: object
+      description: |
+        The result of broken-internal-links audit.
+      properties:
+        brokenInternalLinks:
+          type: array
+          description: A list of broken internal links.
+          items:
+            $ref: './schemas.yaml#/BrokenInternalLink'
+        fullAuditRef:
+          description: |
+            A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+          type: string
+        finalUrl:
+          description: The final URL for the audited page.
+          type: string
     - type: array
       description: Information about the provided URLs in the Google index.
       items:
@@ -531,6 +595,43 @@ AuditResult:
             fullAuditRef:
               description: |
                 A reference by which the full external result of an audit can be accessed, which is dependent on the audit type.
+              type: string
+    - type: object
+      description: |
+        The result of a meta-tags audit.
+      properties:
+        auditResult:
+          type: object
+          properties:
+            detectedTags:
+              description: |
+                A mapping of URLs to their detected meta-tags issues and recommendations.
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  title:
+                    type: object
+                    properties:
+                      seoRecommendation:
+                        description: |
+                          SEO recommendation for the title tag.
+                        type: string
+                      issue:
+                        description: |
+                          The issue detected in the title tag.
+                        type: string
+                      issueDetails:
+                        description: |
+                          Detailed explanation of the issue detected in the title tag.
+                        type: string
+                      seoImpact:
+                        description: |
+                          The impact of the detected issue on SEO.
+                        type: string
+            finalUrl:
+              description: |
+                The final URL for the audited page.
               type: string
     - type: object
       description: The result of CWV audit
@@ -1349,7 +1450,7 @@ SiteMetric:
   required:
     - siteId
     - source
-    - metric
+    - name
     - value
     - time
   properties:
@@ -1374,12 +1475,86 @@ SiteMetric:
     name: 'organic-traffic'
     value: 37900
     time: '2024-04-29T00:00:00.000Z'
+PageOrganicKeywords:
+  type: object
+  required:
+    - siteId
+    - source
+    - name
+    - time
+    - url
+    - keyword
+    - traffic
+  properties:
+    siteId:
+      description: The site ID in uuid format
+      $ref: '#/Id'
+    source:
+      description: The source for retrieving the metric value
+      type: string
+    name:
+      description: The name of the metric
+      type: string
+    time:
+      description: The date and time when the metric was recorded
+      $ref: '#/DateTime'
+    url:
+      description: The URL of the page
+      $ref: '#/URL'
+    keyword:
+      description: The keyword
+      type: string
+    traffic:
+      description: The traffic of the keyword
+      type: integer
+    volume:
+      description: The search volume of the keyword
+      type: integer
+    bestPosition:
+      description: The best position of the keyword
+      type: integer
+    cpc:
+      description: The cost per click of the keyword
+      type: integer
+    isBranded:
+      description: Whether the keyword is branded
+      type: boolean
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    source: 'ahrefs'
+    name: 'organic-keywords'
+    time: '2024-04-29T00:00:00.000Z'
+    url: 'https://example.com/foo/bar'
+    keyword: 'foo bar example'
+    traffic: 2355
+    volume: 2400
+    bestPosition: 1
+    cpc: 89
+    isBranded: true
 SiteMetricList:
   type: array
   items:
     $ref: './schemas.yaml#/SiteMetric'
-ImportOptions:
-  type: object
+PageMetricList:
+  type: array
+  items:
+    oneOf:
+      - $ref: './schemas.yaml#/PageOrganicKeywords'
+DocImportData:
+  title: "Doc Import"
+  description: "There are no data properties available for doc based imports."
+  properties: {}
+XWalkImportData:
+  title: "Xwalk Import"
+  properties:
+    siteName:
+      type: string
+    assetFolder:
+      type: string
+  required:
+    - siteName
+    - assetFolder
+ImportOptionsBase:
   properties:
     pageLoadTimeout:
       description: The time in milliseconds to wait for the page to load
@@ -1390,6 +1565,21 @@ ImportOptions:
   example:
     pageLoadTimeout: 100
     enableJavascript: true
+ImportOptions:
+  allOf: #/ImportOptionsBase
+    - $ref: '#/ImportOptionsBase'
+  properties:
+    type:
+      enum: ['doc', 'xwalk']
+      description: The type of import job. Options are 'doc' or 'xwalk'.
+      type: string
+      default: 'doc'
+    data:
+      description: Optional data to pass to the import job.
+      type: object
+      oneOf:
+        - $ref: '#/DocImportData'
+        - $ref: '#/XWalkImportData'
 ImportJobRequest:
   type: object
   required:
@@ -1498,14 +1688,28 @@ ScrapeRequest:
   required:
     - urls
   properties:
+    jobId:
+      description: Optional ID of the scrape job
+      $ref: '#/Id'
+    options:
+      description: Optional configuration params, defined as a JSON object
+      $ref: '#/ImportOptionsBase'
+    customHeaders:
+      description: Optional custom headers to send with each HTTP request
+      type: object
     urls:
       description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
       type: array
       items:
-        $ref: '#/URL'
+        type: object
+        properties:
+          url:
+            description: The URL to scrape
+            $ref: '#/URL'
       example:
-        - 'https://example.com/en/page1'
-        - 'https://example.com/fr/page2'
+        urls:
+          - url: 'https://example.com/en/page1'
+          - url: 'https://example.com/fr/page2'
 ScrapeResponse:
   type: object
   properties:
@@ -1594,9 +1798,24 @@ BrokenBacklink:
     traffic_domain:
       description: The referring domain's estimated monthly organic traffic from search.
       type: number
-    url_suggested:
-      description: The URL suggested for redirecting from the broken backlink.
+BrokenInternalLink:
+  type: object
+  properties:
+    urlTo:
+      description: The URL of the broken internal link.
       $ref: '#/URL'
+    title:
+      description: The title of the internal page referring to the broken internal link.
+      type: string
+    urlFrom:
+      description: The URL of the internal page referring to the broken link.
+      $ref: '#/URL'
+    trafficDomain:
+      description: The referring page's estimated monthly organic traffic.
+      type: number
+    priority:
+      description: The priority of the broken internal link
+      $ref: '#/Priority'
 ImportAssistantRequest:
   type: object
   required:
@@ -1726,7 +1945,7 @@ OpportunityType:
   type: string
   enum:
     - 'broken-backlinks'
-    - 'broken-internal-backlinks'
+    - 'broken-internal-links'
   example: 'broken-backlinks'
 OpportunityOrigin:
   description: |
@@ -1765,6 +1984,7 @@ Opportunity:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksOpportunityData'
+        - $ref: '#/BrokenInternalLinksOpportunityData'
         - $ref: '#/CWVOpportunityData'
     origin:
       $ref: '#/OpportunityOrigin'
@@ -1785,6 +2005,7 @@ Opportunity:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksGuidance'
+        - $ref: '#/BrokenInternalLinksGuidance'
         - $ref: '#/CWVGuidance'
     tags:
       type: array
@@ -1834,6 +2055,7 @@ OpportunityCreate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksOpportunityData'
+        - $ref: '#/BrokenInternalLinksOpportunityData'
     origin:
       description: Origin of opportunity
       $ref: '#/OpportunityOrigin'
@@ -1851,6 +2073,7 @@ OpportunityCreate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksGuidance'
+        - $ref: '#/BrokenInternalLinksGuidance'
     tags:
       type: array
       items:
@@ -1878,6 +2101,7 @@ OpportunityUpdate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksOpportunityData'
+        - $ref: '#/BrokenInternalLinksOpportunityData'
     title:
       description: Title of this opportunity
       type: string
@@ -1895,6 +2119,7 @@ OpportunityUpdate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksGuidance'
+        - $ref: '#/BrokenInternalLinksGuidance'
     tags:
       type: array
       items:
@@ -1947,12 +2172,14 @@ Suggestion:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksRedirectData'
+        - $ref: '#/BrokenInternalLinksSuggestionData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
+        - $ref: '#/BrokenInternalLinksKpiDeltas'
     status:
       description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
       $ref: '#/SuggestionStatus'
@@ -1990,12 +2217,14 @@ SuggestionCreate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksRedirectData'
+        - $ref: '#/BrokenInternalLinksSuggestionData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
+        - $ref: '#/BrokenInternalLinksKpiDeltas'
   required:
     - opportunityId
     - type
@@ -2082,12 +2311,14 @@ SuggestionUpdate:
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksRedirectData'
+        - $ref: '#/BrokenInternalLinksSuggestionData'
     kpiDeltas:
       description: Map containing metrics estimated to experience lifts or losses due to the issue
       type: object
       additionalProperties: true
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
+        - $ref: '#/BrokenInternalLinksKpiDeltas'
 SuggestionStatusUpdate:
   type: array
   items:
@@ -2159,16 +2390,16 @@ BrokenBacklinksRedirectData:
   type: object
   additionalProperties: true
   properties:
-    referringPageTitle:
+    title:
       description: The title of the referring page
       type: string
-    referringURL:
+    url_from:
       description: The URL of the referring page
       type: string
-    brokenTargetURL:
+    url_to:
       description: The URL of the broken target page
       type: string
-    proposedTargetURLs:
+    urls_suggested:
       description: The proposed target URLs to redirect the broken backlink to
       type: array
       items:
@@ -2176,9 +2407,40 @@ BrokenBacklinksRedirectData:
     manualOverrideURL:
       description: The URL to manually override the proposed target URL
       type: string
-    referringPageTraffic:
+    traffic_domain:
       description: The estimated monthly organic traffic to the referring page
       type: number
+BrokenInternalLinksSuggestionData:
+  description: Data specific to redirect suggestion for broken internal links opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    title:
+      description: The title of the referring page
+      type: string
+    urlFrom:
+      description: The URL of the referring page
+      type: string
+    urlTo:
+      description: The URL of the broken target page
+      type: string
+    aiRationale:
+      description: The rationale for the suggested fix
+      type: string
+    urlsSuggested:
+      description: The proposed internal target URLs to point the broken internal link to
+      type: array
+      items:
+        type: string
+    manualOverrideURL:
+      description: The URL to manually override the proposed target URL
+      type: string
+    trafficDomain:
+      description: The estimated monthly organic traffic to the referring page
+      type: number
+    priority:
+      description: The priority of the broken internal link
+      $ref: '#/Priority'
 BrokenBacklinksKpiDeltas:
   description: KPI deltas specific to redirect suggestion for broken backlinks opportunity
   type: object
@@ -2194,6 +2456,31 @@ BrokenBacklinksGuidance:
   properties:
     steps:
       description: The steps to resolve the broken backlinks opportunity
+      type: array
+      items:
+        type: string
+BrokenInternalLinksKpiDeltas:
+  description: KPI deltas specific to redirect suggestion for broken internal links opportunity
+  type: object
+  additionalProperties: true
+BrokenInternalLinksOpportunityData:
+  description: Data specific to broken internal links opportunity
+  type: object
+  properties:
+    projectedTrafficLost:
+      type: number
+      description: Projected Traffic Lost, representing the estimated loss of organic traffic
+    projectedTrafficValue:
+      type: number
+      description: Projected Traffic Value, calculated by multiplying the Projected Traffic Lost by the Cost Per Click (CPC) value.
+  additionalProperties: true
+BrokenInternalLinksGuidance:
+  description: Guidance specific to broken internal links opportunity
+  type: object
+  additionalProperties: true
+  properties:
+    steps:
+      description: The steps to resolve the broken internal links opportunity
       type: array
       items:
         type: string
@@ -2235,3 +2522,10 @@ CWVGuidance:
       type: array
       items:
         type: string
+Priority:
+      type: string
+      enum:
+        - 'high'
+        - 'medium'
+        - 'low'
+      example: 'high'

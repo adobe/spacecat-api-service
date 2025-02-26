@@ -20,7 +20,7 @@ export const ExperimentDto = {
    * @param {Readonly<Experiment>} experiment - Experiment object.
    * @returns {{
    * siteId: string,
-   * experimentId: string,
+   * expId: string,
    * name: string,
    * url: string,
    * type: string,
@@ -36,7 +36,7 @@ export const ExperimentDto = {
    */
   toJSON: (experiment) => ({
     siteId: experiment.getSiteId(),
-    experimentId: experiment.getExperimentId(),
+    expId: experiment.getExpId(),
     name: experiment.getName(),
     url: experiment.getUrl(),
     type: experiment.getType(),

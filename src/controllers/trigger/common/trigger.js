@@ -14,41 +14,24 @@ import { notFound, ok } from '@adobe/spacecat-shared-http-utils';
 import { isAuditForAllUrls, isAuditForAllDeliveryTypes, sendAuditMessages } from '../../../support/utils.js';
 
 /**
- * Retrieves all organizations and returns an object where key is organization id
- * and the value is organization
- *
- * @param {Object} dataAccess - The data access object for site operations.
- * @returns {Promise<object>} object{key: orgId, value: org object}
- * @throws {Error} Throws an error if organizations retrieval fails
- */
-async function getOrganizations(dataAccess) {
-  const organizations = await dataAccess.getOrganizations();
-  return organizations.reduce((acc, cur) => {
-    acc[cur.getId()] = cur;
-    return acc;
-  }, {});
-}
-
-/**
  * Retrieves sites for auditing based on the input URL. If the input URL has the value
  * 'all', then all sites will be audited. Otherwise, the input URL is assumed to be a base URL.
  * Sites are filtered to only include sites that have not disabled audits.
  *
- * @param {Object} dataAccess - The data access object for site operations.
+ * @param {SiteCollection} siteCollection - The data access object for site operations.
  * @param {string} url - The URL to check for auditing.
  * @param {string} deliveryType - The delivery type (ie aem_edge) to check for auditing.
- * @param {Array<Organization>} orgs - List of spacecat orgs
  * @returns {Promise<Array<Site>>} The sites to audit.
  * @throws {Error} Throws an error if the site is not found.
  */
-async function getSitesToAudit(dataAccess, url, deliveryType) {
+async function getSitesToAudit(siteCollection, url, deliveryType) {
   let sitesToAudit;
   if (isAuditForAllUrls(url)) {
     sitesToAudit = isAuditForAllDeliveryTypes(deliveryType)
-      ? await dataAccess.getSites()
-      : await dataAccess.getSitesByDeliveryType(deliveryType);
+      ? await siteCollection.all()
+      : await siteCollection.allByDeliveryType(deliveryType);
   } else {
-    const site = await dataAccess.getSiteByBaseURL(url);
+    const site = await siteCollection.findByBaseURL(url);
     sitesToAudit = site ? [site] : [];
   }
   return sitesToAudit;
@@ -64,13 +47,13 @@ async function getSitesToAudit(dataAccess, url, deliveryType) {
  */
 export async function triggerFromData(context, config, auditContext = {}) {
   const { dataAccess, sqs } = context;
+  const { Configuration, Site } = dataAccess;
   const { AUDIT_JOBS_QUEUE_URL: queueUrl } = context.env;
   const { url, auditTypes, deliveryType } = config;
 
-  const orgs = await getOrganizations(dataAccess);
-  const configuration = await dataAccess.getConfiguration();
+  const configuration = await Configuration.findLatest();
 
-  const sitesToAudit = await getSitesToAudit(dataAccess, url, deliveryType, orgs);
+  const sitesToAudit = await getSitesToAudit(Site, url, deliveryType);
   if (!sitesToAudit.length) {
     return notFound('Site not found');
   }

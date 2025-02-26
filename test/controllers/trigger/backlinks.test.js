@@ -12,16 +12,17 @@
 
 /* eslint-env mocha */
 
-import { AUDIT_TYPE_BROKEN_BACKLINKS } from '@adobe/spacecat-shared-data-access/src/models/audit.js';
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
+import { Audit } from '@adobe/spacecat-shared-data-access';
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import nock from 'nock';
 import trigger, { INITIAL_BACKLINKS_SLACK_MESSAGE } from '../../../src/controllers/trigger/backlinks.js';
 import { getQueryParams } from '../../../src/utils/slack/base.js';
+
+use(sinonChai);
 
 describe('Backlinks trigger', () => {
   let context;
@@ -37,35 +38,42 @@ describe('Backlinks trigger', () => {
       isHandlerEnabledForSite: sandbox.stub(),
     };
     sites = [
-      createSite({
-        id: 'site1',
-        baseURL: 'http://site1.com',
-      }),
-      createSite({
-        id: 'site2',
-        baseURL: 'http://site2.com',
-      }),
+      {
+        getId: () => 'site1',
+        getBaseURL: () => 'http://site1.com',
+      },
+      {
+        getId: () => 'site2',
+        getBaseURL: () => 'http://site2.com',
+      },
     ];
     configuration.isHandlerEnabledForSite.withArgs(
-      AUDIT_TYPE_BROKEN_BACKLINKS,
+      Audit.AUDIT_TYPES.BROKEN_BACKLINKS,
       sites[0],
     ).returns(true);
     configuration.isHandlerEnabledForSite.withArgs(
-      AUDIT_TYPE_BROKEN_BACKLINKS,
+      Audit.AUDIT_TYPES.BROKEN_BACKLINKS,
       sites[1],
     ).returns(false);
     orgs = [
-      createOrganization({
+      {
         id: 'default',
         name: 'ABCD',
         config: {
         },
-      })];
+      },
+    ];
 
     dataAccessMock = {
-      getOrganizations: sandbox.stub().resolves(orgs),
-      getSitesByDeliveryType: sandbox.stub(),
-      getConfiguration: sandbox.stub().resolves(configuration),
+      Configuration: {
+        findLatest: sandbox.stub().resolves(configuration),
+      },
+      Organization: {
+        all: sandbox.stub().resolves(orgs),
+      },
+      Site: {
+        allByDeliveryType: sandbox.stub().resolves(sites),
+      },
     };
 
     sqsMock = {
@@ -90,8 +98,6 @@ describe('Backlinks trigger', () => {
       },
     };
 
-    dataAccessMock.getSitesByDeliveryType.resolves(sites);
-
     nock('https://slack.com')
       .get('/api/chat.postMessage')
       .query(getQueryParams('DSA', INITIAL_BACKLINKS_SLACK_MESSAGE))
@@ -104,7 +110,7 @@ describe('Backlinks trigger', () => {
     const response = await trigger(context);
     const result = await response.json();
 
-    expect(dataAccessMock.getSitesByDeliveryType.calledOnce).to.be.true;
+    expect(dataAccessMock.Site.allByDeliveryType).to.have.been.calledOnce;
     expect(sqsMock.sendMessage.callCount).to.equal(1);
     expect(result.message[0]).to.equal('Triggered broken-backlinks audit for site1');
   });

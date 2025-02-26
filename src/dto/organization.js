@@ -11,31 +11,11 @@
  */
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { createOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 /**
  * Data transfer object for Organization.
  */
 export const OrganizationDto = {
-
-  /**
-   * Converts a JSON object into a Organization object.
-   * @param {object } jsonObject - JSON object.
-   * @returns {Readonly<Organization>} Organization object.
-   */
-  fromJson: (jsonObject) => {
-    const organizationData = {
-      id: jsonObject.id,
-      name: jsonObject.name,
-      imsOrgId: jsonObject.imsOrgId,
-      createdAt: jsonObject.createdAt,
-      updatedAt: jsonObject.updatedAt,
-      config: jsonObject.config,
-    };
-
-    return createOrganization(organizationData);
-  },
-
   /**
    * Converts a Organization object into a JSON object.
    * @param {Readonly<Organization>} organization - Organization object.

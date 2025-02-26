@@ -26,6 +26,10 @@ audit-for-site:
                 $ref: './examples.yaml#/broken-backlinks-audit'
               costs-audit:
                 $ref: './examples.yaml#/costs-audit'
+              meta-tags-audit:
+                $ref: './examples.yaml#/meta-tags-audit'
+              broken-internal-links-audit:
+                $ref: './examples.yaml#/broken-internal-links-audit'
       '400':
         $ref: './responses.yaml#/400-audit-for-site'
       '401':
@@ -63,6 +67,10 @@ latest-audit-for-site:
                 $ref: './examples.yaml#/broken-backlinks-audit'
               costs-audit:
                 $ref: './examples.yaml#/costs-audit'
+              meta-tags-audit:
+                $ref: './examples.yaml#/meta-tags-audit'
+              broken-internal-links-audit:
+                $ref: './examples.yaml#/broken-internal-links-audit'
       '400':
         $ref: './responses.yaml#/400-latest-audit-for-site'
       '401':

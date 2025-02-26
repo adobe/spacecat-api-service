@@ -11,13 +11,12 @@
  */
 
 /* eslint-env mocha */
+import { SiteCandidate } from '@adobe/spacecat-shared-data-access';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import approveFriendsFamily from '../../../../src/support/slack/actions/approve-friends-family.js';
 import { expectedAnnouncedMessage, expectedApprovedFnFReply, slackFriendsFamilyResponse } from './slack-fixtures.js';
 
@@ -46,16 +45,21 @@ describe('approveSiteCandidate', () => {
     clock = sinon.useFakeTimers();
 
     slackClient = {
-      postMessage: sinon.mock(),
+      postMessage: sinon.mock().resolves({ channelId: 'channel-id', threadId: 'thread-ts' }),
     };
 
     context = {
       dataAccess: {
-        createKeyEvent: sinon.stub(),
-        getSiteCandidateByBaseURL: sinon.stub(),
-        getSiteByBaseURL: sinon.stub(),
-        addSite: sinon.stub(),
-        updateSiteCandidate: sinon.stub(),
+        KeyEvent: {
+          create: sinon.stub(),
+        },
+        SiteCandidate: {
+          findByBaseURL: sinon.stub(),
+        },
+        Site: {
+          create: sinon.stub(),
+          findByBaseURL: sinon.stub(),
+        },
       },
       log: {
         info: sinon.stub(),
@@ -68,19 +72,28 @@ describe('approveSiteCandidate', () => {
       slackClients: {
         WORKSPACE_INTERNAL_STANDARD: slackClient,
       },
+      orgDetectorAgent: {
+        detect: sinon.stub(),
+      },
     };
 
-    site = createSite({
-      baseURL,
-      isLive: true,
-    });
+    site = {
+      getId: () => 'some-site-id',
+      getBaseURL: () => baseURL,
+      getIsLive: () => true,
+      save: sinon.stub(),
+    };
 
-    siteCandidate = createSiteCandidate({
-      baseURL,
-      hlxConfig,
-      source: SITE_CANDIDATE_SOURCES.CDN,
-      status: SITE_CANDIDATE_STATUS.PENDING,
-    });
+    siteCandidate = {
+      getBaseURL: () => baseURL,
+      getHlxConfig: () => hlxConfig,
+      getSource: () => SiteCandidate.SITE_CANDIDATE_SOURCES.CDN,
+      getStatus: () => SiteCandidate.SITE_CANDIDATE_STATUS.PENDING,
+      setSiteId: sinon.stub(),
+      setStatus: sinon.stub(),
+      setUpdatedBy: sinon.stub(),
+      save: sinon.stub(),
+    };
 
     ackMock = sinon.stub().resolves();
     respondMock = sinon.stub().resolves();
@@ -92,37 +105,25 @@ describe('approveSiteCandidate', () => {
   });
 
   it('should approve site candidate, add friends family org and announce site discovery', async () => {
-    const expectedSiteCandidate = createSiteCandidate({
-      baseURL,
-      source: SITE_CANDIDATE_SOURCES.CDN,
-      status: SITE_CANDIDATE_STATUS.APPROVED,
-      updatedBy: 'approvers-username',
-      siteId: site.getId(),
-      hlxConfig,
-    });
-
-    context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
-    context.dataAccess.getSiteByBaseURL.resolves(null);
-    context.dataAccess.addSite.resolves(site);
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
 
     // Call the function under test
     const approveFunction = approveFriendsFamily(context);
     await approveFunction({ ack: ackMock, body: slackFriendsFamilyResponse, respond: respondMock });
 
-    const actualUpdatedSiteCandidate = context.dataAccess.updateSiteCandidate.getCall(0).args[0];
-
     expect(ackMock.calledOnce).to.be.true;
-    expect(context.dataAccess.getSiteCandidateByBaseURL.calledOnceWithExactly(baseURL)).to.be.true;
-    expect(context.dataAccess.addSite.calledOnceWithExactly({
+    expect(context.dataAccess.SiteCandidate.findByBaseURL).to.have.been.calledWithExactly(baseURL);
+    expect(context.dataAccess.Site.create.calledOnceWithExactly({
       baseURL,
       hlxConfig,
       isLive: true,
       organizationId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
     })).to.be.true;
-    expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
     expect(respondMock.calledOnceWith(expectedApprovedFnFReply)).to.be.true;
     expect(slackClient.postMessage.calledOnceWith(expectedAnnouncedMessage)).to.be.true;
-    expect(context.dataAccess.createKeyEvent).to.have.been.calledWith({
+    expect(context.dataAccess.KeyEvent.create).to.have.been.calledWith({
       name: 'Go Live',
       siteId: site.getId(),
       type: 'STATUS CHANGE',

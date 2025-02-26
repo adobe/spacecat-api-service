@@ -11,13 +11,12 @@
  */
 
 /* eslint-env mocha */
+import { SiteCandidate } from '@adobe/spacecat-shared-data-access';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import { createSite } from '@adobe/spacecat-shared-data-access/src/models/site.js';
-import { createSiteCandidate, SITE_CANDIDATE_STATUS, SITE_CANDIDATE_SOURCES } from '@adobe/spacecat-shared-data-access/src/models/site-candidate.js';
 import ignoreSiteCandidate from '../../../../src/support/slack/actions/ignore-site-candidate.js';
 import { expectedIgnoredReply, slackActionResponse, slackFriendsFamilyResponse } from './slack-fixtures.js';
 
@@ -43,9 +42,12 @@ describe('ignoreSiteCandidate', () => {
 
     context = {
       dataAccess: {
-        getSiteCandidateByBaseURL: sinon.stub(),
-        addSite: sinon.stub(),
-        updateSiteCandidate: sinon.stub(),
+        Site: {
+          create: sinon.stub(),
+        },
+        SiteCandidate: {
+          findByBaseURL: sinon.stub(),
+        },
       },
       log: {
         info: sinon.stub(),
@@ -59,16 +61,20 @@ describe('ignoreSiteCandidate', () => {
       },
     };
 
-    site = createSite({
-      baseURL,
-      isLive: true,
-    });
+    site = {
+      getId: () => 'site1',
+      getBaseURL: () => baseURL,
+      getIsLive: () => true,
+    };
 
-    siteCandidate = createSiteCandidate({
+    siteCandidate = {
       baseURL,
-      source: SITE_CANDIDATE_SOURCES.CDN,
-      status: SITE_CANDIDATE_STATUS.PENDING,
-    });
+      source: SiteCandidate.SITE_CANDIDATE_SOURCES.CDN,
+      status: SiteCandidate.SITE_CANDIDATE_STATUS.PENDING,
+      setStatus: sinon.stub(),
+      setUpdatedBy: sinon.stub(),
+      save: sinon.stub(),
+    };
 
     ackMock = sinon.stub().resolves();
     respondMock = sinon.stub().resolves();
@@ -80,26 +86,26 @@ describe('ignoreSiteCandidate', () => {
   });
 
   it('should approve site candidate and announce site discovery', async () => {
-    const expectedSiteCandidate = createSiteCandidate({
+    const expectedSiteCandidate = {
       baseURL,
-      source: SITE_CANDIDATE_SOURCES.CDN,
-      status: SITE_CANDIDATE_STATUS.IGNORED,
+      source: SiteCandidate.SITE_CANDIDATE_SOURCES.CDN,
+      status: SiteCandidate.SITE_CANDIDATE_STATUS.IGNORED,
       updatedBy: 'approvers-username',
-    });
+    };
 
-    context.dataAccess.getSiteCandidateByBaseURL.withArgs(baseURL).resolves(siteCandidate);
-    context.dataAccess.addSite.resolves(site);
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.create.resolves(site);
 
     // Call the function under test
     const ignoreFunction = ignoreSiteCandidate(context);
     await ignoreFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
 
-    const actualUpdatedSiteCandidate = context.dataAccess.updateSiteCandidate.getCall(0).args[0];
-
     expect(ackMock.calledOnce).to.be.true;
-    expect(context.dataAccess.getSiteCandidateByBaseURL.calledOnceWithExactly(baseURL)).to.be.true;
-    expect(context.dataAccess.addSite.notCalled).to.be.true;
-    expect(expectedSiteCandidate.state).to.eql(actualUpdatedSiteCandidate.state);
+    expect(context.dataAccess.SiteCandidate.findByBaseURL.calledOnceWithExactly(baseURL))
+      .to.be.true;
+    expect(context.dataAccess.Site.create).to.not.have.been.called;
+    expect(siteCandidate.setStatus)
+      .to.have.been.calledOnceWithExactly(expectedSiteCandidate.status);
     expect(respondMock.calledOnceWith(expectedIgnoredReply)).to.be.true;
     expect(slackClient.postMessage.notCalled).to.be.true;
   });

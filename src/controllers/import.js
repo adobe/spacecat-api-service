@@ -15,9 +15,12 @@ import {
   noContent,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { isIsoDate, isObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  hasText,
+  isIsoDate, isNonEmptyObject, isObject, isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 import psl from 'psl';
-import { ImportJobStatus } from '@adobe/spacecat-shared-data-access';
+import { ImportJob as ImportJobModel } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
 import { ImportJobDto } from '../dto/import-job.js';
@@ -97,6 +100,29 @@ function ImportController(context) {
 
     if (data.options && !isObject(data.options)) {
       throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
+    }
+
+    const types = Object.values(ImportJobModel.ImportOptionTypes);
+    // the type property is optional for backwards compatibility, if it is provided it must be valid
+    if (data.options?.type && !types.includes(data.options.type)) {
+      throw new ErrorWithStatusCode(`Invalid request: type must be either ${types.join(' or ')}`, STATUS_BAD_REQUEST);
+    }
+
+    if (data.options?.type === ImportJobModel.ImportOptionTypes.XWALK) {
+      if (!hasText(data.models)) {
+        throw new ErrorWithStatusCode('Invalid request: models must be an string', STATUS_BAD_REQUEST);
+      }
+      if (!hasText(data.filters)) {
+        throw new ErrorWithStatusCode('Invalid request: filters must be an string', STATUS_BAD_REQUEST);
+      }
+      if (!hasText(data.definitions)) {
+        throw new ErrorWithStatusCode('Invalid request: definitions must be an string', STATUS_BAD_REQUEST);
+      }
+      if (!isNonEmptyObject(data.options.data)
+        || !hasText(data.options.data.assetFolder)
+        || !hasText(data.options.data.siteName)) {
+        throw new ErrorWithStatusCode('Missing option(s): { data: { assetFolder, siteName } } are required', STATUS_BAD_REQUEST);
+      }
     }
 
     if (data.customHeaders && !isObject(data.customHeaders)) {
@@ -190,7 +216,7 @@ function ImportController(context) {
       }
 
       const {
-        urls, options, importScript, customHeaders,
+        urls, options, importScript, customHeaders, models, filters, definitions,
       } = multipartFormData;
 
       const scopes = profile.getScopes();
@@ -226,6 +252,9 @@ function ImportController(context) {
         importScript,
         initiatedBy,
         customHeaders,
+        models,
+        filters,
+        definitions,
       );
       return createResponse(ImportJobDto.toJSON(job), STATUS_ACCEPTED);
     } catch (error) {
@@ -382,7 +411,7 @@ function ImportController(context) {
         throw new ErrorWithStatusCode('Invalid request: Patch request supports the following paths: ["/status"]', STATUS_BAD_REQUEST);
       }
 
-      if (patch.value !== ImportJobStatus.STOPPED) {
+      if (patch.value !== ImportJobModel.ImportJobStatus.STOPPED) {
         throw new ErrorWithStatusCode('Invalid request: Patch request supports the following values: ["STOPPED"]', STATUS_BAD_REQUEST);
       }
     });

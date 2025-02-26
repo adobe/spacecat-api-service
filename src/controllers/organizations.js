@@ -21,8 +21,8 @@ import {
   hasText,
   isObject,
   isString,
+  isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-import { createOrganization as validateOrganization } from '@adobe/spacecat-shared-data-access/src/models/organization.js';
 
 import { OrganizationDto } from '../dto/organization.js';
 import { SiteDto } from '../dto/site.js';
@@ -43,6 +43,7 @@ function OrganizationsController(dataAccess, env) {
     throw new Error('Environment object required');
   }
   const { SLACK_URL_WORKSPACE_EXTERNAL: slackExternalWorkspaceUrl } = env;
+  const { Organization, Site } = dataAccess;
 
   /**
    * Creates an organization. The organization ID is generated automatically.
@@ -51,8 +52,7 @@ function OrganizationsController(dataAccess, env) {
    */
   const createOrganization = async (context) => {
     try {
-      validateOrganization(context.data);
-      const organization = await dataAccess.addOrganization(context.data);
+      const organization = await Organization.create(context.data);
       return createResponse(OrganizationDto.toJSON(organization), 201);
     } catch (e) {
       return badRequest(e.message);
@@ -64,7 +64,7 @@ function OrganizationsController(dataAccess, env) {
    * @returns {Promise<Response>} Array of organizations response.
    */
   const getAll = async () => {
-    const organizations = (await dataAccess.getOrganizations())
+    const organizations = (await Organization.all())
       .map((organization) => OrganizationDto.toJSON(organization));
     return ok(organizations);
   };
@@ -78,11 +78,11 @@ function OrganizationsController(dataAccess, env) {
   const getByID = async (context) => {
     const organizationId = context.params?.organizationId;
 
-    if (!hasText(organizationId)) {
+    if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
 
-    const organization = await dataAccess.getOrganizationByID(organizationId);
+    const organization = await Organization.findById(organizationId);
     if (!organization) {
       return notFound('Organization not found');
     }
@@ -103,7 +103,7 @@ function OrganizationsController(dataAccess, env) {
       return badRequest('IMS org ID required');
     }
 
-    const organization = await dataAccess.getOrganizationByImsOrgID(imsOrgId);
+    const organization = await Organization.findByImsOrgId(imsOrgId);
     if (!organization) {
       return notFound(`Organization not found by IMS org ID: ${imsOrgId}`);
     }
@@ -146,11 +146,11 @@ function OrganizationsController(dataAccess, env) {
   const getSitesForOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
 
-    if (!hasText(organizationId)) {
+    if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
 
-    const sites = await dataAccess.getSitesByOrganizationID(organizationId);
+    const sites = await Site.allByOrganizationId(organizationId);
 
     return ok(sites.map((site) => SiteDto.toJSON(site)));
   };
@@ -163,11 +163,17 @@ function OrganizationsController(dataAccess, env) {
   const removeOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
 
-    if (!hasText(organizationId)) {
+    if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
 
-    await dataAccess.removeOrganization(organizationId);
+    const organization = await Organization.findById(organizationId);
+
+    if (!organization) {
+      return notFound('Organization not found');
+    }
+
+    await organization.remove();
 
     return noContent();
   };
@@ -180,11 +186,11 @@ function OrganizationsController(dataAccess, env) {
   const updateOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
 
-    if (!hasText(organizationId)) {
+    if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
 
-    const organization = await dataAccess.getOrganizationByID(organizationId);
+    const organization = await Organization.findById(organizationId);
     if (!organization) {
       return notFound('Organization not found');
     }
@@ -196,22 +202,22 @@ function OrganizationsController(dataAccess, env) {
 
     let updates = false;
     if (isString(requestBody.name) && requestBody.name !== organization.getName()) {
-      organization.updateName(requestBody.name);
+      organization.setName(requestBody.name);
       updates = true;
     }
 
     if (isString(requestBody.imsOrgId) && requestBody.imsOrgId !== organization.getImsOrgId()) {
-      organization.updateImsOrgId(requestBody.imsOrgId);
+      organization.setImsOrgId(requestBody.imsOrgId);
       updates = true;
     }
 
     if (isObject(requestBody.config)) {
-      organization.updateConfig(requestBody.config);
+      organization.setConfig(requestBody.config);
       updates = true;
     }
 
     if (updates) {
-      const updatedOrganization = await dataAccess.updateOrganization(organization);
+      const updatedOrganization = await organization.save();
       return ok(OrganizationDto.toJSON(updatedOrganization));
     }
 

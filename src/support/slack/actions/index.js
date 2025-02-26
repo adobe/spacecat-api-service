@@ -10,14 +10,18 @@
  * governing permissions and limitations under the License.
  */
 
-import approveSiteCandidate from './approve-site-candidate.js';
 import approveFriendsFamily from './approve-friends-family.js';
+import approveOrg from './approve-org.js';
+import approveSiteCandidate from './approve-site-candidate.js';
 import ignoreSiteCandidate from './ignore-site-candidate.js';
+import rejectOrg from './reject-org.js';
 
 const actions = {
-  approveSiteCandidate,
   approveFriendsFamily,
+  approveOrg,
+  approveSiteCandidate,
   ignoreSiteCandidate,
+  rejectOrg,
 };
 
 export default actions;

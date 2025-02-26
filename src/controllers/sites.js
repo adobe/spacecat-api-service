@@ -22,14 +22,16 @@ import {
   hasText,
   isBoolean,
   isObject,
-  getStoredMetrics,
+  getStoredMetrics, isValidUUID, deepEqual,
 } from '@adobe/spacecat-shared-utils';
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
+import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
+import { wwwUrlResolver } from '../support/utils.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -37,10 +39,18 @@ import { KeyEventDto } from '../dto/key-event.js';
  * @returns {object} Sites controller.
  * @constructor
  */
-function SitesController(dataAccess) {
+
+const AHREFS = 'ahrefs';
+const ORGANIC_TRAFFIC = 'organic-traffic';
+const MONTH_DAYS = 30;
+const TOTAL_METRICS = 'totalMetrics';
+
+function SitesController(dataAccess, log, env) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
+
+  const { Audit, KeyEvent, Site } = dataAccess;
 
   /**
    * Creates a site. The site ID is generated automatically.
@@ -48,7 +58,10 @@ function SitesController(dataAccess) {
    * @return {Promise<Response>} Site response.
    */
   const createSite = async (context) => {
-    const site = await dataAccess.addSite(context.data);
+    const site = await Site.create({
+      organizationId: env.DEFAULT_ORGANIZATION_ID,
+      ...context.data,
+    });
     return createResponse(SiteDto.toJSON(site), 201);
   };
 
@@ -57,13 +70,13 @@ function SitesController(dataAccess) {
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAll = async () => {
-    const sites = (await dataAccess.getSites()).map((site) => SiteDto.toJSON(site));
+    const sites = (await Site.all()).map((site) => SiteDto.toJSON(site));
     return ok(sites);
   };
 
   /**
    * Gets all sites by delivery type.
-    * @param {object} context - Context of the request.
+   * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAllByDeliveryType = async (context) => {
@@ -73,7 +86,7 @@ function SitesController(dataAccess) {
       return badRequest('Delivery type required');
     }
 
-    const sites = (await dataAccess.getSitesByDeliveryType(deliveryType))
+    const sites = (await Site.allByDeliveryType(deliveryType))
       .map((site) => SiteDto.toJSON(site));
     return ok(sites);
   };
@@ -89,18 +102,21 @@ function SitesController(dataAccess) {
    */
   const getAllWithLatestAudit = async (context) => {
     const auditType = context.params?.auditType;
+    const ascending = context.params?.ascending;
 
     if (!hasText(auditType)) {
       return badRequest('Audit type required');
     }
 
-    let ascending = true;
-    if (hasText(context.params?.ascending)) {
-      ascending = context.params.ascending === 'true';
-    }
-    const sites = (await dataAccess.getSitesWithLatestAudit(auditType, ascending))
-      .map((site) => SiteDto.toJSON(site));
-    return ok(sites);
+    const order = ascending === 'true' ? 'asc' : 'desc';
+
+    const sites = await Site.allWithLatestAudit(auditType, order);
+    const result = await Promise.all(sites
+      .map(async (site) => {
+        const audit = await site.getLatestAuditByAuditType(auditType);
+        return SiteDto.toJSON(site, audit);
+      }));
+    return ok(result);
   };
 
   /**
@@ -108,7 +124,7 @@ function SitesController(dataAccess) {
    * @returns {Promise<Response>} XLS file.
    */
   const getAllAsXLS = async () => {
-    const sites = await dataAccess.getSites();
+    const sites = await Site.all();
     return ok(SiteDto.toXLS(sites));
   };
 
@@ -117,7 +133,7 @@ function SitesController(dataAccess) {
    * @returns {Promise<Response>} CSV file.
    */
   const getAllAsCSV = async () => {
-    const sites = await dataAccess.getSites();
+    const sites = await Site.all();
     return ok(SiteDto.toCSV(sites));
   };
 
@@ -126,7 +142,7 @@ function SitesController(dataAccess) {
     const auditType = context.params?.auditType;
     const auditedAt = context.params?.auditedAt;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -138,7 +154,7 @@ function SitesController(dataAccess) {
       return badRequest('Audited at required');
     }
 
-    const audit = await dataAccess.getAuditForSite(siteId, auditType, auditedAt);
+    const audit = await Audit.findBySiteIdAndAuditTypeAndAuditedAt(siteId, auditType, auditedAt);
     if (!audit) {
       return notFound('Audit not found');
     }
@@ -155,11 +171,11 @@ function SitesController(dataAccess) {
   const getByID = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const site = await dataAccess.getSiteByID(siteId);
+    const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
@@ -183,7 +199,7 @@ function SitesController(dataAccess) {
 
     const decodedBaseURL = Buffer.from(encodedBaseURL, 'base64').toString('utf-8').trim();
 
-    const site = await dataAccess.getSiteByBaseURL(decodedBaseURL);
+    const site = await Site.findByBaseURL(decodedBaseURL);
     if (!site) {
       return notFound('Site not found');
     }
@@ -199,11 +215,17 @@ function SitesController(dataAccess) {
   const removeSite = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    await dataAccess.removeSite(siteId);
+    const site = await Site.findById(siteId);
+
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    await site.remove();
 
     return noContent();
   };
@@ -216,11 +238,11 @@ function SitesController(dataAccess) {
   const updateSite = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const site = await dataAccess.getSiteByID(siteId);
+    const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
@@ -231,35 +253,51 @@ function SitesController(dataAccess) {
     }
 
     let updates = false;
-    if (isBoolean(requestBody.isLive) && requestBody.isLive !== site.isLive()) {
+    if (isBoolean(requestBody.isLive) && requestBody.isLive !== site.getIsLive()) {
       site.toggleLive();
       updates = true;
     }
 
     if (hasText(requestBody.organizationId)
         && requestBody.organizationId !== site.getOrganizationId()) {
-      site.updateOrganizationId(requestBody.organizationId);
+      site.setOrganizationId(requestBody.organizationId);
+      updates = true;
+    }
+
+    if (requestBody.name !== site.getName()) {
+      site.setName(requestBody.name);
       updates = true;
     }
 
     if (requestBody.gitHubURL !== site.getGitHubURL() && validateRepoUrl(requestBody.gitHubURL)) {
-      site.updateGitHubURL(requestBody.gitHubURL);
+      site.setGitHubURL(requestBody.gitHubURL);
       updates = true;
     }
 
     if (requestBody.deliveryType !== site.getDeliveryType()
-      && Object.values(DELIVERY_TYPES).includes(requestBody.deliveryType)) {
-      site.updateDeliveryType(requestBody.deliveryType);
+        && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
+      site.setDeliveryType(requestBody.deliveryType);
+      updates = true;
+    }
+
+    if (isObject(requestBody.deliveryConfig)
+        && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
+      site.setDeliveryConfig(requestBody.deliveryConfig);
       updates = true;
     }
 
     if (isObject(requestBody.config)) {
-      site.updateConfig(requestBody.config);
+      site.setConfig(requestBody.config);
+      updates = true;
+    }
+
+    if (isObject(requestBody.hlxConfig) && !deepEqual(requestBody.hlxConfig, site.getHlxConfig())) {
+      site.setHlxConfig(requestBody.hlxConfig);
       updates = true;
     }
 
     if (updates) {
-      const updatedSite = await dataAccess.updateSite(site);
+      const updatedSite = await site.save();
       return ok(SiteDto.toJSON(updatedSite));
     }
 
@@ -275,7 +313,7 @@ function SitesController(dataAccess) {
     const { siteId } = context.params;
     const { name, type, time } = context.data;
 
-    const keyEvent = await dataAccess.createKeyEvent({
+    const keyEvent = await KeyEvent.create({
       siteId,
       name,
       type,
@@ -294,16 +332,16 @@ function SitesController(dataAccess) {
   const getKeyEventsBySiteID = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
-    const site = await dataAccess.getSiteByID(siteId);
+    const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
 
-    const keyEvents = await dataAccess.getKeyEventsForSite(site.getId());
+    const keyEvents = await site.getKeyEvents();
 
     return ok(keyEvents.map((keyEvent) => KeyEventDto.toJSON(keyEvent)));
   };
@@ -320,7 +358,13 @@ function SitesController(dataAccess) {
       return badRequest('Key Event ID required');
     }
 
-    await dataAccess.removeKeyEvent(keyEventId);
+    const keyEvent = await KeyEvent.findById(keyEventId);
+
+    if (!keyEvent) {
+      return notFound('Key Event not found');
+    }
+
+    await keyEvent.remove();
 
     return noContent();
   };
@@ -330,7 +374,7 @@ function SitesController(dataAccess) {
     const metric = context.params?.metric;
     const source = context.params?.source;
 
-    if (!hasText(siteId)) {
+    if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
 
@@ -342,12 +386,109 @@ function SitesController(dataAccess) {
       return badRequest('source required');
     }
 
-    const site = await dataAccess.getSiteByID(siteId);
+    const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
 
     const metrics = await getStoredMetrics({ siteId, metric, source }, context);
+
+    return ok(metrics);
+  };
+
+  const getLatestSiteMetrics = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    const rumAPIClient = RUMAPIClient.createFrom(context);
+    const domain = wwwUrlResolver(site);
+
+    try {
+      const current = await rumAPIClient.query(TOTAL_METRICS, {
+        domain,
+        interval: MONTH_DAYS,
+      });
+      const total = await rumAPIClient.query(TOTAL_METRICS, {
+        domain,
+        interval: 2 * MONTH_DAYS,
+      });
+      const organicTraffic = await getStoredMetrics(
+        { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+        context,
+      );
+
+      const previousPageViews = total.totalPageViews - current.totalPageViews;
+      const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
+      const pageViewsChange = ((current.totalPageViews - previousPageViews)
+        / previousPageViews) * 100;
+      const ctrChange = ((current.totalCTR - previousCTR) / previousCTR) * 100;
+
+      let cpc = 0;
+
+      if (organicTraffic.length > 0) {
+        const metric = organicTraffic[organicTraffic.length - 1];
+        cpc = metric.cost / metric.value;
+      }
+
+      const projectedTrafficValue = pageViewsChange * cpc;
+
+      log.info(`Got RUM metrics for site ${siteId} current: ${current.length}`);
+
+      return ok({
+        pageViewsChange,
+        ctrChange,
+        projectedTrafficValue,
+      });
+    } catch (error) {
+      log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
+    }
+
+    return ok({
+      pageViewsChange: 0,
+      ctrChange: 0,
+      projectedTrafficValue: 0,
+    });
+  };
+
+  const getPageMetricsBySource = async (context) => {
+    const siteId = context.params?.siteId;
+    const metric = context.params?.metric;
+    const source = context.params?.source;
+    const encodedPageURL = context.params?.base64PageUrl;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(metric)) {
+      return badRequest('metric required');
+    }
+
+    if (!hasText(source)) {
+      return badRequest('source required');
+    }
+
+    if (!hasText(encodedPageURL)) {
+      return badRequest('base64PageUrl required');
+    }
+
+    const decodedPageURL = Buffer.from(encodedPageURL, 'base64').toString('utf-8').trim();
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    let metrics = await getStoredMetrics({ siteId, metric, source }, context);
+    metrics = metrics.filter((metricEntry) => metricEntry.url === decodedPageURL);
 
     return ok(metrics);
   };
@@ -372,6 +513,8 @@ function SitesController(dataAccess) {
 
     // site metrics
     getSiteMetricsBySource,
+    getPageMetricsBySource,
+    getLatestSiteMetrics,
   };
 }
 

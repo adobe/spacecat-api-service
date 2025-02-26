@@ -45,7 +45,7 @@ describe('Slack action commons', () => {
       expect(composeReply({
         blocks,
         username: 'some-user',
-        orgId: 'some-org',
+        isFnF: true,
         approved: true,
       })).to.eql(slackApprovedFriendsFamilyReply);
     });

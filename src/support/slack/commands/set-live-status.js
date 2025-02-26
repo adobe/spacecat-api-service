@@ -37,6 +37,7 @@ function SetLiveStatusCommand(context) {
   });
 
   const { dataAccess, log } = context;
+  const { Site } = dataAccess;
 
   /**
    * Validates input, fetches the site by base URL,
@@ -60,7 +61,7 @@ function SetLiveStatusCommand(context) {
         return;
       }
 
-      const site = await dataAccess.getSiteByBaseURL(baseURL);
+      const site = await Site.findByBaseURL(baseURL);
 
       if (!site) {
         await postSiteNotFoundMessage(say, baseURL);
@@ -69,10 +70,10 @@ function SetLiveStatusCommand(context) {
 
       site.toggleLive();
 
-      await dataAccess.updateSite(site);
+      await site.save();
 
       let message = `:white_check_mark: Successfully updated the live status of the site '${baseURL}'.\n\n`;
-      message += site.isLive()
+      message += site.getIsLive()
         ? ':rocket: _Site is now set to live!_\n\n'
         : ':submarine: _Site is now set to development!_\n\n';
 

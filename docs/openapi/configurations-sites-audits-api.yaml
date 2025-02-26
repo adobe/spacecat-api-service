@@ -1,7 +1,7 @@
 configurations-sites-audits-toggle:
   patch:
     tags:
-      - configurations-sites-audits
+      - configuration
     summary: Enable or disable audits for sites
     description: |
       Use this endpoint to enable or disable specific audit types for your sites.

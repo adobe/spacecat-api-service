@@ -5,7 +5,8 @@ site-metrics-by-source:
     - $ref: './parameters.yaml#/metric'
   get:
     tags:
-      - experimental
+      - metrics
+      - site
     summary: Retrieve site metrics by source
     description: |
       This endpoint is useful for retrieving site metrics by source.
@@ -27,3 +28,72 @@ site-metrics-by-source:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+page-metrics-by-source:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/source'
+    - $ref: './parameters.yaml#/metric'
+    - $ref: './parameters.yaml#/base64PageUrl'
+  get:
+    tags:
+      - metrics
+      - site
+    summary: Retrieve page metrics by source
+    description: |
+      This endpoint is useful for retrieving page metrics by source.
+      Currently only `organic-keywords` is supported as a metric and only for source `ahrefs`.
+    operationId: getPageMetricsBySource
+    responses:
+      '200':
+        description: A list of page metrics
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PageMetricList'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+site-metrics-latest:
+  get:
+    summary: Get latest site metrics
+    description: |
+      Retrieves the latest metrics for a specific site, including RUM (Real User Monitoring)
+      data and organic traffic metrics. Returns zeroed values if no data is available or
+      no RUM domain key is configured.
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: Successful response
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pageViewsChange:
+                  type: number
+                  description: Percentage change in page views compared to the previous period
+                ctrChange:
+                  type: number
+                  description: Percentage change in Click-Through Rate (CTR) compared to the previous period
+                projectedTrafficValue:
+                  type: number
+                  description: Projected traffic value based on page views change and cost per click
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+    tags:
+      - metrics
+      - site

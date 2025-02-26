@@ -10,7 +10,9 @@
  * governing permissions and limitations under the License.
  */
 import { context as h2, h1 } from '@adobe/fetch';
-import { DELIVERY_TYPES } from '@adobe/spacecat-shared-data-access/src/models/site.js';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import URI from 'urijs';
+import { hasText } from '@adobe/spacecat-shared-utils';
 
 /* c8 ignore next 3 */
 export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
@@ -47,7 +49,7 @@ export const sendAuditMessage = async (
   type,
   auditContext,
   siteId,
-) => sqs.sendMessage(queueUrl, { type, url: siteId, auditContext });
+) => sqs.sendMessage(queueUrl, { type, siteId, auditContext });
 
 // todo: prototype - untested
 /* c8 ignore start */
@@ -282,15 +284,15 @@ export async function isAEMSite(url) {
 export async function findDeliveryType(url) {
   const { isHelix } = await isHelixSite(url);
   if (isHelix) {
-    return DELIVERY_TYPES.AEM_EDGE;
+    return SiteModel.DELIVERY_TYPES.AEM_EDGE;
   }
 
   const { isAEM } = await isAEMSite(url);
   if (isAEM) {
-    return DELIVERY_TYPES.AEM_CS;
+    return SiteModel.DELIVERY_TYPES.AEM_CS;
   }
 
-  return DELIVERY_TYPES.OTHER;
+  return SiteModel.DELIVERY_TYPES.OTHER;
 }
 
 /**
@@ -303,3 +305,9 @@ export class ErrorWithStatusCode extends Error {
     this.status = status;
   }
 }
+
+export const wwwUrlResolver = (site) => {
+  const baseURL = site.getBaseURL();
+  const uri = new URI(baseURL);
+  return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
+};

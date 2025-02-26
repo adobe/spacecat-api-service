@@ -16,7 +16,7 @@ import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
-import { createApiKey } from '@adobe/spacecat-shared-data-access/src/models/api-key/api-key.js';
+
 import ApiKeyController from '../../src/controllers/api-key.js';
 import {
   STATUS_INTERNAL_SERVER_ERROR,
@@ -56,23 +56,40 @@ describe('ApiKeyController tests', () => {
     };
 
     exampleApiKey = {
-      id: '56hjhkj309r989ra90',
-      hashedApiKey: '786786423ghfp9-9',
-      name: 'test-key',
-      imsUserId: 'test-user-id',
-      imsOrgId: 'test-org',
-      expiresAt: '2034-05-29T14:26:00.000Z',
-      createdAt: '2024-05-29T14:26:00.000Z',
-      scopes: [{ name: 'imports.read' }, { name: 'imports.write', domains: ['https://example.com'] }],
+      getId: () => '56hjhkj309r989ra90',
+      getHashedApiKey: () => '786786423ghfp9-9',
+      getName: () => 'test-key',
+      getImsUserId: () => 'test-user-id',
+      getImsOrgId: () => 'test-org',
+      getCreatedAt: () => '2024-05-29T14:26:00.000Z',
+      getExpiresAt: () => '2034-05-29T14:26:00.000Z',
+      getDeletedAt: () => null,
+      getRevokedAt: () => null,
+      getScopes: () => [{ name: 'imports.read' }, { name: 'imports.write', domains: ['https://example.com'] }],
+      isValid: () => true,
     };
 
     context = {
       log: console,
       dataAccess: {
-        getApiKeysByImsUserIdAndImsOrgId: sinon.stub(),
-        createNewApiKey: (data) => createApiKey(data),
-        getApiKeyById: sinon.stub(),
-        updateApiKey: sinon.stub(),
+        ApiKey: {
+          allByImsOrgIdAndImsUserId: sinon.stub(),
+          create: (data) => ({
+            getId: () => '56',
+            getCreatedAt: () => '2024-05-29T14:26:00.000Z',
+            getExpiresAt: () => '2034-05-29T14:26:00.000Z',
+            getDeletedAt: () => null,
+            getRevokedAt: () => null,
+            getImsUserId: () => 'some-id',
+            getImsOrgId: () => 'test-org',
+            getHashedApiKey: () => data.hashedApiKey,
+            getName: () => data.name,
+            getDomains: () => data.domains,
+            getUrls: () => data.urls,
+            getScopes: () => data.scopes,
+          }),
+          findById: sinon.stub(),
+        },
       },
       env: {
         API_KEY_CONFIGURATION: JSON.stringify({ maxDomainsPerApiKey: 1, maxApiKeys: 3 }),
@@ -141,7 +158,7 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should create a new API key', async () => {
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
@@ -150,7 +167,7 @@ describe('ApiKeyController tests', () => {
 
     it('should create a new API key if email is not present in the imsUserProfile', async () => {
       context.imsClient.getImsUserProfile.returns({ organizations: ['test-org'] });
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
@@ -159,7 +176,7 @@ describe('ApiKeyController tests', () => {
 
     it('should create a new API key if the bearer prefix is missing', async () => {
       requestContext.pathInfo.headers.authorization = 'test-token';
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_CREATED);
@@ -174,9 +191,8 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should throw an error if the user has reached the maximum number of API keys', async () => {
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId
-        .returns([createApiKey(exampleApiKey),
-          createApiKey(exampleApiKey), createApiKey(exampleApiKey)]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId
+        .returns([exampleApiKey, exampleApiKey, exampleApiKey]);
       const response = await apiKeyController.createApiKey({ ...requestContext });
       expect(response.status).to.equal(STATUS_FORBIDDEN);
       expect(response.headers.get('x-error')).to.equal('Invalid request: Exceeds the limit of 3 allowed API keys');
@@ -185,10 +201,12 @@ describe('ApiKeyController tests', () => {
 
   describe('deleteApiKey', () => {
     it('should delete an API key', async () => {
-      context.dataAccess.getApiKeyById.returns({
+      context.dataAccess.ApiKey.findById.returns({
         getImsUserId: () => 'test@example.com',
         getImsOrgId: () => 'test-org',
+        setDeletedAt(deletedAt) { this.deletedAt = deletedAt; },
         updateDeletedAt: sinon.stub(),
+        save: sinon.stub(),
       });
 
       const response = await apiKeyController.deleteApiKey({ ...requestContext });
@@ -196,7 +214,7 @@ describe('ApiKeyController tests', () => {
     });
 
     it('should throw an error if the API key is not found', async () => {
-      context.dataAccess.getApiKeyById.returns({
+      context.dataAccess.ApiKey.findById.returns({
         getImsUserId: () => 'other@example.com',
         getImsOrgId: () => 'other-org',
       });
@@ -208,7 +226,7 @@ describe('ApiKeyController tests', () => {
 
   describe('getApiKeys', () => {
     it('should return all the API Keys', async () => {
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.returns([createApiKey(exampleApiKey)]);
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.returns([exampleApiKey]);
       const response = await apiKeyController.getApiKeys({ ...requestContext });
       const responseJson = await response.json();
       expect(response.status).to.equal(STATUS_OK);
@@ -219,13 +237,15 @@ describe('ApiKeyController tests', () => {
         imsOrgId: 'test-org',
         expiresAt: '2034-05-29T14:26:00.000Z',
         createdAt: '2024-05-29T14:26:00.000Z',
+        deletedAt: null,
+        revokedAt: null,
         scopes: [{ name: 'imports.read' }, { name: 'imports.write', domains: ['https://example.com'] }],
       };
       expect(responseJson).to.deep.equal([expectedJson]);
     });
 
     it('should throw an error when getApiKeysByImsUserIdAndImsOrgId fails', async () => {
-      context.dataAccess.getApiKeysByImsUserIdAndImsOrgId.throws(new Error('Dynamo Error'));
+      context.dataAccess.ApiKey.allByImsOrgIdAndImsUserId.throws(new Error('Dynamo Error'));
       const response = await apiKeyController.getApiKeys({ ...requestContext });
       expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
     });

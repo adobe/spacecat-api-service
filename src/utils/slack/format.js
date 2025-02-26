@@ -72,7 +72,7 @@ function formatScore(score) {
 
 const printSiteDetails = (site, isAuditEnabled, psiStrategy = 'mobile', latestAudit = null) => {
   const viewPSILink = latestAudit
-    ? `${latestAudit.isError() ? ':warning: ' : ''}<https://googlechrome.github.io/lighthouse/viewer/?jsonurl=${latestAudit.getFullAuditRef()}|View Latest Audit> or `
+    ? `${latestAudit.getIsError() ? ':warning: ' : ''}<https://googlechrome.github.io/lighthouse/viewer/?jsonurl=${latestAudit.getFullAuditRef()}|View Latest Audit> or `
     : '';
   const runPSILink = `<https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=${psiStrategy}|Run PSI Check>`;
 
@@ -82,7 +82,7 @@ const printSiteDetails = (site, isAuditEnabled, psiStrategy = 'mobile', latestAu
       :identification_card: ${site.getId()}
       :cat-egory-white: ${site.getDeliveryType()}
       :github-4173: ${site.getGitHubURL() || '_not set_'}
-      ${site.isLive() ? `:rocket: Is live (${formatDate(site.getIsLiveToggledAt())})` : ':submarine: Is not live'}
+      ${site.getIsLive() ? `:rocket: Is live (${formatDate(site.getIsLiveToggledAt())})` : ':submarine: Is not live'}
       :lighthouse: ${viewPSILink}${runPSILink}
     `;
 };
