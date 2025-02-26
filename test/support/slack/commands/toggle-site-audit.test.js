@@ -150,8 +150,8 @@ describe('UpdateSitesAuditsCommand', () => {
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}Please provide either a CSV file or a single baseURL.`),
-      `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}Please provide either a CSV file or a single baseURL."`,
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.getSiteByBaseURL to be called with "site0.com", but it was not',
     ).to.be.true;
   });
 

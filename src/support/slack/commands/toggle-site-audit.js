@@ -109,14 +109,15 @@ export default (context) => {
         await say(`baseURLInput: ${baseURLInput}, singleAuditType: ${singleAuditType}`);
         // #endregion
 
+        const baseURL = extractURLFromSlackInput(baseURLInput);
+        console.log(`debug1111: ${baseURL}`);
+
         validateInput(enableAudit, singleAuditType);
 
-        if (isValidUrl(baseURLInput) === false) {
+        if (isValidUrl(baseURL) === false) {
           await say(`${ERROR_MESSAGE_PREFIX}Please provide either a CSV file or a single baseURL.`);
           return;
         }
-
-        const baseURL = extractURLFromSlackInput(baseURLInput);
 
         // Process single site
         try {
