@@ -1,3 +1,17 @@
+## [1.93.14](https://github.com/adobe/spacecat-api-service/compare/v1.93.13...v1.93.14) (2025-02-26)
+
+
+### Bug Fixes
+
+* org creation in onboard command ([#786](https://github.com/adobe/spacecat-api-service/issues/786)) ([42a7562](https://github.com/adobe/spacecat-api-service/commit/42a756230a8659c87d766b3f081e1a9f2d812b56))
+
+## [1.93.13](https://github.com/adobe/spacecat-api-service/compare/v1.93.12...v1.93.13) (2025-02-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.9.2 ([#785](https://github.com/adobe/spacecat-api-service/issues/785)) ([c7e194d](https://github.com/adobe/spacecat-api-service/commit/c7e194d172a4603eaf3b8a5170f954cc75fd3525))
+
 ## [1.93.12](https://github.com/adobe/spacecat-api-service/compare/v1.93.11...v1.93.12) (2025-02-26)
 
 
