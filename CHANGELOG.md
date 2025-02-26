@@ -1,3 +1,17 @@
+## [1.93.12](https://github.com/adobe/spacecat-api-service/compare/v1.93.11...v1.93.12) (2025-02-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.9.1 ([#784](https://github.com/adobe/spacecat-api-service/issues/784)) ([04979c6](https://github.com/adobe/spacecat-api-service/commit/04979c658bf548c93c3f1e349aa368b65d6299c1))
+
+## [1.93.11](https://github.com/adobe/spacecat-api-service/compare/v1.93.10...v1.93.11) (2025-02-25)
+
+
+### Bug Fixes
+
+* Update Importer E2E test workflow to use the existing Setup Node & NPM action ([#783](https://github.com/adobe/spacecat-api-service/issues/783)) ([4ed55f9](https://github.com/adobe/spacecat-api-service/commit/4ed55f9e0df76ed933cc46b8fa95dd56769faa5f))
+
 ## [1.93.10](https://github.com/adobe/spacecat-api-service/compare/v1.93.9...v1.93.10) (2025-02-25)
 
 
