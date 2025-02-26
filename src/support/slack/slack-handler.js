@@ -46,6 +46,7 @@ function SlackHandler(commands, log) {
       threadTs,
       client,
       user: event?.user,
+      botToken: context.botToken || process.env.SLACK_BOT_TOKEN,
       files: event.files || [],
     };
 
