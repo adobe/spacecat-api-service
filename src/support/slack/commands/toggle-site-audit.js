@@ -31,13 +31,9 @@ export default (context) => {
   const { log, dataAccess } = context;
   const { Configuration, Site } = dataAccess;
 
-  const validateInput = (enableAudit, baseURL, auditType) => {
+  const validateInput = (enableAudit, auditType) => {
     if (isString(enableAudit) === false || ['enable', 'disable'].includes(enableAudit) === false) {
       throw new Error('The "enableAudit" parameter is required and must be set to "enable" or "disable".');
-    }
-
-    if (isValidUrl(baseURL) === false) {
-      throw new Error('The site URL is missing or in the wrong format.');
     }
 
     if (isString(auditType) === false || auditType.length === 0) {
@@ -71,13 +67,7 @@ export default (context) => {
     }
 
     // Check for valid URL format in each line
-    const invalidUrls = urls.filter((url) => {
-      try {
-        return !isValidUrl(url);
-      } catch {
-        return true;
-      }
-    });
+    const invalidUrls = urls.filter((url) => !isValidUrl(url));
 
     if (isNonEmptyArray(invalidUrls)) {
       throw new Error(`Invalid URLs found in CSV:\n${invalidUrls.join('\n')}`);
@@ -92,11 +82,6 @@ export default (context) => {
     try {
       const [enableAuditInput, auditTypeOrProfileInput] = args;
 
-      // Validate initial inputs
-      if (!enableAuditInput || !['enable', 'disable'].includes(enableAuditInput.toLowerCase())) {
-        await say(`${ERROR_MESSAGE_PREFIX}The first argument must be either "enable" or "disable".`);
-        return;
-      }
       // #region debug start
       await say(`enableAuditInput: ${enableAuditInput}`);
       await say(`auditTypeOrProfileInput: ${auditTypeOrProfileInput}`);
@@ -114,6 +99,7 @@ export default (context) => {
       const configuration = await Configuration.findLatest();
 
       // Check if a file was uploaded
+
       if (isNonEmptyArray(files) === false) {
       // Fall back to original single URL behavior
         const [, baseURLInput, singleAuditType] = args;
@@ -123,12 +109,14 @@ export default (context) => {
         await say(`baseURLInput: ${baseURLInput}, singleAuditType: ${singleAuditType}`);
         // #endregion
 
+        validateInput(enableAudit, singleAuditType);
+
         if (isValidUrl(baseURLInput) === false) {
           await say(`${ERROR_MESSAGE_PREFIX}Please provide either a CSV file or a single baseURL.`);
           return;
         }
+
         const baseURL = extractURLFromSlackInput(baseURLInput);
-        validateInput(enableAudit, baseURL, singleAuditType);
 
         // Process single site
         try {
@@ -160,7 +148,7 @@ export default (context) => {
       }
 
       // Validate inputs and get audit types
-      validateInput(enableAudit, null, auditTypeOrProfile);
+      validateInput(enableAudit, auditTypeOrProfile);
 
       let auditTypes;
       let isProfile = false;
@@ -193,11 +181,6 @@ export default (context) => {
 
       // Process the CSV file
       const file = files[0];
-
-      if (isNonEmptyArray(file) === false) {
-        await say(`${ERROR_MESSAGE_PREFIX}No file uploaded.`);
-        return;
-      }
 
       const response = await fetch(file.url_private, {
         headers: {
