@@ -78,7 +78,7 @@ function OnboardCommand(context) {
       // check if the organization with IMS Org ID already exists; create if it doesn't
       let organization = await Organization.findByImsOrgId(imsOrgID);
       if (!organization) {
-        organization = await Organization.create(context);
+        organization = await Organization.create(context.data);
         const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
         await say(message);
         log.info(message);
