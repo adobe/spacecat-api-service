@@ -300,9 +300,21 @@ const parseCSV = async (fileUrl, token) => {
     const response = await axios.get(fileUrl, {
       headers: { Authorization: `Bearer ${token}` },
       responseType: 'arraybuffer',
+      validateStatus: (status) => status < 500,
     });
 
-    if (!response.data) {
+    if (response.status === 401) {
+      throw new Error('Authentication failed: Invalid Slack token or insufficient permissions.');
+    }
+    if (response.status === 403) {
+      throw new Error('Access denied: Slack bot lacks files:read permission.');
+    }
+
+    if (response.status === 404) {
+      throw new Error(`File not found at: ${fileUrl}.`);
+    }
+
+    if (!response.data || response.data.length === 0) {
       throw new Error('Failed to download CSV: No data received.');
     }
 
