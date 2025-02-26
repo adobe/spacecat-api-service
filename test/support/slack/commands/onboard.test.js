@@ -102,7 +102,7 @@ describe('OnboardCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(dataAccessStub.Organization.create.calledWith(context)).to.be.true;
+      expect(dataAccessStub.Organization.create.calledWith(context.data)).to.be.true;
       expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(dataAccessStub.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com',
@@ -166,7 +166,7 @@ describe('OnboardCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(dataAccessStub.Organization.create.calledWith(context)).to.be.true;
+      expect(dataAccessStub.Organization.create.calledWith(context.data)).to.be.true;
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to create organization')).to.be.true;
     });
 
