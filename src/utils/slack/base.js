@@ -17,7 +17,8 @@ import fs from 'fs';
 import { URL } from 'url';
 import axios from 'axios';
 import path from 'path';
-import Papa from 'papaparse';
+import { Readable } from 'stream';
+import { parse } from 'csv';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import { fetch, isAuditForAllUrls } from '../../support/utils.js';
@@ -307,23 +308,32 @@ const parseCSV = async (file, token) => {
     if (response.status === 401) throw new Error('Authentication failed: Invalid Slack token.');
     if (response.status === 403) throw new Error('Access denied: Missing files:read permission.');
     if (response.status === 404) throw new Error(`File not found at: ${fileUrl}.`);
-
-    const csvString = response.data.toString('utf-8').trim();
-    const parsedData = Papa.parse(csvString, {
-      delimiter: ',',
-      skipEmptyLines: true,
-      dynamicTyping: false,
-    });
-
-    if (!Array.isArray(parsedData.data) || parsedData.data.length === 0) {
+    if (!response.data || response.data.length === 0) {
       throw new Error('CSV parsing resulted in empty or invalid data.');
     }
 
-    if (!parsedData.data.some((row) => row.length >= 2)) {
-      throw new Error('CSV format invalid: Each row must have at least 2 columns.');
-    }
+    const csvString = response.data.toString('utf-8').trim();
+    const csvStream = Readable.from(csvString);
 
-    return parsedData.data;
+    return new Promise((resolve, reject) => {
+      const parsedData = [];
+
+      csvStream
+        .pipe(parse({ delimiter: ',', trim: true, skipEmptyLines: true }))
+        .on('data', (row) => {
+          if (row.length >= 2) {
+            parsedData.push(row);
+          }
+        })
+        .on('end', () => {
+          if (parsedData.length === 0) {
+            reject(new Error('CSV format invalid: Each row must have at least 2 columns.'));
+          } else {
+            resolve(parsedData);
+          }
+        })
+        .on('error', (error) => reject(error));
+    });
   } catch (error) {
     throw new Error(`CSV processing failed: ${error.message}`);
   }

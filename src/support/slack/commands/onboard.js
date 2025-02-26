@@ -177,11 +177,6 @@ function OnboardCommand(context) {
       say, botToken, files, channelId,
     } = slackContext;
 
-    if (!botToken) {
-      await say(':warning: Missing Slack bot token. Please check the configuration.');
-      return;
-    }
-
     const slackClient = new WebClient(botToken);
 
     try {
