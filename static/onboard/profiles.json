@@ -1,12 +1,13 @@
 {
 	"default":  {
 		"audits": {
-			"backlinks": {},
+			"backlinks": {}, // auditType doesn't exist
 			"cwv": {},
 			"experimentation-opportunities": {},
 			"internal-links": {},
-			"metatags": {},
+			"metatags": {}, // auditType doesn't exist
 			"sitemap": {},
+			"scrape-top-pages": {}, // Dependency of structured-data auditType
 			"structured-data": {}
 		},
 		"imports": {},
@@ -15,12 +16,12 @@
 	},
 	"summit":  {
 		"audits": {
-			"backlinks": {},
+			"backlinks": {}, // auditType doesn't exist
 			"cwv": {},
 			"internal-links": {},
-			"metatags": {},
+			"metatags": {}, // auditType doesn't exist
 			"alt-text": {},
-			"high-organic-traffic-low-ctr": {},
+			"high-organic-traffic-low-ctr": {}, // auditType doesn't exist
 			"sitemap": {}
 		},
 		"imports": {
