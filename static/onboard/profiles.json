@@ -5,12 +5,15 @@
 			"cwv": {},
 			"experimentation-opportunities": {},
 			"internal-links": {},
-			"metatags": {}, // auditType doesn't exist
+			"meta-tags": {},
 			"sitemap": {},
 			"scrape-top-pages": {}, // Dependency of structured-data auditType
-			"structured-data": {}
+			"structured-data": {},
+			"broken-internal-links-auto-suggest": {}
 		},
-		"imports": {},
+		"imports": {
+			"top-pages" : {} // Dependency of scrape-top-pages auditType
+		},
 		"config": {},
 		"integrations": {}
 	},
@@ -19,10 +22,11 @@
 			"backlinks": {}, // auditType doesn't exist
 			"cwv": {},
 			"internal-links": {},
-			"metatags": {}, // auditType doesn't exist
+			"meta-tags": {},
 			"alt-text": {},
-			"high-organic-traffic-low-ctr": {}, // auditType doesn't exist
-			"sitemap": {}
+			"experimentation-opportunities": {},
+			"sitemap": {},
+			"broken-internal-links-auto-suggest": {}
 		},
 		"imports": {
 			"top-pages" : {},
