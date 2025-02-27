@@ -1,32 +1,34 @@
 {
 	"default":  {
 		"audits": {
-			"backlinks": {}, // auditType doesn't exist
+			"scrape-top-pages": {}, // Dependency of structured-data and broken-backlinks auditType
+			"broken-internal-links-auto-suggest": {},
+			"broken-backlinks": {}, 
 			"cwv": {},
 			"experimentation-opportunities": {},
 			"internal-links": {},
 			"meta-tags": {},
 			"sitemap": {},
-			"scrape-top-pages": {}, // Dependency of structured-data auditType
-			"structured-data": {},
-			"broken-internal-links-auto-suggest": {}
+			"structured-data": {}
 		},
 		"imports": {
-			"top-pages" : {} // Dependency of scrape-top-pages auditType
+			"top-pages" : {}, // Dependency of scrape-top-pages
+			"organic-keywords" : {} // Dependency of experimentation-opportunities auditType
 		},
 		"config": {},
 		"integrations": {}
 	},
 	"summit":  {
 		"audits": {
-			"backlinks": {}, // auditType doesn't exist
+			"scrape-top-pages": {}, // Dependency of broken-backlinks
+			"alt-text": {},
+			"broken-backlinks": {}, 
+			"broken-internal-links-auto-suggest": {},
 			"cwv": {},
+			"experimentation-opportunities": {},
 			"internal-links": {},
 			"meta-tags": {},
-			"alt-text": {},
-			"experimentation-opportunities": {},
-			"sitemap": {},
-			"broken-internal-links-auto-suggest": {}
+			"sitemap": {}
 		},
 		"imports": {
 			"top-pages" : {},
