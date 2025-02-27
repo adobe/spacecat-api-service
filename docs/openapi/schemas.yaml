@@ -65,7 +65,6 @@ ScopeName:
   enum:
     - 'imports.write'
     - 'imports.read'
-    - 'imports.assistant'
 ImsOrganizationId:
   type: string
   example: '1234567890ABCDEF12345678@AdobeOrg'
@@ -1816,51 +1815,6 @@ BrokenInternalLink:
     priority:
       description: The priority of the broken internal link
       $ref: '#/Priority'
-ImportAssistantRequest:
-  type: object
-  required:
-    - command
-  properties:
-    command:
-      description: Assistant command to execute. Examples 'findMainContent', 'findRemovalSelectors', 'findBlockSelectors', 'findBlockCells', 'generatePageTransformation'.
-      type: string
-    prompt:
-      description: Optional prompt to provide context for the analysis. It is required for all commands except 'findMainContent'.
-      type: string
-    htmlContent:
-      description: The HTML to be inspected. It is required for most commands. Removing unnecessary content and properties will reduce the number of credits used.
-      type: string
-    imageUrl:
-      description: A base64 encoded image.  It is required for specific commands like 'findBlockSelectors'.
-      type: string
-    selector:
-      description: A CSS selector indicating the element to inspect in the provided htmlContent. It is required for specific commands like 'findBlockCells'.
-      type: string
-  example:
-    command: 'findBlockSelectors'
-    prompt: 'rectangle with blue background, a heading and paragraph text'
-    imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANS...'
-    htmlContent: '<html>...</html>'
-ImportAssistantResponse:
-  type: object
-  properties:
-    choices:
-      description: The choices available from the assistant command.
-      type: array
-      items:
-        type: object
-        properties:
-          message:
-            description: The message from the assistant command.
-            type: object
-            properties:
-              content:
-                description: The content of the message.
-                type: string
-  example:
-    choices:
-      - message:
-          content: 'div.main div.product'
 ApiKeyRequest:
   type: object
   required:
