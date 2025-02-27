@@ -12,6 +12,8 @@
 import {
   isString, isValidUrl, isNonEmptyArray, hasText,
 } from '@adobe/spacecat-shared-utils';
+import { Readable } from 'stream';
+import { parse } from 'csv';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, loadProfileConfig } from '../../../utils/slack/base.js';
 
@@ -41,17 +43,38 @@ export default (context) => {
     }
   };
 
-  const processCSVContent = async (fileContent) => fileContent
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+  // const processCSVContent = async (fileContent) => fileContent
+  //   .split('\n')
+  //   .map((line) => line.trim())
+  //   .filter((line) => line.length > 0);
+
+  const processCSVContent = async (fileContent) => {
+    const csvString = fileContent.trim();
+    const csvStream = Readable.from(csvString);
+
+    return new Promise((resolve, reject) => {
+      const urls = [];
+
+      csvStream
+        .pipe(parse({ skipEmptyLines: true }))
+        .on('data', (row) => {
+          if (row[0]?.trim()) {
+            urls.push(row[0].trim());
+          }
+        })
+        .on('end', () => {
+          if (urls.length === 0) {
+            reject(new Error('No valid URLs found in the CSV file.'));
+          } else {
+            resolve(urls);
+          }
+        })
+        .on('error', (error) => reject(new Error(`CSV processing failed: ${error.message}`)));
+    });
+  };
 
   const validateCSVFile = async (file, fileContent) => {
   // Check file extension
-
-    // if (!file.name.toLowerCase().endsWith('.csv')) {
-    //   throw new Error('Please upload a CSV file.');
-    // }
 
     // Check if file is empty
     if (hasText(fileContent) === false) {
@@ -60,11 +83,6 @@ export default (context) => {
 
     // Process and validate content
     const urls = await processCSVContent(fileContent);
-
-    // Check if we have any URLs
-    if (!isNonEmptyArray(urls)) {
-      throw new Error('No valid URLs found in the CSV file.');
-    }
 
     // Check for valid URL format in each line
     const invalidUrls = urls.filter((url) => !isValidUrl(url));
@@ -110,7 +128,6 @@ export default (context) => {
         // #endregion
 
         const baseURL = extractURLFromSlackInput(baseURLInput);
-        console.log(`debug1111: ${baseURL}`);
 
         validateInput(enableAudit, singleAuditType);
 

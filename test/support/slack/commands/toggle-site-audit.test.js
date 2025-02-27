@@ -438,6 +438,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       expect(slackContextMock.say.calledWith(sinon.match('Invalid URLs found'))).to.be.true;
     });
+
     it('should handle sites that are not found during bulk processing', async () => {
       global.fetch.resolves({
         ok: true,
@@ -464,6 +465,23 @@ describe('UpdateSitesAuditsCommand', () => {
       )).to.be.true;
 
       expect(configurationMock.save.calledOnce).to.be.true;
+    });
+
+    it('should throw an error when CSV processing fails', async () => {
+      global.fetch.resolves({
+        ok: true,
+        text: () => Promise.resolve('"unclosed quote\nhttp://example.com'),
+      });
+
+      slackContextMock.files = [{
+        name: 'sites.csv',
+        url_private: 'http://mock-url',
+      }];
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'cwv'], slackContextMock);
+
+      expect(slackContextMock.say.calledWith(sinon.match('CSV processing failed:'))).to.be.true;
     });
   });
 
