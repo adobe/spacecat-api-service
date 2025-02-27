@@ -50,7 +50,7 @@ function OnboardCommand(context) {
     usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
   });
 
-  const { dataAccess, log } = context;
+  const { dataAccess, log, imsClient } = context;
   const { Configuration, Site, Organization } = dataAccess;
 
   const csvStringifier = createObjectCsvStringifier({
@@ -105,7 +105,26 @@ function OnboardCommand(context) {
 
       let organization = await Organization.findByImsOrgId(imsOrgID);
       if (!organization) {
-        organization = await Organization.create(context);
+        let imsOrgDetails;
+        try {
+          imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
+          log.info(`IMS Org Details: ${imsOrgDetails}`);
+        } catch (error) {
+          log.error(`Error retrieving IMS Org details: ${error.message}`);
+          await say(`:x: Could not find an IMS org with the ID *${imsOrgID}*.`);
+          return;
+        }
+
+        if (!imsOrgDetails) {
+          await say(`:x: Could not find an IMS org with the ID *${imsOrgID}*.`);
+          return;
+        }
+
+        organization = await Organization.create({
+          name: imsOrgDetails.orgName,
+          imsOrgId: imsOrgID,
+        });
+
         const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
         await say(message);
         log.info(message);

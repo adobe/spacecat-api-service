@@ -28,6 +28,7 @@ describe('OnboardCommand', () => {
   let parseCSVStub;
   let baseURL;
   let OnboardCommand;
+  let imsClientStub;
 
   beforeEach(async () => {
     const configuration = {
@@ -51,6 +52,9 @@ describe('OnboardCommand', () => {
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
     };
+    imsClientStub = {
+      getImsOrganizationDetails: sinon.stub(),
+    };
     context = {
       dataAccess: dataAccessStub,
       log: console,
@@ -60,6 +64,7 @@ describe('OnboardCommand', () => {
         DEFAULT_ORGANIZATION_ID: 'default',
         token: 'test-token',
       },
+      imsClient: imsClientStub,
     };
     slackContext = { say: sinon.spy(), files: [] };
     slackContext.botToken = 'test-token';
@@ -100,6 +105,7 @@ describe('OnboardCommand', () => {
       };
 
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
+      imsClientStub.getImsOrganizationDetails.resolves({ orgName: 'Mock IMS Org' });
       dataAccessStub.Organization.create.resolves(mockOrganization);
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
@@ -114,7 +120,8 @@ describe('OnboardCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(dataAccessStub.Organization.create.calledWith(context)).to.be.true;
+      expect(imsClientStub.getImsOrganizationDetails.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
+      expect(dataAccessStub.Organization.create.calledWith({ name: 'Mock IMS Org', imsOrgId: '000000000000000000000000@AdobeOrg' })).to.be.true;
       expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
       expect(slackContext.say.calledWith(':white_check_mark: A new organization has been created. Organization ID: 123 Organization name: new-org IMS Org ID: 000000000000000000000000@AdobeOrg.')).to.be.true;
     });
@@ -151,6 +158,7 @@ describe('OnboardCommand', () => {
 
     it('handles error when a new organization failed to be created', async () => {
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
+      imsClientStub.getImsOrganizationDetails.resolves({ orgName: 'Mock IMS Org' });
       dataAccessStub.Organization.create.rejects(new Error('failed to create organization'));
 
       const args = ['example.com', '000000000000000000000000@AdobeOrg'];
@@ -158,6 +166,9 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
+      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
+      expect(imsClientStub.getImsOrganizationDetails.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
+      expect(dataAccessStub.Organization.create.calledWith({ name: 'Mock IMS Org', imsOrgId: '000000000000000000000000@AdobeOrg' })).to.be.true;
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to create organization')).to.be.true;
     });
   });
