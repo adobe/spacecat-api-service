@@ -14,7 +14,7 @@
 
 import sinon from 'sinon';
 import { expect } from 'chai';
-import ToggleSiteAuditCommand from '../../../../src/support/slack/commands/toggle-site-audit.js';
+import esmock from 'esmock';
 
 const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
 const ERROR_MESSAGE_PREFIX = ':x: ';
@@ -34,7 +34,8 @@ describe('UpdateSitesAuditsCommand', () => {
   let logMock;
   let contextMock;
   let slackContextMock;
-
+  let ToggleSiteAuditCommand;
+  let fetchStub;
   const exceptsAtBadRequest = () => {
     expect(
       configurationMock.enableHandlerForSite.called,
@@ -86,6 +87,16 @@ describe('UpdateSitesAuditsCommand', () => {
     slackContextMock = {
       say: sinon.stub(),
     };
+
+    fetchStub = sinon.stub().resolves({
+      ok: true,
+      text: () => Promise.resolve('https://site1.com\nhttps://site2.com'),
+    });
+    ToggleSiteAuditCommand = await esmock('../../../../src/support/slack/commands/toggle-site-audit.js', {
+      '@adobe/spacecat-shared-utils': {
+        tracingFetch: fetchStub,
+      },
+    });
   });
 
   afterEach(() => {
@@ -276,13 +287,6 @@ describe('UpdateSitesAuditsCommand', () => {
   });
 
   describe('CSV bulk operations', () => {
-    beforeEach(() => {
-      global.fetch = sinon.stub().resolves({
-        ok: true,
-        text: () => Promise.resolve('https://site1.com\nhttps://site2.com'),
-      });
-    });
-
     it('should process CSV file to enable with profile', async () => {
       const args = ['enable', 'default'];
       const command = ToggleSiteAuditCommand(contextMock);
@@ -322,11 +326,6 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('should handle errors during audit enabling/disabling in bulk processing', async () => {
-      global.fetch.resolves({
-        ok: true,
-        text: () => Promise.resolve('https://site1.com\nhttps://site2.com'),
-      });
-
       slackContextMock.files = [{
         name: 'sites.csv',
         url_private: 'http://mock-url',
@@ -356,7 +355,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('should handle CSV file with invalid URLs', async () => {
-      global.fetch.resolves({
+      fetchStub.resolves({
         ok: true,
         text: () => Promise.resolve('invalid-url\nhttps://valid.com'),
       });
@@ -373,7 +372,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('should handle CSV file with only invalid URLs', async () => {
-      global.fetch.resolves({
+      fetchStub.resolves({
         ok: true,
         text: () => Promise.resolve(' \n  '),
       });
@@ -390,7 +389,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('should handle empty CSV file', async () => {
-      global.fetch.resolves({
+      fetchStub.resolves({
         ok: true,
         text: () => Promise.resolve(''),
       });
@@ -407,7 +406,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('should handle CSV download failure', async () => {
-      global.fetch.resolves({
+      fetchStub.resolves({
         ok: false,
       });
 
@@ -423,7 +422,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('should handle CSV file with invalid URLs', async () => {
-      global.fetch.resolves({
+      fetchStub.resolves({
         ok: true,
         text: () => Promise.resolve('invalid-url1\ninvalid-url2'),
       });
@@ -440,7 +439,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('should handle sites that are not found during bulk processing', async () => {
-      global.fetch.resolves({
+      fetchStub.resolves({
         ok: true,
         text: () => Promise.resolve('https://site1.com\nhttps://nonexistent-site.com'),
       });
@@ -468,7 +467,7 @@ describe('UpdateSitesAuditsCommand', () => {
     });
 
     it('should throw an error when CSV processing fails', async () => {
-      global.fetch.resolves({
+      fetchStub.resolves({
         ok: true,
         text: () => Promise.resolve('"unclosed quote\nhttp://example.com'),
       });

@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import {
-  isString, isValidUrl, isNonEmptyArray, hasText,
+  isString, isValidUrl, isNonEmptyArray, hasText, tracingFetch as fetch,
 } from '@adobe/spacecat-shared-utils';
 import { Readable } from 'stream';
 import { parse } from 'csv';
@@ -119,7 +119,7 @@ export default (context) => {
       // Check if a file was uploaded
 
       if (isNonEmptyArray(files) === false) {
-      // Fall back to original single URL behavior
+      // single URL behavior
         const [, baseURLInput, singleAuditType] = args;
 
         // #region debug start
