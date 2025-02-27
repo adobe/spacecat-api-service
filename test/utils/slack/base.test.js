@@ -281,7 +281,7 @@ describe('Base Slack Utils', () => {
         throw new Error('Test failed: Error was not thrown');
       } catch (error) {
         expect(error.message).to.equal(
-          'CSV processing failed: CSV format invalid: Each row must have at least 2 columns.',
+          'CSV format invalid: Each row must have at least 2 columns.',
         );
       }
     });
