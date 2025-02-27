@@ -1,3 +1,10 @@
+## [1.93.19](https://github.com/adobe/spacecat-api-service/compare/v1.93.18...v1.93.19) (2025-02-27)
+
+
+### Bug Fixes
+
+* Sites-29600 Remove Assistant's handlebar dependency ([#794](https://github.com/adobe/spacecat-api-service/issues/794)) ([ebdaf75](https://github.com/adobe/spacecat-api-service/commit/ebdaf75a4a60524c5240599eada3f0110083bd62))
+
 ## [1.93.18](https://github.com/adobe/spacecat-api-service/compare/v1.93.17...v1.93.18) (2025-02-27)
 
 
