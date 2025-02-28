@@ -37,6 +37,13 @@ export default (context) => {
   const { log, dataAccess } = context;
   const { Configuration, Site } = dataAccess;
 
+  /**
+   * Validates the command input parameters for enabling/disabling audits.
+   *
+   * @param {string} enableAudit - The action to perform, must be either 'enable' or 'disable'
+   * @param {string} auditType - The type of audit or profile to enable/disable
+   * @throws {Error} If enableAudit is invalid or if auditType is empty/not a string
+   */
   const validateInput = (enableAudit, auditType) => {
     if (isString(enableAudit) === false || ['enable', 'disable'].includes(enableAudit) === false) {
       throw new Error('The "enableAudit" parameter is required and must be set to "enable" or "disable".');
@@ -47,6 +54,13 @@ export default (context) => {
     }
   };
 
+  /**
+   * Processes CSV content to extract URLs from the first column.
+   *
+   * @param {string} fileContent - The raw CSV file content as a string
+   * @returns {Promise<string[]>} A promise that resolves to an array of trimmed URLs
+   * @throws {Error} If no valid URLs are found in the CSV or if CSV processing fails
+   */
   const processCSVContent = async (fileContent) => {
     const csvString = fileContent.trim();
     const csvStream = Readable.from(csvString);
@@ -72,18 +86,19 @@ export default (context) => {
     });
   };
 
-  const validateCSVFile = async (file, fileContent) => {
-  // Check file extension
-
-    // Check if file is empty
+  /**
+   * Validates the content of a CSV file by checking for non-empty content and valid URLs.
+   *
+   * @param {string} fileContent - The raw CSV file content to validate
+   * @returns {Promise<string[]>} A promise that resolves to an array of validated URLs
+   * @throws {Error} If the file is empty or contains invalid URLs
+   */
+  const validateCSVFile = async (fileContent) => {
     if (hasText(fileContent) === false) {
       throw new Error('The CSV file is empty.');
     }
-
-    // Process and validate content
     const urls = await processCSVContent(fileContent);
 
-    // Check for valid URL format in each line
     const invalidUrls = urls.filter((url) => !isValidUrl(url));
 
     if (isNonEmptyArray(invalidUrls)) {
@@ -119,7 +134,6 @@ export default (context) => {
           return;
         }
 
-        // Process single site
         try {
           const site = await Site.findByBaseURL(baseURL);
           if (!site) {
@@ -148,7 +162,6 @@ export default (context) => {
         return;
       }
 
-      // Validate inputs and get audit types
       validateInput(enableAudit, auditTypeOrProfile);
 
       let auditTypes;
@@ -180,7 +193,6 @@ export default (context) => {
         return;
       }
 
-      // Process the CSV file
       const file = files[0];
 
       const response = await fetch(file.url_private, {
@@ -198,13 +210,12 @@ export default (context) => {
 
       let baseURLs;
       try {
-        baseURLs = await validateCSVFile(file, fileContent);
+        baseURLs = await validateCSVFile(fileContent);
       } catch (error) {
         await say(`${ERROR_MESSAGE_PREFIX}${error.message}`);
         return;
       }
 
-      // Process all URLs with the specified audit types
       const results = {
         successful: [],
         failed: [],
@@ -243,10 +254,8 @@ export default (context) => {
         .filter((result) => !result.success)
         .map(({ baseURL, error }) => ({ baseURL, error }));
 
-      // Save configuration after processing all sites
       await configuration.save();
 
-      // Format and send results message
       let message = ':clipboard: *Bulk Update Results*\n';
       if (isProfile) {
         message += `\nProfile: \`${auditTypeOrProfile}\` with ${auditTypes.length} audit types:`;
