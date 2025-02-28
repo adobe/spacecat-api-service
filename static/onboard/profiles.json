@@ -6,7 +6,8 @@
 			"broken-backlinks": {}, 
 			"cwv": {},
 			"experimentation-opportunities": {},
-			"internal-links": {},
+			"broken-internal-links": {},
+			"meta-tags-auto-suggest": {},
 			"meta-tags": {},
 			"sitemap": {},
 			"structured-data": {}
@@ -26,7 +27,8 @@
 			"broken-internal-links-auto-suggest": {},
 			"cwv": {},
 			"experimentation-opportunities": {},
-			"internal-links": {},
+			"broken-internal-links": {},
+			"meta-tags-auto-suggest": {},
 			"meta-tags": {},
 			"sitemap": {}
 		},
