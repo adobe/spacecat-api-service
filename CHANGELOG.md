@@ -1,3 +1,10 @@
+# [1.94.0](https://github.com/adobe/spacecat-api-service/compare/v1.93.20...v1.94.0) (2025-02-28)
+
+
+### Features
+
+* introduce google authentication status endpoint ([#795](https://github.com/adobe/spacecat-api-service/issues/795)) ([d09d537](https://github.com/adobe/spacecat-api-service/commit/d09d537e2d146d024dc5b380fbf86dce9a084a01))
+
 ## [1.93.20](https://github.com/adobe/spacecat-api-service/compare/v1.93.19...v1.93.20) (2025-02-28)
 
 
