@@ -180,7 +180,13 @@ function SitesController(dataAccess, log, env) {
       return notFound('Site not found');
     }
 
-    log.info(`DEBUUUUUUG: site ${siteId} has overrideBaseURL ${site.getConfig()?.getFetchConfig()?.overrideBaseURL}`);
+    log.info(`DEBUUUUUUG: site ${siteId} has config ${site.getConfig()}`);
+    log.info(`DEBUUUUUUG: site ${siteId} has getFetchConfig ${site.getConfig()?.getFetchConfig()}`);
+    log.info(`DEBUUUUUUG: site ${siteId} has getFetchConfig headers ${site.getConfig()?.getFetchConfig()?.headers}`);
+    log.info(`DEBUUUUUUG: site ${siteId} has getFetchConfig overrideBaseURL ${site.getConfig()?.getFetchConfig()?.overrideBaseURL}`);
+    log.info(`DEBUUUUUUG: site ${siteId} has fetchConfig ${site.getConfig()?.fetchConfig}`);
+    log.info(`DEBUUUUUUG: site ${siteId} has fetchConfig headers ${site.getConfig()?.fetchConfig?.headers}`);
+    log.info(`DEBUUUUUUG: site ${siteId} has fetchConfig overrideBaseURL ${site.getConfig()?.fetchConfig?.overrideBaseURL}`);
 
     return ok(SiteDto.toJSON(site));
   };
