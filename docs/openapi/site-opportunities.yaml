@@ -330,9 +330,7 @@ site-opportunity-suggestions-auto-fix:
                 suggestionIds:
                   type: array
                   items:
-                    type: string
-                    format: uuid
-                  description: An array of suggestion IDs to be autofixed.
+                    $ref: './schemas.yaml#/Id'
               required:
                 - suggestionIds
 

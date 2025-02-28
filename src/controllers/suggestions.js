@@ -18,7 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
-  isArray,
+  isArray, isNonEmptyObject,
   isObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
@@ -399,7 +399,7 @@ function SuggestionsController(dataAccess, sqs, env) {
     }
 
     // validate request body
-    if (!context.data) {
+    if (!isNonEmptyObject(context.data)) {
       return badRequest('No updates provided');
     }
     const { suggestionIds } = context.data;
@@ -415,66 +415,68 @@ function SuggestionsController(dataAccess, sqs, env) {
       return notFound('Opportunity not found');
     }
     const configuration = await Configuration.findLatest();
-    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-autofix`, site)) {
+    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
       return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
     }
-    const suggestionEntities = await Promise.all(suggestionIds.map(
-      async (suggestionId, index) => {
-        const suggestion = await Suggestion.findById(suggestionId);
-        if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
-          return {
-            index,
-            uuid: suggestionId,
-            message: 'Suggestion not found',
-            statusCode: 404,
-          };
+    const suggestions = await Suggestion.allByOpportunityId(
+      opportunityId,
+    );
+    const validSuggestions = [];
+    const failedSuggestions = [];
+    suggestions.forEach((suggestion) => {
+      if (suggestionIds.includes(suggestion.getId())) {
+        if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+          validSuggestions.push(suggestion);
         } else {
-          try {
-            if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
-              suggestion.setStatus(SuggestionModel.STATUSES.IN_PROGRESS);
-              const updatedSuggestion = await suggestion.save();
-              return {
-                index,
-                uuid: suggestionId,
-                suggestion: SuggestionDto.toJSON(updatedSuggestion),
-                statusCode: 200,
-              };
-            }
-            return {
-              index,
-              uuid: suggestionId,
-              message: 'Suggestion is not in NEW status',
-              statusCode: 400,
-            };
-          } catch (error) {
-            return {
-              index,
-              uuid: suggestionId,
-              message: error.message,
-              statusCode: error instanceof ValidationError ? 400 : 500,
-            };
-          }
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Suggestion is not in NEW status',
+            statusCode: 400,
+          });
         }
-      },
-    ));
-    const succeeded = suggestionEntities.filter((r) => r.statusCode === 200);
-    const fullResponse = {
-      suggestions: suggestionEntities,
+      }
+    });
+    suggestionIds.forEach((suggestionId, index) => {
+      if (!suggestions.find((s) => s.getId() === suggestionId)) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        });
+      }
+    });
+    const succeededSuggestions = await Suggestion.bulkUpdateStatus(
+      validSuggestions,
+      SuggestionModel.STATUSES.IN_PROGRESS,
+    );
+    const response = {
+      suggestions: [
+        ...succeededSuggestions.map((suggestion) => ({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          statusCode: 200,
+          suggestion: SuggestionDto.toJSON(suggestion),
+        })),
+        ...failedSuggestions,
+      ],
       metadata: {
-        total: suggestionEntities.length,
-        success: succeeded.length,
-        failed: suggestionEntities.length - succeeded.length,
+        total: suggestionIds.length,
+        success: succeededSuggestions.length,
+        failed: failedSuggestions.length,
       },
     };
+    response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
     await sendAutofixMessage(
       sqs,
       queueUrl,
       opportunity.getType(),
       siteId,
-      succeeded.map((s) => s.uuid),
+      succeededSuggestions.map((s) => s.getId()),
     );
-    return createResponse(fullResponse, 207);
+    return createResponse(response, 207);
   };
 
   const removeSuggestion = async (context) => {

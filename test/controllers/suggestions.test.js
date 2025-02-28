@@ -208,8 +208,8 @@ describe('Suggestions Controller', () => {
     ];
 
     const isHandlerEnabledForSite = sandbox.stub();
-    isHandlerEnabledForSite.withArgs('broken-backlinks-autofix', site).returns(true);
-    isHandlerEnabledForSite.withArgs('broken-backlinks-autofix', siteNotEnabled).returns(false);
+    isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
     mockOpportunity = {
       findById: sandbox.stub(),
     };
@@ -237,6 +237,7 @@ describe('Suggestions Controller', () => {
         const suggestion = suggs.find((s) => s.id === id);
         return Promise.resolve(suggestion ? mockSuggestionEntity(suggestion, removeStub) : null);
       }),
+      bulkUpdateStatus: sandbox.stub(),
       create: sandbox.stub().callsFake((suggData) => {
         if (suggData.throwValidationError) {
           throw new ValidationError('Validation error');
@@ -1025,6 +1026,12 @@ describe('Suggestions Controller', () => {
 
   describe('auto-fix suggestions', () => {
     it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -1093,7 +1100,7 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
         },
-        data: 'not an array',
+        data: { suggestionIds: 'not an array' },
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1140,6 +1147,9 @@ describe('Suggestions Controller', () => {
     });
 
     it('auto-fix suggestions status fails passed suggestions not found', async () => {
+      mockSuggestion.allByOpportunityId.resolves([
+        mockSuggestionEntity(suggs[2])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -1165,6 +1175,9 @@ describe('Suggestions Controller', () => {
     });
 
     it('autofix suggestion patches suggestion status fails passed suggestions not new', async () => {
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0]),
+        mockSuggestionEntity(suggs[1])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -1187,34 +1200,6 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
-    });
-
-    it('auto-fix suggestions status fails if validation error in save', async () => {
-      suggs[0].throwError = true;
-      suggs[2].throwValidationError = true;
-      const response = await suggestionsController.autofixSuggestions({
-        params: {
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-        },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
-      });
-      expect(response.status).to.equal(207);
-      const bulkPatchResponse = await response.json();
-      expect(bulkPatchResponse).to.have.property('suggestions');
-      expect(bulkPatchResponse).to.have.property('metadata');
-      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
-      expect(bulkPatchResponse.metadata).to.have.property('success', 0);
-      expect(bulkPatchResponse.metadata).to.have.property('failed', 2);
-      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
-      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
-      expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
-      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 500);
-      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 400);
-      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
-      expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
-      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Unknown error');
-      expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Validation error');
     });
   });
 
