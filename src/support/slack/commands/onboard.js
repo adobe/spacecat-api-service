@@ -163,21 +163,6 @@ function OnboardCommand(context) {
 
       const configuration = await Configuration.findLatest();
 
-      const auditTypes = Object.keys(profile.audits);
-
-      auditTypes.forEach((auditType) => {
-        configuration.enableHandlerForSite(auditType, site);
-      });
-
-      await configuration.save();
-
-      for (const auditType of auditTypes) {
-        /* eslint-disable no-await-in-loop */
-        await triggerAuditForSite(site, auditType, slackContext, context);
-      }
-
-      reportLine.audits = auditTypes.join(',');
-
       const importTypes = Object.keys(profile.imports);
 
       for (const importType of importTypes) {
@@ -194,6 +179,21 @@ function OnboardCommand(context) {
       }
 
       reportLine.imports = importTypes.join(', ');
+
+      const auditTypes = Object.keys(profile.audits);
+
+      auditTypes.forEach((auditType) => {
+        configuration.enableHandlerForSite(auditType, site);
+      });
+
+      await configuration.save();
+
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        await triggerAuditForSite(site, auditType, slackContext, context);
+      }
+
+      reportLine.audits = auditTypes.join(',');
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
