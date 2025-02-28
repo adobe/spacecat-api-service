@@ -180,7 +180,7 @@ function SitesController(dataAccess, log, env) {
       return notFound('Site not found');
     }
 
-    log.info(`DEBUUUUUUG: site ${siteId} has overrideBaseURL ${site.getConfig()?.fetchConfig?.overrideBaseURL}`);
+    log.info(`DEBUUUUUUG: site ${siteId} has overrideBaseURL ${site.getConfig()?.getFetchConfig()?.overrideBaseURL}`);
 
     return ok(SiteDto.toJSON(site));
   };
