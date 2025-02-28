@@ -42,5 +42,25 @@
 		},
 		"config": {},
 		"integrations": {}
+	},
+	"summit-less-quality":  {
+		"audits": {
+			"scrape-top-pages": {}, // Dependency of broken-backlinks
+			"alt-text": {},
+			"broken-backlinks": {}, 
+			"broken-internal-links-auto-suggest": {},
+			"cwv": {},
+			"experimentation-opportunities": {},
+			"broken-internal-links": {},
+			"meta-tags-auto-suggest": {},
+			"meta-tags": {},
+			"sitemap": {}
+		},
+		"imports": {
+			"top-pages" : {},
+			"rum-traffic" : {}
+		},
+		"config": {},
+		"integrations": {}
 	}	
 }
