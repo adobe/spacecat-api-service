@@ -13,7 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, isObject } from '@adobe/spacecat-shared-utils';
 import { WebClient } from '@slack/web-api';
 import os from 'os';
 import path from 'path';
@@ -50,7 +50,7 @@ function OnboardCommand(context) {
     usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
   });
 
-  const { dataAccess, log } = context;
+  const { dataAccess, log, imsClient } = context;
   const { Configuration, Site, Organization } = dataAccess;
 
   const csvStringifier = createObjectCsvStringifier({
@@ -103,10 +103,30 @@ function OnboardCommand(context) {
         return;
       }
 
+      // check if the organization with IMS Org ID already exists; create if it doesn't
       let organization = await Organization.findByImsOrgId(imsOrgID);
       if (!organization) {
-        organization = await Organization.create(context);
-        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.id} Organization name: ${organization.name} IMS Org ID: ${imsOrgID}.`;
+        let imsOrgDetails;
+        try {
+          imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
+          log.info(`IMS Org Details: ${imsOrgDetails}`);
+        } catch (error) {
+          log.error(`Error retrieving IMS Org details: ${error.message}`);
+          await say(`:x: Could not find an IMS org with the ID *${imsOrgID}*.`);
+          return;
+        }
+
+        if (!imsOrgDetails) {
+          await say(`:x: Could not find an IMS org with the ID *${imsOrgID}*.`);
+          return;
+        }
+
+        organization = await Organization.create({
+          name: imsOrgDetails.orgName,
+          imsOrgId: imsOrgID,
+        });
+
+        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
         await say(message);
         log.info(message);
       }
@@ -122,6 +142,25 @@ function OnboardCommand(context) {
       }
 
       const profile = await loadProfileConfig(profileName);
+
+      if (!isObject(profile)) {
+        await say(`:warning: Profile "${profileName}" not found or invalid. Please try again.`);
+        log.error(`Profile "${profileName}" is missing or invalid.`);
+        return;
+      }
+
+      if (!isObject(profile?.audits)) {
+        await say(`:warning: Profile "${profileName}" does not have a valid audits section.`);
+        log.error(`Profile "${profileName}" has invalid or missing audits.`);
+        return;
+      }
+
+      if (!isObject(profile?.imports)) {
+        await say(`:warning: Profile "${profileName}" does not have a valid imports section.`);
+        log.error(`Profile "${profileName}" has invalid or missing imports.`);
+        return;
+      }
+
       const configuration = await Configuration.findLatest();
 
       const auditTypes = Object.keys(profile.audits);
@@ -139,7 +178,9 @@ function OnboardCommand(context) {
 
       reportLine.audits = auditTypes.join(',');
 
-      for (const importType of Object.keys(profile.imports)) {
+      const importTypes = Object.keys(profile.imports);
+
+      for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
         await triggerImportRun(
           configuration,
@@ -152,7 +193,7 @@ function OnboardCommand(context) {
         );
       }
 
-      reportLine.imports = Object.keys(profile.imports).join(', ');
+      reportLine.imports = importTypes.join(', ');
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;

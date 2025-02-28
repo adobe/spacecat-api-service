@@ -11,7 +11,9 @@
  */
 
 import { createUrl } from '@adobe/fetch';
-import { hasText, isString, tracingFetch } from '@adobe/spacecat-shared-utils';
+import {
+  hasText, isString, isObject, tracingFetch,
+} from '@adobe/spacecat-shared-utils';
 import fs from 'fs';
 
 import { URL } from 'url';
@@ -363,7 +365,7 @@ const loadProfileConfig = (profileKey) => {
     const data = fs.readFileSync(PROFILE_CONFIG_PATH, 'utf-8');
     const profiles = JSON.parse(data);
 
-    if (!profiles[profileKey]) {
+    if (!isObject(profiles[profileKey])) {
       throw new Error(`Profile "${profileKey}" not found in ${PROFILE_CONFIG_PATH}`);
     }
 

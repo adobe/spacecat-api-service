@@ -28,6 +28,7 @@ describe('OnboardCommand', () => {
   let parseCSVStub;
   let baseURL;
   let OnboardCommand;
+  let imsClientStub;
 
   beforeEach(async () => {
     const configuration = {
@@ -51,6 +52,9 @@ describe('OnboardCommand', () => {
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
     };
+    imsClientStub = {
+      getImsOrganizationDetails: sinon.stub(),
+    };
     context = {
       dataAccess: dataAccessStub,
       log: console,
@@ -60,6 +64,7 @@ describe('OnboardCommand', () => {
         DEFAULT_ORGANIZATION_ID: 'default',
         token: 'test-token',
       },
+      imsClient: imsClientStub,
     };
     slackContext = { say: sinon.spy(), files: [] };
     slackContext.botToken = 'test-token';
@@ -91,11 +96,21 @@ describe('OnboardCommand', () => {
   });
 
   describe('Single-Site Onboarding', () => {
+    beforeEach(() => {
+      nock.cleanAll();
+    });
+
     it('handles valid input and adds a new site', async () => {
       nock(baseURL).get('/').replyWithError('rainy weather');
 
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
-      dataAccessStub.Organization.create.resolves({ id: '123', name: 'new-org' });
+      imsClientStub.getImsOrganizationDetails.resolves({ orgName: 'Mock IMS Org' });
+      dataAccessStub.Organization.create.resolves(mockOrganization);
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
         getBaseURL: () => baseURL,
@@ -109,9 +124,17 @@ describe('OnboardCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(dataAccessStub.Organization.create.calledWith(context)).to.be.true;
+      expect(imsClientStub.getImsOrganizationDetails.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
+      expect(dataAccessStub.Organization.create.calledWith({ name: 'Mock IMS Org', imsOrgId: '000000000000000000000000@AdobeOrg' })).to.be.true;
       expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
+      expect(dataAccessStub.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com',
+        deliveryType: 'other',
+        isLive: false,
+        organizationId: 'default',
+      });
       expect(slackContext.say.calledWith(':white_check_mark: A new organization has been created. Organization ID: 123 Organization name: new-org IMS Org ID: 000000000000000000000000@AdobeOrg.')).to.be.true;
+      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
     it('warns when an invalid site base URL is provided', async () => {
@@ -144,8 +167,21 @@ describe('OnboardCommand', () => {
       expect(dataAccessStub.Organization.create.notCalled).to.be.true;
     });
 
+    it('does not create a site if one already exists', async () => {
+      dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
+      dataAccessStub.Site.findByBaseURL.resolves({});
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(dataAccessStub.Site.create.notCalled).to.be.true;
+    });
+
     it('handles error when a new organization failed to be created', async () => {
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
+      imsClientStub.getImsOrganizationDetails.resolves({ orgName: 'Mock IMS Org' });
       dataAccessStub.Organization.create.rejects(new Error('failed to create organization'));
 
       const args = ['example.com', '000000000000000000000000@AdobeOrg'];
@@ -154,6 +190,23 @@ describe('OnboardCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to create organization')).to.be.true;
+      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
+      expect(imsClientStub.getImsOrganizationDetails.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
+      expect(dataAccessStub.Organization.create.calledWith({ name: 'Mock IMS Org', imsOrgId: '000000000000000000000000@AdobeOrg' })).to.be.true;
+      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to create organization')).to.be.true;
+    });
+
+    it('handles error when a site failed to be added', async () => {
+      nock(baseURL).get('/').replyWithError('rainy weather');
+      dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Site.create.rejects(new Error('failed to add the site'));
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to add the site')).to.be.true;
     });
   });
 
