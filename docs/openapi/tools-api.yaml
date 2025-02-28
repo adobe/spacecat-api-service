@@ -219,47 +219,6 @@ import-job-result:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
-import-assistant:
-  post:
-    tags:
-      - import
-    summary: Send a prompt to the import assistant
-    description: |
-      Note: Not implemented yet.
-
-      This endpoint can be used to send prompts to the import assistant.
-      Each prompt will make use of AI to analyze a URL and return
-      choices in response to the request.
-    operationId: processImportAssistant
-    security:
-      - scoped_api_key: [ ]
-    requestBody:
-      content:
-        application/json:
-          schema:
-            $ref: './schemas.yaml#/ImportAssistantRequest'
-    parameters:
-      - in: header
-        name: x-api-key
-        schema:
-          type: string
-        description: |
-          Client-specific import API key with the 'imports.assistant' scope.
-    responses:
-      '200':
-        description: Contents of the response from the import AI assistant.
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/ImportAssistantResponse'
-      '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404'
-      '500':
-        $ref: './responses.yaml#/500'
 api-keys:
   post:
     tags:
