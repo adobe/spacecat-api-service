@@ -472,7 +472,7 @@ function SuggestionsController(dataAccess, sqs, env) {
     await sendAutofixMessage(
       sqs,
       queueUrl,
-      opportunity.getType(),
+      opportunityId,
       siteId,
       succeededSuggestions.map((s) => s.getId()),
     );
