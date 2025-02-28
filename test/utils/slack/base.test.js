@@ -16,12 +16,11 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import fs from 'fs';
 import chaiAsPromised from 'chai-as-promised';
+import nock from 'nock';
 
 import path from 'path';
 
 import { Blocks } from 'slack-block-builder';
-import MockAdapter from 'axios-mock-adapter';
-import axios from 'axios';
 import {
   extractURLFromSlackInput,
   FALLBACK_SLACK_CHANNEL,
@@ -226,27 +225,23 @@ describe('Base Slack Utils', () => {
   });
 
   describe('parseCSV', () => {
-    let axiosMock;
-    let sandbox;
-
-    beforeEach(() => {
-      axiosMock = new MockAdapter(axios);
-      sandbox = sinon.createSandbox();
-    });
+    const baseUrl = 'https://fake-url.com';
+    const filePath = '/file.csv';
+    const fileUrl = `${baseUrl}${filePath}`;
+    const token = 'test-bot-token';
 
     afterEach(() => {
-      axiosMock.restore();
-      sandbox.restore();
+      nock.cleanAll();
     });
 
     it('should correctly fetch and parse a CSV file', async () => {
-      const filePath = 'test/utils/slack/test-entries.csv';
-      const fileContent = fs.readFileSync(filePath, 'utf-8');
-      const file = { url_private: 'https://fake-url.com/file.csv' };
-      const token = 'test-bot-token';
+      const fileContent = fs.readFileSync('test/utils/slack/test-entries.csv', 'utf-8');
 
-      axiosMock.onGet(file.url_private).reply(200, fileContent);
+      nock(baseUrl)
+        .get(filePath)
+        .reply(200, fileContent);
 
+      const file = { url_private: fileUrl };
       const records = await parseCSV(file, token);
 
       expect(records).to.deep.equal([
@@ -256,10 +251,11 @@ describe('Base Slack Utils', () => {
     });
 
     it('should throw an error when the file download fails due to a network error', async () => {
-      const file = { url_private: 'https://fake-url.com/file.csv' };
-      const token = 'test-bot-token';
+      nock(baseUrl)
+        .get(filePath)
+        .replyWithError('Network failure');
 
-      axiosMock.onGet(file.url_private).networkError();
+      const file = { url_private: fileUrl };
 
       try {
         await parseCSV(file, token);
@@ -270,11 +266,11 @@ describe('Base Slack Utils', () => {
     });
 
     it('should throw an error when CSV data has fewer than 2 columns', async () => {
-      const invalidCsvContent = 'invalid_data';
-      const file = { url_private: 'https://fake-url.com/file.csv' };
-      const token = 'test-bot-token';
+      nock(baseUrl)
+        .get(filePath)
+        .reply(200, 'invalid_data');
 
-      axiosMock.onGet(file.url_private).reply(200, invalidCsvContent);
+      const file = { url_private: fileUrl };
 
       try {
         await parseCSV(file, token);
@@ -288,13 +284,13 @@ describe('Base Slack Utils', () => {
 
     it('should throw an error when CSV parsing results in empty or invalid data', async () => {
       const invalidCsvContents = ['', '\n\n\n', ' '];
-      const file = { url_private: 'https://fake-url.com/file.csv' };
-      const token = 'test-bot-token';
 
-      const testPromises = invalidCsvContents.map(async (content) => {
-        axiosMock.onGet(file.url_private).reply(200, content);
+      for (const content of invalidCsvContents) {
+        nock(baseUrl).get(filePath).reply(200, content);
+        const file = { url_private: fileUrl };
 
         try {
+          // eslint-disable-next-line no-await-in-loop
           await parseCSV(file, token);
           throw new Error('Test failed: Error was not thrown');
         } catch (error) {
@@ -302,31 +298,15 @@ describe('Base Slack Utils', () => {
             'CSV processing failed: CSV parsing resulted in empty or invalid data.',
           );
         }
-      });
-
-      await Promise.allSettled(testPromises);
-    });
-
-    it('should throw an error when CSV download returns empty data', async () => {
-      const file = { url_private: 'https://fake-url.com/file.csv' };
-      const token = 'test-bot-token';
-      axiosMock.onGet(file.url_private).reply(200, '');
-
-      try {
-        await parseCSV(file, token);
-        throw new Error('Test failed: Error was not thrown');
-      } catch (error) {
-        expect(error.message).to.equal(
-          'CSV processing failed: CSV parsing resulted in empty or invalid data.',
-        );
       }
     });
 
     it('should throw an error when authentication fails with 401 Unauthorized', async () => {
-      const file = { url_private: 'https://fake-url.com/file.csv' };
-      const token = 'test-bot-token';
+      nock(baseUrl)
+        .get(filePath)
+        .reply(401);
 
-      axiosMock.onGet(file.url_private).reply(401);
+      const file = { url_private: fileUrl };
 
       try {
         await parseCSV(file, token);
@@ -339,10 +319,11 @@ describe('Base Slack Utils', () => {
     });
 
     it('should throw an error when access is forbidden with 403 Forbidden', async () => {
-      const file = { url_private: 'https://fake-url.com/file.csv' };
-      const token = 'test-bot-token';
+      nock(baseUrl)
+        .get(filePath)
+        .reply(403);
 
-      axiosMock.onGet(file.url_private).reply(403);
+      const file = { url_private: fileUrl };
 
       try {
         await parseCSV(file, token);
@@ -355,10 +336,11 @@ describe('Base Slack Utils', () => {
     });
 
     it('should throw an error when the file is not found (404)', async () => {
-      const file = { url_private: 'https://fake-url.com/file.csv' };
-      const token = 'test-bot-token';
+      nock(baseUrl)
+        .get(filePath)
+        .reply(404);
 
-      axiosMock.onGet(file.url_private).reply(404);
+      const file = { url_private: fileUrl };
 
       try {
         await parseCSV(file, token);

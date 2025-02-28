@@ -11,11 +11,10 @@
  */
 
 import { createUrl } from '@adobe/fetch';
-import { hasText, isString } from '@adobe/spacecat-shared-utils';
+import { hasText, isString, tracingFetch } from '@adobe/spacecat-shared-utils';
 import fs from 'fs';
 
 import { URL } from 'url';
-import axios from 'axios';
 import path from 'path';
 import { Readable } from 'stream';
 import { parse } from 'csv';
@@ -299,20 +298,28 @@ const wrapSayForThread = (say, threadTs) => {
 const parseCSV = async (file, token) => {
   try {
     const fileUrl = file.url_private;
-    const response = await axios.get(fileUrl, {
+    const response = await tracingFetch(fileUrl, {
       headers: { Authorization: `Bearer ${token}` },
       responseType: 'arraybuffer',
       validateStatus: (status) => status < 500,
     });
 
+    const responseData = await response.arrayBuffer();
+    const responseBuffer = Buffer.from(responseData);
+
     if (response.status === 401) throw new Error('Authentication failed: Invalid Slack token.');
     if (response.status === 403) throw new Error('Access denied: Missing files:read permission.');
     if (response.status === 404) throw new Error(`File not found at: ${fileUrl}.`);
-    if (!response.data || response.data.length === 0) {
+    if (!responseBuffer || responseBuffer.length === 0) {
       throw new Error('CSV parsing resulted in empty or invalid data.');
     }
 
-    const csvString = response.data.toString('utf-8').trim();
+    const csvString = responseBuffer.toString('utf-8').trim();
+
+    if (csvString.length === 0) {
+      throw new Error('CSV parsing resulted in empty or invalid data.');
+    }
+
     const csvStream = Readable.from(csvString);
 
     return new Promise((resolve, reject) => {
