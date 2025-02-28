@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.93.17",
+  "version": "1.93.19",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -87,7 +87,6 @@
     "@slack/bolt": "4.2.0",
     "busboy": "1.6.0",
     "fuse.js": "7.1.0",
-    "handlebars": "^4.7.8",
     "js-yaml": "4.1.0",
     "jsdom": "26.0.0",
     "psl": "1.15.0",
