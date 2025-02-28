@@ -391,6 +391,10 @@ function SitesController(dataAccess, log, env) {
       return notFound('Site not found');
     }
 
+    log.debug(`DEBUUUUUUG: site ${siteId} has overrideBaseURL ${site.getConfig()?.fetchConfig?.overrideBaseURL}`);
+    const finalURL = await site.resolveFinalURL();
+    log.debug(`DEBUUUUUUG: site ${siteId} has finalURL ${finalURL}`);
+
     const metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
     return ok(metrics);
