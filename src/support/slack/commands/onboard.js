@@ -26,7 +26,7 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerAuditForSite, triggerImportRun } from '../../utils.js';
+import { findDeliveryType, triggerImportRun } from '../../utils.js';
 
 import BaseCommand from './base.js';
 
@@ -187,11 +187,6 @@ function OnboardCommand(context) {
       });
 
       await configuration.save();
-
-      for (const auditType of auditTypes) {
-        /* eslint-disable no-await-in-loop */
-        await triggerAuditForSite(site, auditType, slackContext, context);
-      }
 
       reportLine.audits = auditTypes.join(',');
     } catch (error) {
