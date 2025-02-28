@@ -13,7 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
-import { isValidUrl, isObject } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import { WebClient } from '@slack/web-api';
 import os from 'os';
 import path from 'path';
@@ -216,7 +216,7 @@ function OnboardCommand(context) {
     const slackClient = new WebClient(botToken);
 
     try {
-      if (files?.length > 0) {
+      if (isNonEmptyArray(files)) {
         // Ensure exactly one CSV file is uploaded
         if (files.length > 1) {
           await say(':warning: Please upload only **one** CSV file at a time.');
@@ -238,7 +238,7 @@ function OnboardCommand(context) {
         // Download & parse CSV
         const csvData = await parseCSV(file, botToken);
 
-        if (csvData.length === 0) {
+        if (!isNonEmptyArray(csvData)) {
           await say(':x: No valid rows found in the CSV file. Please check the format.');
           return;
         }

@@ -29,6 +29,7 @@ import {
   sendMessageBlocks,
   loadProfileConfig,
   parseCSV,
+  fetchFile,
 } from '../../../src/utils/slack/base.js';
 
 use(chaiAsPromised);
@@ -224,11 +225,105 @@ describe('Base Slack Utils', () => {
     });
   });
 
+  describe('fetchFile', () => {
+    const baseUrl = 'https://fake-url.com';
+    const filePath = '/file.csv';
+    const fileUrl = `${baseUrl}${filePath}`;
+    const token = 'test-bot-token';
+    const file = {
+      url_private: fileUrl,
+      mimetype: 'text/csv',
+    };
+
+    afterEach(() => {
+      nock.cleanAll();
+    });
+
+    it('should return file content when file is downloaded successfully', async () => {
+      const mockData = Buffer.from('test1,test2\nvalue1,value2', 'utf-8');
+
+      nock(baseUrl)
+        .get(filePath)
+        .reply(200, mockData);
+
+      const result = await fetchFile(file, token);
+      expect(result).to.equal(mockData.toString('utf-8').trim());
+    });
+
+    it('should return a Buffer for non-text files', async () => {
+      const binaryContent = Buffer.from([0x00, 0x01, 0x02]);
+
+      nock(baseUrl)
+        .get(filePath)
+        .reply(200, binaryContent);
+
+      const result = await fetchFile(
+        { url_private: fileUrl, mimetype: 'application/octet-stream', name: 'non-text-file' },
+        token,
+      );
+      expect(result).to.be.instanceOf(Buffer);
+      expect(result.equals(binaryContent)).to.be.true;
+    });
+
+    it('should throw an error when authentication fails with 401', async () => {
+      nock(baseUrl).get(filePath).reply(401);
+
+      try {
+        await fetchFile(file, token);
+        throw new Error('Test failed: Expected error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'Authentication failed: Invalid Slack token.',
+        );
+      }
+    });
+
+    it('should throw an error when token lacks the permissions', async () => {
+      nock(baseUrl).get(filePath).reply(403);
+
+      try {
+        await fetchFile(file, token);
+        throw new Error('Test failed: Expected error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Access denied: Missing files:read permission.');
+      }
+    });
+
+    it('should throw an error when the file is not found (404)', async () => {
+      nock(baseUrl).get(filePath).reply(404);
+
+      try {
+        await fetchFile(file, token);
+        throw new Error('Test failed: Expected error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(`File not found at: ${fileUrl}.`);
+      }
+    });
+
+    it('should throw an error when the file is empty', async () => {
+      nock(baseUrl).get(filePath).reply(200, '');
+
+      try {
+        await fetchFile(file, token);
+        throw new Error('Test failed: Expected error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'File download resulted in empty or invalid data.',
+        );
+      }
+    });
+  });
+
   describe('parseCSV', () => {
     const baseUrl = 'https://fake-url.com';
     const filePath = '/file.csv';
     const fileUrl = `${baseUrl}${filePath}`;
     const token = 'test-bot-token';
+    const file = {
+      url_private: fileUrl,
+      mimetype: 'text/csv',
+      name: 'file.csv',
+    };
 
     afterEach(() => {
       nock.cleanAll();
@@ -241,7 +336,6 @@ describe('Base Slack Utils', () => {
         .get(filePath)
         .reply(200, fileContent);
 
-      const file = { url_private: fileUrl };
       const records = await parseCSV(file, token);
 
       expect(records).to.deep.equal([
@@ -255,10 +349,8 @@ describe('Base Slack Utils', () => {
         .get(filePath)
         .replyWithError('Network failure');
 
-      const file = { url_private: fileUrl };
-
       try {
-        await parseCSV(file, token);
+        await parseCSV({ url_private: fileUrl }, token);
         throw new Error('Test failed: Error was not thrown');
       } catch (error) {
         expect(error.message).to.include('CSV processing failed');
@@ -270,8 +362,6 @@ describe('Base Slack Utils', () => {
         .get(filePath)
         .reply(200, 'invalid_data');
 
-      const file = { url_private: fileUrl };
-
       try {
         await parseCSV(file, token);
         throw new Error('Test failed: Error was not thrown');
@@ -282,12 +372,11 @@ describe('Base Slack Utils', () => {
       }
     });
 
-    it('should throw an error when CSV parsing results in empty or invalid data', async () => {
-      const invalidCsvContents = ['', '\n\n\n', ' '];
+    it('should throw an error when CSV parsing results in invalid data', async () => {
+      const invalidCsvContents = ['\n\n\n', ' '];
 
       for (const content of invalidCsvContents) {
         nock(baseUrl).get(filePath).reply(200, content);
-        const file = { url_private: fileUrl };
 
         try {
           // eslint-disable-next-line no-await-in-loop
@@ -298,57 +387,6 @@ describe('Base Slack Utils', () => {
             'CSV processing failed: CSV parsing resulted in empty or invalid data.',
           );
         }
-      }
-    });
-
-    it('should throw an error when authentication fails with 401 Unauthorized', async () => {
-      nock(baseUrl)
-        .get(filePath)
-        .reply(401);
-
-      const file = { url_private: fileUrl };
-
-      try {
-        await parseCSV(file, token);
-        throw new Error('Test failed: Error was not thrown');
-      } catch (error) {
-        expect(error.message).to.equal(
-          'CSV processing failed: Authentication failed: Invalid Slack token.',
-        );
-      }
-    });
-
-    it('should throw an error when access is forbidden with 403 Forbidden', async () => {
-      nock(baseUrl)
-        .get(filePath)
-        .reply(403);
-
-      const file = { url_private: fileUrl };
-
-      try {
-        await parseCSV(file, token);
-        throw new Error('Test failed: Error was not thrown');
-      } catch (error) {
-        expect(error.message).to.equal(
-          'CSV processing failed: Access denied: Missing files:read permission.',
-        );
-      }
-    });
-
-    it('should throw an error when the file is not found (404)', async () => {
-      nock(baseUrl)
-        .get(filePath)
-        .reply(404);
-
-      const file = { url_private: fileUrl };
-
-      try {
-        await parseCSV(file, token);
-        throw new Error('Test failed: Error was not thrown');
-      } catch (error) {
-        expect(error.message).to.equal(
-          `CSV processing failed: File not found at: ${file.url_private}.`,
-        );
       }
     });
   });

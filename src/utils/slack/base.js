@@ -290,35 +290,52 @@ const wrapSayForThread = (say, threadTs) => {
 };
 
 /**
- * Downloads and parses a CSV file from Slack.
+ * Downloads a file from Slack.
  *
- * @param {string} fileUrl - The private Slack file URL.
+ * @param {Object} file - The Slack file object.
  * @param {string} token - The Slack bot token for authentication.
- * @returns {Promise<Array<Array<string>>>} Parsed CSV data as an array of rows.
- * @throws {Error} - Throws an error if the file cannot be downloaded or parsed.
+ * @returns {Promise<Buffer | string>} - The file content as a Buffer or string.
+ * @throws {Error} - Throws an error if the request fails.
+ */
+const fetchFile = async (file, token) => {
+  const fileUrl = file.url_private;
+  const response = await tracingFetch(fileUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+    responseType: 'arraybuffer',
+    validateStatus: (status) => status < 500,
+  });
+
+  const responseData = await response.arrayBuffer();
+  const responseBuffer = Buffer.from(responseData);
+
+  if (response.status === 401) throw new Error('Authentication failed: Invalid Slack token.');
+  if (response.status === 403) throw new Error('Access denied: Missing files:read permission.');
+  if (response.status === 404) throw new Error(`File not found at: ${fileUrl}.`);
+
+  if (!responseBuffer || responseBuffer.length === 0) {
+    throw new Error('File download resulted in empty or invalid data.');
+  }
+
+  // Check if the file type is text-based
+  if (file.mimetype?.startsWith('text/') || file.mimetype === 'application/json' || file.name.endsWith('.csv')) {
+    return responseBuffer.toString('utf-8').trim();
+  }
+
+  return responseBuffer;
+};
+
+/**
+ * Parses a CSV file from Slack.
+ *
+ * @param {Object} file - The Slack file object.
+ * @param {string} token - The Slack bot token for authentication.
+ * @returns {Promise<Array<Array<string>>>} - Parsed CSV data as an array of rows.
+ * @throws {Error} - Throws an error if the file cannot be parsed.
  */
 const parseCSV = async (file, token) => {
   try {
-    const fileUrl = file.url_private;
-    const response = await tracingFetch(fileUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-      responseType: 'arraybuffer',
-      validateStatus: (status) => status < 500,
-    });
-
-    const responseData = await response.arrayBuffer();
-    const responseBuffer = Buffer.from(responseData);
-
-    if (response.status === 401) throw new Error('Authentication failed: Invalid Slack token.');
-    if (response.status === 403) throw new Error('Access denied: Missing files:read permission.');
-    if (response.status === 404) throw new Error(`File not found at: ${fileUrl}.`);
-    if (!responseBuffer || responseBuffer.length === 0) {
-      throw new Error('CSV parsing resulted in empty or invalid data.');
-    }
-
-    const csvString = responseBuffer.toString('utf-8').trim();
-
-    if (csvString.length === 0) {
+    const csvString = await fetchFile(file, token);
+    if (typeof csvString !== 'string' || !csvString.trim()) {
       throw new Error('CSV parsing resulted in empty or invalid data.');
     }
 
@@ -389,4 +406,5 @@ export {
   wrapSayForThread,
   loadProfileConfig,
   parseCSV,
+  fetchFile,
 };
