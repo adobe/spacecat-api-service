@@ -13,8 +13,10 @@
 			"structured-data": {}
 		},
 		"imports": {
+			"organic-traffic" : {},
 			"top-pages" : {}, // Dependency of scrape-top-pages
-			"organic-keywords" : {} // Dependency of experimentation-opportunities auditType
+			"organic-keywords" : {}, // Dependency of experimentation-opportunities auditType
+			"rum-traffic" : {}
 		},
 		"config": {},
 		"integrations": {}
@@ -33,8 +35,10 @@
 			"sitemap": {}
 		},
 		"imports": {
+			"organic-traffic" : {},
 			"top-pages" : {},
-			"organic-keywords" : {}
+			"organic-keywords" : {},
+			"rum-traffic" : {}
 		},
 		"config": {},
 		"integrations": {}
