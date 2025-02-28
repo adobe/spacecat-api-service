@@ -43,7 +43,7 @@
 		"config": {},
 		"integrations": {}
 	},
-	"summit-less-quality":  {
+	"summit-lower-quality":  {
 		"audits": {
 			"scrape-top-pages": {}, // Dependency of broken-backlinks
 			"alt-text": {},
