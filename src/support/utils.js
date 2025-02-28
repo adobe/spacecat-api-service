@@ -99,11 +99,11 @@ export const sendRunImportMessage = async (
 export const sendAutofixMessage = async (
   sqs,
   queueUrl,
-  type,
+  opportunityId,
   siteId,
   suggestionIds,
 ) => sqs.sendMessage(queueUrl, {
-  type,
+  opportunityId,
   siteId,
   suggestionIds,
 });
