@@ -180,6 +180,8 @@ function SitesController(dataAccess, log, env) {
       return notFound('Site not found');
     }
 
+    log.info(`DEBUUUUUUG: site ${siteId} has overrideBaseURL ${site.getConfig()?.fetchConfig?.overrideBaseURL}`);
+
     return ok(SiteDto.toJSON(site));
   };
 
@@ -390,10 +392,6 @@ function SitesController(dataAccess, log, env) {
     if (!site) {
       return notFound('Site not found');
     }
-
-    log.info(`DEBUUUUUUG: site ${siteId} has overrideBaseURL ${site.getConfig()?.fetchConfig?.overrideBaseURL}`);
-    const finalURL = await site.resolveFinalURL();
-    log.info(`DEBUUUUUUG: site ${siteId} has finalURL ${finalURL}`);
 
     const metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
