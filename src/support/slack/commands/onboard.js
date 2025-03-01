@@ -210,9 +210,12 @@ function OnboardCommand(context) {
    */
   const handleExecution = async (args, slackContext) => {
     const {
-      // eslint-disable-next-line camelcase
-      say, botToken, files, channelId, client, thread_ts,
+      say, botToken, files, channelId, client,
     } = slackContext;
+
+    const initialMessage = await say(':spacecat: Mission Control, we are go for onboarding! :satellite:');
+    // eslint-disable-next-line camelcase
+    const thread_ts = initialMessage?.ts;
 
     await say(`:bug: [DEBUG] Slack client methods: ${Object.keys(client)}`);
     // eslint-disable-next-line camelcase
