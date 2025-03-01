@@ -219,7 +219,7 @@ function OnboardCommand(context) {
 
     await say(`:bug: [DEBUG] Slack client methods: ${Object.keys(client)}`);
     // eslint-disable-next-line camelcase
-    await say(`:bug: [DEBUG] Thread TS: ${thread_ts}`);
+    await say(`:bug: [DEBUG] Thread TS: ${slackContext.message.ts}`);
 
     try {
       if (isNonEmptyArray(files)) {
