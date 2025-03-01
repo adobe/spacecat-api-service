@@ -220,12 +220,14 @@ function OnboardCommand(context) {
    */
   const handleExecution = async (args, slackContext) => {
     const {
-      say, botToken, files, channelId, client,
+      say, botToken, files, channelId, client, threadTs,
     } = slackContext;
 
     await say(':spacecat: Mission Control, we are go for onboarding! :satellite:');
 
-    await say(`:bug: [DEBUG] Slack context: ${Object.keys(slackContext)}`);
+    await say(`:bug: [DEBUG] Slack ctx files methods: ${Object.keys(files)}`);
+    await say(`:bug: [DEBUG] Slack ctx client.files methods: ${Object.keys(client.files)}`);
+    await say(`:bug: [DEBUG] Slack ctx threadTs: ${threadTs}`);
 
     try {
       if (isNonEmptyArray(files)) {
@@ -284,6 +286,7 @@ function OnboardCommand(context) {
               filename: 'spacecat_onboarding_report.csv',
               title: 'Spacecat Onboarding Report',
               initial_comment: ':spacecat: :memo: Onboarding complete! Here you can find the execution report.',
+              thread_ts: threadTs,
             });
           } catch (error) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);

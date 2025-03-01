@@ -67,7 +67,7 @@ describe('OnboardCommand', () => {
       imsClient: imsClientStub,
     };
     slackContext = {
-      say: sinon.spy(), files: [], client: {}, message: {},
+      say: sinon.spy(), files: [], client: { files: [] },
     };
     slackContext.botToken = 'test-token';
 
