@@ -225,9 +225,7 @@ function OnboardCommand(context) {
 
     await say(':spacecat: Mission Control, we are go for onboarding! :satellite:');
 
-    await say(`:bug: [DEBUG] Slack ctx files methods: ${Object.keys(files)}`);
     await say(`:bug: [DEBUG] Slack ctx client.files methods: ${Object.keys(client.files)}`);
-    await say(`:bug: [DEBUG] Slack ctx threadTs: ${threadTs}`);
 
     try {
       if (isNonEmptyArray(files)) {
@@ -275,12 +273,12 @@ function OnboardCommand(context) {
 
         fileStream.end(async () => {
           const fileContent = fs.readFileSync(tempFilePath, 'utf-8');
-          await say(':bug: [DEBUG] Report stream content:\n', fileContent);
+          await say(`:bug: [DEBUG] Report stream content: ${fileContent}`);
         });
 
         fileStream.on('finish', async () => {
           try {
-            await client.files.uploadV2({
+            const uploadResponse = client.files.upload({
               channels: channelId,
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
@@ -288,6 +286,7 @@ function OnboardCommand(context) {
               initial_comment: ':spacecat: :memo: Onboarding complete! Here you can find the execution report.',
               thread_ts: threadTs,
             });
+            await say(`:bug: [DEBUG] Report upload response: ${uploadResponse}`);
           } catch (error) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
           } finally {
