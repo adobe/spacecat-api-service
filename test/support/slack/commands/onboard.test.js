@@ -145,7 +145,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith(':warning: Please provide a valid site base URL.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Invalid site base URL.')).to.be.true;
     });
 
     it('warns when an invalid IMS Org ID is provided', async () => {
@@ -154,7 +154,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith(':warning: Please provide a valid IMS Org ID.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Invalid IMS Org ID.')).to.be.true;
     });
 
     it('does not create a new organization if one already exists for the given IMS Org ID', async () => {

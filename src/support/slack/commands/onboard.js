@@ -201,7 +201,7 @@ function OnboardCommand(context) {
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
-      reportLine.status = 'Failure';
+      reportLine.status = 'Failed';
 
       throw error; // re-throw the error to ensure that the outer function detects failure
     }
@@ -308,6 +308,10 @@ function OnboardCommand(context) {
           profileName,
           slackContext,
         );
+
+        if (reportLine.errors) {
+          await say(`:warning: ${reportLine.errors}`);
+        }
 
         const message = `
         *Onboarding complete for ${reportLine.site}*
