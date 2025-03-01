@@ -22,3 +22,32 @@ google-auth:
         $ref: './responses.yaml#/500'
     security: []
 
+google-auth-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - auth
+    summary: Check Google Search Console authentication status for a site
+    description: |
+      This endpoint is used to check if a site is connected to Google Search Console and verify authentication status.
+    operationId: googleAuthStatus
+    responses:
+      '200':
+        description: Site is successfully connected to Google Search Console
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  description: The GSC connection status of the site
+                  example: "Site is connected to Google Search Console"
+      '400':
+        description: Missing or invalid parameters
+      '404':
+        description: Authentication tokens not found or Site not found in Google Search Console
+      '500':
+        $ref: './responses.yaml#/500'
+    security: []

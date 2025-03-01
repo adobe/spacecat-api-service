@@ -53,6 +53,8 @@ paths:
     $ref: './audits-api.yaml#/latest-audits'
   /auth/google/{siteId}:
     $ref: './auth-api.yaml#/google-auth'
+  /auth/google/{siteId}/status:
+    $ref: './auth-api.yaml#/google-auth-status'
   /configurations:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
@@ -155,8 +157,6 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
-  /tools/import/assistant/prompt:
-    $ref: './tools-api.yaml#/import-assistant'
 
 components:
   securitySchemes:

@@ -1,3 +1,150 @@
+# [1.94.0](https://github.com/adobe/spacecat-api-service/compare/v1.93.20...v1.94.0) (2025-02-28)
+
+
+### Features
+
+* introduce google authentication status endpoint ([#795](https://github.com/adobe/spacecat-api-service/issues/795)) ([d09d537](https://github.com/adobe/spacecat-api-service/commit/d09d537e2d146d024dc5b380fbf86dce9a084a01))
+
+## [1.93.20](https://github.com/adobe/spacecat-api-service/compare/v1.93.19...v1.93.20) (2025-02-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.9.5 ([#796](https://github.com/adobe/spacecat-api-service/issues/796)) ([38bed4e](https://github.com/adobe/spacecat-api-service/commit/38bed4ef13191c10be92ab3f89a6a7985c56de27))
+
+## [1.93.19](https://github.com/adobe/spacecat-api-service/compare/v1.93.18...v1.93.19) (2025-02-27)
+
+
+### Bug Fixes
+
+* Sites-29600 Remove Assistant's handlebar dependency ([#794](https://github.com/adobe/spacecat-api-service/issues/794)) ([ebdaf75](https://github.com/adobe/spacecat-api-service/commit/ebdaf75a4a60524c5240599eada3f0110083bd62))
+
+## [1.93.18](https://github.com/adobe/spacecat-api-service/compare/v1.93.17...v1.93.18) (2025-02-27)
+
+
+### Bug Fixes
+
+* sites-29600 remove import assistant endpoint and code ([#793](https://github.com/adobe/spacecat-api-service/issues/793)) ([186bb07](https://github.com/adobe/spacecat-api-service/commit/186bb078e094a4b4147f6945dcc43f244b58b1a0))
+
+## [1.93.17](https://github.com/adobe/spacecat-api-service/compare/v1.93.16...v1.93.17) (2025-02-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.9.4 ([#790](https://github.com/adobe/spacecat-api-service/issues/790)) ([607df5c](https://github.com/adobe/spacecat-api-service/commit/607df5cde6c87833b25ec938f38a702d7302e6c8))
+
+## [1.93.16](https://github.com/adobe/spacecat-api-service/compare/v1.93.15...v1.93.16) (2025-02-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.9.3 ([#788](https://github.com/adobe/spacecat-api-service/issues/788)) ([542d977](https://github.com/adobe/spacecat-api-service/commit/542d9771dbc9856ab199736ebbdded733c0df784))
+
+## [1.93.15](https://github.com/adobe/spacecat-api-service/compare/v1.93.14...v1.93.15) (2025-02-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-gpt-client to v1.5.1 ([#787](https://github.com/adobe/spacecat-api-service/issues/787)) ([73e558b](https://github.com/adobe/spacecat-api-service/commit/73e558be96afdecff91dcf30cb51d1ba3942a17d))
+
+## [1.93.14](https://github.com/adobe/spacecat-api-service/compare/v1.93.13...v1.93.14) (2025-02-26)
+
+
+### Bug Fixes
+
+* org creation in onboard command ([#786](https://github.com/adobe/spacecat-api-service/issues/786)) ([42a7562](https://github.com/adobe/spacecat-api-service/commit/42a756230a8659c87d766b3f081e1a9f2d812b56))
+
+## [1.93.13](https://github.com/adobe/spacecat-api-service/compare/v1.93.12...v1.93.13) (2025-02-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.9.2 ([#785](https://github.com/adobe/spacecat-api-service/issues/785)) ([c7e194d](https://github.com/adobe/spacecat-api-service/commit/c7e194d172a4603eaf3b8a5170f954cc75fd3525))
+
+## [1.93.12](https://github.com/adobe/spacecat-api-service/compare/v1.93.11...v1.93.12) (2025-02-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.9.1 ([#784](https://github.com/adobe/spacecat-api-service/issues/784)) ([04979c6](https://github.com/adobe/spacecat-api-service/commit/04979c658bf548c93c3f1e349aa368b65d6299c1))
+
+## [1.93.11](https://github.com/adobe/spacecat-api-service/compare/v1.93.10...v1.93.11) (2025-02-25)
+
+
+### Bug Fixes
+
+* Update Importer E2E test workflow to use the existing Setup Node & NPM action ([#783](https://github.com/adobe/spacecat-api-service/issues/783)) ([4ed55f9](https://github.com/adobe/spacecat-api-service/commit/4ed55f9e0df76ed933cc46b8fa95dd56769faa5f))
+
+## [1.93.10](https://github.com/adobe/spacecat-api-service/compare/v1.93.9...v1.93.10) (2025-02-25)
+
+
+### Bug Fixes
+
+* **data-access:** rollback to 2.8.4 ([#781](https://github.com/adobe/spacecat-api-service/issues/781)) ([09af663](https://github.com/adobe/spacecat-api-service/commit/09af663896cbd48889d45c051e25d5abc08c487f))
+
+## [1.93.9](https://github.com/adobe/spacecat-api-service/compare/v1.93.8...v1.93.9) (2025-02-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.9.0 ([#780](https://github.com/adobe/spacecat-api-service/issues/780)) ([88d8047](https://github.com/adobe/spacecat-api-service/commit/88d804797674886cdbc710533655f8fc6cc1cd4c))
+
+## [1.93.8](https://github.com/adobe/spacecat-api-service/compare/v1.93.7...v1.93.8) (2025-02-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.8.4 ([#778](https://github.com/adobe/spacecat-api-service/issues/778)) ([db0b34c](https://github.com/adobe/spacecat-api-service/commit/db0b34ceee9ae7f05b672887c6097585e310adf1))
+
+## [1.93.7](https://github.com/adobe/spacecat-api-service/compare/v1.93.6...v1.93.7) (2025-02-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.9.10 ([#777](https://github.com/adobe/spacecat-api-service/issues/777)) ([a655c77](https://github.com/adobe/spacecat-api-service/commit/a655c770e788615fb42d8d6359912c669d16809c))
+
+## [1.93.6](https://github.com/adobe/spacecat-api-service/compare/v1.93.5...v1.93.6) (2025-02-22)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#772](https://github.com/adobe/spacecat-api-service/issues/772)) ([e185e30](https://github.com/adobe/spacecat-api-service/commit/e185e30a14ed3f424e18dd7670e613de297f8374))
+
+## [1.93.5](https://github.com/adobe/spacecat-api-service/compare/v1.93.4...v1.93.5) (2025-02-22)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#771](https://github.com/adobe/spacecat-api-service/issues/771)) ([e214b4d](https://github.com/adobe/spacecat-api-service/commit/e214b4d1b78abd0c2f1ef5871b4beb1689cad015))
+
+## [1.93.4](https://github.com/adobe/spacecat-api-service/compare/v1.93.3...v1.93.4) (2025-02-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.33.0 ([#770](https://github.com/adobe/spacecat-api-service/issues/770)) ([ebf64bd](https://github.com/adobe/spacecat-api-service/commit/ebf64bdc6572fba6be691b3096943940612d215d))
+
+## [1.93.3](https://github.com/adobe/spacecat-api-service/compare/v1.93.2...v1.93.3) (2025-02-21)
+
+
+### Bug Fixes
+
+* range may be undefined ([#769](https://github.com/adobe/spacecat-api-service/issues/769)) ([7118a64](https://github.com/adobe/spacecat-api-service/commit/7118a64faf516763f7f0ff021999b8a481590742))
+
+## [1.93.2](https://github.com/adobe/spacecat-api-service/compare/v1.93.1...v1.93.2) (2025-02-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.8.2 ([#768](https://github.com/adobe/spacecat-api-service/issues/768)) ([848f21d](https://github.com/adobe/spacecat-api-service/commit/848f21d37c11c7d164e586c6e6dd9ce3c7d43ace))
+
+## [1.93.1](https://github.com/adobe/spacecat-api-service/compare/v1.93.0...v1.93.1) (2025-02-21)
+
+
+### Bug Fixes
+
+* temporarily disable role check ([#767](https://github.com/adobe/spacecat-api-service/issues/767)) ([f56b9cf](https://github.com/adobe/spacecat-api-service/commit/f56b9cf60b0ca9b9314ca8b707de1a34a2e5699f))
+
 # [1.93.0](https://github.com/adobe/spacecat-api-service/compare/v1.92.5...v1.93.0) (2025-02-20)
 
 
