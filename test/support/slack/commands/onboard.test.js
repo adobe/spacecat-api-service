@@ -66,7 +66,7 @@ describe('OnboardCommand', () => {
       },
       imsClient: imsClientStub,
     };
-    slackContext = { say: sinon.spy(), files: [] };
+    slackContext = { say: sinon.spy(), files: [], client: {} };
     slackContext.botToken = 'test-token';
 
     parseCSVStub = sinon.stub().resolves([]);
