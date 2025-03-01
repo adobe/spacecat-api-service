@@ -93,13 +93,15 @@ function OnboardCommand(context) {
       await say(`:gear: Applying ${profileName} profile.`);
 
       if (!isValidUrl(baseURL)) {
-        await say(':warning: Please provide a valid site base URL.');
-        return;
+        reportLine.errors = 'Invalid site base URL.';
+        reportLine.status = 'Failed';
+        return reportLine;
       }
 
       if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
-        await say(':warning: Please provide a valid IMS Org ID.');
-        return;
+        reportLine.errors = 'Invalid IMS Org ID.';
+        reportLine.status = 'Failed';
+        return reportLine;
       }
 
       // check if the organization with IMS Org ID already exists; create if it doesn't
@@ -111,13 +113,15 @@ function OnboardCommand(context) {
           log.info(`IMS Org Details: ${imsOrgDetails}`);
         } catch (error) {
           log.error(`Error retrieving IMS Org details: ${error.message}`);
-          await say(`:x: Could not find an IMS org with the ID *${imsOrgID}*.`);
-          return;
+          reportLine.errors = `Error retrieving IMS org with the ID *${imsOrgID}*.`;
+          reportLine.status = 'Failed';
+          return reportLine;
         }
 
         if (!imsOrgDetails) {
-          await say(`:x: Could not find an IMS org with the ID *${imsOrgID}*.`);
-          return;
+          reportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
+          reportLine.status = 'Failed';
+          return reportLine;
         }
 
         organization = await Organization.create({
@@ -143,21 +147,27 @@ function OnboardCommand(context) {
       const profile = await loadProfileConfig(profileName);
 
       if (!isObject(profile)) {
-        await say(`:warning: Profile "${profileName}" not found or invalid. Please try again.`);
-        log.error(`Profile "${profileName}" is missing or invalid.`);
-        return;
+        const error = `Profile "${profileName}" not found or invalid.`;
+        log.error(error);
+        reportLine.errors = error;
+        reportLine.status = 'Failed';
+        return reportLine;
       }
 
       if (!isObject(profile?.audits)) {
-        await say(`:warning: Profile "${profileName}" does not have a valid audits section.`);
-        log.error(`Profile "${profileName}" has invalid or missing audits.`);
-        return;
+        const error = `Profile "${profileName}" does not have a valid audits section.`;
+        log.error(error);
+        reportLine.errors = error;
+        reportLine.status = 'Failed';
+        return reportLine;
       }
 
       if (!isObject(profile?.imports)) {
-        await say(`:warning: Profile "${profileName}" does not have a valid imports section.`);
-        log.error(`Profile "${profileName}" has invalid or missing imports.`);
-        return;
+        const error = `Profile "${profileName}" does not have a valid imports section.`;
+        log.error(error);
+        reportLine.errors = error;
+        reportLine.status = 'Failed';
+        return reportLine;
       }
 
       const configuration = await Configuration.findLatest();
@@ -177,7 +187,7 @@ function OnboardCommand(context) {
         );
       }
 
-      reportLine.imports = importTypes.join(', ');
+      reportLine.imports = importTypes.join(',');
 
       const auditTypes = Object.keys(profile.audits);
 
@@ -213,13 +223,9 @@ function OnboardCommand(context) {
       say, botToken, files, channelId, client,
     } = slackContext;
 
-    const initialMessage = await say(':spacecat: Mission Control, we are go for onboarding! :satellite:');
-    // eslint-disable-next-line camelcase
-    const thread_ts = initialMessage?.ts;
+    await say(':spacecat: Mission Control, we are go for onboarding! :satellite:');
 
-    await say(`:bug: [DEBUG] Slack client methods: ${Object.keys(client)}`);
-    // eslint-disable-next-line camelcase
-    await say(`:bug: [DEBUG] Thread TS: ${slackContext.message.ts}`);
+    await say(`:bug: [DEBUG] Slack context: ${Object.keys(slackContext)}`);
 
     try {
       if (isNonEmptyArray(files)) {
@@ -278,8 +284,6 @@ function OnboardCommand(context) {
               filename: 'spacecat_onboarding_report.csv',
               title: 'Spacecat Onboarding Report',
               initial_comment: ':spacecat: :memo: Onboarding complete! Here you can find the execution report.',
-              // eslint-disable-next-line camelcase
-              thread_ts,
             });
           } catch (error) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
