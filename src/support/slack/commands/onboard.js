@@ -195,6 +195,7 @@ function OnboardCommand(context) {
 
       throw error; // re-throw the error to ensure that the outer function detects failure
     }
+    await say(`:bug: [DEBUG] onboardSingleSite report line before return: ${reportLine}`);
     // eslint-disable-next-line consistent-return
     return reportLine;
   };
@@ -211,6 +212,8 @@ function OnboardCommand(context) {
     const {
       say, botToken, files, channelId, client,
     } = slackContext;
+
+    await say(`:bug: [DEBUG] Slack client: ${client}`);
 
     try {
       if (isNonEmptyArray(files)) {
@@ -252,10 +255,14 @@ function OnboardCommand(context) {
           const [baseURL, imsOrgID] = row;
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           await say(`Onboarding a site with base URL ${baseURL} and IMS org ID ${imsOrgID}`);
+          await say(`:bug: [DEBUG] report line before fileStream write: ${reportLine}`);
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
-        fileStream.end();
+        fileStream.end(async () => {
+          const fileContent = fs.readFileSync(tempFilePath, 'utf-8');
+          await say(':bug: [DEBUG] Report stream content:\n', fileContent);
+        });
 
         fileStream.on('finish', async () => {
           try {
