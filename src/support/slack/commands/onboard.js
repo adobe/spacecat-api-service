@@ -14,7 +14,6 @@
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
-import { WebClient } from '@slack/web-api';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -210,10 +209,8 @@ function OnboardCommand(context) {
    */
   const handleExecution = async (args, slackContext) => {
     const {
-      say, botToken, files, channelId,
+      say, botToken, files, channelId, client,
     } = slackContext;
-
-    const slackClient = new WebClient(botToken);
 
     try {
       if (isNonEmptyArray(files)) {
@@ -262,7 +259,7 @@ function OnboardCommand(context) {
 
         fileStream.on('finish', async () => {
           try {
-            await slackClient.files.uploadV2({
+            await client.files.uploadV2({
               channels: channelId,
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
