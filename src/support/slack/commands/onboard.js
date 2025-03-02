@@ -90,8 +90,6 @@ function OnboardCommand(context) {
     };
 
     try {
-      await say(`:gear: Applying ${profileName} profile.`);
-
       if (!isValidUrl(baseURL)) {
         reportLine.errors = 'Invalid site base URL.';
         reportLine.status = 'Failed';
@@ -205,7 +203,6 @@ function OnboardCommand(context) {
 
       throw error; // re-throw the error to ensure that the outer function detects failure
     }
-    await say(`:bug: [DEBUG] onboardSingleSite report line before return: ${JSON.stringify(reportLine, null, 2)}`);
     // eslint-disable-next-line consistent-return
     return reportLine;
   };
@@ -223,15 +220,13 @@ function OnboardCommand(context) {
       say, botToken, files, channelId, client, threadTs,
     } = slackContext;
 
-    await say(':spacecat: Mission Control, we are go for onboarding! :satellite:');
-
-    await say(`:bug: [DEBUG] Slack ctx client.files methods: ${Object.keys(client.files)}`);
+    await say(':spacecat: Mission Control, we are go for *onboarding*! :satellite:');
 
     try {
       if (isNonEmptyArray(files)) {
         // Ensure exactly one CSV file is uploaded
         if (files.length > 1) {
-          await say(':warning: Please upload only **one** CSV file at a time.');
+          await say(':warning: Please upload only *one* CSV file at a time.');
           return;
         }
 
@@ -239,7 +234,7 @@ function OnboardCommand(context) {
 
         // Ensure file is a CSV
         if (!file.name.endsWith('.csv')) {
-          await say(':warning: Please upload a **valid** CSV file.');
+          await say(':warning: Please upload a *valid* CSV file.');
           return;
         }
 
@@ -266,27 +261,22 @@ function OnboardCommand(context) {
           /* eslint-disable no-await-in-loop */
           const [baseURL, imsOrgID] = row;
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
-          await say(`Onboarding a site with base URL ${baseURL} and IMS org ID ${imsOrgID}`);
-          await say(`:bug: [DEBUG] stringified record: ${csvStringifier.stringifyRecords([reportLine])}`);
+          await say(`Onboarding a site with base URL ${baseURL} and IMS org ID ${imsOrgID}`); // TODO: remove to reduce noise
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
-        fileStream.end(async () => {
-          const fileContent = fs.readFileSync(tempFilePath, 'utf-8');
-          await say(`:bug: [DEBUG] Report stream content: ${fileContent}`);
-        });
+        fileStream.end();
 
         fileStream.on('finish', async () => {
           try {
-            const uploadResponse = client.files.upload({
+            await client.files.upload({
               channels: channelId,
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
               title: 'Spacecat Onboarding Report',
-              initial_comment: ':spacecat: :memo: Onboarding complete! Here you can find the execution report.',
+              initial_comment: ':spacecat: *Onboarding complete!* :satellite:\nHere you can find the *execution report*. :memo:',
               thread_ts: threadTs,
             });
-            await say(`:bug: [DEBUG] Report upload response: ${uploadResponse}`);
           } catch (error) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
           } finally {
@@ -295,11 +285,9 @@ function OnboardCommand(context) {
             });
           }
         });
-
-        await say(':white_check_mark: Batch onboarding completed successfully.');
       } else {
         if (args.length < 2) {
-          await say(':warning: Missing required arguments. Please provide **Site URL** and **IMS Org ID**.');
+          await say(':warning: Missing required arguments. Please provide *Site URL* and *IMS Org ID*.');
           return;
         }
 
@@ -321,7 +309,7 @@ function OnboardCommand(context) {
         :gear: *Profile:* ${reportLine.profile}
         :clipboard: *Audits:* ${reportLine.audits || 'None'}
         :inbox_tray: *Imports:* ${reportLine.imports || 'None'}
-        ${reportLine.errors ? `:cross-x: *Errors:* ${reportLine.errors}` : `:check: *Status:* ${reportLine.status}`}
+        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : `:check: *Status:* ${reportLine.status}`}
         `;
 
         await say(message);

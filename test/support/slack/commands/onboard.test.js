@@ -263,7 +263,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith(':warning: Please upload only **one** CSV file at a time.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Please upload only *one* CSV file at a time.')).to.be.true;
     });
 
     it('warns when a non-CSV file is uploaded', async () => {
@@ -274,7 +274,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith(':warning: Please upload a **valid** CSV file.')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Please upload a *valid* CSV file.')).to.be.true;
     });
   });
 
