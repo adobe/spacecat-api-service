@@ -269,7 +269,7 @@ function OnboardCommand(context) {
 
         fileStream.on('finish', async () => {
           try {
-            await client.files.upload({
+            client.files.upload({
               channels: channelId,
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
