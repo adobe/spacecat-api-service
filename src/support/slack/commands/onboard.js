@@ -269,7 +269,7 @@ function OnboardCommand(context) {
 
         fileStream.on('finish', async () => {
           try {
-            const uploadResponse = await client.files.upload({
+            const uploadResponse = client.files.upload({
               channels: channelId,
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
@@ -282,6 +282,8 @@ function OnboardCommand(context) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
           }
         });
+
+        await say(':white_check_mark: Batch onboarding completed successfully.');
       } else {
         if (args.length < 2) {
           await say(':warning: Missing required arguments. Please provide *Site URL* and *IMS Org ID*.');
