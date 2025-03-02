@@ -269,7 +269,7 @@ function OnboardCommand(context) {
 
         fileStream.on('finish', async () => {
           try {
-            client.files.upload({
+            const uploadResponse = await client.files.upload({
               channels: channelId,
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
@@ -277,12 +277,9 @@ function OnboardCommand(context) {
               initial_comment: ':spacecat: *Onboarding complete!* :satellite:\nHere you can find the *execution report*. :memo:',
               thread_ts: threadTs,
             });
+            log.info(uploadResponse);
           } catch (error) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
-          } finally {
-            fs.unlink(tempFilePath, (err) => {
-              if (err) log.error('Error deleting temp file: ', err.message);
-            });
           }
         });
       } else {
