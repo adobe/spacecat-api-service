@@ -57,11 +57,11 @@ function OnboardCommand(context) {
       { id: 'site', title: 'Site URL' },
       { id: 'imsOrgId', title: 'IMS Org ID' },
       { id: 'profile', title: 'Profile' },
+      { id: 'existingSite', title: 'Already existing site?' },
       { id: 'audits', title: 'Audits' },
       { id: 'imports', title: 'Imports' },
       { id: 'errors', title: 'Errors' },
       { id: 'status', title: 'Status' },
-      { id: 'existingSite', title: 'Already existing site?' },
     ],
   });
 
