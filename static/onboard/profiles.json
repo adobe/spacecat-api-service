@@ -5,7 +5,6 @@
 			"broken-internal-links-auto-suggest": {},
 			"broken-backlinks": {}, 
 			"cwv": {},
-			"experimentation-opportunities": {},
 			"broken-internal-links": {},
 			"meta-tags-auto-suggest": {},
 			"meta-tags": {},
@@ -18,7 +17,6 @@
 				"end-date": "2024-03-02"
 			},
 			"top-pages" : {}, // Dependency of scrape-top-pages
-			"organic-keywords" : {}, // Dependency of experimentation-opportunities auditType
 			"rum-traffic" : {}
 		},
 		"config": {},
@@ -31,7 +29,6 @@
 			"broken-backlinks": {}, 
 			"broken-internal-links-auto-suggest": {},
 			"cwv": {},
-			"experimentation-opportunities": {},
 			"broken-internal-links": {},
 			"meta-tags-auto-suggest": {},
 			"meta-tags": {},
@@ -43,7 +40,6 @@
 				"endDate": "2024-03-02"
 			},
 			"top-pages" : {},
-			"organic-keywords" : {},
 			"rum-traffic" : {}
 		},
 		"config": {},
@@ -56,7 +52,6 @@
 			"broken-backlinks": {}, 
 			"broken-internal-links-auto-suggest": {},
 			"cwv": {},
-			"experimentation-opportunities": {},
 			"broken-internal-links": {},
 			"meta-tags-auto-suggest": {},
 			"meta-tags": {},
