@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import {
-  isString, isValidUrl, isNonEmptyArray, hasText, tracingFetch as fetch,
+  isValidUrl, isNonEmptyArray, hasText, tracingFetch as fetch,
 } from '@adobe/spacecat-shared-utils';
 import { Readable } from 'stream';
 import { parse } from 'csv';
@@ -45,11 +45,11 @@ export default (context) => {
    * @throws {Error} If enableAudit is invalid or if auditType is empty/not a string
    */
   const validateInput = (enableAudit, auditType) => {
-    if (isString(enableAudit) === false || ['enable', 'disable'].includes(enableAudit) === false) {
+    if (hasText(enableAudit) === false || ['enable', 'disable'].includes(enableAudit) === false) {
       throw new Error('The "enableAudit" parameter is required and must be set to "enable" or "disable".');
     }
 
-    if (isString(auditType) === false || auditType.length === 0) {
+    if (hasText(auditType) === false || auditType.length === 0) {
       throw new Error('The audit type parameter is required.');
     }
   };
@@ -115,6 +115,7 @@ export default (context) => {
       const [enableAuditInput, auditTypeOrProfileInput] = args;
 
       const enableAudit = enableAuditInput.toLowerCase();
+      const isEnableAudit = enableAudit === 'enable';
       const auditTypeOrProfile = auditTypeOrProfileInput
         ? auditTypeOrProfileInput.toLowerCase() : null;
 
@@ -147,7 +148,7 @@ export default (context) => {
             return;
           }
 
-          if (enableAudit === 'enable') {
+          if (isEnableAudit) {
             configuration.enableHandlerForSite(singleAuditType, site);
           } else {
             configuration.disableHandlerForSite(singleAuditType, site);
@@ -231,7 +232,7 @@ export default (context) => {
           }
 
           auditTypes.forEach((auditType) => {
-            if (enableAudit === 'enable') {
+            if (isEnableAudit) {
               configuration.enableHandlerForSite(auditType, site);
             } else {
               configuration.disableHandlerForSite(auditType, site);
@@ -264,12 +265,12 @@ export default (context) => {
         message += `\nAudit Type: \`${auditTypeOrProfile}\``;
       }
 
-      if (results.successful.length > 0) {
+      if (isNonEmptyArray(results.successful)) {
         message += `\n${SUCCESS_MESSAGE_PREFIX}Successfully ${enableAudit}d for ${results.successful.length} sites:`;
         message += `\n\`\`\`${results.successful.join('\n')}\`\`\``;
       }
 
-      if (results.failed.length > 0) {
+      if (isNonEmptyArray(results.failed)) {
         message += `\n${ERROR_MESSAGE_PREFIX}Failed to process ${results.failed.length} sites:`;
         message += '\n```';
         results.failed.forEach(({ baseURL, error }) => {
