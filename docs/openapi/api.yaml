@@ -121,6 +121,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
