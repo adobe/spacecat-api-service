@@ -13,7 +13,10 @@
 			"structured-data": {}
 		},
 		"imports": {
-			"organic-traffic" : {},
+			"organic-traffic" : {
+				"start-date": "2025-02-24",
+				"end-date": "2024-03-02"
+			},
 			"top-pages" : {}, // Dependency of scrape-top-pages
 			"organic-keywords" : {}, // Dependency of experimentation-opportunities auditType
 			"rum-traffic" : {}
@@ -35,7 +38,10 @@
 			"sitemap": {}
 		},
 		"imports": {
-			"organic-traffic" : {},
+			"organic-traffic" : {
+				"startDate": "2025-02-24",
+				"endDate": "2024-03-02"
+			},
 			"top-pages" : {},
 			"organic-keywords" : {},
 			"rum-traffic" : {}
