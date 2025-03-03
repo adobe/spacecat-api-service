@@ -1,3 +1,10 @@
+# [1.95.0](https://github.com/adobe/spacecat-api-service/compare/v1.94.1...v1.95.0) (2025-03-03)
+
+
+### Features
+
+* add autofix endpoint ([#773](https://github.com/adobe/spacecat-api-service/issues/773)) ([53ab57f](https://github.com/adobe/spacecat-api-service/commit/53ab57f623c355ac9a20ff2dc5ed20d6cce84768))
+
 ## [1.94.1](https://github.com/adobe/spacecat-api-service/compare/v1.94.0...v1.94.1) (2025-03-02)
 
 
