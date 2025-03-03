@@ -335,7 +335,7 @@ const fetchFile = async (file, token) => {
 const parseCSV = async (file, token) => {
   try {
     const csvString = await fetchFile(file, token);
-    if (typeof csvString !== 'string' || !csvString.trim()) {
+    if (!hasText(csvString)) {
       throw new Error('CSV parsing resulted in empty or invalid data.');
     }
 
