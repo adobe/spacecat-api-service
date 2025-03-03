@@ -47,7 +47,7 @@ function SlackHandler(commands, log) {
       client,
       user: event?.user,
       botToken: context.botToken || process.env.SLACK_BOT_TOKEN,
-      files: event.files || [],
+      files: event?.files || [],
     };
 
     log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);
