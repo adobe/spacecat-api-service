@@ -91,13 +91,13 @@ function OnboardCommand(context) {
 
     try {
       if (!isValidUrl(baseURL)) {
-        reportLine.errors = 'Invalid site base URL.';
+        reportLine.errors = 'Invalid site base URL';
         reportLine.status = 'Failed';
         return reportLine;
       }
 
       if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
-        reportLine.errors = 'Invalid IMS Org ID.';
+        reportLine.errors = 'Invalid IMS Org ID';
         reportLine.status = 'Failed';
         return reportLine;
       }
