@@ -1,3 +1,10 @@
+# [1.96.0](https://github.com/adobe/spacecat-api-service/compare/v1.95.0...v1.96.0) (2025-03-03)
+
+
+### Features
+
+* **bulk-audit-enable-disable:** bulk enable/disable audits with csv support ([#797](https://github.com/adobe/spacecat-api-service/issues/797)) ([2ecd0cf](https://github.com/adobe/spacecat-api-service/commit/2ecd0cfe6f75061b03cc088752fc582f7ba10a15))
+
 # [1.95.0](https://github.com/adobe/spacecat-api-service/compare/v1.94.1...v1.95.0) (2025-03-03)
 
 
