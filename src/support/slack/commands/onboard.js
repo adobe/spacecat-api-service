@@ -61,6 +61,7 @@ function OnboardCommand(context) {
       { id: 'imports', title: 'Imports' },
       { id: 'errors', title: 'Errors' },
       { id: 'status', title: 'Status' },
+      { id: 'existingSite', title: 'Already existing site?' },
     ],
   });
 
@@ -87,6 +88,7 @@ function OnboardCommand(context) {
       imports: '',
       errors: '',
       status: 'Success',
+      existingSite: 'No',
     };
 
     try {
@@ -133,10 +135,11 @@ function OnboardCommand(context) {
       }
 
       let site = await Site.findByBaseURL(baseURL);
-      if (!site) {
+      if (site) {
+        reportLine.existingSite = 'Yes';
+      } else {
         const deliveryType = await findDeliveryType(baseURL);
         const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
-
         site = await Site.create({
           baseURL, deliveryType, isLive, organizationId: defaultOrgId,
         });
