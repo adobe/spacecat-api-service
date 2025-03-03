@@ -58,6 +58,7 @@ function OnboardCommand(context) {
       { id: 'imsOrgId', title: 'IMS Org ID' },
       { id: 'profile', title: 'Profile' },
       { id: 'existingSite', title: 'Already existing site?' },
+      { id: 'deliveryType', title: 'Delivery Type' },
       { id: 'audits', title: 'Audits' },
       { id: 'imports', title: 'Imports' },
       { id: 'errors', title: 'Errors' },
@@ -84,6 +85,7 @@ function OnboardCommand(context) {
       site: baseURL,
       imsOrgId: imsOrgID,
       profile: profileName,
+      deliveryType: '',
       audits: '',
       imports: '',
       errors: '',
@@ -139,6 +141,7 @@ function OnboardCommand(context) {
         reportLine.existingSite = 'Yes';
       } else {
         const deliveryType = await findDeliveryType(baseURL);
+        reportLine.deliveryType = deliveryType;
         const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
         site = await Site.create({
           baseURL, deliveryType, isLive, organizationId: defaultOrgId,
