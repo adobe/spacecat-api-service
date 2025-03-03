@@ -18,7 +18,8 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
-  isArray, isNonEmptyObject,
+  isArray,
+  isNonEmptyObject,
   isObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
