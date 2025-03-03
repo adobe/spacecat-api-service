@@ -330,7 +330,7 @@ describe('Base Slack Utils', () => {
     });
 
     it('should correctly fetch and parse a CSV file', async () => {
-      const fileContent = fs.readFileSync('test/utils/slack/test-entries.csv', 'utf-8');
+      const fileContent = fs.readFileSync('test/fixtures/onboarding.csv', 'utf-8');
 
       nock(baseUrl)
         .get(filePath)
