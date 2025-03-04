@@ -1,3 +1,10 @@
+# [1.97.0](https://github.com/adobe/spacecat-api-service/compare/v1.96.4...v1.97.0) (2025-03-04)
+
+
+### Features
+
+* **sites:** add delivery configuration object to site object ([#744](https://github.com/adobe/spacecat-api-service/issues/744)) ([a87c751](https://github.com/adobe/spacecat-api-service/commit/a87c7518f9950d0f5f6379eed406946727c1c764))
+
 ## [1.96.4](https://github.com/adobe/spacecat-api-service/compare/v1.96.3...v1.96.4) (2025-03-04)
 
 
