@@ -44,40 +44,35 @@ function RunScrapeCommand(context) {
 
   const scrapeSite = async (baseURL, slackContext) => {
     const { say } = slackContext;
-    try {
-      const site = await Site.findByBaseURL(baseURL);
-      if (!isObject(site)) {
-        await postSiteNotFoundMessage(say, baseURL);
-        return;
-      }
-
-      const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
-      const topPages = result || [];
-
-      if (topPages.length === 0) {
-        await say(`:warning: No top pages found for site \`${baseURL}\``);
-        return;
-      }
-      const urls = topPages.map((page) => ({ url: page.getUrl() }));
-      await say(`:white_check_mark: Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
-
-      const batches = [];
-      for (let i = 0; i < urls.length; i += 50) {
-        batches.push(urls.slice(i, i + 50));
-      }
-      say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
-      const promises = batches.map((urlsBatch) => triggerScraperRun(
-        `${site.getId()}`,
-        urlsBatch,
-        slackContext,
-        context,
-      ));
-      await Promise.all(promises);
-      log.info(`Completed triggering scrape runs for site ${baseURL}`);
-    } catch (error) {
-      log.error(error);
-      await postErrorMessage(say, error);
+    const site = await Site.findByBaseURL(baseURL);
+    if (!isObject(site)) {
+      await postSiteNotFoundMessage(say, baseURL);
+      return;
     }
+
+    const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
+    const topPages = result || [];
+
+    if (topPages.length === 0) {
+      await say(`:warning: No top pages found for site \`${baseURL}\``);
+      return;
+    }
+    const urls = topPages.map((page) => ({ url: page.getUrl() }));
+    log.info(`Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
+
+    const batches = [];
+    for (let i = 0; i < urls.length; i += 50) {
+      batches.push(urls.slice(i, i + 50));
+    }
+
+    const promises = batches.map((urlsBatch) => triggerScraperRun(
+      `${site.getId()}`,
+      urlsBatch,
+      slackContext,
+      context,
+    ));
+    await Promise.all(promises);
+    log.info(`Completed triggering scrape runs for site ${baseURL}`);
   };
   /**
      * Validates input and triggers a new scrape run for the given site.
@@ -100,48 +95,54 @@ function RunScrapeCommand(context) {
       return;
     }
     */
+    try {
+      const [baseURLInput] = args;
+      const baseURL = extractURLFromSlackInput(baseURLInput);
 
-    const [baseURLInput] = args;
-    const baseURL = extractURLFromSlackInput(baseURLInput);
-
-    if (!hasText(baseURL) && !isNonEmptyArray(files)) {
-      await say(baseCommand.usage());
-      return;
-    }
-
-    if (hasText(baseURL) && isNonEmptyArray(files)) {
-      await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
-      return;
-    }
-
-    if (isNonEmptyArray(files)) {
-      if (files.length > 1) {
-        await say(':warning: Only one CSV file is allowed.');
+      if (!hasText(baseURL) && !isNonEmptyArray(files)) {
+        await say(baseCommand.usage());
         return;
       }
 
-      const file = files[0];
-      if (!file.name.endsWith('.csv')) {
-        await say(':warning: Only CSV files are allowed.');
+      if (hasText(baseURL) && isNonEmptyArray(files)) {
+        await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
 
-      const csvData = await parseCSV(file, botToken);
-      if (!isNonEmptyArray(csvData)) {
-        await say(':warning: No URLs found in the CSV file.');
-        return;
-      }
+      if (isNonEmptyArray(files)) {
+        if (files.length > 1) {
+          await say(':warning: Only one CSV file is allowed.');
+          return;
+        }
 
-      await Promise.all(
-        csvData.map(async (row) => {
-          const [csvBaseURL] = row;
-          return scrapeSite(csvBaseURL, slackContext);
-        }),
-      );
-    } else if (hasText(baseURL)) {
-      await scrapeSite(baseURL, slackContext);
+        const file = files[0];
+        if (!file.name.endsWith('.csv')) {
+          await say(':warning: Only CSV files are allowed.');
+          return;
+        }
+
+        const csvData = await parseCSV(file, botToken);
+        if (!isNonEmptyArray(csvData)) {
+          await say(':warning: No URLs found in the CSV file.');
+          return;
+        }
+
+        say(`:adobe-run: Triggering scrape run for ${csvData.length} sites.`);
+        await Promise.all(
+          csvData.map(async (row) => {
+            const [csvBaseURL] = row;
+            return scrapeSite(csvBaseURL, slackContext);
+          }),
+        );
+      } else if (hasText(baseURL)) {
+        say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
+        await scrapeSite(baseURL, slackContext);
+      }
+      say(':white_check_mark: Completed triggering scrape runs.');
+    } catch (error) {
+      log.error(error);
+      await postErrorMessage(say, error);
     }
-    say(':white_check_mark: Completed triggering scrape runs.');
   };
 
   baseCommand.init(context);
