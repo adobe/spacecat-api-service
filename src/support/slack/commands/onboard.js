@@ -139,6 +139,7 @@ function OnboardCommand(context) {
       let site = await Site.findByBaseURL(baseURL);
       if (site) {
         reportLine.existingSite = 'Yes';
+        reportLine.deliveryType = site.getDeliveryType();
       } else {
         const deliveryType = await findDeliveryType(baseURL);
         reportLine.deliveryType = deliveryType;
