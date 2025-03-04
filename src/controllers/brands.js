@@ -126,7 +126,10 @@ function BrandsController(dataAccess, log, env) {
     if (!hasText(brandId)) {
       return badRequest('Brand ID missing in brand config of site');
     }
-    const imsOrgId = site.getOrganization()?.getImsOrgId();
+    const organizationId = site.getOrganizationId();
+    const organization = await Organization.findById(organizationId);
+    log.info(`Organization for site: ${siteId} is ${organization}`);
+    const imsOrgId = organization?.getImsOrgId();
     log.info(`IMS Org ID for site: ${siteId} is ${imsOrgId}`);
     const imsConfig = getImsConfig();
     const brandClient = BrandClient.createFrom(context);
