@@ -70,7 +70,7 @@ function BrandsController(dataAccess, log, env) {
       return badRequest('Organization ID required');
     }
 
-    const organization = await Organization.findByID(organizationId);
+    const organization = await Organization.findById(organizationId);
     if (!organization) {
       return notFound(`Organization not found: ${organizationId}`);
     }
@@ -117,7 +117,7 @@ function BrandsController(dataAccess, log, env) {
       return badRequest('Site ID required');
     }
 
-    const site = await Site.findByID(siteId);
+    const site = await Site.findById(siteId);
     if (!site) {
       return notFound(`Site not found: ${siteId}`);
     }
