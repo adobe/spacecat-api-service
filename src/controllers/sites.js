@@ -264,6 +264,11 @@ function SitesController(dataAccess, log, env) {
       updates = true;
     }
 
+    if (requestBody.name !== site.getName()) {
+      site.setName(requestBody.name);
+      updates = true;
+    }
+
     if (requestBody.gitHubURL !== site.getGitHubURL() && validateRepoUrl(requestBody.gitHubURL)) {
       site.setGitHubURL(requestBody.gitHubURL);
       updates = true;
@@ -272,6 +277,12 @@ function SitesController(dataAccess, log, env) {
     if (requestBody.deliveryType !== site.getDeliveryType()
         && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
       site.setDeliveryType(requestBody.deliveryType);
+      updates = true;
+    }
+
+    if (isObject(requestBody.deliveryConfig)
+        && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
+      site.setDeliveryConfig(requestBody.deliveryConfig);
       updates = true;
     }
 
@@ -447,6 +458,41 @@ function SitesController(dataAccess, log, env) {
     });
   };
 
+  const getPageMetricsBySource = async (context) => {
+    const siteId = context.params?.siteId;
+    const metric = context.params?.metric;
+    const source = context.params?.source;
+    const encodedPageURL = context.params?.base64PageUrl;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(metric)) {
+      return badRequest('metric required');
+    }
+
+    if (!hasText(source)) {
+      return badRequest('source required');
+    }
+
+    if (!hasText(encodedPageURL)) {
+      return badRequest('base64PageUrl required');
+    }
+
+    const decodedPageURL = Buffer.from(encodedPageURL, 'base64').toString('utf-8').trim();
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    let metrics = await getStoredMetrics({ siteId, metric, source }, context);
+    metrics = metrics.filter((metricEntry) => metricEntry.url === decodedPageURL);
+
+    return ok(metrics);
+  };
+
   return {
     createSite,
     getAll,
@@ -467,6 +513,7 @@ function SitesController(dataAccess, log, env) {
 
     // site metrics
     getSiteMetricsBySource,
+    getPageMetricsBySource,
     getLatestSiteMetrics,
   };
 }

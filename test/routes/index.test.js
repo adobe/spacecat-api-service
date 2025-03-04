@@ -75,10 +75,6 @@ describe('getRouteHandlers', () => {
     stopImportJob: sinon.stub(),
   };
 
-  const mockAssistantController = {
-    processImportAssistant: sinon.stub(),
-  };
-
   const mockApiKeyController = {
     createApiKey: sinon.stub(),
     deleteApiKey: sinon.stub(),
@@ -119,7 +115,6 @@ describe('getRouteHandlers', () => {
       mockTrigger,
       mockFulfillmentController,
       mockImportController,
-      mockAssistantController,
       mockApiKeyController,
       mockSitesAuditsToggleController,
       mockOpportunitiesController,
@@ -145,7 +140,6 @@ describe('getRouteHandlers', () => {
       'POST /tools/api-keys',
       'GET /tools/api-keys',
       'POST /tools/import/jobs',
-      'POST /tools/import/assistant/prompt',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -191,6 +185,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/key-events',
       'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
+      'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'DELETE /tools/api-keys/:id',
       'GET /tools/import/jobs/:jobId',
       'PATCH /tools/import/jobs/:jobId',
@@ -205,6 +200,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions',

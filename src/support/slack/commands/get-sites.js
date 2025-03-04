@@ -201,6 +201,9 @@ _Sites are ordered by performance score, then all other scores, ascending._
         case 'aem_cs':
           deliveryType = 'aem_cs';
           break;
+        case 'aem_ams':
+          deliveryType = 'aem_ams';
+          break;
         case 'other':
           deliveryType = 'other';
           break;

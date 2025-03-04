@@ -31,8 +31,6 @@ tags:
     description: Site operations
   - name: audit
     description: Audit operations
-  - name: site-audit
-    description: Site-audit operations
   - name: auth
     description: Init authentication against 3rd party services
   - name: organization
@@ -55,6 +53,8 @@ paths:
     $ref: './audits-api.yaml#/latest-audits'
   /auth/google/{siteId}:
     $ref: './auth-api.yaml#/google-auth'
+  /auth/google/{siteId}/status:
+    $ref: './auth-api.yaml#/google-auth-status'
   /configurations:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
@@ -91,7 +91,7 @@ paths:
     $ref: './site-api.yaml#/site-by-base-url'
   /sites/with-latest-audit/{auditType}:
     $ref: './sites-api.yaml#/sites-with-latest-audit'
-  /sites/{siteId}/metrics/latest:
+  /sites/{siteId}/latest-metrics:
     $ref: './site-metrics-api.yaml#/site-metrics-latest'
   /sites/{siteId}:
     $ref: './site-api.yaml#/site'
@@ -121,6 +121,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
@@ -133,6 +135,8 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
   /sites/{siteId}/metrics/{metric}/{source}:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
+  /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
+    $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
   /slack/channels/invite-by-user-id:
@@ -151,8 +155,6 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
-  /tools/import/assistant/prompt:
-    $ref: './tools-api.yaml#/import-assistant'
 
 components:
   securitySchemes:

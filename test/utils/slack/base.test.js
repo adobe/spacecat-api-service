@@ -12,8 +12,12 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
 import sinon from 'sinon';
+import fs from 'fs';
+import chaiAsPromised from 'chai-as-promised';
+
+import path from 'path';
 
 import { Blocks } from 'slack-block-builder';
 import {
@@ -22,7 +26,10 @@ import {
   getSlackContext,
   postErrorMessage, sendFile,
   sendMessageBlocks,
+  loadProfileConfig,
 } from '../../../src/utils/slack/base.js';
+
+use(chaiAsPromised);
 
 describe('Base Slack Utils', () => {
   describe('extractBaseURLFromInput', () => {
@@ -212,6 +219,106 @@ describe('Base Slack Utils', () => {
         const slackContext = await getSlackContext({ url: 'some-url', log: console });
         expect(slackContext).to.eql({ channel: FALLBACK_SLACK_CHANNEL });
       });
+    });
+  });
+
+  describe('loadProfileConfig', () => {
+    let fsStub;
+
+    beforeEach(() => {
+      fsStub = sinon.stub(fs, 'readFileSync');
+    });
+
+    afterEach(() => {
+      fsStub.restore();
+    });
+
+    it('should load the correct profile configuration', () => {
+      const mockProfileData = JSON.stringify({
+        default: {
+          audits: {
+            foo: {},
+            bar: {},
+          },
+          imports: {
+            'import-foo': {},
+            'import-bar': {},
+          },
+          config: {},
+          integrations: {},
+        },
+        other: {
+          audits: ['audit1', 'audit2'],
+          imports: {},
+          config: {},
+          integrations: {},
+        },
+      });
+
+      fsStub.returns(mockProfileData);
+
+      const result = loadProfileConfig('default');
+
+      expect(result).to.deep.equal({
+        audits: {
+          foo: {},
+          bar: {},
+        },
+        imports: {
+          'import-foo': {},
+          'import-bar': {},
+        },
+        config: {},
+        integrations: {},
+      });
+
+      expect(result.audits).to.deep.equal({ foo: {}, bar: {} });
+      expect(result.imports).to.deep.equal({
+        'import-foo': {},
+        'import-bar': {},
+      });
+    });
+
+    it('should throw an error if profile does not exist', () => {
+      const mockProfileData = JSON.stringify({
+        default: {
+          audits: {
+            foo: {},
+            bar: {},
+          },
+          imports: {},
+          config: {},
+          integrations: {},
+        },
+        other: {
+          audits: ['audit1', 'audit2'],
+          imports: {},
+          config: {},
+          integrations: {},
+        },
+      });
+
+      const profileConfigPath = path.resolve(process.cwd(), 'static/onboard/profiles.json');
+
+      fsStub.returns(mockProfileData);
+
+      expect(() => loadProfileConfig('nonexistent'))
+        .to.throw(`Failed to load profile configuration for "nonexistent": Profile "nonexistent" not found in ${profileConfigPath}`);
+    });
+
+    it('should throw an error if JSON file is invalid', () => {
+      fsStub.returns('INVALID_JSON');
+
+      expect(() => loadProfileConfig('default'))
+      // eslint-disable-next-line quotes
+        .to.throw(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`);
+    });
+
+    it('should throw an error if the file cannot be read', () => {
+      fsStub.throws(new Error('File not found'));
+
+      expect(() => loadProfileConfig('default'))
+        .to.throw('Failed to load profile configuration for "default": File not found');
     });
   });
 });
