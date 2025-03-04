@@ -131,7 +131,14 @@ function RunScrapeCommand(context) {
         await Promise.all(
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
-            return scrapeSite(csvBaseURL, slackContext);
+            try {
+              const result = await scrapeSite(csvBaseURL, slackContext);
+              say(`:white_check_mark: Completed scrape for ${csvBaseURL}`);
+              return result;
+            } catch (error) {
+              say(`::warning:Failed scrape for ${csvBaseURL}: ${error.message}`);
+              return null;
+            }
           }),
         );
       } else if (hasText(baseURL)) {
