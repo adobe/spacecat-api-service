@@ -39,6 +39,7 @@ DeliveryConfig:
       description: The site ID
       type: string
       example: '1234'
+  additionalProperties: true
 AuditType:
   type: string
   enum:
