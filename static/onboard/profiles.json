@@ -1,7 +1,7 @@
 {
 	"default":  {
 		"audits": {
-			"scrape-top-pages": {}, // Dependency of structured-data and broken-backlinks auditType
+			"scrape-top-pages": {},
 			"broken-internal-links-auto-suggest": {},
 			"broken-backlinks": {}, 
 			"cwv": {},
@@ -16,15 +16,15 @@
 				"start-date": "2025-02-24",
 				"end-date": "2024-03-02"
 			},
-			"top-pages" : {}, // Dependency of scrape-top-pages
-			"rum-traffic" : {}
+			"top-pages" : {},
+			"all-traffic" : {}
 		},
 		"config": {},
 		"integrations": {}
 	},
 	"summit":  {
 		"audits": {
-			"scrape-top-pages": {}, // Dependency of broken-backlinks
+			"scrape-top-pages": {},
 			"alt-text": {},
 			"broken-backlinks": {}, 
 			"broken-internal-links-auto-suggest": {},
@@ -40,14 +40,14 @@
 				"endDate": "2024-03-02"
 			},
 			"top-pages" : {},
-			"rum-traffic" : {}
+			"all-traffic" : {}
 		},
 		"config": {},
 		"integrations": {}
 	},
 	"summit-lower-quality":  {
 		"audits": {
-			"scrape-top-pages": {}, // Dependency of broken-backlinks
+			"scrape-top-pages": {},
 			"alt-text": {},
 			"broken-backlinks": {}, 
 			"broken-internal-links-auto-suggest": {},
@@ -59,7 +59,7 @@
 		},
 		"imports": {
 			"top-pages" : {},
-			"rum-traffic" : {}
+			"all-traffic" : {}
 		},
 		"config": {},
 		"integrations": {}
