@@ -67,7 +67,7 @@ describe('RunScrapeCommand', () => {
       const command = RunScrapeCommand(context);
       expect(command.id).to.equal('run-scrape');
       expect(command.name).to.equal('Run Scrape');
-      expect(command.description).to.include('Runs the specified scrape type for the site identified with its id');
+      expect(command.description).to.include('Runs the specified scrape type for the provided base URL or a list of URLs provided in a CSV file');
     });
   });
 
@@ -115,7 +115,7 @@ describe('RunScrapeCommand', () => {
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Found top pages for site `https://example.com`');
       expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Triggering scrape run for site `https://example.com`');
-      expect(slackContext.say.thirdCall.args[0]).to.include('white_check_mark: Completed triggering scrape runs for site `https://example.com` — Total URLs: 2');
+      expect(slackContext.say.thirdCall.args[0]).to.include('white_check_mark: Completed triggering scrape runs.');
     });
 
     /* todo: uncomment after summit and back-office-UI support

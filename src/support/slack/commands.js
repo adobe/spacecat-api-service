@@ -25,6 +25,7 @@ import help from './commands/help.js';
 import toggleSiteAudit from './commands/toggle-site-audit.js';
 import onboard from './commands/onboard.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
+import runAllAudits from './commands/run-all-audits.js';
 
 /**
  * Returns all commands.
@@ -40,6 +41,7 @@ export default (context) => [
   getSites(context),
   martechImpact(context),
   runAudit(context),
+  runAllAudits(context),
   runImport(context),
   runScrape(context),
   setLiveStatus(context),
