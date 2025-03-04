@@ -133,10 +133,10 @@ function RunScrapeCommand(context) {
             const [csvBaseURL] = row;
             try {
               const result = await scrapeSite(csvBaseURL, slackContext);
-              say(`:white_check_mark: Completed scrape for ${csvBaseURL}`);
+              say(`:white_check_mark: Completed scrape for \`${csvBaseURL}\``);
               return result;
             } catch (error) {
-              say(`::warning:Failed scrape for ${csvBaseURL}: ${error.message}`);
+              say(`::warning:Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
               return null;
             }
           }),
@@ -144,8 +144,8 @@ function RunScrapeCommand(context) {
       } else if (hasText(baseURL)) {
         say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
         await scrapeSite(baseURL, slackContext);
+        say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\`.`);
       }
-      say(':white_check_mark: Completed triggering scrape runs.');
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
