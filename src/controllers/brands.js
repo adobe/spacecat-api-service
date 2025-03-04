@@ -128,7 +128,6 @@ function BrandsController(dataAccess, log, env) {
     }
     const organizationId = site.getOrganizationId();
     const organization = await Organization.findById(organizationId);
-    log.info(`Organization for site: ${siteId} is ${organization}`);
     const imsOrgId = organization?.getImsOrgId();
     log.info(`IMS Org ID for site: ${siteId} is ${imsOrgId}`);
     const imsConfig = getImsConfig();
