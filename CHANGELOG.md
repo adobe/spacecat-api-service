@@ -1,3 +1,10 @@
+## [1.96.4](https://github.com/adobe/spacecat-api-service/compare/v1.96.3...v1.96.4) (2025-03-04)
+
+
+### Bug Fixes
+
+* adding all-traffic to import schemas ([#803](https://github.com/adobe/spacecat-api-service/issues/803)) ([980dbef](https://github.com/adobe/spacecat-api-service/commit/980dbef464ff7e99cc34295a38bde66043d34c97))
+
 ## [1.96.3](https://github.com/adobe/spacecat-api-service/compare/v1.96.2...v1.96.3) (2025-03-04)
 
 
