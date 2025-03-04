@@ -121,7 +121,7 @@ function BrandsController(dataAccess, log, env) {
     if (!site) {
       return notFound(`Site not found: ${siteId}`);
     }
-    const brandId = site.getBrandConfig()?.brandId;
+    const brandId = site.getConfig()?.getBrandConfig()?.brandId;
     log.info(`Brand ID mapping for site: ${siteId} is ${brandId}`);
     if (!hasText(brandId)) {
       return badRequest('Brand ID missing in brand config of site');
