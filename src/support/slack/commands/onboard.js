@@ -290,7 +290,7 @@ function OnboardCommand(context) {
           }
         });
 
-        await say(':white_check_mark: Batch onboarding completed successfully.');
+        await say(':white_check_mark: Batch onboarding process finished successfully.');
       } else {
         if (args.length < 2) {
           await say(':warning: Missing required arguments. Please provide *Site URL* and *IMS Org ID*.');
