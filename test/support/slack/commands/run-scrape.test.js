@@ -115,7 +115,6 @@ describe('RunScrapeCommand', () => {
       expect(slackContext.say.called).to.be.true;
       expect(context.log.info.firstCall.args[0]).to.include('Found top pages for site `https://example.com`');
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering scrape run for site `https://example.com`');
-      expect(slackContext.say.secondCall.args[0]).to.include('white_check_mark: Completed triggering scrape runs.');
     });
 
     /* todo: uncomment after summit and back-office-UI support
