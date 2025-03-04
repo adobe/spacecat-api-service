@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { hasText, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import { hasText, isNonEmptyArray, isValidUrl } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, parseCSV, postErrorMessage } from '../../../utils/slack/base.js';
 import { triggerAuditForSite } from '../../utils.js';
@@ -49,7 +49,7 @@ function RunAllAuditsCommand(context) {
       const enabledAudits = configuration.getEnabledAuditsForSite(site);
 
       if (!isNonEmptyArray(enabledAudits)) {
-        await say(`:warning: No audits configured for site ${baseURL}`);
+        await say(`:warning: No audits configured for site \`${baseURL}\``);
         return;
       }
 
@@ -59,13 +59,13 @@ function RunAllAuditsCommand(context) {
             await triggerAuditForSite(site, auditType, slackContext, context);
           } catch (error) {
             log.error(`Error running audit ${auditType.id} for site ${baseURL}`, error);
-            await postErrorMessage(say, error.message);
+            await postErrorMessage(say, error);
           }
         }),
       );
     } catch (error) {
       log.error(`Error running all audits for site ${baseURL}`, error);
-      await postErrorMessage(say, error.message);
+      await postErrorMessage(say, error);
     }
   };
 
@@ -104,16 +104,14 @@ function RunAllAuditsCommand(context) {
         return;
       }
       const csvData = await parseCSV(file, botToken);
-      if (!isNonEmptyArray(csvData)) {
-        await say(':warning: No URLs found in the CSV file.');
-        return;
-      }
 
       await Promise.all(
         csvData.map(async (row) => {
           const [csvBaseURL] = row;
-          if (hasText(csvBaseURL)) {
+          if (isValidUrl(csvBaseURL)) {
             await runAllAuditsForSite(csvBaseURL, slackContext);
+          } else {
+            await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
           }
         }),
       );

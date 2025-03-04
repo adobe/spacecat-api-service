@@ -47,7 +47,7 @@ function RunScrapeCommand(context) {
     const site = await Site.findByBaseURL(baseURL);
     if (!isObject(site)) {
       await postSiteNotFoundMessage(say, baseURL);
-      return;
+      return null;
     }
 
     const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
@@ -55,8 +55,9 @@ function RunScrapeCommand(context) {
 
     if (topPages.length === 0) {
       await say(`:warning: No top pages found for site \`${baseURL}\``);
-      return;
+      return null;
     }
+
     const urls = topPages.map((page) => ({ url: page.getUrl() }));
     log.info(`Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
@@ -65,15 +66,11 @@ function RunScrapeCommand(context) {
       batches.push(urls.slice(i, i + 50));
     }
 
-    const promises = batches.map((urlsBatch) => triggerScraperRun(
-      `${site.getId()}`,
-      urlsBatch,
-      slackContext,
-      context,
-    ));
-    await Promise.all(promises);
-    log.info(`Completed triggering scrape runs for site ${baseURL}`);
+    return Promise.all(
+      batches.map((urlsBatch) => triggerScraperRun(`${site.getId()}`, urlsBatch, slackContext, context)),
+    );
   };
+
   /**
      * Validates input and triggers a new scrape run for the given site.
      *
@@ -111,33 +108,27 @@ function RunScrapeCommand(context) {
 
       if (isNonEmptyArray(files)) {
         if (files.length > 1) {
-          await say(':warning: Only one CSV file is allowed.');
+          await say(':warning: Please provide only one CSV file.');
           return;
         }
 
         const file = files[0];
         if (!file.name.endsWith('.csv')) {
-          await say(':warning: Only CSV files are allowed.');
+          await say(':warning: Please provide a CSV file.');
           return;
         }
 
         const csvData = await parseCSV(file, botToken);
-        if (!isNonEmptyArray(csvData)) {
-          await say(':warning: No URLs found in the CSV file.');
-          return;
-        }
 
         say(`:adobe-run: Triggering scrape run for ${csvData.length} sites.`);
         await Promise.all(
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             try {
-              const result = await scrapeSite(csvBaseURL, slackContext);
+              await scrapeSite(csvBaseURL, slackContext);
               say(`:white_check_mark: Completed scrape for \`${csvBaseURL}\``);
-              return result;
             } catch (error) {
-              say(`::warning:Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
-              return null;
+              say(`:warning: Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
             }
           }),
         );
