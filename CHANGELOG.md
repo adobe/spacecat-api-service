@@ -1,3 +1,10 @@
+# [1.100.0](https://github.com/adobe/spacecat-api-service/compare/v1.99.4...v1.100.0) (2025-03-05)
+
+
+### Features
+
+* introduce bulk import ([#811](https://github.com/adobe/spacecat-api-service/issues/811)) ([22519b9](https://github.com/adobe/spacecat-api-service/commit/22519b905da98e5fe0c95234d6741fdc87d3a67c))
+
 ## [1.99.4](https://github.com/adobe/spacecat-api-service/compare/v1.99.3...v1.99.4) (2025-03-05)
 
 
