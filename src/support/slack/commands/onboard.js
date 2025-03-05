@@ -181,6 +181,8 @@ function OnboardCommand(context) {
 
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
+        site.enableImport(importType);
+        await site.save();
         await triggerImportRun(
           configuration,
           importType,
