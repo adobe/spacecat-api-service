@@ -72,11 +72,18 @@ function OnboardCommand(context) {
    *
    * @param {string} baseURLInput - The site URL.
    * @param {string} imsOrgID - The IMS Org ID.
+   * @param {object} configuration - The configuration object.
    * @param {string} profileName - The profile name.
    * @param {Object} slackContext - Slack context.
    * @returns {Promise<Object>} - A report line containing execution details.
    */
-  const onboardSingleSite = async (baseURLInput, imsOrgID, profileName, slackContext) => {
+  const onboardSingleSite = async (
+    baseURLInput,
+    imsOrgID,
+    configuration,
+    profileName,
+    slackContext,
+  ) => {
     const { say } = slackContext;
     const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = context.env;
 
@@ -176,8 +183,6 @@ function OnboardCommand(context) {
         return reportLine;
       }
 
-      const configuration = await Configuration.findLatest();
-
       const importTypes = Object.keys(profile.imports);
       const siteConfig = site.getConfig();
       for (const importType of importTypes) {
@@ -209,8 +214,6 @@ function OnboardCommand(context) {
       auditTypes.forEach((auditType) => {
         configuration.enableHandlerForSite(auditType, site);
       });
-
-      await configuration.save();
 
       reportLine.audits = auditTypes.join(',');
       log.info(`Enabled the following audits for site ${site.getId()}: ${reportLine.audits}`);
@@ -270,6 +273,7 @@ function OnboardCommand(context) {
 
         const tempFilePath = path.join(os.tmpdir(), `spacecat_onboard_report_${Date.now()}.csv`);
         const fileStream = fs.createWriteStream(tempFilePath);
+        const configuration = await Configuration.findLatest();
 
         // Write headers to CSV report
         fileStream.write(csvStringifier.getHeaderString());
@@ -278,9 +282,17 @@ function OnboardCommand(context) {
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
           const [baseURL, imsOrgID] = row;
-          const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
+          const reportLine = await onboardSingleSite(
+            baseURL,
+            imsOrgID,
+            configuration,
+            profileName,
+            slackContext,
+          );
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
+
+        await configuration.save();
 
         log.info('All sites were processed and onboarded.');
 
@@ -310,12 +322,17 @@ function OnboardCommand(context) {
         }
 
         const [baseURLInput, imsOrgID, profileName = 'default'] = args;
+        const configuration = await Configuration.findLatest();
+
         const reportLine = await onboardSingleSite(
           baseURLInput,
           imsOrgID,
+          configuration,
           profileName,
           slackContext,
         );
+
+        await configuration.save();
 
         if (reportLine.errors) {
           await say(`:warning: ${reportLine.errors}`);
