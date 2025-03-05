@@ -1,3 +1,38 @@
+## [1.97.1](https://github.com/adobe/spacecat-api-service/compare/v1.97.0...v1.97.1) (2025-03-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#804](https://github.com/adobe/spacecat-api-service/issues/804)) ([58d6f01](https://github.com/adobe/spacecat-api-service/commit/58d6f018cdd12f60f8fb9170214762d45c7caba3))
+
+# [1.97.0](https://github.com/adobe/spacecat-api-service/compare/v1.96.4...v1.97.0) (2025-03-04)
+
+
+### Features
+
+* **sites:** add delivery configuration object to site object ([#744](https://github.com/adobe/spacecat-api-service/issues/744)) ([a87c751](https://github.com/adobe/spacecat-api-service/commit/a87c7518f9950d0f5f6379eed406946727c1c764))
+
+## [1.96.4](https://github.com/adobe/spacecat-api-service/compare/v1.96.3...v1.96.4) (2025-03-04)
+
+
+### Bug Fixes
+
+* adding all-traffic to import schemas ([#803](https://github.com/adobe/spacecat-api-service/issues/803)) ([980dbef](https://github.com/adobe/spacecat-api-service/commit/980dbef464ff7e99cc34295a38bde66043d34c97))
+
+## [1.96.3](https://github.com/adobe/spacecat-api-service/compare/v1.96.2...v1.96.3) (2025-03-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#802](https://github.com/adobe/spacecat-api-service/issues/802)) ([f6a25f5](https://github.com/adobe/spacecat-api-service/commit/f6a25f502736afdceadd3319c274776134418c2c))
+
+## [1.96.2](https://github.com/adobe/spacecat-api-service/compare/v1.96.1...v1.96.2) (2025-03-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#801](https://github.com/adobe/spacecat-api-service/issues/801)) ([461e31e](https://github.com/adobe/spacecat-api-service/commit/461e31e9a77b602777cd48c59ab4ca661fe43f15))
+
 ## [1.96.1](https://github.com/adobe/spacecat-api-service/compare/v1.96.0...v1.96.1) (2025-03-03)
 
 
