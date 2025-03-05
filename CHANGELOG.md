@@ -1,3 +1,10 @@
+## [1.99.1](https://github.com/adobe/spacecat-api-service/compare/v1.99.0...v1.99.1) (2025-03-05)
+
+
+### Bug Fixes
+
+* enable imports for sites ([#807](https://github.com/adobe/spacecat-api-service/issues/807)) ([8992728](https://github.com/adobe/spacecat-api-service/commit/89927282daf9ad1350ea3776152dbef71cd50d41))
+
 # [1.99.0](https://github.com/adobe/spacecat-api-service/compare/v1.98.0...v1.99.0) (2025-03-05)
 
 
