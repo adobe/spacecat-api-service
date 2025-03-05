@@ -113,10 +113,14 @@ function RunImportCommand(context) {
     */
 
     try {
-      const [importType, baseURLInput, startDate, endDate] = args;
+      const [importType, baseURLInput, start, end] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const hasValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
+
+      const [startDate, endDate] = hasFiles
+        ? [baseURLInput, start]
+        : [start, end];
 
       if (!hasText(importType) || (!hasValidBaseURL && !hasFiles)) {
         await say(baseCommand.usage());
