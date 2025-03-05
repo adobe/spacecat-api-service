@@ -1,3 +1,10 @@
+## [1.99.2](https://github.com/adobe/spacecat-api-service/compare/v1.99.1...v1.99.2) (2025-03-05)
+
+
+### Bug Fixes
+
+* global configuration concurrency issue while saving ([#808](https://github.com/adobe/spacecat-api-service/issues/808)) ([f3a0eaf](https://github.com/adobe/spacecat-api-service/commit/f3a0eafd3117f2b509a2ec227db1c14426606260))
+
 ## [1.99.1](https://github.com/adobe/spacecat-api-service/compare/v1.99.0...v1.99.1) (2025-03-05)
 
 
