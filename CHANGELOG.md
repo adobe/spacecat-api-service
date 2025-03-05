@@ -1,3 +1,10 @@
+# [1.99.0](https://github.com/adobe/spacecat-api-service/compare/v1.98.0...v1.99.0) (2025-03-05)
+
+
+### Features
+
+* Describe changes needed for profiles config ([#791](https://github.com/adobe/spacecat-api-service/issues/791)) ([5253cf4](https://github.com/adobe/spacecat-api-service/commit/5253cf4e731645b37c060c184a8756c2e73d3419))
+
 # [1.98.0](https://github.com/adobe/spacecat-api-service/compare/v1.97.1...v1.98.0) (2025-03-05)
 
 
