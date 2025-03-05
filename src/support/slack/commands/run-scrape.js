@@ -9,7 +9,11 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { hasText, isNonEmptyArray, isObject } from '@adobe/spacecat-shared-utils';
+import {
+  isNonEmptyArray,
+  isNonEmptyObject,
+  isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { triggerScraperRun } from '../../utils.js';
@@ -45,7 +49,7 @@ function RunScrapeCommand(context) {
   const scrapeSite = async (baseURL, slackContext) => {
     const { say } = slackContext;
     const site = await Site.findByBaseURL(baseURL);
-    if (!isObject(site)) {
+    if (!isNonEmptyObject(site)) {
       await postSiteNotFoundMessage(say, baseURL);
       return null;
     }
@@ -53,7 +57,7 @@ function RunScrapeCommand(context) {
     const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
     const topPages = result || [];
 
-    if (topPages.length === 0) {
+    if (!isNonEmptyArray(topPages)) {
       await say(`:warning: No top pages found for site \`${baseURL}\``);
       return null;
     }
@@ -95,18 +99,20 @@ function RunScrapeCommand(context) {
     try {
       const [baseURLInput] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
+      const isValidBaseURL = isValidUrl(baseURL);
+      const hasFiles = isNonEmptyArray(files);
 
-      if (!hasText(baseURL) && !isNonEmptyArray(files)) {
+      if (!isValidBaseURL && !hasFiles) {
         await say(baseCommand.usage());
         return;
       }
 
-      if (hasText(baseURL) && isNonEmptyArray(files)) {
+      if (isValidBaseURL && hasFiles) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
 
-      if (isNonEmptyArray(files)) {
+      if (hasFiles) {
         if (files.length > 1) {
           await say(':warning: Please provide only one CSV file.');
           return;
@@ -132,7 +138,7 @@ function RunScrapeCommand(context) {
             }
           }),
         );
-      } else if (hasText(baseURL)) {
+      } else if (isValidBaseURL) {
         say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
         await scrapeSite(baseURL, slackContext);
         say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\`.`);
