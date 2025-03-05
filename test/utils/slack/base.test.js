@@ -479,7 +479,7 @@ describe('Base Slack Utils', () => {
       fsStub.returns('INVALID_JSON');
 
       expect(() => loadProfileConfig('default'))
-      // eslint-disable-next-line quotes
+        // eslint-disable-next-line quotes
         .to.throw(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`);
     });
 
