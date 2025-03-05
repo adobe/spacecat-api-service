@@ -199,6 +199,8 @@ function OnboardCommand(context) {
 
       reportLine.imports = importTypes.join(',');
 
+      log.info(`Enabled the following imports for site ${site.getId()}: ${reportLine.imports}`);
+
       const auditTypes = Object.keys(profile.audits);
 
       auditTypes.forEach((auditType) => {
@@ -208,6 +210,7 @@ function OnboardCommand(context) {
       await configuration.save();
 
       reportLine.audits = auditTypes.join(',');
+      log.info(`Enabled the following audits for site ${site.getId()}: ${reportLine.audits}`);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -275,6 +278,8 @@ function OnboardCommand(context) {
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
+
+        log.info('All sites were processed and onboarded.');
 
         fileStream.end();
 
