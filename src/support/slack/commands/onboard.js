@@ -179,13 +179,12 @@ function OnboardCommand(context) {
       const configuration = await Configuration.findLatest();
 
       const importTypes = Object.keys(profile.imports);
-
+      const siteConfig = site.getConfig();
       for (const importType of importTypes) {
-        const siteConfig = site.getConfig();
         siteConfig.enableImport(importType);
-        site.setConfig(Config.toDynamoItem(siteConfig));
       }
 
+      site.setConfig(Config.toDynamoItem(siteConfig));
       await site.save();
 
       for (const importType of importTypes) {
