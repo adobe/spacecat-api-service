@@ -13,6 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import os from 'os';
 import path from 'path';
@@ -178,6 +179,13 @@ function OnboardCommand(context) {
       const configuration = await Configuration.findLatest();
 
       const importTypes = Object.keys(profile.imports);
+      const siteConfig = site.getConfig();
+      for (const importType of importTypes) {
+        siteConfig.enableImport(importType);
+      }
+
+      site.setConfig(Config.toDynamoItem(siteConfig));
+      await site.save();
 
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
@@ -194,6 +202,8 @@ function OnboardCommand(context) {
 
       reportLine.imports = importTypes.join(',');
 
+      log.info(`Enabled the following imports for site ${site.getId()}: ${reportLine.imports}`);
+
       const auditTypes = Object.keys(profile.audits);
 
       auditTypes.forEach((auditType) => {
@@ -203,6 +213,7 @@ function OnboardCommand(context) {
       await configuration.save();
 
       reportLine.audits = auditTypes.join(',');
+      log.info(`Enabled the following audits for site ${site.getId()}: ${reportLine.audits}`);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -270,6 +281,8 @@ function OnboardCommand(context) {
           const reportLine = await onboardSingleSite(baseURL, imsOrgID, profileName, slackContext);
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
+
+        log.info('All sites were processed and onboarded.');
 
         fileStream.end();
 
