@@ -33,6 +33,7 @@ describe('OnboardCommand', () => {
   beforeEach(async () => {
     const configuration = {
       enableHandlerForSite: sinon.stub(),
+      save: sinon.stub().resolves(),
     };
     baseURL = 'https://example.com';
 
