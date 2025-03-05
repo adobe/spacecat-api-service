@@ -1,3 +1,10 @@
+## [1.99.3](https://github.com/adobe/spacecat-api-service/compare/v1.99.2...v1.99.3) (2025-03-05)
+
+
+### Bug Fixes
+
+* wrap site.save() in try-catch block ([#809](https://github.com/adobe/spacecat-api-service/issues/809)) ([b23066e](https://github.com/adobe/spacecat-api-service/commit/b23066e265df046a2311a73f1b0901c2d21498e8))
+
 ## [1.99.2](https://github.com/adobe/spacecat-api-service/compare/v1.99.1...v1.99.2) (2025-03-05)
 
 
