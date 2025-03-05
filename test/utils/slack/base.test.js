@@ -16,6 +16,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import fs from 'fs';
 import chaiAsPromised from 'chai-as-promised';
+import nock from 'nock';
 
 import path from 'path';
 
@@ -27,6 +28,8 @@ import {
   postErrorMessage, sendFile,
   sendMessageBlocks,
   loadProfileConfig,
+  parseCSV,
+  fetchFile,
 } from '../../../src/utils/slack/base.js';
 
 use(chaiAsPromised);
@@ -222,6 +225,172 @@ describe('Base Slack Utils', () => {
     });
   });
 
+  describe('fetchFile', () => {
+    const baseUrl = 'https://fake-url.com';
+    const filePath = '/file.csv';
+    const fileUrl = `${baseUrl}${filePath}`;
+    const token = 'test-bot-token';
+    const file = {
+      url_private: fileUrl,
+      mimetype: 'text/csv',
+    };
+
+    afterEach(() => {
+      nock.cleanAll();
+    });
+
+    it('should return file content when file is downloaded successfully', async () => {
+      const mockData = Buffer.from('test1,test2\nvalue1,value2', 'utf-8');
+
+      nock(baseUrl)
+        .get(filePath)
+        .reply(200, mockData);
+
+      const result = await fetchFile(file, token);
+      expect(result).to.equal(mockData.toString('utf-8').trim());
+    });
+
+    it('should return a Buffer for non-text files', async () => {
+      const binaryContent = Buffer.from([0x00, 0x01, 0x02]);
+
+      nock(baseUrl)
+        .get(filePath)
+        .reply(200, binaryContent);
+
+      const result = await fetchFile(
+        { url_private: fileUrl, mimetype: 'application/octet-stream', name: 'non-text-file' },
+        token,
+      );
+      expect(result).to.be.instanceOf(Buffer);
+      expect(result.equals(binaryContent)).to.be.true;
+    });
+
+    it('should throw an error when authentication fails with 401', async () => {
+      nock(baseUrl).get(filePath).reply(401);
+
+      try {
+        await fetchFile(file, token);
+        throw new Error('Test failed: Expected error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'Authentication failed: Invalid Slack token.',
+        );
+      }
+    });
+
+    it('should throw an error when token lacks the permissions', async () => {
+      nock(baseUrl).get(filePath).reply(403);
+
+      try {
+        await fetchFile(file, token);
+        throw new Error('Test failed: Expected error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Access denied: Missing files:read permission.');
+      }
+    });
+
+    it('should throw an error when the file is not found (404)', async () => {
+      nock(baseUrl).get(filePath).reply(404);
+
+      try {
+        await fetchFile(file, token);
+        throw new Error('Test failed: Expected error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(`File not found at: ${fileUrl}.`);
+      }
+    });
+
+    it('should throw an error when the file is empty', async () => {
+      nock(baseUrl).get(filePath).reply(200, '');
+
+      try {
+        await fetchFile(file, token);
+        throw new Error('Test failed: Expected error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'File download resulted in empty or invalid data.',
+        );
+      }
+    });
+  });
+
+  describe('parseCSV', () => {
+    const baseUrl = 'https://fake-url.com';
+    const filePath = '/file.csv';
+    const fileUrl = `${baseUrl}${filePath}`;
+    const token = 'test-bot-token';
+    const file = {
+      url_private: fileUrl,
+      mimetype: 'text/csv',
+      name: 'file.csv',
+    };
+
+    afterEach(() => {
+      nock.cleanAll();
+    });
+
+    it('should correctly fetch and parse a CSV file', async () => {
+      const fileContent = fs.readFileSync('test/fixtures/onboarding.csv', 'utf-8');
+
+      nock(baseUrl)
+        .get(filePath)
+        .reply(200, fileContent);
+
+      const records = await parseCSV(file, token);
+
+      expect(records).to.deep.equal([
+        ['https://www.foo.com', '12345@AdobeOrg'],
+        ['https://www.bar.com', '12345@AdobeOrg'],
+      ]);
+    });
+
+    it('should throw an error when the file download fails due to a network error', async () => {
+      nock(baseUrl)
+        .get(filePath)
+        .replyWithError('Network failure');
+
+      try {
+        await parseCSV({ url_private: fileUrl }, token);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.include('CSV processing failed');
+      }
+    });
+
+    it('should throw an error when CSV data has fewer than 2 columns', async () => {
+      nock(baseUrl)
+        .get(filePath)
+        .reply(200, 'invalid_data');
+
+      try {
+        await parseCSV(file, token);
+        throw new Error('Test failed: Error was not thrown');
+      } catch (error) {
+        expect(error.message).to.equal(
+          'CSV format invalid: Each row must have at least 2 columns.',
+        );
+      }
+    });
+
+    it('should throw an error when CSV parsing results in invalid data', async () => {
+      const invalidCsvContents = ['\n\n\n', ' '];
+
+      for (const content of invalidCsvContents) {
+        nock(baseUrl).get(filePath).reply(200, content);
+
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await parseCSV(file, token);
+          throw new Error('Test failed: Error was not thrown');
+        } catch (error) {
+          expect(error.message).to.equal(
+            'CSV processing failed: CSV parsing resulted in empty or invalid data.',
+          );
+        }
+      }
+    });
+  });
+
   describe('loadProfileConfig', () => {
     let fsStub;
 
@@ -310,7 +479,7 @@ describe('Base Slack Utils', () => {
       fsStub.returns('INVALID_JSON');
 
       expect(() => loadProfileConfig('default'))
-      // eslint-disable-next-line quotes
+        // eslint-disable-next-line quotes
         .to.throw(`Failed to load profile configuration for "default": Unexpected token 'I', "INVALID_JSON" is not valid JSON`);
     });
 
