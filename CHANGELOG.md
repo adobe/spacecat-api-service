@@ -1,3 +1,10 @@
+## [1.99.4](https://github.com/adobe/spacecat-api-service/compare/v1.99.3...v1.99.4) (2025-03-05)
+
+
+### Bug Fixes
+
+* fix end date in profiles config ([#810](https://github.com/adobe/spacecat-api-service/issues/810)) ([b2a9e33](https://github.com/adobe/spacecat-api-service/commit/b2a9e33de971cccecd8096c17d7ef429368f7787))
+
 ## [1.99.3](https://github.com/adobe/spacecat-api-service/compare/v1.99.2...v1.99.3) (2025-03-05)
 
 
