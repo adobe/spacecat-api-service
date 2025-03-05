@@ -15,7 +15,7 @@
 		"imports": {
 			"organic-traffic" : {
 				"start-date": "2025-02-24",
-				"end-date": "2024-03-02"
+				"end-date": "2025-03-02"
 			},
 			"top-pages" : {},
 			"all-traffic" : {}
@@ -39,7 +39,7 @@
 		"imports": {
 			"organic-traffic" : {
 				"startDate": "2025-02-24",
-				"endDate": "2024-03-02"
+				"endDate": "2025-03-02"
 			},
 			"top-pages" : {},
 			"all-traffic" : {}
