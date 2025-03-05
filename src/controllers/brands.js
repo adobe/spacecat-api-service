@@ -9,12 +9,12 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-/* c8 ignore start */
 import BrandClient from '@adobe/spacecat-shared-brand-client';
 import {
   badRequest,
   notFound,
   ok,
+  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -24,8 +24,10 @@ import {
 
 import { ErrorWithStatusCode } from '../support/utils.js';
 import {
-  STATUS_UNAUTHORIZED,
+  STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
+
+const HEADER_ERROR = 'x-error';
 
 /**
  * BrandsController. Provides methods to read brands and brand guidelines.
@@ -44,6 +46,12 @@ function BrandsController(dataAccess, log, env) {
   }
   const { Organization, Site } = dataAccess;
 
+  function createErrorResponse(error) {
+    return createResponse({}, error.status, {
+      [HEADER_ERROR]: error.message,
+    });
+  }
+
   /**
    * Get the IMS user token from the context.
    * @param {object} context - The context of the request.
@@ -55,7 +63,7 @@ function BrandsController(dataAccess, log, env) {
     const { authorization: authorizationHeader } = headers;
     const BEARER_PREFIX = 'Bearer ';
     if (!hasText(authorizationHeader) || !authorizationHeader.startsWith(BEARER_PREFIX)) {
-      throw new ErrorWithStatusCode('Missing Authorization header', STATUS_UNAUTHORIZED);
+      throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
     }
     return authorizationHeader;
   }
@@ -65,21 +73,26 @@ function BrandsController(dataAccess, log, env) {
    */
   const getBrandsForOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
-    log.info(`Getting brands for organization: ${organizationId}`);
-    if (!isValidUUID(organizationId)) {
-      return badRequest('Organization ID required');
-    }
+    try {
+      log.info(`Getting brands for organization: ${organizationId}`);
+      if (!isValidUUID(organizationId)) {
+        return badRequest('Organization ID required');
+      }
 
-    const organization = await Organization.findById(organizationId);
-    if (!organization) {
-      return notFound(`Organization not found: ${organizationId}`);
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound(`Organization not found: ${organizationId}`);
+      }
+      const imsOrgId = organization.getImsOrgId();
+      const imsUserToken = getImsUserToken(context);
+      const brandClient = BrandClient.createFrom(context);
+      const brands = await brandClient.getBrandsForOrganization(imsOrgId, imsUserToken);
+      log.info(`Found ${brands.length} brands for organization: ${organizationId}`);
+      return ok(brands);
+    } catch (error) {
+      log.error(`Error getting brands for organization: ${organizationId}`, error);
+      return createErrorResponse(error);
     }
-    const imsOrgId = organization.getImsOrgId();
-    const imsUserToken = getImsUserToken(context);
-    const brandClient = BrandClient.createFrom(context);
-    const brands = await brandClient.getBrandsForOrganization(imsOrgId, imsUserToken);
-    log.info(`Found ${brands.length} brands for organization: ${organizationId}`);
-    return ok(brands);
   };
 
   /**
@@ -94,7 +107,7 @@ function BrandsController(dataAccess, log, env) {
       BRAND_IMS_CLIENT_SECRET: clientSecret,
     } = env;
     if (!hasText(host) || !hasText(clientId) || !hasText(clientCode) || !hasText(clientSecret)) {
-      throw new ErrorWithStatusCode('IMS Config not found in the environment', STATUS_UNAUTHORIZED);
+      throw new ErrorWithStatusCode('IMS Config not found in the environment', STATUS_BAD_REQUEST);
     }
     return {
       host,
@@ -112,29 +125,34 @@ function BrandsController(dataAccess, log, env) {
    */
   const getBrandGuidelinesForSite = async (context) => {
     const siteId = context.params?.siteId;
-    log.info(`Getting brand guidelines for site: ${siteId}`);
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
+    try {
+      log.info(`Getting brand guidelines for site: ${siteId}`);
+      if (!isValidUUID(siteId)) {
+        return badRequest('Site ID required');
+      }
 
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound(`Site not found: ${siteId}`);
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound(`Site not found: ${siteId}`);
+      }
+      const brandId = site.getConfig()?.getBrandConfig()?.brandId;
+      log.info(`Brand ID mapping for site: ${siteId} is ${brandId}`);
+      if (!hasText(brandId)) {
+        return notFound(`Brand mapping not found for site ID: ${siteId}`);
+      }
+      const organizationId = site.getOrganizationId();
+      const organization = await Organization.findById(organizationId);
+      const imsOrgId = organization?.getImsOrgId();
+      log.info(`IMS Org ID for site: ${siteId} is ${imsOrgId}`);
+      const imsConfig = getImsConfig();
+      const brandClient = BrandClient.createFrom(context);
+      const brandGuidelines = await brandClient.getBrandGuidelines(brandId, imsOrgId, imsConfig);
+      log.info(`Found brand guidelines for site: ${siteId}`);
+      return ok(brandGuidelines);
+    } catch (error) {
+      log.error(`Error getting brand guidelines for site: ${siteId}`, error);
+      return createErrorResponse(error);
     }
-    const brandId = site.getConfig()?.getBrandConfig()?.brandId;
-    log.info(`Brand ID mapping for site: ${siteId} is ${brandId}`);
-    if (!hasText(brandId)) {
-      return badRequest('Brand ID missing in brand config of site');
-    }
-    const organizationId = site.getOrganizationId();
-    const organization = await Organization.findById(organizationId);
-    const imsOrgId = organization?.getImsOrgId();
-    log.info(`IMS Org ID for site: ${siteId} is ${imsOrgId}`);
-    const imsConfig = getImsConfig();
-    const brandClient = BrandClient.createFrom(context);
-    const brandGuidelines = await brandClient.getBrandGuidelines(brandId, imsOrgId, imsConfig);
-    log.info(`Found brand guidelines for site: ${siteId}`);
-    return ok(brandGuidelines);
   };
 
   return {
@@ -144,4 +162,3 @@ function BrandsController(dataAccess, log, env) {
 }
 
 export default BrandsController;
-/* c8 ignore end */

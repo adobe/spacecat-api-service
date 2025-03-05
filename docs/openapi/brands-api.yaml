@@ -56,7 +56,7 @@ brand-guidelines-by-site-id:
               brand-not-found:
                 summary: Brand not found for site
                 value:
-                  message: "No brandId configured for site {siteId}"
+                  message: "Brand mapping not found for site ID: {siteId}"
               site-not-found:
                 summary: Site not found
                 value:
