@@ -185,7 +185,14 @@ function OnboardCommand(context) {
       }
 
       site.setConfig(Config.toDynamoItem(siteConfig));
-      await site.save();
+      try {
+        await site.save();
+      } catch (error) {
+        log.error(error);
+        reportLine.errors = error.message;
+        reportLine.status = 'Failed';
+        return reportLine;
+      }
 
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
