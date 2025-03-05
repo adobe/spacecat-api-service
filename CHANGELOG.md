@@ -1,3 +1,59 @@
+# [1.100.0](https://github.com/adobe/spacecat-api-service/compare/v1.99.4...v1.100.0) (2025-03-05)
+
+
+### Features
+
+* introduce bulk import ([#811](https://github.com/adobe/spacecat-api-service/issues/811)) ([22519b9](https://github.com/adobe/spacecat-api-service/commit/22519b905da98e5fe0c95234d6741fdc87d3a67c))
+
+## [1.99.4](https://github.com/adobe/spacecat-api-service/compare/v1.99.3...v1.99.4) (2025-03-05)
+
+
+### Bug Fixes
+
+* fix end date in profiles config ([#810](https://github.com/adobe/spacecat-api-service/issues/810)) ([b2a9e33](https://github.com/adobe/spacecat-api-service/commit/b2a9e33de971cccecd8096c17d7ef429368f7787))
+
+## [1.99.3](https://github.com/adobe/spacecat-api-service/compare/v1.99.2...v1.99.3) (2025-03-05)
+
+
+### Bug Fixes
+
+* wrap site.save() in try-catch block ([#809](https://github.com/adobe/spacecat-api-service/issues/809)) ([b23066e](https://github.com/adobe/spacecat-api-service/commit/b23066e265df046a2311a73f1b0901c2d21498e8))
+
+## [1.99.2](https://github.com/adobe/spacecat-api-service/compare/v1.99.1...v1.99.2) (2025-03-05)
+
+
+### Bug Fixes
+
+* global configuration concurrency issue while saving ([#808](https://github.com/adobe/spacecat-api-service/issues/808)) ([f3a0eaf](https://github.com/adobe/spacecat-api-service/commit/f3a0eafd3117f2b509a2ec227db1c14426606260))
+
+## [1.99.1](https://github.com/adobe/spacecat-api-service/compare/v1.99.0...v1.99.1) (2025-03-05)
+
+
+### Bug Fixes
+
+* enable imports for sites ([#807](https://github.com/adobe/spacecat-api-service/issues/807)) ([8992728](https://github.com/adobe/spacecat-api-service/commit/89927282daf9ad1350ea3776152dbef71cd50d41))
+
+# [1.99.0](https://github.com/adobe/spacecat-api-service/compare/v1.98.0...v1.99.0) (2025-03-05)
+
+
+### Features
+
+* Describe changes needed for profiles config ([#791](https://github.com/adobe/spacecat-api-service/issues/791)) ([5253cf4](https://github.com/adobe/spacecat-api-service/commit/5253cf4e731645b37c060c184a8756c2e73d3419))
+
+# [1.98.0](https://github.com/adobe/spacecat-api-service/compare/v1.97.1...v1.98.0) (2025-03-05)
+
+
+### Features
+
+* introduce Bulk scrape and audit ([#806](https://github.com/adobe/spacecat-api-service/issues/806)) ([671a7aa](https://github.com/adobe/spacecat-api-service/commit/671a7aa6d7c6dad9dd1288e7c5e0355ab501f546))
+
+## [1.97.1](https://github.com/adobe/spacecat-api-service/compare/v1.97.0...v1.97.1) (2025-03-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#804](https://github.com/adobe/spacecat-api-service/issues/804)) ([58d6f01](https://github.com/adobe/spacecat-api-service/commit/58d6f018cdd12f60f8fb9170214762d45c7caba3))
+
 # [1.97.0](https://github.com/adobe/spacecat-api-service/compare/v1.96.4...v1.97.0) (2025-03-04)
 
 

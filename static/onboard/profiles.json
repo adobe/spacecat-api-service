@@ -1,31 +1,68 @@
 {
 	"default":  {
 		"audits": {
-			"backlinks": {},
+			"scrape-top-pages": {},
+			"broken-internal-links-auto-suggest": {},
+			"broken-backlinks": {},
 			"cwv": {},
-			"experimentation-opportunities": {},
-			"internal-links": {},
-			"metatags": {},
+			"broken-internal-links": {},
+			"meta-tags-auto-suggest": {},
+			"meta-tags": {},
 			"sitemap": {},
-			"structured-data": {}
+			"structured-data": {},
+			"forms-opportunities": {}
 		},
-		"imports": {},
+		"imports": {
+			"organic-traffic" : {
+				"start-date": "2025-02-24",
+				"end-date": "2025-03-02"
+			},
+			"top-pages" : {},
+			"all-traffic" : {}
+		},
 		"config": {},
 		"integrations": {}
 	},
 	"summit":  {
 		"audits": {
-			"backlinks": {},
-			"cwv": {},
-			"internal-links": {},
-			"metatags": {},
+			"scrape-top-pages": {},
 			"alt-text": {},
-			"high-organic-traffic-low-ctr": {},
-			"sitemap": {}
+			"broken-backlinks": {}, 
+			"broken-internal-links-auto-suggest": {},
+			"cwv": {},
+			"broken-internal-links": {},
+			"meta-tags-auto-suggest": {},
+			"meta-tags": {},
+			"sitemap": {},
+			"forms-opportunities": {}
+		},
+		"imports": {
+			"organic-traffic" : {
+				"startDate": "2025-02-24",
+				"endDate": "2025-03-02"
+			},
+			"top-pages" : {},
+			"all-traffic" : {}
+		},
+		"config": {},
+		"integrations": {}
+	},
+	"summit-lower-quality":  {
+		"audits": {
+			"scrape-top-pages": {},
+			"alt-text": {},
+			"broken-backlinks": {}, 
+			"broken-internal-links-auto-suggest": {},
+			"cwv": {},
+			"broken-internal-links": {},
+			"meta-tags-auto-suggest": {},
+			"meta-tags": {},
+			"sitemap": {},
+			"forms-opportunities": {}
 		},
 		"imports": {
 			"top-pages" : {},
-			"organic-keywords" : {}
+			"all-traffic" : {}
 		},
 		"config": {},
 		"integrations": {}
