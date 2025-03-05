@@ -1,3 +1,10 @@
+# [1.98.0](https://github.com/adobe/spacecat-api-service/compare/v1.97.1...v1.98.0) (2025-03-05)
+
+
+### Features
+
+* introduce Bulk scrape and audit ([#806](https://github.com/adobe/spacecat-api-service/issues/806)) ([671a7aa](https://github.com/adobe/spacecat-api-service/commit/671a7aa6d7c6dad9dd1288e7c5e0355ab501f546))
+
 ## [1.97.1](https://github.com/adobe/spacecat-api-service/compare/v1.97.0...v1.97.1) (2025-03-04)
 
 
