@@ -13,6 +13,7 @@
 // todo: prototype - untested
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import os from 'os';
 import path from 'path';
@@ -181,7 +182,9 @@ function OnboardCommand(context) {
 
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
-        site.enableImport(importType);
+        const siteConfig = site.getConfig();
+        siteConfig.enableImport(importType);
+        site.setConfig(Config.toDynamoItem(siteConfig));
         await site.save();
         await triggerImportRun(
           configuration,
