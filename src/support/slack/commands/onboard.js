@@ -181,11 +181,15 @@ function OnboardCommand(context) {
       const importTypes = Object.keys(profile.imports);
 
       for (const importType of importTypes) {
-        /* eslint-disable no-await-in-loop */
         const siteConfig = site.getConfig();
         siteConfig.enableImport(importType);
         site.setConfig(Config.toDynamoItem(siteConfig));
-        await site.save();
+      }
+
+      await site.save();
+
+      for (const importType of importTypes) {
+        /* eslint-disable no-await-in-loop */
         await triggerImportRun(
           configuration,
           importType,
