@@ -118,7 +118,9 @@ export default class AdobeImsHandler extends AbstractHandler {
 
   // eslint-disable-next-line class-methods-use-this
   async #fillModel(aclAccess) {
-    console.log('§§§ in fillModel', JSON.stringify(aclAccess));
+    console.log('§§§ in fillModel role:', aclAccess.Role);
+    console.log('§§§ in fillModel site:', aclAccess.Site);
+    console.log('§§§ in fillModel acl:', aclAccess.Acl);
     const role1 = await aclAccess.Role.create({
       imsOrgId: 'F4646ED9626926AA0A49420E',
       identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
