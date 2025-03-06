@@ -1146,6 +1146,18 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Handler is not enabled for site 07efc218-79f6-48b5-970e-deb0f88ce01b autofix type broken-backlinks');
     });
 
+    it('does not set IN_PROGRESS if no valid suggestions', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: ['not-found'] },
+      });
+      expect(response.status).to.equal(207);
+      expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
+    });
+
     it('auto-fix suggestions status fails passed suggestions not found', async () => {
       mockSuggestion.allByOpportunityId.resolves([
         mockSuggestionEntity(suggs[2])]);
