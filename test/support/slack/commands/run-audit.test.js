@@ -114,11 +114,13 @@ describe('RunAuditCommand', () => {
     });
 
     it('trigger all audits for a valid site', async () => {
+      const handlerEnabledStub = sinon.stub().onCall(0).returns(true).onCall(1)
+        .returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
-        getEnabledAuditsForSite: () => ['lhs-mobile', 'lhs-desktop'],
+        isHandlerEnabledForSite: handlerEnabledStub,
       });
 
       const command = RunAuditCommand(context);
@@ -130,11 +132,15 @@ describe('RunAuditCommand', () => {
     });
 
     it('triggers all audits for all sites specified in a CSV file', async () => {
+      const handlerEnabledStub = sinon.stub().onCall(0).returns(true).onCall(1)
+        .returns(true)
+        .onCall(22)
+        .returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
-        getEnabledAuditsForSite: () => ['lhs-mobile', 'lhs-desktop'],
+        isHandlerEnabledForSite: handlerEnabledStub,
       });
       const fileUrl = 'https://example.com/sites.csv';
       slackContext.files = [
@@ -214,11 +220,12 @@ describe('RunAuditCommand', () => {
     });
 
     it('handles site with no enable audits', async () => {
+      const handlerEnabledStub = sinon.stub().onCall(0).returns(false);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
-        getEnabledAuditsForSite: () => [],
+        isHandlerEnabledForSite: handlerEnabledStub,
       });
 
       const command = RunAuditCommand(context);
@@ -229,12 +236,13 @@ describe('RunAuditCommand', () => {
     });
 
     it('handles error while triggering audits', async () => {
-      const errorMessage = 'Failed to send message';
+      const errorMessage = 'Failed to trigger';
+      const handlerEnabledStub = sinon.stub().onCall(0).returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
-        getEnabledAuditsForSite: () => ['lhs-mobile', 'lhs-desktop'],
+        isHandlerEnabledForSite: handlerEnabledStub,
       });
       sqsStub.sendMessage.rejects(new Error(errorMessage));
 
