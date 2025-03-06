@@ -100,20 +100,12 @@ function RunAuditCommand(context) {
             }
           }),
         );
-        say(':white_check_mark: All audits triggered successfully.');
       } else {
         if (!configuration.isHandlerEnabledForSite(auditType, site)) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
           return;
         }
         await triggerAuditForSite(site, auditType, slackContext, context);
-
-        let message = `:white_check_mark: ${auditType} audit check is triggered for ${baseURL}\n`;
-        if (auditType === LHS_MOBILE) {
-          message += `:adobe-run: In a minute, you can run @spacecat get site ${baseURL}`;
-        }
-
-        await say(message);
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -181,6 +173,7 @@ function RunAuditCommand(context) {
         );
       } else if (hasValidBaseURL) {
         const auditType = auditTypeInputArg || LHS_MOBILE;
+        say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
         await runAuditForSite(baseURL, auditType, slackContext);
       }
     } catch (error) {
