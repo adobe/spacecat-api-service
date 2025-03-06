@@ -149,7 +149,7 @@ describe('RunAuditCommand', () => {
           + 'https://valid.url,uuidv4');
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['', 'all'], slackContext);
+      await command.handleExecution(['all'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for 2 sites.');
