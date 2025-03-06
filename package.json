@@ -75,7 +75,7 @@
     "@adobe/spacecat-shared-http-utils": "1.9.12",
     "@adobe/spacecat-shared-ims-client": "1.5.9",
     "@adobe/spacecat-shared-rum-api-client": "2.21.4",
-    "@adobe/spacecat-shared-brand-client": "1.0.0",
+    "@adobe/spacecat-shared-brand-client": "https://gitpkg.now.sh/adobe/spacecat-shared/packages/spacecat-shared-brand-client?40c463080b28e1683c3e6d768dd214e2a99529d5",
     "@adobe/spacecat-shared-slack-client": "1.5.8",
     "@adobe/spacecat-shared-utils": "1.34.0",
     "@aws-sdk/client-s3": "3.758.0",
