@@ -56,8 +56,6 @@ export async function getDBAcls(dynamoClient, orgId, roles) {
   const resp = await dynamoClient.send(command);
   console.log('§§§ DynamoDB Get DBACLs response:', JSON.stringify(resp));
 
-  // TODO sort paths by length
-
   const acls = resp.Items.map((it) => ({
     role: it.role.S,
     acl: it.acl.L.map((a) => ({
@@ -160,7 +158,8 @@ export default async function getAcls({
   return {
     acls,
     aclEntities: {
-      model: ['organization', 'site'],
+      model: ['organization', 'site'], // TODO Flip
+      // spacecatScopes: ['xxxyyyzzz'],
     },
   };
 }

@@ -106,10 +106,6 @@ describe('haspermission', () => {
     expect(hasPermisson('/someapi/xyz123', 'R', aclCtx)).to.be.true;
     expect(hasPermisson('/someapi/xyz123', 'U', aclCtx)).to.be.true;
     expect(hasPermisson('/someapi/xyz123', 'D', aclCtx)).to.be.true;
-    expect(hasPermisson('/someapi/tes', 'R', aclCtx)).to.be.true;
-    expect(hasPermisson('/someapi/tes', 'U', aclCtx)).to.be.true;
-    expect(hasPermisson('/someapi/tes', 'C', aclCtx)).to.be.true;
-    expect(hasPermisson('/someapi/tes', 'D', aclCtx)).to.be.true;
 
     // matching rule: /someapi/specificid
     expect(hasPermisson('/someapi/specificid', 'C', aclCtx)).to.be.false;

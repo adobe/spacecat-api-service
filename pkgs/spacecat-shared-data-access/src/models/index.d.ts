@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+export type * from './acl';
 export type * from './audit';
 export type * from './configuration';
 export type * from './base';
@@ -20,6 +21,7 @@ export type * from './key-event';
 export type * from './latest-audit';
 export type * from './opportunity';
 export type * from './organization';
+export type * from './role';
 export type * from './site';
 export type * from './site-candidate';
 export type * from './site-top-page';
