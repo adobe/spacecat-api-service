@@ -48,6 +48,7 @@ describe('OnboardCommand', () => {
       Organization: {
         create: sinon.stub(),
         findByImsOrgId: sinon.stub(),
+        getId: sinon.stub(),
       },
     };
     sqsStub = {
@@ -201,7 +202,9 @@ describe('OnboardCommand', () => {
 
     it('handles error when a site failed to be added', async () => {
       nock(baseURL).get('/').replyWithError('rainy weather');
-      dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
+      dataAccessStub.Organization.findByImsOrgId.resolves({
+        getId: sinon.stub().returns('existing-org-123'),
+      });
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.rejects(new Error('failed to add the site'));
 
