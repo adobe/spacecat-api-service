@@ -1,3 +1,10 @@
+## [1.100.3](https://github.com/adobe/spacecat-api-service/compare/v1.100.2...v1.100.3) (2025-03-06)
+
+
+### Bug Fixes
+
+* use tracingFetch and user agent ([#814](https://github.com/adobe/spacecat-api-service/issues/814)) ([88363a3](https://github.com/adobe/spacecat-api-service/commit/88363a301a86ef074df48694934594be22abfdac))
+
 ## [1.100.2](https://github.com/adobe/spacecat-api-service/compare/v1.100.1...v1.100.2) (2025-03-06)
 
 
