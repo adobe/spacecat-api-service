@@ -34,17 +34,10 @@ const ALL_AUDITS = [
   'canonical',
   'broken-backlinks',
   'broken-internal-links',
-  'experimentation',
-  'conversion',
-  'experimentation-ess-daily',
-  'experimentation-ess-all',
   'experimentation-opportunities',
   'meta-tags',
-  'costs',
   'structured-data',
   'forms-opportunities',
-  'site-detection',
-  'guidance:high-organic-low-ctr',
   'alt-text',
 ];
 
