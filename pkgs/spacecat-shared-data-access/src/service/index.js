@@ -62,5 +62,8 @@ export const createDataAccess = (config, log = console, client = undefined) => {
   const electroService = createElectroService(rawClient, config, log);
   const entityRegistry = new EntityRegistry(electroService, config, log);
 
+  console.log('§§§ Registered RoleSchema:', entityRegistry.getCollections().Role);
+  console.log('§§§ Registered SiteSchema:', entityRegistry.getCollections().Site);
+
   return entityRegistry.getCollections();
 };
