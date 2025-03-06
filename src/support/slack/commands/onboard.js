@@ -366,10 +366,10 @@ function OnboardCommand(context) {
 
         const message = `
         *:spacecat: :satellite: Onboarding complete for ${reportLine.site}*
-        :ims: *IMS Org ID:* ${reportLine.imsOrgId}
-        :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId}
-        :identification_card: *Site ID:* ${reportLine.siteId}
-        :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType}
+        :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
+        :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
+        :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
+        :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
         :question: *Already existing:* ${reportLine.existingSite}
         :gear: *Profile:* ${reportLine.profile}
         :clipboard: *Audits:* ${reportLine.audits || 'None'}
