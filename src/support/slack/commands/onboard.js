@@ -162,9 +162,17 @@ function OnboardCommand(context) {
         log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
         reportLine.deliveryType = deliveryType;
         const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
-        site = await Site.create({
-          baseURL, deliveryType, isLive, organizationId: defaultOrgId,
-        });
+
+        try {
+          site = await Site.create({
+            baseURL, deliveryType, isLive, organizationId: defaultOrgId,
+          });
+        } catch (error) {
+          log.error(`Error creating site: ${error.message}`);
+          reportLine.errors = error.message;
+          reportLine.status = 'Failed';
+          return reportLine;
+        }
       }
 
       const siteID = site.getId();
