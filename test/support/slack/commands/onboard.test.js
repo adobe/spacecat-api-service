@@ -212,7 +212,7 @@ describe('OnboardCommand', () => {
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
-      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to add the site')).to.be.true;
+      expect(slackContext.say.calledWithMatch(/:x: \*Errors:\* failed to add the site/)).to.be.true;
     });
   });
 
