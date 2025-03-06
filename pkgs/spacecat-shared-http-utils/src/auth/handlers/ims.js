@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { getAclAccess } from '@adobe/spacecat-shared-data-access';
+import { createDataAccess } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import {
   createLocalJWKSet,
@@ -132,9 +132,20 @@ export default class AdobeImsHandler extends AbstractHandler {
     console.log('§§§ Created roles:', role1, role2);
   }
 
+  // eslint-disable-next-line class-methods-use-this
+  async #getAclAccess(context) {
+    console.log('§§§ Getting ACL Access');
+
+    const { log } = context;
+    return createDataAccess({
+      tableNameData: 'spacecat-services-roles-dev',
+    }, log);
+  }
+
   async checkAuth(request, context) {
     console.log('§§§ Get ACL Access via model');
-    const aclAccess = getAclAccess(context);
+    const aclAccess = this.#getAclAccess(context);
+    console.log('§§§ Done getting ACL Access via model');
     // await this.#fillModel(aclAccess);
 
     // console.log('§§§ context in ims:', JSON.stringify(context));
