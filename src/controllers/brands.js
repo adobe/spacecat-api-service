@@ -47,7 +47,7 @@ function BrandsController(dataAccess, log, env) {
   const { Organization, Site } = dataAccess;
 
   function createErrorResponse(error) {
-    return createResponse({}, error.status, {
+    return createResponse({ message: error.message }, error.status, {
       [HEADER_ERROR]: error.message,
     });
   }
