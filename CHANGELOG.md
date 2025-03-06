@@ -1,3 +1,10 @@
+## [1.101.3](https://github.com/adobe/spacecat-api-service/compare/v1.101.2...v1.101.3) (2025-03-06)
+
+
+### Bug Fixes
+
+* we should not bulkUpdateStatus when validSuggestions is empty ([#819](https://github.com/adobe/spacecat-api-service/issues/819)) ([b138907](https://github.com/adobe/spacecat-api-service/commit/b138907f3919c3d4eb84b8e692b294cefd63984e))
+
 ## [1.101.2](https://github.com/adobe/spacecat-api-service/compare/v1.101.1...v1.101.2) (2025-03-06)
 
 
