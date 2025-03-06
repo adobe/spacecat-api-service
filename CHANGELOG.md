@@ -1,3 +1,11 @@
+## [1.101.2](https://github.com/adobe/spacecat-api-service/compare/v1.101.1...v1.101.2) (2025-03-06)
+
+
+### Bug Fixes
+
+* improve error handling for site creation failures ([#818](https://github.com/adobe/spacecat-api-service/issues/818)) ([c6d1c86](https://github.com/adobe/spacecat-api-service/commit/c6d1c86bc41465158ee8f8af0614d45351f4d127))
+* obtain all enabled audits ([#816](https://github.com/adobe/spacecat-api-service/issues/816)) ([c01e5cf](https://github.com/adobe/spacecat-api-service/commit/c01e5cf5c1a697ecee67e5f82a4f83fca2e78960))
+
 ## [1.101.1](https://github.com/adobe/spacecat-api-service/compare/v1.101.0...v1.101.1) (2025-03-06)
 
 
