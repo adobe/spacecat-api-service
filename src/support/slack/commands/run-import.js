@@ -13,12 +13,17 @@
 // todo: prototype - untested
 /* c8 ignore start */
 
-import { hasText, isObject } from '@adobe/spacecat-shared-utils';
+import {
+  hasText,
+  isNonEmptyArray,
+  isNonEmptyObject,
+  isValidUrl,
+} from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { triggerImportRun } from '../../utils.js';
 import {
-  extractURLFromSlackInput,
+  extractURLFromSlackInput, parseCSV,
   postErrorMessage,
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
@@ -42,11 +47,48 @@ function RunImportCommand(context) {
       + '\nCurrently this will run the import for all sources and all destinations configured for the site, hence be aware of costs'
       + ' (source: ahrefs) when choosing the date range.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType} {baseURL} {startDate} {endDate}`,
+    usageText: `${PHRASES[0]} {importType} {baseURL|CSV-file} {startDate} {endDate}`,
   });
 
   const { dataAccess, log } = context;
   const { Configuration, Site } = dataAccess;
+
+  /**
+   * Triggers an import run for the given site.
+   * @param {string} importType - The type of import to run.
+   * @param {string} baseURL - The base URL of the site.
+   * @param {string} startDate - The start date for the import run.
+   * @param {string} endDate - The end date for the import run.
+   * @param {Object} config - The configuration object.`
+   * @param {Object} slackContext - The Slack context object.
+   * @returns {Promise} A promise that resolves when the operation is complete.
+   */
+  const runImportForSite = async (
+    importType,
+    baseURL,
+    startDate,
+    endDate,
+    config,
+    slackContext,
+  ) => {
+    const { say } = slackContext;
+
+    const site = await Site.findByBaseURL(baseURL);
+    if (!isNonEmptyObject(site)) {
+      await postSiteNotFoundMessage(say, baseURL);
+      return;
+    }
+
+    await triggerImportRun(
+      config,
+      importType,
+      site.getId(),
+      startDate,
+      endDate,
+      slackContext,
+      context,
+    );
+  };
 
   /**
    * Validates input and triggers a new import run for the given site.
@@ -57,7 +99,7 @@ function RunImportCommand(context) {
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say } = slackContext;
+    const { say, files, botToken } = slackContext;
 
     const config = await Configuration.findLatest();
     /* todo: uncomment after summit and back-office-UI support for configuration setting (roles)
@@ -71,11 +113,22 @@ function RunImportCommand(context) {
     */
 
     try {
-      const [importType, baseURLInput, startDate, endDate] = args;
+      const [importType, baseURLInput, start, end] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
+      const hasValidBaseURL = isValidUrl(baseURL);
+      const hasFiles = isNonEmptyArray(files);
 
-      if (!hasText(importType) || !hasText(baseURL)) {
+      const [startDate, endDate] = hasFiles
+        ? [baseURLInput, start]
+        : [start, end];
+
+      if (!hasText(importType) || (!hasValidBaseURL && !hasFiles)) {
         await say(baseCommand.usage());
+        return;
+      }
+
+      if (hasValidBaseURL && hasFiles) {
+        await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
 
@@ -94,26 +147,47 @@ function RunImportCommand(context) {
         return;
       }
 
-      const site = await Site.findByBaseURL(baseURL);
-      if (!isObject(site)) {
-        await postSiteNotFoundMessage(say, baseURL);
-        return;
+      if (hasFiles) {
+        if (files.length > 1) {
+          await say(':warning: Please provide only one CSV file.');
+          return;
+        }
+
+        const file = files[0];
+        if (!file.name.endsWith('.csv')) {
+          await say(':warning: Please provide a CSV file.');
+          return;
+        }
+
+        const csvData = await parseCSV(file, botToken);
+
+        say(`:adobe-run: Triggering import run of type ${importType} for ${csvData.length} sites.`);
+
+        await Promise.all(
+          csvData.map(async (row) => {
+            const [csvBaseURL] = row;
+            if (isValidUrl(csvBaseURL)) {
+              await runImportForSite(
+                importType,
+                csvBaseURL,
+                startDate,
+                endDate,
+                config,
+                slackContext,
+              );
+            } else {
+              await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
+            }
+          }),
+        );
+      } else if (hasValidBaseURL) {
+        await runImportForSite(importType, baseURL, startDate, endDate, config, slackContext);
+
+        const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}\n`;
+        // message += 'Stand by for results. I will post them here when they are ready.';
+
+        await say(message);
       }
-
-      await triggerImportRun(
-        config,
-        importType,
-        site.getId(),
-        startDate,
-        endDate,
-        slackContext,
-        context,
-      );
-
-      const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}\n`;
-      // message += 'Stand by for results. I will post them here when they are ready.';
-
-      await say(message);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);

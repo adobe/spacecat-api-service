@@ -53,6 +53,8 @@ paths:
     $ref: './audits-api.yaml#/latest-audits'
   /auth/google/{siteId}:
     $ref: './auth-api.yaml#/google-auth'
+  /auth/google/{siteId}/status:
+    $ref: './auth-api.yaml#/google-auth-status'
   /configurations:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
@@ -119,6 +121,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
@@ -151,8 +155,6 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
-  /tools/import/assistant/prompt:
-    $ref: './tools-api.yaml#/import-assistant'
 
 components:
   securitySchemes:
