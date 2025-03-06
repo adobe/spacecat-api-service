@@ -24,6 +24,22 @@ import { triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
+const ALL_AUDITS = [
+  'apex',
+  'cwv',
+  'lhs-mobile',
+  'lhs-desktop',
+  '404',
+  'sitemap',
+  'canonical',
+  'broken-backlinks',
+  'broken-internal-links',
+  'experimentation-opportunities',
+  'meta-tags',
+  'structured-data',
+  'forms-opportunities',
+  'alt-text',
+];
 
 /**
  * Factory function to create the RunAuditCommand object.
@@ -64,7 +80,10 @@ function RunAuditCommand(context) {
       }
 
       if (auditType === 'all') {
-        const enabledAudits = configuration.getEnabledAuditsForSite(site);
+        // const enabledAudits = configuration.getEnabledAuditsForSite(site);
+        const enabledAudits = ALL_AUDITS.filter(
+          (audit) => configuration.isHandlerEnabledForSite(audit, site),
+        );
 
         if (!isNonEmptyArray(enabledAudits)) {
           await say(`:warning: No audits configured for site \`${baseURL}\``);
