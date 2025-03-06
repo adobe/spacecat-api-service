@@ -309,37 +309,6 @@ export default class ImsClient {
    * @returns {Promise<{userId, email, organizations: string[]}>} Fields from the user's profile
    */
   async getImsUserProfile(imsAccessToken) {
-    // Helper to pull the unique organization ID values from an array of role entries
-    function getOrganizationList(roles) {
-      return [...new Set(roles.map((roleEntry) => roleEntry.organization))];
-    }
-
-    function accessProp(obj, prop, defVal) {
-      if (prop === undefined) return undefined;
-
-      if (!obj[prop]) {
-        // eslint-disable-next-line no-param-reassign
-        obj[prop] = defVal;
-      }
-
-      return obj[prop];
-    }
-
-    function getOrgDetails(roles, prodCtx) {
-      const details = {};
-
-      prodCtx?.forEach((ctx) => {
-        const d = accessProp(details, ctx.prodCtx?.owningEntity, {});
-        const groupList = accessProp(d, 'groups', []);
-
-        groupList.push({
-          groupid: ctx.prodCtx?.groupid,
-          user_visible_name: ctx.prodCtx?.user_visible_name,
-        });
-      });
-      return details;
-    }
-
     try {
       const startTime = process.hrtime.bigint();
 
@@ -356,12 +325,8 @@ export default class ImsClient {
         throw new Error(`IMS getImsUserProfile request failed with status: ${profileResponse.status}`);
       }
 
-      /* */
-      const pr = await profileResponse.json();
-      console.log('§§§ IMS getImsUserProfile response:', JSON.stringify(pr));
-      /* */
       const {
-        userId, email, roles, projectedProductContext: prodCtx,
+        userId, email, ownerOrg,
       } = await profileResponse.json();
 
       this.#logDuration('IMS getImsUserProfile request', startTime);
@@ -369,8 +334,7 @@ export default class ImsClient {
       return {
         userId,
         email,
-        organizations: getOrganizationList(roles),
-        orgDetails: getOrgDetails(roles, prodCtx),
+        organizations: [ownerOrg],
       };
     } catch (error) {
       this.log.error('Error fetching user profile data from IMS: ', error.message);
