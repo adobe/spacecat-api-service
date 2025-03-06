@@ -35,7 +35,7 @@
   "dependencies": {
     "@adobe/fetch": "4.1.11",
     "@adobe/spacecat-shared-utils": "1.26.4",
-    "@adobe/spacecat-shared-data-access": "2.0.2",
+    "@adobe/spacecat-shared-data-access": "file:../spacecat-shared-data-access",
     "@aws-sdk/client-dynamodb": "3.734.0",
     "jose": "5.9.6"
   },
