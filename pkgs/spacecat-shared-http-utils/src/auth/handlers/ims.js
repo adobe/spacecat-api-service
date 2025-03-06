@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { getAclAccess } from '@adobe/spacecat-shared-data-access';
+// import { getAclAccess } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import {
   createLocalJWKSet,
@@ -133,9 +133,9 @@ export default class AdobeImsHandler extends AbstractHandler {
   }
 
   async checkAuth(request, context) {
-    console.log('§§§ Get ACL Access via model');
-    const aclAccess = getAclAccess(context);
-    await this.#fillModel(aclAccess);
+    console.log('§§§ Skip Get ACL Access via model');
+    // const aclAccess = getAclAccess(context);
+    // await this.#fillModel(aclAccess);
 
     console.log('§§§ context in ims:', JSON.stringify(context));
     const token = getBearerToken(context);
