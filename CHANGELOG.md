@@ -1,3 +1,10 @@
+## [1.101.4](https://github.com/adobe/spacecat-api-service/compare/v1.101.3...v1.101.4) (2025-03-06)
+
+
+### Bug Fixes
+
+* reduce slack messages amount ([#820](https://github.com/adobe/spacecat-api-service/issues/820)) ([153fd96](https://github.com/adobe/spacecat-api-service/commit/153fd968b76c35cde83ca1b908ee6b30893534eb))
+
 ## [1.101.3](https://github.com/adobe/spacecat-api-service/compare/v1.101.2...v1.101.3) (2025-03-06)
 
 
