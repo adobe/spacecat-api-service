@@ -50,12 +50,3 @@ export default function dataAccessWrapper(fn /* , opts = {} */) {
     return fn(request, context);
   };
 }
-
-export function getAclAccess(context) {
-  console.log('§§§ Getting ACL Access');
-
-  const { log } = context;
-  // return createDataAccess({
-  //   tableNameData: 'spacecat-services-roles-dev',
-  // }, log);
-}
