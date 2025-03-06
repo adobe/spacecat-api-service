@@ -57,6 +57,8 @@ function OnboardCommand(context) {
     header: [
       { id: 'site', title: 'Site URL' },
       { id: 'imsOrgId', title: 'IMS Org ID' },
+      { id: 'spacecatOrgId', title: 'Spacecat Org ID' },
+      { id: 'siteId', title: 'Site ID' },
       { id: 'profile', title: 'Profile' },
       { id: 'existingSite', title: 'Already existing site?' },
       { id: 'deliveryType', title: 'Delivery Type' },
@@ -92,6 +94,8 @@ function OnboardCommand(context) {
     const reportLine = {
       site: baseURL,
       imsOrgId: imsOrgID,
+      spacecatOrgId: '',
+      siteId: '',
       profile: profileName,
       deliveryType: '',
       audits: '',
@@ -144,12 +148,18 @@ function OnboardCommand(context) {
         log.info(message);
       }
 
+      log.info(`Organization ${organization.getId()} was successfully retrieved or created`);
+      reportLine.spacecatOrgId = organization.getId();
+
       let site = await Site.findByBaseURL(baseURL);
       if (site) {
         reportLine.existingSite = 'Yes';
         reportLine.deliveryType = site.getDeliveryType();
+        log.info(`Site ${baseURL} already exists. Site ID: ${site.getId()}, Delivery Type: ${reportLine.deliveryType}`);
       } else {
+        log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
         const deliveryType = await findDeliveryType(baseURL);
+        log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
         reportLine.deliveryType = deliveryType;
         const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
         site = await Site.create({
@@ -157,7 +167,13 @@ function OnboardCommand(context) {
         });
       }
 
+      const siteID = site.getId();
+      log.info(`Site ${baseURL} was successfully retrieved or created. Site ID: ${siteID}`);
+
+      reportLine.siteId = siteID;
+
       const profile = await loadProfileConfig(profileName);
+      log.info(`Profile ${profileName} was successfully loaded`);
 
       if (!isObject(profile)) {
         const error = `Profile "${profileName}" not found or invalid.`;
@@ -184,10 +200,13 @@ function OnboardCommand(context) {
       }
 
       const importTypes = Object.keys(profile.imports);
+      reportLine.imports = importTypes.join(',');
       const siteConfig = site.getConfig();
       for (const importType of importTypes) {
         siteConfig.enableImport(importType);
       }
+
+      log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
 
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
@@ -199,12 +218,14 @@ function OnboardCommand(context) {
         return reportLine;
       }
 
+      log.info(`Site config succesfully saved for site ${siteID}`);
+
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
         await triggerImportRun(
           configuration,
           importType,
-          site.getId(),
+          siteID,
           profile.imports[importType].startDate,
           profile.imports[importType].endDate,
           slackContext,
@@ -212,9 +233,7 @@ function OnboardCommand(context) {
         );
       }
 
-      reportLine.imports = importTypes.join(',');
-
-      log.info(`Enabled the following imports for site ${site.getId()}: ${reportLine.imports}`);
+      log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
 
       const auditTypes = Object.keys(profile.audits);
 
@@ -223,7 +242,7 @@ function OnboardCommand(context) {
       });
 
       reportLine.audits = auditTypes.join(',');
-      log.info(`Enabled the following audits for site ${site.getId()}: ${reportLine.audits}`);
+      log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -346,8 +365,12 @@ function OnboardCommand(context) {
         }
 
         const message = `
-        *Onboarding complete for ${reportLine.site}*
-        :ims: *IMS Org ID:* ${reportLine.imsOrgId}
+        *:spacecat: :satellite: Onboarding complete for ${reportLine.site}*
+        :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
+        :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
+        :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
+        :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
+        :question: *Already existing:* ${reportLine.existingSite}
         :gear: *Profile:* ${reportLine.profile}
         :clipboard: *Audits:* ${reportLine.audits || 'None'}
         :inbox_tray: *Imports:* ${reportLine.imports || 'None'}

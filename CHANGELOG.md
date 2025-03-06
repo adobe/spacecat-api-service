@@ -1,3 +1,10 @@
+# [1.101.0](https://github.com/adobe/spacecat-api-service/compare/v1.100.3...v1.101.0) (2025-03-06)
+
+
+### Features
+
+* improve logging, add org and site id to report ([#817](https://github.com/adobe/spacecat-api-service/issues/817)) ([126722e](https://github.com/adobe/spacecat-api-service/commit/126722eb4049ea980cd02e922b3a962b83c809bc))
+
 ## [1.100.3](https://github.com/adobe/spacecat-api-service/compare/v1.100.2...v1.100.3) (2025-03-06)
 
 
