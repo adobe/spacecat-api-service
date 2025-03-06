@@ -55,7 +55,7 @@ export function getAclAccess(context) {
   console.log('§§§ Getting ACL Access');
 
   const { log } = context;
-  return createDataAccess({
-    tableNameData: 'spacecat-services-roles-dev',
-  }, log);
+  // return createDataAccess({
+  //   tableNameData: 'spacecat-services-roles-dev',
+  // }, log);
 }

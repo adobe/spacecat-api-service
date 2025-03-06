@@ -356,6 +356,10 @@ export default class ImsClient {
         throw new Error(`IMS getImsUserProfile request failed with status: ${profileResponse.status}`);
       }
 
+      /* */
+      const pr = await profileResponse.json();
+      console.log('§§§ IMS getImsUserProfile response:', JSON.stringify(pr));
+      /* */
       const {
         userId, email, roles, projectedProductContext: prodCtx,
       } = await profileResponse.json();
