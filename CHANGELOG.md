@@ -1,3 +1,10 @@
+## [1.101.5](https://github.com/adobe/spacecat-api-service/compare/v1.101.4...v1.101.5) (2025-03-06)
+
+
+### Bug Fixes
+
+* use correct organization id when creating site ([#821](https://github.com/adobe/spacecat-api-service/issues/821)) ([b19054d](https://github.com/adobe/spacecat-api-service/commit/b19054db45aeb2ab145ec3af453a59417454d19b))
+
 ## [1.101.4](https://github.com/adobe/spacecat-api-service/compare/v1.101.3...v1.101.4) (2025-03-06)
 
 
