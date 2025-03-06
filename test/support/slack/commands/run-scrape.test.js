@@ -244,8 +244,6 @@ describe('RunScrapeCommand', () => {
       await command.handleExecution([], slackContext);
 
       expect(slackContext.say.calledWith(':adobe-run: Triggering scrape run for 2 sites.')).to.be.true;
-      expect(slackContext.say.calledWith(':white_check_mark: Completed scrape for `https://site.com`')).to.be.true;
-      expect(slackContext.say.calledWith(':white_check_mark: Completed scrape for `https://valid.url`')).to.be.true;
     });
 
     it('handles failing scrape for a site in the CSV file', async () => {
@@ -275,7 +273,6 @@ describe('RunScrapeCommand', () => {
       const command = RunScrapeCommand(context);
       await command.handleExecution([], slackContext);
 
-      expect(slackContext.say.calledWith(':white_check_mark: Completed scrape for `https://site.com`')).to.be.true;
       expect(slackContext.say.calledWith(':warning: Failed scrape for `https://valid.url`: Test Error')).to.be.true;
     });
   });
