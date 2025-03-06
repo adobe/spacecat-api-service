@@ -1,3 +1,10 @@
+## [1.100.2](https://github.com/adobe/spacecat-api-service/compare/v1.100.1...v1.100.2) (2025-03-06)
+
+
+### Bug Fixes
+
+* all audit command triggers only lhs ([#813](https://github.com/adobe/spacecat-api-service/issues/813)) ([83e9f9e](https://github.com/adobe/spacecat-api-service/commit/83e9f9e44f253a8f1f484b01fa4df08772fca55b))
+
 ## [1.100.1](https://github.com/adobe/spacecat-api-service/compare/v1.100.0...v1.100.1) (2025-03-06)
 
 
