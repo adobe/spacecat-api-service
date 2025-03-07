@@ -154,17 +154,17 @@ export default class AdobeImsHandler extends AbstractHandler {
     console.log('§§§ creating acl:', item);
     const acl = await aclAccess.Acl.create(item);
 
-    /* */
-    // Look up the associated role
-    console.log('§§§ role to look up ACLs:', role.getImsOrgId(), role.getIdentity());
-    const lookedup = await aclAccess.Role.findByIndexKeys({
-      imsOrgId: role.getImsOrgId(),
-      identity: role.getIdentity(),
-    });
-    console.log('§§§ role looked up ACLs:', await lookedup.getAcls());
-    /* */
+    // /* */
+    // // Look up the associated role
+    // console.log('§§§ role to look up ACLs:', role.getImsOrgId(), role.getIdentity());
+    // const lookedup = await aclAccess.Role.findByIndexKeys({
+    //   imsOrgId: role.getImsOrgId(),
+    //   identity: role.getIdentity(),
+    // });
+    // console.log('§§§ role looked up ACLs:', await lookedup.getAcls());
+    // /* */
 
-    console.log('§§§ acl created and associated with role', await role.getAcls());
+    // console.log('§§§ acl created and associated with role', await role.getAcls());
     return acl;
   }
 
@@ -180,7 +180,7 @@ export default class AdobeImsHandler extends AbstractHandler {
       console.log('§§§ New role created:', r1);
 
       await this.#addSampleAcls(aclAccess, r1, {
-        roleId: r1.getId(),
+        roleName: 'mysite-importer',
         imsOrgId: 'F4646ED9626926AA0A49420E',
         acls: [
           {
@@ -190,34 +190,36 @@ export default class AdobeImsHandler extends AbstractHandler {
         ],
       });
     }
+
+    // const r2 = await this.#addSampleRoles(aclAccess, {
+    //   imsOrgId: 'F4646ED9626926AA0A49420E',
+    //   identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
+    //   name: 'test-account-writer',
+    // });
+    // if (r2) {
+
+    // }
+    // await this.#addSampleRoles(aclAccess, {
+    //   imsOrgId: 'F4646ED9626926AA0A49420E',
+    //   identity: 'imsOrgID:F4646ED9626926AA0A49420E',
+    //   name: 'test-account-reader',
+    // });
+    // await this.#addSampleRoles(aclAccess, {
+    //   imsOrgId: 'F4646ED9626926AA0A49420E',
+    //   identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
+    //   name: 'another-account-reader',
+    // });
+    // await this.#addSampleRoles(aclAccess, {
+    //   imsOrgId: 'F4646ED9626926AA0A49420E',
+    //   identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
+    //   name: 'another-account-writer',
+    // });
+    // await this.#addSampleRoles(aclAccess, {
+    //   imsOrgId: '43101FC962E3B1BF0A494217',
+    //   identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
+    //   name: 'test-account-reader',
+    // });
   }
-  /*
-        await this.#addSampleRoles(aclAccess, {
-            imsOrgId: 'F4646ED9626926AA0A49420E',
-            identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
-            name: 'test-account-writer',
-          });
-        await this.#addSampleRoles(aclAccess, {
-          imsOrgId: 'F4646ED9626926AA0A49420E',
-          identity: 'imsOrgID:F4646ED9626926AA0A49420E',
-          name: 'test-account-reader',
-        });
-        await this.#addSampleRoles(aclAccess, {
-          imsOrgId: 'F4646ED9626926AA0A49420E',
-          identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
-          name: 'another-account-reader',
-        });
-        await this.#addSampleRoles(aclAccess, {
-          imsOrgId: 'F4646ED9626926AA0A49420E',
-          identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
-          name: 'another-account-writer',
-        });
-        await this.#addSampleRoles(aclAccess, {
-          imsOrgId: '43101FC962E3B1BF0A494217',
-          identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
-          name: 'test-account-reader',
-        });
-        */
 
   // eslint-disable-next-line class-methods-use-this
   async #getAclAccess(context) {

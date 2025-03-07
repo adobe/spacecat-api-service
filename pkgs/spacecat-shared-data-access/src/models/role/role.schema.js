@@ -25,7 +25,8 @@ Indexes Doc: https://electrodb.dev/en/modeling/indexes/
  */
 
 const schema = new SchemaBuilder(Role, RoleCollection)
-  .addReference('has_many', 'Acls')
+  // it's just a to-many reference
+  // .addReference('has_many', 'Acls')
   .addAttribute('imsOrgId', {
     type: 'string',
     required: true,
