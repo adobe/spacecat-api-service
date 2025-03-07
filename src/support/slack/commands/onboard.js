@@ -119,7 +119,6 @@ function OnboardCommand(context) {
 
       // check if the organization with IMS Org ID already exists; create if it doesn't
       let organization = await Organization.findByImsOrgId(imsOrgID);
-      let organizationId;
       if (!organization) {
         let imsOrgDetails;
         try {
@@ -143,13 +142,12 @@ function OnboardCommand(context) {
           imsOrgId: imsOrgID,
         });
 
-        organizationId = organization.getId();
-
-        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organizationId} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
+        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
         await say(message);
         log.info(message);
       }
 
+      const organizationId = organization.getId();
       log.info(`Organization ${organizationId} was successfully retrieved or created`);
       reportLine.spacecatOrgId = organizationId;
 
