@@ -156,9 +156,10 @@ export default class AdobeImsHandler extends AbstractHandler {
 
     /* */
     // Look up the associated role
+    console.log('§§§ role to look up ACLs:', role.getImsOrgId(), role.getIdentity());
     const lookedup = await aclAccess.Role.findByIndexKeys({
-      imsOrgId: role.imsOrgId,
-      identity: role.identity,
+      imsOrgId: role.getImsOrgId(),
+      identity: role.getIdentity(),
     });
     console.log('§§§ role looked up ACLs:', await lookedup.getAcls());
     /* */
