@@ -129,7 +129,14 @@ export default class AdobeImsHandler extends AbstractHandler {
       return null;
     }
 
-    return /* await */ aclAccess.Role.create(item);
+    const created = await aclAccess.Role.create(item);
+    console.log('§§§ role created:', created.getId());
+    const lookedup = await aclAccess.Role.findByIndexKeys({
+      imsOrgId: item.imsOrgId,
+      identity: item.identity,
+    });
+    console.log('§§§ role looked up:', lookedup.getId());
+    return lookedup;
   }
 
   // eslint-disable-next-line class-methods-use-this
