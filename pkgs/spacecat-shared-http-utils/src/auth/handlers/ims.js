@@ -153,8 +153,18 @@ export default class AdobeImsHandler extends AbstractHandler {
 
     console.log('§§§ creating acl:', item);
     const acl = await aclAccess.Acl.create(item);
-    await role.getAcls().add(acl);
-    console.log('§§§ acl created and associated with role');
+
+    /* */
+    // Look up the associated role
+    const lookedup = await aclAccess.Role.findByIndexKeys({
+      imsOrgId: role.imsOrgId,
+      identity: role.identity,
+    });
+    console.log('§§§ role looked up ACLs:', await lookedup.getAcls());
+    /* */
+
+    await role.getAcls().push(acl);
+    console.log('§§§ acl created and associated with role', await role.getAcls());
     return acl;
   }
 
