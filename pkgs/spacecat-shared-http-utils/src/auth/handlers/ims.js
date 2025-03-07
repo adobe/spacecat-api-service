@@ -122,6 +122,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     const role = await aclAccess.Role.findByIndexKeys({
       imsOrgId: item.imsOrgId,
       identity: item.identity,
+      name: item.name,
     });
 
     if (role) {
