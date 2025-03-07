@@ -1,6 +1,18 @@
 # [1.102.0](https://github.com/adobe/spacecat-api-service/compare/v1.101.7...v1.102.0) (2025-03-07)
 
 
+### Bug Fixes
+
+* **docs:** validation errors ([ddc6dcd](https://github.com/adobe/spacecat-api-service/commit/ddc6dcda62944e3045a88c9d64ae01cacd746605))
+
+
+### Features
+
+* Brand API ([#763](https://github.com/adobe/spacecat-api-service/issues/763)) ([1021303](https://github.com/adobe/spacecat-api-service/commit/1021303c53f2d665e673500c1bd76164eaa873a7))
+
+# [1.102.0](https://github.com/adobe/spacecat-api-service/compare/v1.101.7...v1.102.0) (2025-03-07)
+
+
 ### Features
 
 * Brand API ([#763](https://github.com/adobe/spacecat-api-service/issues/763)) ([1021303](https://github.com/adobe/spacecat-api-service/commit/1021303c53f2d665e673500c1bd76164eaa873a7))
