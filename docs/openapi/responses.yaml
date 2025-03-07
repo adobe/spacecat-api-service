@@ -138,7 +138,7 @@
     X-Error:
       $ref: './headers.yaml#/xError'
 '404-brand-not-found-for-siteId':
-  description: Brand not found for site ID.
+  description: Brand or site not found for site ID.
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'

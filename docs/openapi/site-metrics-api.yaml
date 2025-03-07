@@ -62,6 +62,7 @@ page-metrics-by-source:
       - api_key: [ ]
 site-metrics-latest:
   get:
+    operationId: getSiteLatestMetrics
     summary: Get latest site metrics
     description: |
       Retrieves the latest metrics for a specific site, including RUM (Real User Monitoring)
