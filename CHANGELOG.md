@@ -1,3 +1,10 @@
+# [1.102.0](https://github.com/adobe/spacecat-api-service/compare/v1.101.7...v1.102.0) (2025-03-07)
+
+
+### Features
+
+* Brand API ([#763](https://github.com/adobe/spacecat-api-service/issues/763)) ([1021303](https://github.com/adobe/spacecat-api-service/commit/1021303c53f2d665e673500c1bd76164eaa873a7))
+
 ## [1.101.7](https://github.com/adobe/spacecat-api-service/compare/v1.101.6...v1.101.7) (2025-03-06)
 
 
