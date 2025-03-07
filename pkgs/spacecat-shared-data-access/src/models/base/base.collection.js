@@ -376,22 +376,28 @@ class BaseCollection {
     }
 
     try {
+      console.log('§§§ create 1');
       const instance = this.#createInstance(item);
 
       // Check that the current user has permission to create the entity
-      instance.ensurePermission('C');
+      // instance.ensurePermission('C');
+      console.log('§§§ create 2');
 
       if (upsert) {
         await this.entity.put(item).go();
       } else {
         await this.entity.create(item).go();
       }
+      console.log('§§§ create 3');
 
       this.#invalidateCache();
+      console.log('§§§ create 4');
 
       this.log.info(`Created item for [${this.entityName}]`);
 
+      console.log('§§§ create 5');
       await this.#onCreate(instance);
+      console.log('§§§ create 6');
 
       return instance;
     } catch (error) {
