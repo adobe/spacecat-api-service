@@ -119,7 +119,10 @@ export default class AdobeImsHandler extends AbstractHandler {
   // eslint-disable-next-line class-methods-use-this
   async #addSampleRoles(aclAccess, item) {
     // only add sample data if it's not already there
-    const role = await aclAccess.Role.get(item);
+    const role = await aclAccess.Role.findByIndexKeys({
+      imsOrgId: item.imsOrgId,
+      identity: item.identity,
+    });
 
     if (role) {
       console.log('§§§ role already exists:', item);
