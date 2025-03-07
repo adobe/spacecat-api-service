@@ -191,34 +191,89 @@ export default class AdobeImsHandler extends AbstractHandler {
       });
     }
 
-    // const r2 = await this.#addSampleRoles(aclAccess, {
-    //   imsOrgId: 'F4646ED9626926AA0A49420E',
-    //   identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
-    //   name: 'test-account-writer',
-    // });
-    // if (r2) {
+    const r2 = await this.#addSampleRoles(aclAccess, {
+      imsOrgId: 'F4646ED9626926AA0A49420E',
+      identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
+      name: 'test-account-writer',
+    });
+    if (r2) {
+      console.log('§§§ New role created r2');
 
-    // }
-    // await this.#addSampleRoles(aclAccess, {
-    //   imsOrgId: 'F4646ED9626926AA0A49420E',
-    //   identity: 'imsOrgID:F4646ED9626926AA0A49420E',
-    //   name: 'test-account-reader',
-    // });
-    // await this.#addSampleRoles(aclAccess, {
-    //   imsOrgId: 'F4646ED9626926AA0A49420E',
-    //   identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
-    //   name: 'another-account-reader',
-    // });
-    // await this.#addSampleRoles(aclAccess, {
-    //   imsOrgId: 'F4646ED9626926AA0A49420E',
-    //   identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
-    //   name: 'another-account-writer',
-    // });
-    // await this.#addSampleRoles(aclAccess, {
-    //   imsOrgId: '43101FC962E3B1BF0A494217',
-    //   identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
-    //   name: 'test-account-reader',
-    // });
+      await this.#addSampleAcls(aclAccess, r1, {
+        roleName: 'test-account-writer',
+        imsOrgId: 'F4646ED9626926AA0A49420E',
+        acls: [
+          {
+            actions: ['C', 'R', 'U', 'D'],
+            path: '/organization/0f8ff270-968e-4007-aea1-2fa1c5e3332c',
+          },
+          {
+            actions: ['C', 'R', 'U', 'D'],
+            path: '/organization/77d14008-649f-4be2-8d40-cba150995410/site/**',
+          },
+        ],
+      });
+    }
+    const r3 = await this.#addSampleRoles(aclAccess, {
+      imsOrgId: 'F4646ED9626926AA0A49420E',
+      identity: 'imsOrgID:F4646ED9626926AA0A49420E',
+      name: 'test-account-reader',
+    });
+    if (r3) {
+      console.log('§§§ New role created r2');
+
+      await this.#addSampleAcls(aclAccess, r1, {
+        roleName: 'test-account-reader',
+        imsOrgId: 'F4646ED9626926AA0A49420E',
+        acls: [
+          {
+            actions: ['R'],
+            path: '/organization/0f8ff270-968e-4007-aea1-2fa1c5e3332c',
+          },
+          {
+            actions: ['R'],
+            path: '/organization/77d14008-649f-4be2-8d40-cba150995410',
+          },
+          {
+            actions: ['R'],
+            path: '/organization/77d14008-649f-4be2-8d40-cba150995410/site/b57fb90d-a847-4f18-b80e-283ff7145345',
+          },
+        ],
+      });
+    }
+    await this.#addSampleRoles(aclAccess, {
+      imsOrgId: 'F4646ED9626926AA0A49420E',
+      identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
+      name: 'another-account-reader',
+    });
+    await this.#addSampleRoles(aclAccess, {
+      imsOrgId: 'F4646ED9626926AA0A49420E',
+      identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
+      name: 'another-account-writer',
+    });
+    const r4 = await this.#addSampleRoles(aclAccess, {
+      imsOrgId: '43101FC962E3B1BF0A494217',
+      identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
+      name: 'test-account-reader',
+    });
+    if (r4) {
+      console.log('§§§ New role created r4');
+
+      await this.#addSampleAcls(aclAccess, r4, {
+        roleName: 'test-account-reader',
+        imsOrgId: '43101FC962E3B1BF0A494217',
+        acls: [
+          {
+            actions: ['R'],
+            path: '/organization/77d14008-649f-4be2-8d40-cba150995410',
+          },
+          {
+            actions: ['R'],
+            path: '/organization/77d14008-649f-4be2-8d40-cba150995410/site/b57fb90d-a847-4f18-b80e-283ff7145345',
+          },
+        ],
+      });
+    }
   }
 
   // eslint-disable-next-line class-methods-use-this
