@@ -43,6 +43,11 @@ const schema = new SchemaBuilder(Role, RoleCollection)
   .addIndex(
     { composite: ['imsOrgId'] },
     { composite: ['identity'] },
+  )
+  .addIndex(
+    { composite: ['imsOrgId'] },
+    { composite: ['identity'] },
+    { composite: ['name'] },
   );
 
 export default schema.build();
