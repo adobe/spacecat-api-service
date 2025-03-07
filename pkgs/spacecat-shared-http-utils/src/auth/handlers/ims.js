@@ -125,13 +125,14 @@ export default class AdobeImsHandler extends AbstractHandler {
     });
 
     if (role) {
-      console.log('§§§ role already exists:', item);
+      console.log('§§§ role already exists:', role.getId());
       return null;
     }
 
     return /* await */ aclAccess.Role.create(item);
   }
 
+  // eslint-disable-next-line class-methods-use-this
   async #addSampleAcls(aclAccess, role, item) {
     // only add sample data if it's not already there
     // const acl = await aclAccess.Acl.findByIndexKeys({
@@ -159,6 +160,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     });
     if (r1) {
       // its a new one
+      console.log('§§§ New role created:', r1);
 
       await this.#addSampleAcls(aclAccess, r1, {
         roleId: r1.getId(),
