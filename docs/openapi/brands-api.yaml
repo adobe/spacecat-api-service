@@ -45,22 +45,7 @@ brand-guidelines-by-site-id:
       '401':
         $ref: './responses.yaml#/401'
       '404':
-        description: Not found - either the site ID is invalid or no brand ID is configured for the site
-        content:
-          application/json:
-            schema:
-              oneOf:
-                - $ref: './responses.yaml#/404-brand-not-found-for-siteId'
-                - $ref: './responses.yaml#/404-site-not-found-with-id'
-            examples:
-              brand-not-found:
-                summary: Brand not found for site
-                value:
-                  message: "Brand mapping not found for site ID: {siteId}"
-              site-not-found:
-                summary: Site not found
-                value:
-                  message: "Site not found with id {siteId}"
+        $ref: './responses.yaml#/404-brand-not-found-for-siteId'
       '500':
         $ref: './responses.yaml#/500'
     security:
