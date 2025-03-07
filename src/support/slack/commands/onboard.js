@@ -143,13 +143,12 @@ function OnboardCommand(context) {
           imsOrgId: imsOrgID,
         });
 
-        organizationId = organization.getId();
-
         const message = `:white_check_mark: A new organization has been created. Organization ID: ${organizationId} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
         await say(message);
         log.info(message);
       }
 
+      organizationId = organization.getId();
       log.info(`Organization ${organizationId} was successfully retrieved or created`);
       reportLine.spacecatOrgId = organizationId;
 
