@@ -1,3 +1,10 @@
+## [1.102.3](https://github.com/adobe/spacecat-api-service/compare/v1.102.2...v1.102.3) (2025-03-07)
+
+
+### Bug Fixes
+
+* **data-access:** fix fetchAllPages flag to sites all ([#828](https://github.com/adobe/spacecat-api-service/issues/828)) ([c08a90c](https://github.com/adobe/spacecat-api-service/commit/c08a90c58d61831ff1a482b5484c984a314df438))
+
 ## [1.102.2](https://github.com/adobe/spacecat-api-service/compare/v1.102.1...v1.102.2) (2025-03-07)
 
 
