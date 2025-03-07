@@ -66,7 +66,7 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: lhs-mobile audit check is triggered for https://validsite.com');
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
@@ -83,7 +83,8 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':x: Will not audit site \'https://validsite.com\' because audits of type \'lhs-mobile\' are disabled for this site.');
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
+      expect(slackContext.say.secondCall.args[0]).to.include(':x: Will not audit site \'https://validsite.com\' because audits of type \'lhs-mobile\' are disabled for this site.');
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
@@ -114,27 +115,33 @@ describe('RunAuditCommand', () => {
     });
 
     it('trigger all audits for a valid site', async () => {
+      const handlerEnabledStub = sinon.stub().onCall(0).returns(true).onCall(1)
+        .returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
-        getEnabledAuditsForSite: () => ['lhs-mobile', 'lhs-desktop'],
+        isHandlerEnabledForSite: handlerEnabledStub,
       });
 
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com', 'all'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.equal(':white_check_mark: All audits triggered successfully.');
+      expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for https://validsite.com');
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
     it('triggers all audits for all sites specified in a CSV file', async () => {
+      const handlerEnabledStub = sinon.stub().onCall(0).returns(true).onCall(1)
+        .returns(true)
+        .onCall(22)
+        .returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
-        getEnabledAuditsForSite: () => ['lhs-mobile', 'lhs-desktop'],
+        isHandlerEnabledForSite: handlerEnabledStub,
       });
       const fileUrl = 'https://example.com/sites.csv';
       slackContext.files = [
@@ -149,11 +156,10 @@ describe('RunAuditCommand', () => {
           + 'https://valid.url,uuidv4');
 
       const command = RunAuditCommand(context);
-      await command.handleExecution(['', 'all'], slackContext);
+      await command.handleExecution(['all'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for 2 sites.');
-      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: All audits triggered successfully.');
       expect(sqsStub.sendMessage.called).to.be.true;
     });
 
@@ -214,27 +220,30 @@ describe('RunAuditCommand', () => {
     });
 
     it('handles site with no enable audits', async () => {
+      const handlerEnabledStub = sinon.stub().onCall(0).returns(false);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
-        getEnabledAuditsForSite: () => [],
+        isHandlerEnabledForSite: handlerEnabledStub,
       });
 
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com', 'all'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.equal(':warning: No audits configured for site `https://validsite.com`');
+      expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for https://validsite.com');
+      expect(slackContext.say.secondCall.args[0]).to.equal(':warning: No audits configured for site `https://validsite.com`');
     });
 
     it('handles error while triggering audits', async () => {
-      const errorMessage = 'Failed to send message';
+      const errorMessage = 'Failed to trigger';
+      const handlerEnabledStub = sinon.stub().onCall(0).returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
-        getEnabledAuditsForSite: () => ['lhs-mobile', 'lhs-desktop'],
+        isHandlerEnabledForSite: handlerEnabledStub,
       });
       sqsStub.sendMessage.rejects(new Error(errorMessage));
 
@@ -242,7 +251,8 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com', 'all'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.equal(`:nuclear-warning: Oops! Something went wrong: ${errorMessage}`);
+      expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for https://validsite.com');
+      expect(slackContext.say.secondCall.args[0]).to.equal(`:nuclear-warning: Oops! Something went wrong: ${errorMessage}`);
     });
 
     it('handles error when site cannot be found', async () => {

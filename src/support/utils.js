@@ -9,15 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { context as h2, h1 } from '@adobe/fetch';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import URI from 'urijs';
-import { hasText } from '@adobe/spacecat-shared-utils';
-
-/* c8 ignore next 3 */
-export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
-  ? h1()
-  : h2();
+import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 
 /**
  * Checks if the url parameter "url" equals "ALL".
@@ -233,7 +227,7 @@ export const triggerImportRun = async (
 export async function isHelixSite(url, edgeConfig = {}) {
   let resp;
   try {
-    resp = await fetch(url, { headers: { 'User-Agent': 'curl/7.88.1' } });
+    resp = await fetch(url);
   } catch (e) {
     return {
       isHelix: false,

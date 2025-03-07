@@ -132,7 +132,6 @@ function RunScrapeCommand(context) {
             const [csvBaseURL] = row;
             try {
               await scrapeSite(csvBaseURL, slackContext);
-              say(`:white_check_mark: Completed scrape for \`${csvBaseURL}\``);
             } catch (error) {
               say(`:warning: Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
             }

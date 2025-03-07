@@ -11,8 +11,7 @@
  */
 import { JSDOM } from 'jsdom';
 import { Octokit } from '@octokit/rest';
-import { fetch } from '../../../support/utils.js';
-
+import { tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 /**
  * Scrapes the GitHub organization name from the organization's GitHub page.
  *

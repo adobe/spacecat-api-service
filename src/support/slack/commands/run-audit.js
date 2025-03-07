@@ -24,6 +24,22 @@ import { triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
+const ALL_AUDITS = [
+  'apex',
+  'cwv',
+  'lhs-mobile',
+  'lhs-desktop',
+  '404',
+  'sitemap',
+  'canonical',
+  'broken-backlinks',
+  'broken-internal-links',
+  'experimentation-opportunities',
+  'meta-tags',
+  'structured-data',
+  'forms-opportunities',
+  'alt-text',
+];
 
 /**
  * Factory function to create the RunAuditCommand object.
@@ -64,7 +80,10 @@ function RunAuditCommand(context) {
       }
 
       if (auditType === 'all') {
-        const enabledAudits = configuration.getEnabledAuditsForSite(site);
+        // const enabledAudits = configuration.getEnabledAuditsForSite(site);
+        const enabledAudits = ALL_AUDITS.filter(
+          (audit) => configuration.isHandlerEnabledForSite(audit, site),
+        );
 
         if (!isNonEmptyArray(enabledAudits)) {
           await say(`:warning: No audits configured for site \`${baseURL}\``);
@@ -81,20 +100,12 @@ function RunAuditCommand(context) {
             }
           }),
         );
-        say(':white_check_mark: All audits triggered successfully.');
       } else {
         if (!configuration.isHandlerEnabledForSite(auditType, site)) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
           return;
         }
         await triggerAuditForSite(site, auditType, slackContext, context);
-
-        let message = `:white_check_mark: ${auditType} audit check is triggered for ${baseURL}\n`;
-        if (auditType === LHS_MOBILE) {
-          message += `:adobe-run: In a minute, you can run @spacecat get site ${baseURL}`;
-        }
-
-        await say(message);
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -115,12 +126,11 @@ function RunAuditCommand(context) {
     const { say, files, botToken } = slackContext;
 
     try {
-      const [baseURLInput, auditTypeInput] = args;
+      const [baseURLInputArg, auditTypeInputArg] = args;
 
-      const baseURL = extractURLFromSlackInput(baseURLInput);
-      const hasValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
-      const auditType = auditTypeInput || LHS_MOBILE;
+      const baseURL = extractURLFromSlackInput(baseURLInputArg);
+      const hasValidBaseURL = isValidUrl(baseURL);
 
       if (!hasValidBaseURL && !hasFiles) {
         await say(baseCommand.usage());
@@ -133,6 +143,9 @@ function RunAuditCommand(context) {
       }
 
       if (hasFiles) {
+        const [, auditTypeInput] = ['', baseURLInputArg];
+        const auditType = auditTypeInput || LHS_MOBILE;
+
         if (files.length > 1) {
           await say(':warning: Please provide only one CSV file.');
           return;
@@ -159,6 +172,8 @@ function RunAuditCommand(context) {
           }),
         );
       } else if (hasValidBaseURL) {
+        const auditType = auditTypeInputArg || LHS_MOBILE;
+        say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
         await runAuditForSite(baseURL, auditType, slackContext);
       }
     } catch (error) {

@@ -1,3 +1,81 @@
+## [1.101.7](https://github.com/adobe/spacecat-api-service/compare/v1.101.6...v1.101.7) (2025-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.35.0 ([#823](https://github.com/adobe/spacecat-api-service/issues/823)) ([b3d57a9](https://github.com/adobe/spacecat-api-service/commit/b3d57a98eaecc179011a33dcd9a0a5c79fd53407))
+
+## [1.101.6](https://github.com/adobe/spacecat-api-service/compare/v1.101.5...v1.101.6) (2025-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.22.0 ([#822](https://github.com/adobe/spacecat-api-service/issues/822)) ([fa17ae3](https://github.com/adobe/spacecat-api-service/commit/fa17ae3e442cc5ec8a72344814de71aa70bc7273))
+
+## [1.101.5](https://github.com/adobe/spacecat-api-service/compare/v1.101.4...v1.101.5) (2025-03-06)
+
+
+### Bug Fixes
+
+* use correct organization id when creating site ([#821](https://github.com/adobe/spacecat-api-service/issues/821)) ([b19054d](https://github.com/adobe/spacecat-api-service/commit/b19054db45aeb2ab145ec3af453a59417454d19b))
+
+## [1.101.4](https://github.com/adobe/spacecat-api-service/compare/v1.101.3...v1.101.4) (2025-03-06)
+
+
+### Bug Fixes
+
+* reduce slack messages amount ([#820](https://github.com/adobe/spacecat-api-service/issues/820)) ([153fd96](https://github.com/adobe/spacecat-api-service/commit/153fd968b76c35cde83ca1b908ee6b30893534eb))
+
+## [1.101.3](https://github.com/adobe/spacecat-api-service/compare/v1.101.2...v1.101.3) (2025-03-06)
+
+
+### Bug Fixes
+
+* we should not bulkUpdateStatus when validSuggestions is empty ([#819](https://github.com/adobe/spacecat-api-service/issues/819)) ([b138907](https://github.com/adobe/spacecat-api-service/commit/b138907f3919c3d4eb84b8e692b294cefd63984e))
+
+## [1.101.2](https://github.com/adobe/spacecat-api-service/compare/v1.101.1...v1.101.2) (2025-03-06)
+
+
+### Bug Fixes
+
+* improve error handling for site creation failures ([#818](https://github.com/adobe/spacecat-api-service/issues/818)) ([c6d1c86](https://github.com/adobe/spacecat-api-service/commit/c6d1c86bc41465158ee8f8af0614d45351f4d127))
+* obtain all enabled audits ([#816](https://github.com/adobe/spacecat-api-service/issues/816)) ([c01e5cf](https://github.com/adobe/spacecat-api-service/commit/c01e5cf5c1a697ecee67e5f82a4f83fca2e78960))
+
+## [1.101.1](https://github.com/adobe/spacecat-api-service/compare/v1.101.0...v1.101.1) (2025-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#815](https://github.com/adobe/spacecat-api-service/issues/815)) ([831252c](https://github.com/adobe/spacecat-api-service/commit/831252cb8bea9661342920723024fed66c89dabe))
+
+# [1.101.0](https://github.com/adobe/spacecat-api-service/compare/v1.100.3...v1.101.0) (2025-03-06)
+
+
+### Features
+
+* improve logging, add org and site id to report ([#817](https://github.com/adobe/spacecat-api-service/issues/817)) ([126722e](https://github.com/adobe/spacecat-api-service/commit/126722eb4049ea980cd02e922b3a962b83c809bc))
+
+## [1.100.3](https://github.com/adobe/spacecat-api-service/compare/v1.100.2...v1.100.3) (2025-03-06)
+
+
+### Bug Fixes
+
+* use tracingFetch and user agent ([#814](https://github.com/adobe/spacecat-api-service/issues/814)) ([88363a3](https://github.com/adobe/spacecat-api-service/commit/88363a301a86ef074df48694934594be22abfdac))
+
+## [1.100.2](https://github.com/adobe/spacecat-api-service/compare/v1.100.1...v1.100.2) (2025-03-06)
+
+
+### Bug Fixes
+
+* all audit command triggers only lhs ([#813](https://github.com/adobe/spacecat-api-service/issues/813)) ([83e9f9e](https://github.com/adobe/spacecat-api-service/commit/83e9f9e44f253a8f1f484b01fa4df08772fca55b))
+
+## [1.100.1](https://github.com/adobe/spacecat-api-service/compare/v1.100.0...v1.100.1) (2025-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#812](https://github.com/adobe/spacecat-api-service/issues/812)) ([259f75d](https://github.com/adobe/spacecat-api-service/commit/259f75d199b2d54f58b52225c91079f6bd74cbbf))
+
 # [1.100.0](https://github.com/adobe/spacecat-api-service/compare/v1.99.4...v1.100.0) (2025-03-05)
 
 

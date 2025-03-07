@@ -12,7 +12,7 @@
 
 import { createUrl } from '@adobe/fetch';
 import {
-  hasText, isString, isObject, tracingFetch,
+  hasText, isString, isObject, tracingFetch as fetch,
 } from '@adobe/spacecat-shared-utils';
 import fs from 'fs';
 
@@ -22,7 +22,7 @@ import { Readable } from 'stream';
 import { parse } from 'csv';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
-import { fetch, isAuditForAllUrls } from '../../support/utils.js';
+import { isAuditForAllUrls } from '../../support/utils.js';
 
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
@@ -299,7 +299,7 @@ const wrapSayForThread = (say, threadTs) => {
  */
 const fetchFile = async (file, token) => {
   const fileUrl = file.url_private;
-  const response = await tracingFetch(fileUrl, {
+  const response = await fetch(fileUrl, {
     headers: { Authorization: `Bearer ${token}` },
     responseType: 'arraybuffer',
     validateStatus: (status) => status < 500,

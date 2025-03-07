@@ -48,6 +48,7 @@ describe('OnboardCommand', () => {
       Organization: {
         create: sinon.stub(),
         findByImsOrgId: sinon.stub(),
+        getId: sinon.stub(),
       },
     };
     sqsStub = {
@@ -62,7 +63,6 @@ describe('OnboardCommand', () => {
       sqs: sqsStub,
       env: {
         AUDIT_JOBS_QUEUE_URL: 'testQueueUrl',
-        DEFAULT_ORGANIZATION_ID: 'default',
         token: 'test-token',
       },
       imsClient: imsClientStub,
@@ -134,7 +134,7 @@ describe('OnboardCommand', () => {
         baseURL: 'https://example.com',
         deliveryType: 'other',
         isLive: false,
-        organizationId: 'default',
+        organizationId: '123',
       });
       expect(slackContext.say.calledWith(':white_check_mark: A new organization has been created. Organization ID: 123 Organization name: new-org IMS Org ID: 000000000000000000000000@AdobeOrg.')).to.be.true;
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
@@ -201,7 +201,9 @@ describe('OnboardCommand', () => {
 
     it('handles error when a site failed to be added', async () => {
       nock(baseURL).get('/').replyWithError('rainy weather');
-      dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
+      dataAccessStub.Organization.findByImsOrgId.resolves({
+        getId: sinon.stub().returns('existing-org-123'),
+      });
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.rejects(new Error('failed to add the site'));
 
@@ -209,7 +211,7 @@ describe('OnboardCommand', () => {
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
-      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to add the site')).to.be.true;
+      expect(slackContext.say.calledWithMatch(/:x: \*Errors:\* failed to add the site/)).to.be.true;
     });
   });
 

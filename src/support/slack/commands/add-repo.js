@@ -10,9 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { isObject } from '@adobe/spacecat-shared-utils';
+import { isObject, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 
-import { fetch, triggerAuditForSite } from '../../utils.js';
+import { triggerAuditForSite } from '../../utils.js';
 import { printSiteDetails } from '../../../utils/slack/format.js';
 import { validateRepoUrl } from '../../../utils/validations.js';
 import {
