@@ -211,6 +211,141 @@ describe('OnboardCommand', () => {
       await command.handleExecution(args, slackContext);
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to add the site')).to.be.true;
     });
+
+    it('validates date intervals for imports and fails if invalid', async () => {
+      nock(baseURL).get('/').replyWithError('rainy weather');
+      dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Site.create.resolves({
+        getId: () => 'site-123',
+        getConfig: () => ({ enableImport: () => {} }),
+        setConfig: () => {},
+        save: () => Promise.resolve(),
+      });
+
+      // Mock the profile config with invalid dates
+      const mockProfile = {
+        imports: {
+          testImport: {
+            startDate: '2024-01-01',
+            endDate: '2023-12-31', // End date before start date
+          },
+        },
+        audits: {},
+      };
+
+      const loadProfileConfigStub = sinon.stub().resolves(mockProfile);
+      const isValidDateIntervalStub = sinon.stub().returns(false);
+      OnboardCommand = await esmock(
+        '../../../../src/support/slack/commands/onboard.js',
+        {
+          '../../../../src/utils/slack/base.js': {
+            parseCSV: parseCSVStub,
+            loadProfileConfig: loadProfileConfigStub,
+          },
+          '../../../../src/utils/date-utils.js': {
+            isValidDateInterval: isValidDateIntervalStub,
+          },
+        },
+      );
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg', 'test-profile'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(isValidDateIntervalStub.calledWith('2024-01-01', '2023-12-31')).to.be.true;
+      expect(slackContext.say.calledWith(sinon.match(/Invalid date interval for import type testImport/))).to.be.true;
+    });
+
+    it('successfully processes valid date intervals for imports', async () => {
+      nock(baseURL).get('/').replyWithError('rainy weather');
+      dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Site.create.resolves({
+        getId: () => 'site-123',
+        getConfig: () => ({ enableImport: () => {} }),
+        setConfig: () => {},
+        save: () => Promise.resolve(),
+      });
+
+      // Mock the profile config with valid dates
+      const mockProfile = {
+        imports: {
+          testImport: {
+            startDate: '2023-01-01',
+            endDate: '2024-01-01', // Valid date range
+          },
+        },
+        audits: {},
+      };
+
+      const loadProfileConfigStub = sinon.stub().resolves(mockProfile);
+      const isValidDateIntervalStub = sinon.stub().returns(true);
+      OnboardCommand = await esmock(
+        '../../../../src/support/slack/commands/onboard.js',
+        {
+          '../../../../src/utils/slack/base.js': {
+            parseCSV: parseCSVStub,
+            loadProfileConfig: loadProfileConfigStub,
+          },
+          '../../../../src/utils/date-utils.js': {
+            isValidDateInterval: isValidDateIntervalStub,
+          },
+        },
+      );
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg', 'test-profile'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(isValidDateIntervalStub.calledWith('2023-01-01', '2024-01-01')).to.be.true;
+      expect(slackContext.say.calledWith(sinon.match(/Onboarding complete for/))).to.be.true;
+    });
+
+    it('handles missing dates in import configuration', async () => {
+      nock(baseURL).get('/').replyWithError('rainy weather');
+      dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Site.create.resolves({
+        getId: () => 'site-123',
+        getConfig: () => ({ enableImport: () => {} }),
+        setConfig: () => {},
+        save: () => Promise.resolve(),
+      });
+
+      // Mock the profile config with missing dates
+      const mockProfile = {
+        imports: {
+          testImport: {}, // No dates specified
+        },
+        audits: {},
+      };
+
+      const loadProfileConfigStub = sinon.stub().resolves(mockProfile);
+      const isValidDateIntervalStub = sinon.stub().returns(true);
+      OnboardCommand = await esmock(
+        '../../../../src/support/slack/commands/onboard.js',
+        {
+          '../../../../src/utils/slack/base.js': {
+            parseCSV: parseCSVStub,
+            loadProfileConfig: loadProfileConfigStub,
+          },
+          '../../../../src/utils/date-utils.js': {
+            isValidDateInterval: isValidDateIntervalStub,
+          },
+        },
+      );
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg', 'test-profile'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(isValidDateIntervalStub.calledWith(undefined, undefined)).to.be.true;
+      expect(slackContext.say.calledWith(sinon.match(/Onboarding complete for/))).to.be.true;
+    });
   });
 
   describe('Batch Onboarding from CSV', () => {

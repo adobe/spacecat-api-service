@@ -31,6 +31,7 @@ import { findDeliveryType, triggerImportRun } from '../../utils.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
+import { isValidDateInterval } from '../../../utils/date-utils.js';
 
 const PHRASES = ['onboard site', 'onboard sites'];
 
@@ -201,12 +202,22 @@ function OnboardCommand(context) {
 
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
+        const { startDate, endDate } = profile.imports[importType];
+
+        if ((startDate || endDate) && !isValidDateInterval(startDate, endDate)) {
+          const error = `Invalid date interval for import type ${importType}. Please provide valid dates in the format YYYY-MM-DD. The end date must be after the start date and within a two-year range.`;
+          log.error(error);
+          reportLine.errors = error;
+          reportLine.status = 'Failed';
+          return reportLine;
+        }
+
         await triggerImportRun(
           configuration,
           importType,
           site.getId(),
-          profile.imports[importType].startDate,
-          profile.imports[importType].endDate,
+          startDate,
+          endDate,
           slackContext,
           context,
         );
