@@ -161,6 +161,7 @@ export default class AdobeImsHandler extends AbstractHandler {
       // its a new one
 
       await this.#addSampleAcls(aclAccess, r1, {
+        roleId: r1.getId(),
         imsOrgId: 'F4646ED9626926AA0A49420E',
         acls: [
           {
