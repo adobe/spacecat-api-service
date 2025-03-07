@@ -30,7 +30,7 @@ const schema = new SchemaBuilder(Acl, AclCollection)
   .addAttribute('imsOrgId', {
     type: 'string',
     required: true,
-    validate: (value) => Organization.IMS_ORG_ID_REGEX.test(value),
+    // validate: (value) => Organization.IMS_ORG_ID_REGEX.test(value),
   })
   .addAttribute('acls', {
     type: 'list',

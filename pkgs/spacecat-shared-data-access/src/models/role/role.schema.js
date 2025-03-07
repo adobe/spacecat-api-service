@@ -29,7 +29,7 @@ const schema = new SchemaBuilder(Role, RoleCollection)
   .addAttribute('imsOrgId', {
     type: 'string',
     required: true,
-    validate: (value) => Organization.IMS_ORG_ID_REGEX.test(value),
+    // validate: (value) => Organization.IMS_ORG_ID_REGEX.test(value),
   })
   .addAttribute('identity', {
     type: 'string',
