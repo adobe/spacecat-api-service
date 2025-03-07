@@ -117,21 +117,50 @@ export default class AdobeImsHandler extends AbstractHandler {
   }
 
   // eslint-disable-next-line class-methods-use-this
+  async #addSampleRoles(aclAccess, item) {
+    // only add sample data if it's not already there
+    const role = await aclAccess.Role.get(item);
+
+    if (role) {
+      console.log('§§§ role already exists:', item);
+      return role;
+    }
+
+    return /* await */ aclAccess.Role.create(item);
+  }
+
+  // eslint-disable-next-line class-methods-use-this
   async #fillModel(aclAccess) {
-    console.log('§§§ in fillModel role:', aclAccess.Role);
-    console.log('§§§ in fillModel site:', aclAccess.Site);
-    console.log('§§§ in fillModel acl:', aclAccess.Acl);
-    const role1 = await aclAccess.Role.create({
+    await this.#addSampleRoles(aclAccess, {
       imsOrgId: 'F4646ED9626926AA0A49420E',
       identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
       name: 'mysite-importer',
     });
-    const role2 = await aclAccess.Role.create({
+    await this.#addSampleRoles(aclAccess, {
       imsOrgId: 'F4646ED9626926AA0A49420E',
       identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
       name: 'test-account-writer',
     });
-    console.log('§§§ Created roles:', role1, role2);
+    await this.#addSampleRoles(aclAccess, {
+      imsOrgId: 'F4646ED9626926AA0A49420E',
+      identity: 'imsOrgID:F4646ED9626926AA0A49420E',
+      name: 'test-account-reader',
+    });
+    await this.#addSampleRoles(aclAccess, {
+      imsOrgId: 'F4646ED9626926AA0A49420E',
+      identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
+      name: 'another-account-reader',
+    });
+    await this.#addSampleRoles(aclAccess, {
+      imsOrgId: 'F4646ED9626926AA0A49420E',
+      identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
+      name: 'another-account-writer',
+    });
+    await this.#addSampleRoles(aclAccess, {
+      imsOrgId: '43101FC962E3B1BF0A494217',
+      identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
+      name: 'test-account-reader',
+    });
   }
 
   // eslint-disable-next-line class-methods-use-this
