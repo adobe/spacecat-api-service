@@ -23,7 +23,7 @@ class RoleCollection extends BaseCollection {
   async allRolesByIdentities(imsOrgId, identities) {
     console.log('§§§ allRolesByIdentities', imsOrgId, identities);
     const res = await this.entity.query
-      .acls({ imsOrgId })
+      .roles({ imsOrgId })
       .where((attr, { eq }) => identities.map((identity) => eq(attr.identity, identity).join(' OR '))).go();
 
     console.log('§§§ allRolesByIdentities found', res);
