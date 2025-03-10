@@ -234,7 +234,7 @@ async function getDBACLs(dbAccess, {
     });
     if (acl) {
       const roleAcls = acl.getAcls();
-      roleAcls.forEach((e) => e.sort(pathSorter));
+      roleAcls.sort(pathSorter);
       acls.push(...roleAcls);
     }
   }
