@@ -24,7 +24,7 @@ import configDev from './config/ims-stg.js';
 
 import AbstractHandler from './abstract.js';
 import AuthInfo from '../auth-info.js';
-import getAcls from '../rbac/acls.js';
+import getAclsOud from '../rbac/acls.js';
 
 const IGNORED_PROFILE_PROPS = [
   'id',
@@ -271,10 +271,12 @@ export default class AdobeImsHandler extends AbstractHandler {
   }
 
   async checkAuth(request, context) {
+    /* */
     console.log('§§§ Get ACL Access via model');
     const aclAccess = await this.#getAclAccess(context);
     console.log('§§§ Done getting ACL Access via model');
     await this.#fillModel(aclAccess);
+    /* */
 
     // console.log('§§§ context in ims:', JSON.stringify(context));
     const token = getBearerToken(context);
@@ -286,7 +288,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     try {
       const imsProfile = await context.imsClient.getImsUserProfile(token);
       console.log('§§§ ims profile:', JSON.stringify(imsProfile));
-      const acls = await getAcls({
+      const acls = await getAclsOud({
         imsUserId: imsProfile.userId,
         imsOrgs: imsProfile.organizations,
         imsGroups: imsProfile.orgDetails,

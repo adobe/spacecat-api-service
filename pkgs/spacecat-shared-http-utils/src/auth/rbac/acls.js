@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { createDataAccess } from '@adobe/spacecat-shared-data-access';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 
 function prepPathForSort(path) {
@@ -24,7 +25,7 @@ function pathSorter({ path: path1 }, { path: path2 }) {
   return sp2.length - sp1.length;
 }
 
-export async function getDBAcls(dynamoClient, orgId, roles) {
+export async function getDBAclsOld(dynamoClient, orgId, roles) {
   const input = {
     ExpressionAttributeNames: {
       '#role': 'role',
@@ -68,7 +69,7 @@ export async function getDBAcls(dynamoClient, orgId, roles) {
   return acls;
 }
 
-export async function getDBRoles(dbClient, {
+export async function getDBRolesOld(dbClient, {
   imsUserId, imsOrgId, imsGroups, apiKey,
 }) {
   const idents = {
@@ -128,7 +129,7 @@ export async function getDBRoles(dbClient, {
   return new Set(roles);
 }
 
-export default async function getAcls({
+export default async function getAclsOud({
   imsUserId, imsOrgs, imsGroups, apiKey,
 }) {
   console.log('§§§ getAcls input:', JSON.stringify({
@@ -142,7 +143,7 @@ export default async function getAcls({
   for (const orgid of imsOrgs) {
     const imsOrgId = orgid.split('@')[0];
     // eslint-disable-next-line no-await-in-loop
-    const roles = await getDBRoles(dbClient, {
+    const roles = await getDBRolesOld(dbClient, {
       imsUserId, imsOrgId, imsGroups, apiKey,
     });
     if (roles === undefined || roles.size === 0) {
@@ -151,7 +152,7 @@ export default async function getAcls({
     }
 
     // eslint-disable-next-line no-await-in-loop
-    const aclList = await getDBAcls(dbClient, imsOrgId, roles);
+    const aclList = await getDBAclsOld(dbClient, imsOrgId, roles);
     acls.push(...aclList);
   }
 
@@ -160,6 +161,116 @@ export default async function getAcls({
     aclEntities: {
       model: ['organization', 'site'], // TODO Flip
       // spacecatScopes: ['xxxyyyzzz'],
+    },
+  };
+}
+
+async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') {
+  console.log('§§§ Getting RBAC DB Access');
+
+  return createDataAccess({
+    tableNameData: tableName,
+  }, log);
+}
+
+async function getDBRoles(dbAccess, {
+  imsUserId, imsOrgId, imsGroups, apiKey,
+}) {
+  const idents = {
+    userident: `imsID:${imsUserId}`,
+    orgident: `imsOrgID:${imsOrgId}`,
+  };
+
+  if (imsGroups) {
+    for (const [org, groups] of Object.entries(imsGroups)) {
+      if (!(org.split('@')[0] === imsOrgId)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+
+      let grpCnt = 0;
+      for (const group of groups.groups) {
+        idents[`grp${grpCnt}`] = `imsOrgID/groupID:${imsOrgId}/${group.groupid}`;
+        grpCnt += 1;
+      }
+    }
+  }
+
+  if (apiKey) {
+    idents.apikey = `apiKeyID:${apiKey}`;
+  }
+
+  const roles = [];
+
+  console.log('§§§ Looking up roles for these identities:', JSON.stringify(idents));
+  // TODO avoid using a loop, us a custom query instead
+  for (const identity of Object.values(idents)) {
+    // eslint-disable-next-line no-await-in-loop
+    const r = await dbAccess.Role.findByIndexKeys({
+      imsOrgId,
+      identity,
+    });
+    if (r) {
+      roles.push(r.name);
+    }
+  }
+
+  console.log('§§§ Found roles:', JSON.stringify(roles));
+  return roles;
+}
+
+async function getDBACLs(dbAccess, {
+  imsOrgId, roles,
+}) {
+  const acls = [];
+
+  console.log('§§§ Looking up ACLs for these roles:', JSON.stringify(roles));
+  // TODO avoid using a loop, us a custom query instead
+  for (const role of roles) {
+    // eslint-disable-next-line no-await-in-loop
+    const acl = await dbAccess.Acl.findByIndexKeys({
+      imsOrgId,
+      roleName: role,
+    });
+    if (acl) {
+      acls.push(acl);
+    }
+  }
+  console.log('§§§ Found ACLs:', JSON.stringify(acls));
+
+  return acls;
+}
+
+export async function getAcls({
+  imsUserId, imsOrgs, imsGroups, apiKey,
+}, log) {
+  const dbAccess = await getDBAccess(log);
+
+  const acls = [];
+
+  // Normally there is only 1 organization, but the API returns an array so
+  // we'll iterate over it and use all the ACLs we find.
+  for (const orgid of imsOrgs) {
+    const imsOrgId = orgid.split('@')[0];
+    // eslint-disable-next-line no-await-in-loop
+    const roles = await getDBRoles(dbAccess, {
+      imsUserId, imsOrgId, imsGroups, apiKey,
+    });
+    if (!roles) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const aclList = await getDBACLs(dbAccess, { imsOrgId, roles });
+    acls.push(...aclList);
+  }
+
+  return {
+    acls,
+    aclEntities: {
+      model: ['organization', 'site'], // TODO Flip
+      // spacecatScopes: ['xxxyyyzzz'], // TODO maybe?
     },
   };
 }
