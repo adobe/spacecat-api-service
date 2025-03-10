@@ -54,6 +54,10 @@ const schema = new SchemaBuilder(Acl, AclCollection)
         },
       },
     },
-  });
+  })
+  .addIndex(
+    { composite: ['imsOrgId'] },
+    { composite: ['roleName'] },
+  );
 
 export default schema.build();

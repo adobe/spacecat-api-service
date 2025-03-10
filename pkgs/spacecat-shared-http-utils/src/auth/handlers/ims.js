@@ -144,30 +144,15 @@ export default class AdobeImsHandler extends AbstractHandler {
 
   // eslint-disable-next-line class-methods-use-this
   async #addSampleAcls(aclAccess, item) {
-    // only add sample data if it's not already there
-    // const acl = await aclAccess.Acl.findByIndexKeys({
-    //   imsOrgId: item.imsOrgId,
-    // });
-
-    // if (acl) {
-    //   console.log('§§§ acl already exists:', item);
-    //   return null;
-    // }
-
     console.log('§§§ creating acl:', item);
     const acl = await aclAccess.Acl.create(item);
 
-    // /* */
-    // // Look up the associated role
-    // console.log('§§§ role to look up ACLs:', role.getImsOrgId(), role.getIdentity());
-    // const lookedup = await aclAccess.Role.findByIndexKeys({
-    //   imsOrgId: role.getImsOrgId(),
-    //   identity: role.getIdentity(),
-    // });
-    // console.log('§§§ role looked up ACLs:', await lookedup.getAcls());
-    // /* */
+    const lookedup = await aclAccess.Acl.findByIndexKeys({
+      roleName: item.roleName,
+      imsOrgId: item.imsOrgId,
+    });
+    console.log('§§§ acl looked up:', lookedup.getId());
 
-    // console.log('§§§ acl created and associated with role', await role.getAcls());
     return acl;
   }
 
