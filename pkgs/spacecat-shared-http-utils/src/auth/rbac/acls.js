@@ -129,7 +129,7 @@ export async function getDBRolesOld(dbClient, {
   return new Set(roles);
 }
 
-export default async function getAclsOud({
+export async function getAclsOud({
   imsUserId, imsOrgs, imsGroups, apiKey,
 }) {
   console.log('§§§ getAcls input:', JSON.stringify({
@@ -241,7 +241,7 @@ async function getDBACLs(dbAccess, {
   return acls;
 }
 
-export async function getAcls({
+export default async function getAcls({
   imsUserId, imsOrgs, imsGroups, apiKey,
 }, log) {
   const dbAccess = await getDBAccess(log);

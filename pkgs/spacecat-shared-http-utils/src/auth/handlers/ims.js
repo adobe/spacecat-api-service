@@ -24,7 +24,7 @@ import configDev from './config/ims-stg.js';
 
 import AbstractHandler from './abstract.js';
 import AuthInfo from '../auth-info.js';
-import getAclsOud from '../rbac/acls.js';
+import getAcls from '../rbac/acls.js';
 
 const IGNORED_PROFILE_PROPS = [
   'id',
@@ -288,7 +288,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     try {
       const imsProfile = await context.imsClient.getImsUserProfile(token);
       console.log('§§§ ims profile:', JSON.stringify(imsProfile));
-      const acls = await getAclsOud({
+      const acls = await getAcls({
         imsUserId: imsProfile.userId,
         imsOrgs: imsProfile.organizations,
         imsGroups: imsProfile.orgDetails,
