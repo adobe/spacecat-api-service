@@ -202,7 +202,7 @@ async function getDBRoles(dbAccess, {
 
   const roles = [];
 
-  console.log('§§§ Looking up roles for these identities:', JSON.stringify(idents));
+  console.log('§§§ Looking up Roles for these identities:', JSON.stringify(idents));
   // TODO avoid using a loop, us a custom query instead
   for (const identity of Object.values(idents)) {
     // eslint-disable-next-line no-await-in-loop
@@ -233,7 +233,7 @@ async function getDBACLs(dbAccess, {
       roleName: role,
     });
     if (acl) {
-      acls.push(acl);
+      acls.push(acl.getAcls());
     }
   }
   console.log('§§§ Found ACLs:', JSON.stringify(acls));
