@@ -16,7 +16,6 @@ import SchemaBuilder from '../base/schema.builder.js';
 
 import Role from './role.model.js';
 import RoleCollection from './role.collection.js';
-import Organization from '../organization/organization.model.js';
 
 /*
 Schema Doc: https://electrodb.dev/en/modeling/schema/

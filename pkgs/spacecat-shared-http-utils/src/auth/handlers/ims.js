@@ -180,7 +180,7 @@ export default class AdobeImsHandler extends AbstractHandler {
       ],
     });
 
-    const r2 = await this.#addSampleRoles(aclAccess, {
+    await this.#addSampleRoles(aclAccess, {
       imsOrgId: 'F4646ED9626926AA0A49420E',
       identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
       name: 'test-account-writer',
@@ -201,7 +201,7 @@ export default class AdobeImsHandler extends AbstractHandler {
         },
       ],
     });
-    const r3 = await this.#addSampleRoles(aclAccess, {
+    await this.#addSampleRoles(aclAccess, {
       imsOrgId: 'F4646ED9626926AA0A49420E',
       identity: 'imsOrgID:F4646ED9626926AA0A49420E',
       name: 'test-account-reader',
@@ -237,7 +237,7 @@ export default class AdobeImsHandler extends AbstractHandler {
       identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
       name: 'another-account-writer',
     }, true);
-    const r4 = await this.#addSampleRoles(aclAccess, {
+    await this.#addSampleRoles(aclAccess, {
       imsOrgId: '43101FC962E3B1BF0A494217',
       identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
       name: 'test-account-reader',

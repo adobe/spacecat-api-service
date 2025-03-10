@@ -217,7 +217,7 @@ async function getDBRoles(dbAccess, {
 
   console.log('§§§ Found roles:', JSON.stringify(roles));
 
-  const roles2 = dbAccess.Role.allRolesByIdentities(imsOrgId, Object.values(idents));
+  const roles2 = await dbAccess.Role.allRolesByIdentities(imsOrgId, Object.values(idents));
   console.log('§§§ Found roles2:', JSON.stringify(roles2));
   return roles;
 }
