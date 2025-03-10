@@ -211,7 +211,7 @@ async function getDBRoles(dbAccess, {
       identity,
     });
     if (r) {
-      roles.push(r.name);
+      roles.push(r.getName());
     }
   }
 
