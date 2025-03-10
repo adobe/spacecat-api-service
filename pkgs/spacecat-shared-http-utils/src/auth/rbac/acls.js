@@ -233,7 +233,9 @@ async function getDBACLs(dbAccess, {
       roleName: role,
     });
     if (acl) {
-      acls.push(acl.getAcls());
+      const roleAcls = acl.getAcls();
+      roleAcls.forEach((e) => e.sort(pathSorter));
+      acls.push(...roleAcls);
     }
   }
   console.log('§§§ Found ACLs:', JSON.stringify(acls));
