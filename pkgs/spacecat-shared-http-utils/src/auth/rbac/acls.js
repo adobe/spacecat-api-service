@@ -29,6 +29,11 @@ async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') {
 
   return createDataAccess({
     tableNameData: tableName,
+    aclCtx: {
+      aclEntities: {
+        exclude: ['acl', 'role'],
+      },
+    },
   }, log);
 }
 
