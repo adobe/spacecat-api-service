@@ -71,7 +71,7 @@ export default class ScopedApiKeyHandler extends AbstractHandler {
       imsUserId: apiKeyEntity.getImsUserId(),
       imsOrgs: [apiKeyEntity.getImsOrgId()],
       apiKey: apiKeyEntity.getApiKeyId(),
-    });
+    }, context.log);
 
     // API key is valid: return auth info with scope details from the API key entity
     return authInfo

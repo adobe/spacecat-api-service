@@ -109,7 +109,12 @@ class BaseModel {
    * @throws {Error} - Throws an error if the action is not permitted.
    */
   ensurePermission(action) {
-    if (this.aclCtx?.aclEntities?.model?.includes(this.entityName)) {
+    let check = true; // By default ensure permission
+    if (this.aclCtx?.aclEntities?.exclude?.includes(this.entityName)) {
+      check = false;
+    }
+
+    if (check) {
       ensurePermission(this.#getACLPath(), action, this.aclCtx);
     } else {
       console.log('Entity [', this.entityName, '] is excluded from ACL checking');

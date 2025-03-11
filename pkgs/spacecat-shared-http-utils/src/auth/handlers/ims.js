@@ -133,13 +133,6 @@ export default class AdobeImsHandler extends AbstractHandler {
 
     const created = await aclAccess.Role.create(item);
     return created;
-    // console.log('§§§ role created:', created.getId());
-    // const lookedup = await aclAccess.Role.findByIndexKeys({
-    //   imsOrgId: item.imsOrgId,
-    //   identity: item.identity,
-    // });
-    // console.log('§§§ role looked up:', lookedup.getId());
-    // return lookedup;
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -292,7 +285,7 @@ export default class AdobeImsHandler extends AbstractHandler {
         imsUserId: imsProfile.userId,
         imsOrgs: imsProfile.organizations,
         imsGroups: imsProfile.orgDetails,
-      });
+      }, context.log); // TODO pass config
 
       const config = loadConfig(context);
       const payload = await this.#validateToken(token, config);
