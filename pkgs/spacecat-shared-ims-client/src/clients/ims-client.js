@@ -325,11 +325,13 @@ export default class ImsClient {
         throw new Error(`IMS getImsUserProfile request failed with status: ${profileResponse.status}`);
       }
 
+      const profileJson = await profileResponse.json();
       const {
         userId, email, ownerOrg,
-      } = await profileResponse.json();
+      } = profileJson;
 
       this.#logDuration('IMS getImsUserProfile request', startTime);
+      this.log.debug(`IMS user profile: ${JSON.stringify(profileJson)}`);
 
       return {
         userId,
