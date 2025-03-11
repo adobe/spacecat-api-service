@@ -66,6 +66,16 @@ export const createElectroMocks = (Model, record) => {
   };
 
   const mockEntityRegistry = {
+    aclCtx: {
+      aclEntities: {
+        // For the unit tests, by default skip the ACL checks
+        exclude: [
+          'apiKey', 'audit', 'configuration', 'experiment',
+          'importJob', 'importUrl', 'keyEvent', 'latestAudit', 'organization',
+          'opportunity', 'site', 'siteCandidate', 'siteTopPage', 'suggestion',
+        ],
+      },
+    },
     log: mockLogger,
     getCollection: stub().returns({
       schema: {

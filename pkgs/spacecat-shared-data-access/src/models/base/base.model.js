@@ -115,9 +115,9 @@ class BaseModel {
     }
 
     if (check) {
-      ensurePermission(this.#getACLPath(), action, this.aclCtx);
+      ensurePermission(this.#getACLPath(), action, this.aclCtx, this.log);
     } else {
-      console.log('Entity [', this.entityName, '] is excluded from ACL checking');
+      this.log.info(`Entity [${this.entityName}] is excluded from ACL checking`);
     }
   }
 

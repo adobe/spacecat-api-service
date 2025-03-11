@@ -74,6 +74,12 @@ describe('BaseCollection', () => {
   beforeEach(() => {
     mockIndexes = { primary: {}, all: { index: 'all', indexType: 'all' } };
     mockEntityRegistry = {
+      aclCtx: {
+        aclEntities: {
+          // Exclude the opportunity entity (which is used by these mocks) from ACL checks
+          exclude: ['mockEntityModel'],
+        },
+      },
       getCollection: stub(),
     };
 

@@ -54,6 +54,12 @@ describe('BaseModel', () => { /* eslint-disable no-underscore-dangle */
     };
 
     mockEntityRegistry = {
+      aclCtx: {
+        aclEntities: {
+          // Exclude the opportunity entity (which is used by these mocks) from ACL checks
+          exclude: ['opportunity'],
+        },
+      },
       log: mockLogger,
       getCollection: stub().returns({
         schema: {

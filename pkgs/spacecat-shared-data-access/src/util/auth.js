@@ -74,9 +74,10 @@ function getPermissions(path, acl) {
  * @param {string} perm - the requested permission, typically 'C', 'R', 'U', or 'D'
  * but not necessarily restricted to single characters.
  * @param {Object} aclCtx - the ACL context.
+ * @param {Object} log - the logger.
  * @returns {boolean} - true if the permission is granted, false otherwise.
  */
-export function hasPermisson(entityPath, perm, aclCtx) {
+export function hasPermisson(entityPath, perm, aclCtx, log) {
   const allActions = [];
   const traces = [];
   aclCtx.acls.forEach((a) => {
@@ -89,7 +90,7 @@ export function hasPermisson(entityPath, perm, aclCtx) {
 
   const permission = allActions.includes(perm);
   if (permission) {
-    console.log('§§§ Permission granted for', entityPath, 'with', perm, 'traces:', traces);
+    log.debug(`Permission granted for ${entityPath} with ${perm} traces: ${traces}`);
   }
   return permission;
 }
@@ -101,20 +102,13 @@ export function hasPermisson(entityPath, perm, aclCtx) {
  * @param {string} perm - the requested permission, typically 'C', 'R', 'U', or 'D'
  * but not necessarily restricted to single characters.
  * @param {Object} aclCtx - the ACL context.
+ * @param {Object} log - the logger.
  * @throws {Error} - if the permission is not granted.
  */
-export function ensurePermission(path, perm, aclCtx) {
-  console.log(
-    '§§§ Calling ensurePermission with path:',
-    path,
-    'aclCtx:',
-    JSON.stringify(aclCtx),
-    'perm:',
-    perm,
-    'response:',
-    hasPermisson(path, perm, aclCtx),
-  );
-  if (!hasPermisson(path, perm, aclCtx)) {
+export function ensurePermission(path, perm, aclCtx, log) {
+  const permission = hasPermisson(path, perm, aclCtx, log);
+  log.debug(`Check ${perm} access permission for ${path} result: ${permission}`);
+  if (!permission) {
     throw new Error('Permission denied');
   }
 }

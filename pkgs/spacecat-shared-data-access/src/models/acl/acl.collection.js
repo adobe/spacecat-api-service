@@ -21,9 +21,9 @@ import BaseCollection from '../base/base.collection.js';
  */
 class AclCollection extends BaseCollection {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars,class-methods-use-this
-  async allAclsByRoleIds(roleIds) {
-    // todo: use electrodb filter expression as detailed in https://electrodb.dev/en/queries/filters/
-  }
+  // async allAclsByRoleIds(roleIds) {
+  //   // todo: use electrodb filter expression as detailed in https://electrodb.dev/en/queries/filters/
+  // }
 }
 
 export default AclCollection;

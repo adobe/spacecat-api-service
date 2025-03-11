@@ -84,7 +84,7 @@ describe('EntityRegistry', () => {
       .to.throw(DataAccessError, 'Collection NonExistentCollection not found');
   });
 
-  it.only('gets all collections', () => {
+  it('gets all collections', () => {
     const collections = entityRegistry.getCollections();
 
     expect(collections).to.be.an('object');

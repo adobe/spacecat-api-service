@@ -143,9 +143,9 @@ export default async function getAcls({
     aclEntities: {
       // Right now only check organization and site
       exclude: [
-        'api-key', 'audit', 'configuration', 'experiment',
-        'import-job', 'import-url', 'key-event', 'latest-audit',
-        'opportunity', 'site-candidate', 'site-top-page', 'suggestion',
+        'apiKey', 'audit', 'configuration', 'experiment',
+        'importJob', 'importUrl', 'keyEvent', 'latestAudit',
+        'opportunity', 'siteCandidate', 'siteTopPage', 'suggestion',
       ],
     },
   };
