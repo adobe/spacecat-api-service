@@ -36,7 +36,7 @@ export default class ScopedApiKeyHandler extends AbstractHandler {
           exclude: ['apiKey'], // We don't have ACLs yet and so we need to bypass those for the apiKey entity
         },
       },
-    }, this.log);
+    }, this.logger);
   }
 
   async checkAuth(request, context) {
