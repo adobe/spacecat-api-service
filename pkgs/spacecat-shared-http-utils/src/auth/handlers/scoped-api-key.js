@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { createDataAccess } from '@adobe/spacecat-shared-data-access/src/index.js';
 import { hasText, isIsoDate } from '@adobe/spacecat-shared-utils';
 import AbstractHandler from './abstract.js';
 import { hashWithSHA256 } from '../generate-hash.js';
@@ -25,12 +26,22 @@ export default class ScopedApiKeyHandler extends AbstractHandler {
     super('scopedApiKey', log);
   }
 
-  async checkAuth(request, context) {
-    const { dataAccess, pathInfo: { headers = {} } } = context;
-    if (!dataAccess) {
-      throw new Error('Data access is required');
-    }
+  #getDataAccess(tableName = 'spacecat-services-data-dev') { // TODO pick up name from config
+    // Data access for the purpose of authorization
+    console.log('§§§ createDataAccess for auth');
+    return createDataAccess({
+      tableNameData: tableName,
+      aclCtx: {
+        aclEntities: {
+          exclude: ['apiKey'], // We don't have ACLs yet and so we need to bypass those for the apiKey entity
+        },
+      },
+    }, this.log);
+  }
 
+  async checkAuth(request, context) {
+    const { pathInfo: { headers = {} } } = context;
+    const dataAccess = this.#getDataAccess();
     const { ApiKey } = dataAccess;
 
     const apiKeyFromHeader = headers['x-api-key'];
