@@ -53,7 +53,7 @@ export function authWrapper(fn, opts = {}) {
         tableNameData: 'spacecat-services-data-dev', // TODO pick up from somewhere
         aclCtx: {
           aclEntities: {
-            exclude: [], // TODO find out what this needs
+            exclude: ['apiKey'], // TODO find out what this needs
           },
         },
       }, log);
