@@ -34,8 +34,8 @@
   },
   "dependencies": {
     "@adobe/fetch": "4.1.11",
-    "@adobe/spacecat-shared-utils": "1.26.4",
     "@adobe/spacecat-shared-data-access": "file:../spacecat-shared-data-access",
+    "@adobe/spacecat-shared-utils": "1.26.4",
     "@aws-sdk/client-dynamodb": "3.734.0",
     "jose": "5.9.6"
   },
@@ -43,6 +43,7 @@
     "@adobe/helix-shared-wrap": "2.0.2",
     "chai": "5.1.2",
     "chai-as-promised": "8.0.1",
+    "esmock": "^2.7.0",
     "sinon": "19.0.2"
   }
 }

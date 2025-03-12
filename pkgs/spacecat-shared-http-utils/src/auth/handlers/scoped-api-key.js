@@ -34,14 +34,12 @@ export default class ScopedApiKeyHandler extends AbstractHandler {
     const { ApiKey } = dataAccess;
 
     const apiKeyFromHeader = headers['x-api-key'];
-    console.log('§§§ apiKeyFromHeader:', apiKeyFromHeader);
     if (!hasText(apiKeyFromHeader)) {
       return null;
     }
 
     // Keys are stored by their hash, so we need to hash the key to look it up
     const hashedApiKey = hashWithSHA256(apiKeyFromHeader);
-    console.log('§§§ hashedApiKey:', hashedApiKey);
     const apiKeyEntity = await ApiKey.findByHashedApiKey(hashedApiKey);
 
     if (!apiKeyEntity) {

@@ -30,13 +30,6 @@ export function authWrapper(fn, opts = {}) {
 
     const route = `${method.toUpperCase()} ${suffix}`;
 
-    /* */
-    // context.dataAccess = createDataAccess({
-    //   tableNameData: DYNAMO_TABLE_NAME_DATA, opts= root
-    //   // aclCtx, e.g. from context.attributes.authInfo
-    // }, log);
-    /* */
-
     if (ANONYMOUS_ENDPOINTS.includes(route)
       || route.startsWith('POST /hooks/site-detection/')
       || method.toUpperCase() === 'OPTIONS') {
@@ -53,6 +46,7 @@ export function authWrapper(fn, opts = {}) {
     }
 
     try {
+      // TODO this is needed for API keys
       // Data access for the purpose of authorization
       console.log('§§§ createDataAccess for auth');
       context.dataAccess = createDataAccess({

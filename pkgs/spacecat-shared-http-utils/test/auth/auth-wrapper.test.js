@@ -16,10 +16,10 @@ import { Request } from '@adobe/fetch';
 import wrap from '@adobe/helix-shared-wrap';
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import esmock from 'esmock';
 
 import { authWrapper, enrichPathInfo } from '../../src/index.js';
 import AbstractHandler from '../../src/auth/handlers/abstract.js';
-import ScopedApiKeyHandler from '../../src/auth/handlers/scoped-api-key.js';
 
 use(chaiAsPromised);
 
@@ -53,7 +53,10 @@ describe('auth wrapper', () => {
     };
     mockApiKey = {
       getId: () => 'test-id',
+      getApiKeyId: () => 'xxx-yyy-zzz',
       getExpiresAt: () => null,
+      getImsUserId: () => 'aaa@bbb.c',
+      getImsOrgId: () => 'B00BAA@AdobeOrg',
       getRevokedAt: () => null,
       getHashedApiKey: () => '372c6ba5a67b01a8d6c45e5ade6b41db9586ca06c77f0ef7795dfe895111fd0b',
       getName: () => 'Test API key name',
@@ -117,6 +120,19 @@ describe('auth wrapper', () => {
   });
 
   it('should add auth.checkScopes to the context', async () => {
+    async function mockGetAcls({ imsUserId, imsOrgs, apiKey }) {
+      if (imsUserId === 'aaa@bbb.c' && imsOrgs[0] === 'B00BAA@AdobeOrg' && apiKey === 'xxx-yyy-zzz') {
+        return {
+          aclEntities: { exclude: ['myentity'] },
+        };
+      }
+      throw new Error('Unexpected arguments');
+    }
+
+    const ScopedApiKeyHandler = await esmock('../../src/auth/handlers/scoped-api-key.js', {
+      '../../src/auth/rbac/acls.js': mockGetAcls,
+    });
+
     const scopedAction = wrap(() => 42)
       .with(authWrapper, { authHandlers: [ScopedApiKeyHandler] })
       .with(enrichPathInfo);
@@ -133,5 +149,7 @@ describe('auth wrapper', () => {
 
     const expectedError = 'API key is missing the [scope-user-does-not-have] scope(s) required for this resource';
     expect(() => context.auth.checkScopes(['scope-user-does-not-have'])).to.throw(expectedError);
+
+    expect(context.attributes.authInfo.rbac.aclEntities.exclude).to.deep.equal(['myentity']);
   });
 });

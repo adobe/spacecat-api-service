@@ -13,17 +13,21 @@
 /* eslint-env mocha */
 
 import { expect, use } from 'chai';
+import esmock from 'esmock';
 import sinon from 'sinon';
 import chaiAsPromised from 'chai-as-promised';
 import fs from 'fs';
 import { importPKCS8, SignJWT } from 'jose';
 
 import publicJwk from '../../fixtures/auth/ims/public-jwks.js';
-import AdobeImsHandler from '../../../src/auth/handlers/ims.js';
 import AbstractHandler from '../../../src/auth/handlers/abstract.js';
 import AuthInfo from '../../../src/auth/auth-info.js';
 import imsIdpConfigDev from '../../../src/auth/handlers/config/ims-stg.js';
 
+// Mock out the getAcls call done by the handler to always return an empty object
+const AdobeImsHandler = await esmock('../../../src/auth/handlers/ims.js', {
+  '../../../src/auth/rbac/acls.js': () => ({}),
+});
 use(chaiAsPromised);
 
 const privateKey = fs.readFileSync('test/fixtures/auth/ims/private_key.pem', 'utf8');
@@ -95,6 +99,7 @@ describe('AdobeImsHandler', () => {
     const token = await createToken({ as: 'ims-na1' });
     const context = {
       log: logStub,
+      imsClient: { getImsUserProfile: () => ({}) },
       func: { version: 'ci1234' },
       pathInfo: { headers: { authorization: `Bearer ${token}` } },
     };
@@ -109,7 +114,11 @@ describe('AdobeImsHandler', () => {
 
     beforeEach(() => {
       imsIdpConfigDev.discovery.jwks = publicJwk;
-      context = { func: { version: 'ci' }, log: logStub };
+      context = {
+        func: { version: 'ci' },
+        imsClient: { getImsUserProfile: () => ({}) },
+        log: logStub,
+      };
     });
 
     afterEach(() => {

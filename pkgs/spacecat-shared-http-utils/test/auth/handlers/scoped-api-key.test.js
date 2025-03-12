@@ -15,10 +15,15 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import chaiAsPromised from 'chai-as-promised';
+import esmock from 'esmock';
 
 import AbstractHandler from '../../../src/auth/handlers/abstract.js';
 import AuthInfo from '../../../src/auth/auth-info.js';
-import ScopedApiKeyHandler from '../../../src/auth/handlers/scoped-api-key.js';
+
+// Mock out the getAcls call done by the handler to always return an empty object
+const ScopedApiKeyHandler = await esmock('../../../src/auth/handlers/scoped-api-key.js', {
+  '../../../src/auth/rbac/acls.js': () => ({}),
+});
 
 use(chaiAsPromised);
 
@@ -31,8 +36,11 @@ describe('ScopedApiKeyHandler', () => {
   const baseApiKeyData = {
     getHashedApiKey: () => '372c6ba5a67b01a8d6c45e5ade6b41db9586ca06c77f0ef7795dfe895111fd0b',
     getId: () => '1C4ED8DE-8ECD-42E1-9812-AF34082FB1B4',
+    getApiKeyId: () => 'abcd-efgh-ijkl-mnop',
     getName: () => 'Test api key',
     getExpiresAt: () => null,
+    getImsUserId: () => '999@888.e',
+    getImsOrgId: () => '314159@AdobeOrg',
     getRevokedAt: () => null,
     getScopes: () => [
       {
