@@ -14,10 +14,10 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 import SchemaBuilder from '../base/schema.builder.js';
+import { validateIMSOrg } from '../role/role.schema.js';
 
 import Acl from './acl.model.js';
 import AclCollection from './acl.collection.js';
-// import Organization from '../organization/organization.model.js';
 
 /*
 Schema Doc: https://electrodb.dev/en/modeling/schema/
@@ -34,7 +34,7 @@ const schema = new SchemaBuilder(Acl, AclCollection)
   .addAttribute('imsOrgId', {
     type: 'string',
     required: true,
-    // validate: (value) => Organization.IMS_ORG_ID_REGEX.test(value),
+    validate: (value) => validateIMSOrg(value),
   })
   .addAttribute('acls', {
     type: 'list',

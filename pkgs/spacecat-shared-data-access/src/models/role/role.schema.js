@@ -23,17 +23,52 @@ Attribute Doc: https://electrodb.dev/en/modeling/attributes/
 Indexes Doc: https://electrodb.dev/en/modeling/indexes/
  */
 
+export const validateIMSOrg = (value) => {
+  if (value.length < 1) {
+    throw new Error('IMS Org ID must not be empty');
+  }
+
+  const components = value.split('@');
+  if (components.length !== 2) {
+    throw new Error('Incorrectly formed IMS Org ID');
+  }
+
+  return true;
+};
+
+export const validateIdentity = (value) => {
+  if (value.length < 1) {
+    throw new Error('Identity must not be empty');
+  }
+
+  const components = value.split(':');
+  if (components.length !== 2) {
+    throw new Error('Identity must be in the form of "type:identifier"');
+  }
+
+  switch (components[0]) {
+    case 'imsID':
+    case 'imsOrgID':
+    case 'imsOrgID/groupID':
+    case 'apiKeyID':
+      return true;
+    default:
+      throw new Error(`Unsupperted identity type: ${components[0]}`);
+  }
+};
+
 const schema = new SchemaBuilder(Role, RoleCollection)
-  // it's just a to-many reference
+  // it's just a many-to-many reference
   // .addReference('has_many', 'Acls')
   .addAttribute('imsOrgId', {
     type: 'string',
     required: true,
-    // validate: (value) => Organization.IMS_ORG_ID_REGEX.test(value),
+    validate: (value) => validateIMSOrg(value),
   })
   .addAttribute('identity', {
     type: 'string',
     required: true,
+    validate: (value) => validateIdentity(value),
   })
   .addAttribute('name', {
     type: 'string',

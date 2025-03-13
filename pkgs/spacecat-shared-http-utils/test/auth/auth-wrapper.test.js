@@ -49,7 +49,6 @@ describe('auth wrapper', () => {
       pathInfo: {
         suffix: '',
       },
-      dataAccess: { ApiKey: { findByHashedApiKey: async () => mockApiKey } },
     };
     mockApiKey = {
       getId: () => 'test-id',
@@ -131,6 +130,9 @@ describe('auth wrapper', () => {
 
     const ScopedApiKeyHandler = await esmock('../../src/auth/handlers/scoped-api-key.js', {
       '../../src/auth/rbac/acls.js': mockGetAcls,
+      '@adobe/spacecat-shared-data-access/src/index.js': {
+        createDataAccess: () => ({ ApiKey: { findByHashedApiKey: async () => mockApiKey } }),
+      },
     });
 
     const scopedAction = wrap(() => 42)
