@@ -19,3 +19,24 @@ configurations:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+latest-configurations:
+  get:
+    tags:
+      - configuration
+    summary: Get the latest jobs configurations
+    operationId: getLatestJobsConfigurations
+    security:
+      - admin_key: [ ]
+    responses:
+      '200':
+        description: A list of all known jobs configurations or empty list if no jobs configurations are present.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Configuration'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
