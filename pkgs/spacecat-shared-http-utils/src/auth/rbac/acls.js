@@ -72,8 +72,12 @@ async function getDBACLs(dbAccess, {
   imsOrgId, roles,
 }, log) {
   const acls = await dbAccess.Acl.allAclsByRoleNames(imsOrgId, roles);
-  log.debug((`Found ACLs for ${imsOrgId} roles ${roles}: ${acls}`));
-  return acls;
+  const roleAcls = acls.map((a) => ({
+    role: a.roleName,
+    acl: a.acls,
+  }));
+  log.debug((`Found ACLs for ${imsOrgId} roles ${roles}: ${roleAcls}`));
+  return roleAcls;
 
   /*
   const acls = [];
