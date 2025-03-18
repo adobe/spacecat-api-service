@@ -72,37 +72,15 @@ async function getDBACLs(dbAccess, {
   imsOrgId, roles,
 }, log) {
   const acls = await dbAccess.Acl.allAclsByRoleNames(imsOrgId, roles);
-  const roleAcls = acls.map((a) => ({
-    role: a.roleName,
-    acl: a.acls,
-  }));
+  const roleAcls = acls.map((a) => {
+    a.acls.sort(pathSorter);
+    return {
+      role: a.roleName,
+      acl: a.acls,
+    };
+  });
   log.debug((`Found ACLs for ${imsOrgId} roles ${roles}: ${roleAcls}`));
   return roleAcls;
-
-  /*
-  const acls = [];
-
-  console.log('§§§ Looking up ACLs for these roles:', JSON.stringify(roles));
-  // TODO avoid using a loop, us a custom query instead
-  for (const role of roles) {
-    // eslint-disable-next-line no-await-in-loop
-    const acl = await dbAccess.Acl.findByIndexKeys({
-      imsOrgId,
-      roleName: role,
-    });
-    if (acl) {
-      const roleAcl = acl.getAcls();
-      roleAcl.sort(pathSorter);
-      acls.push({
-        role,
-        acl: roleAcl,
-      });
-    }
-  }
-  console.log('§§§ Found ACLs:', JSON.stringify(acls));
-
-  return acls;
-  */
 }
 
 export default async function getAcls({
