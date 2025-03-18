@@ -40,10 +40,10 @@ async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') {
 async function getDBRoles(dbAccess, {
   imsUserId, imsOrgId, imsGroups, apiKey,
 }, log) {
-  const idents = {
-    userident: `imsID:${imsUserId}`,
-    orgident: `imsOrgID:${imsOrgId}`,
-  };
+  const idents = [
+    `imsID:${imsUserId}`,
+    `imsOrgID:${imsOrgId}`,
+  ];
 
   if (imsGroups) {
     for (const [org, groups] of Object.entries(imsGroups)) {
@@ -52,44 +52,20 @@ async function getDBRoles(dbAccess, {
         continue;
       }
 
-      let grpCnt = 0;
       for (const group of groups.groups) {
-        idents[`grp${grpCnt}`] = `imsOrgID/groupID:${imsOrgId}/${group.groupid}`;
-        grpCnt += 1;
+        idents.push(`imsOrgID/groupID:${imsOrgId}/${group.groupid}`);
       }
     }
   }
 
   if (apiKey) {
-    idents.apikey = `apiKeyID:${apiKey}`;
+    idents.push(`apiKeyID:${apiKey}`);
   }
 
-  const roles = await dbAccess.Role.allRolesByIdentities(imsOrgId, Object.values(idents));
-  const roleNames = roles.map((r) => r.getName());
-  log.info(`Found role names for identities: ${JSON.stringify(idents)}: ${JSON.stringify(roleNames)}`);
+  const roles = await dbAccess.Role.allRolesByIdentities(imsOrgId, idents);
+  const roleNames = roles.map((r) => r.name);
+  log.debug(`Found role names for ${imsOrgId} identities: ${idents}: ${roleNames}`);
   return roleNames;
-  /*
-  const roles = [];
-
-  console.log('§§§ Looking up Roles for these identities:', JSON.stringify(idents));
-  // TODO avoid using a loop, us a custom query instead
-  for (const identity of Object.values(idents)) {
-    // eslint-disable-next-line no-await-in-loop
-    const r = await dbAccess.Role.findByIndexKeys({
-      imsOrgId,
-      identity,
-    });
-    if (r) {
-      roles.push(r.getName());
-    }
-  }
-
-  console.log('§§§ Found roles:', JSON.stringify(roles));
-
-  // const roles2 = await dbAccess.Role.allRolesByIdentities(imsOrgId, Object.values(idents));
-  // console.log('§§§ Found roles2:', JSON.stringify(roles2));
-  return roles;
-  */
 }
 
 async function getDBACLs(dbAccess, {

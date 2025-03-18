@@ -290,7 +290,7 @@ export default class AdobeImsHandler extends AbstractHandler {
       const acls = await getAcls({
         imsUserId: imsProfile.userId,
         imsOrgs: imsProfile.organizations,
-        imsGroups: imsProfile.orgDetails,
+        // imsGroups: imsProfile.orgDetails, - right now no way to find these
       }, context.log); // TODO pass config
 
       const config = loadConfig(context);
