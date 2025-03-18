@@ -33,6 +33,8 @@ class RoleCollection extends BaseCollection {
       .go();
 
     console.log('§§§ allRolesByIdentities org', imsOrgId, 'identities', identities, 'result', JSON.stringify(res));
+
+    // TODO is this right? Or do we need to create instances?
     return res.data;
   }
 }

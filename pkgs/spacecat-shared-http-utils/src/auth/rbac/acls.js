@@ -39,7 +39,7 @@ async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') {
 
 async function getDBRoles(dbAccess, {
   imsUserId, imsOrgId, imsGroups, apiKey,
-}) {
+}, log) {
   const idents = {
     userident: `imsID:${imsUserId}`,
     orgident: `imsOrgID:${imsOrgId}`,
@@ -64,6 +64,11 @@ async function getDBRoles(dbAccess, {
     idents.apikey = `apiKeyID:${apiKey}`;
   }
 
+  const roles = await dbAccess.Role.allRolesByIdentities(imsOrgId, Object.values(idents));
+  const roleNames = roles.map((r) => r.getName());
+  log.info(`Found role names for identities: ${JSON.stringify(idents)}: ${JSON.stringify(roleNames)}`);
+  return roleNames;
+  /*
   const roles = [];
 
   console.log('§§§ Looking up Roles for these identities:', JSON.stringify(idents));
@@ -84,6 +89,7 @@ async function getDBRoles(dbAccess, {
   // const roles2 = await dbAccess.Role.allRolesByIdentities(imsOrgId, Object.values(idents));
   // console.log('§§§ Found roles2:', JSON.stringify(roles2));
   return roles;
+  */
 }
 
 async function getDBACLs(dbAccess, {
