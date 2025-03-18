@@ -108,7 +108,7 @@ export default async function getAcls({
     // eslint-disable-next-line no-await-in-loop
     const roles = await getDBRoles(dbAccess, {
       imsUserId, imsOrgId, imsGroups, apiKey,
-    });
+    }, log);
     if (!roles) {
       // eslint-disable-next-line no-continue
       continue;
