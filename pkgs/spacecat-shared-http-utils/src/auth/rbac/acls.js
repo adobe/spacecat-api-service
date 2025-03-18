@@ -47,7 +47,7 @@ async function getDBRoles(dbAccess, {
 
   if (imsGroups) {
     for (const [org, groups] of Object.entries(imsGroups)) {
-      if (!(org.split('@')[0] === imsOrgId)) {
+      if (org !== imsOrgId) {
         // eslint-disable-next-line no-continue
         continue;
       }
@@ -122,8 +122,7 @@ export default async function getAcls({
 
   // Normally there is only 1 organization, but the API returns an array so
   // we'll iterate over it and use all the ACLs we find.
-  for (const orgid of imsOrgs) {
-    const imsOrgId = orgid.split('@')[0];
+  for (const imsOrgId of imsOrgs) {
     // eslint-disable-next-line no-await-in-loop
     const roles = await getDBRoles(dbAccess, {
       imsUserId, imsOrgId, imsGroups, apiKey,
