@@ -121,7 +121,7 @@ export default async function getAcls({
     }
 
     // eslint-disable-next-line no-await-in-loop
-    const aclList = await getDBACLs(dbAccess, { imsOrgId, roles });
+    const aclList = await getDBACLs(dbAccess, { imsOrgId, roles }, log);
     acls.push(...aclList);
   }
 
