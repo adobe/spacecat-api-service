@@ -260,6 +260,11 @@ export default class AdobeImsHandler extends AbstractHandler {
     const { log } = context;
     return createDataAccess({
       tableNameData: 'spacecat-services-rbac-dev',
+      aclCtx: {
+        aclEntities: {
+          exclude: ['acl', 'role'],
+        },
+      },
     }, log);
   }
 
