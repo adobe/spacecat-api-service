@@ -43,7 +43,14 @@ describe('LatestAudit IT', async () => {
   before(async () => {
     sampleData = await seedDatabase();
 
-    dataAccess = getDataAccess();
+    const acls = [{
+      acl: [{
+        actions: ['C', 'R', 'U', 'D'],
+        path: '/latestAudit/*',
+      }],
+    }];
+    const aclCtx = { acls };
+    dataAccess = getDataAccess({ aclCtx });
     LatestAudit = dataAccess.LatestAudit;
     Audit = dataAccess.Audit;
   });

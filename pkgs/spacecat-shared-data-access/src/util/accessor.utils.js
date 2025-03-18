@@ -111,7 +111,7 @@ export function createAccessor(config) { /* eslint-disable no-underscore-dangle 
     ...isNonEmptyObject(foreignKey) && { [foreignKey.name]: foreignKey.value },
   };
 
-  // Check here too!
+  // TODO Check here too!
   // This is used by collections
   const accessor = async (...args) => {
     const argsKey = args.length > 0 ? JSON.stringify(args) : '_';

@@ -376,16 +376,20 @@ class BaseCollection {
     }
 
     try {
-      const instance = this.#createInstance(item);
-
       // Check that the current user has permission to create the entity
-      instance.ensurePermission('C');
+      // Do this by creating a temporary instance and checking that.
+      // The temp entity has an empty ID, because that will be assigned by the database
+      // upon real creation.
+      const tempData = { ...item };
+      tempData[this.idName] = '';
+      const temp = this.#createInstance(tempData);
+      temp.ensurePermission('C');
 
-      if (upsert) {
-        await this.entity.put(item).go();
-      } else {
-        await this.entity.create(item).go();
-      }
+      const record = upsert
+        ? await this.entity.put(item).go()
+        : await this.entity.create(item).go();
+
+      const instance = this.#createInstance(record.data);
 
       this.#invalidateCache();
       this.log.info(`Created item for [${this.entityName}]`);

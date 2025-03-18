@@ -90,15 +90,25 @@ class BaseModel {
 
   /**
    * Provide a path representation of the current instance for ACL purposes.
-   * @returns The path representation. Always absolute, so starts with a '/'.
+   * @returns The path representation. Always absolute, so starts with a '/'. Returns
+   * null if the entity is owned more than 1 level deep, which is currently not checked.
    */
   #getACLPath() {
-    const refs = this.schema.getReferencesByType(Reference.TYPES.BELONGS_TO);
-    if (refs.length !== 1) {
+    const belongsTo = this.schema.getReferencesByType(Reference.TYPES.BELONGS_TO);
+    if (belongsTo.length !== 1) {
       return `/${this.entityName}/${this.getId()}`;
     }
-    const ownerID = this.record[entityNameToIdName(refs[0].target)];
-    return `/${decapitalize(refs[0].target)}/${ownerID}/${this.entityName}/${this.getId()}`;
+
+    // Check if the owning collection again is owned by something
+    const ownerCollection = this.entityRegistry.getCollection(`${belongsTo[0].getTarget()}Collection`);
+    const ownerBelongsTo = ownerCollection.schema.getReferencesByType(Reference.TYPES.BELONGS_TO);
+    if (ownerBelongsTo.length > 0) {
+      // The owner also belongs to something. Currently this is not supported
+      return null;
+    }
+
+    const ownerID = this.record[entityNameToIdName(belongsTo[0].target)];
+    return `/${decapitalize(belongsTo[0].target)}/${ownerID}/${this.entityName}/${this.getId()}`;
   }
 
   /**
@@ -115,7 +125,12 @@ class BaseModel {
     }
 
     if (check) {
-      ensurePermission(this.#getACLPath(), action, this.aclCtx, this.log);
+      const aclPath = this.#getACLPath();
+      if (aclPath) {
+        ensurePermission(aclPath, action, this.aclCtx, this.log);
+      } else {
+        this.log.info(`Entity [${this.entityName}] is owned more than 1 level deep. Currently excluded from ACL checking`);
+      }
     } else {
       this.log.info(`Entity [${this.entityName}] is excluded from ACL checking`);
     }

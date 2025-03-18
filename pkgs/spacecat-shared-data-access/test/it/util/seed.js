@@ -29,6 +29,7 @@ const resetDatabase = async () => {
     TEST_DA_CONFIG.tableNameKeyEvents,
     TEST_DA_CONFIG.tableNameLatestAudits,
     TEST_DA_CONFIG.tableNameOrganizations,
+    TEST_DA_CONFIG.tableNameRoles,
     TEST_DA_CONFIG.tableNameSiteCandidates,
     TEST_DA_CONFIG.tableNameSiteTopPages,
     TEST_DA_CONFIG.tableNameSites,
@@ -37,7 +38,38 @@ const resetDatabase = async () => {
 };
 
 const seedV2Fixtures = async () => {
-  const dataAccess = getDataAccess();
+  // ACLs needed for seeding
+  const acls = [{
+    acl: [{
+      actions: ['C', 'R'],
+      path: '/apiKey/*',
+    }, {
+      actions: ['C', 'R'],
+      path: '/configuration/*',
+    }, {
+      actions: ['C'],
+      path: '/importJob/**',
+    }, {
+      actions: ['C', 'R'],
+      path: '/site/**',
+    }, {
+      actions: ['C', 'R', 'U'],
+      path: '/opportunity/**',
+    }, {
+      actions: ['C', 'R'],
+      path: '/organization/**',
+    }, {
+      actions: ['C'],
+      path: '/role/*',
+    }, {
+      actions: ['C', 'R'],
+      path: '/latestAudit/*',
+    },
+    ],
+  }];
+
+  const aclCtx = { acls };
+  const dataAccess = getDataAccess({ aclCtx });
   const sampleData = {};
 
   for (const [key, data] of Object.entries(fixtures)) {

@@ -33,7 +33,18 @@ describe('Suggestion IT', async () => {
   before(async () => {
     sampleData = await seedDatabase();
 
-    const dataAccess = getDataAccess();
+    // ACLs needed to make this test pass
+    const acls = [{
+      acl: [{
+        actions: ['R'],
+        path: '/organization/**',
+      }, {
+        actions: ['R', 'U', 'D'],
+        path: '/opportunity/**',
+      }],
+    }];
+    const aclCtx = { acls };
+    const dataAccess = getDataAccess({ aclCtx });
     Suggestion = dataAccess.Suggestion;
   });
 

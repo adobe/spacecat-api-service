@@ -51,7 +51,14 @@ describe('Opportunity IT', async () => {
       warn: sinon.stub(),
     };
 
-    const dataAccess = getDataAccess({}, mockLogger);
+    const acls = [{
+      acl: [{
+        actions: ['C', 'R', 'U', 'D'],
+        path: '/opportunity/*',
+      }],
+    }];
+    const aclCtx = { acls };
+    const dataAccess = getDataAccess({ aclCtx }, mockLogger);
     Opportunity = dataAccess.Opportunity;
     Suggestion = dataAccess.Suggestion;
   });

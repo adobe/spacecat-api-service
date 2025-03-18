@@ -124,7 +124,7 @@ describe('SiteCollection permissions', () => {
       return {
         acls: [{
           acl: [
-            { path: '/organization/o123/site/s12345', actions: ['C'] },
+            { path: '/organization/o123/site/', actions: ['C'] },
           ],
         }],
         aclEntities: { model: ['site', 'organization'] },

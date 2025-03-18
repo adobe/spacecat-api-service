@@ -37,7 +37,9 @@ describe('SiteCandidate IT', async () => {
   before(async () => {
     sampleData = await seedDatabase();
 
-    const dataAccess = getDataAccess();
+    const acls = [];
+    const aclCtx = { acls };
+    const dataAccess = getDataAccess({ aclCtx });
     SiteCandidate = dataAccess.SiteCandidate;
   });
 

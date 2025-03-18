@@ -28,7 +28,15 @@ describe('Organization IT', async () => {
   before(async () => {
     sampleData = await seedDatabase();
 
-    const dataAccess = getDataAccess();
+    const acls = [{
+      acl: [{
+        actions: ['C', 'R', 'U', 'D'],
+        path: '/organization/*',
+      }],
+
+    }];
+    const aclCtx = { acls };
+    const dataAccess = getDataAccess({ aclCtx });
     Organization = dataAccess.Organization;
   });
 
