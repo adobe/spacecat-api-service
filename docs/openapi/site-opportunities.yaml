@@ -2,6 +2,7 @@ site-opportunities:
   parameters:
     - $ref: './parameters.yaml#/siteId'
   get:
+    operationId: getSiteOpportunities
     summary: |
       Retrieve a list of all opportunities for a specific site
     tags:
@@ -26,6 +27,7 @@ site-opportunities:
     security:
       - ims_key: [ ]
   post:
+    operationId: createSiteOpportunity
     summary: |
       Create a new opportunity for a specific site
     tags:
@@ -70,6 +72,7 @@ site-opportunities-by-status:
       schema:
         type: string
   get:
+    operationId: getSiteOpportunitiesByStatus
     summary: |      
       Retrieve opportunities for a specific site filtered by status
     tags:
@@ -101,6 +104,7 @@ site-opportunity:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
   get:
+    operationId: getSiteOpportunity
     summary: |      
       Retrieve details of a specific opportunity
     tags:
@@ -129,6 +133,7 @@ site-opportunity:
       - ims_key: [ ]
 
   patch:
+    operationId: updateSiteOpportunity
     summary: |      
       Update specific attributes of an existing opportunity
     tags:
@@ -165,6 +170,7 @@ site-opportunity:
       - ims_key: [ ]
 
   delete:
+    operationId: deleteSiteOpportunity
     summary: |
       Delete an opportunity and associated suggestions + fixes
     tags:
@@ -190,6 +196,7 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
   get:
+    operationId: getSiteOpportunitySuggestions
     summary: |     
       Retrieve a list of all suggestions for a specific opportunity
     tags:
@@ -215,6 +222,7 @@ site-opportunity-suggestions:
       - ims_key: [ ]
 
   post:
+    operationId: createSiteOpportunitySuggestions
     summary: |     
       Create and add a list of one or more suggestions to an opportunity in one transaction
     tags:
@@ -253,6 +261,7 @@ site-opportunity-suggestions-by-status:
       schema:
         type: string
   get:
+    operationId: getSiteOpportunitySuggestionsByStatus
     summary: |
       Retrieve suggestions for a specific opportunity filtered by status
     tags:
@@ -284,6 +293,7 @@ site-opportunity-suggestions-status:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
   patch:
+    operationId: updateSiteOpportunitySuggestionsStatus
     summary: |
       Update the status of one or multiple suggestions in one transaction
     tags:
@@ -312,12 +322,52 @@ site-opportunity-suggestions-status:
     security:
       - ims_key: [ ]
 
+site-opportunity-suggestions-auto-fix:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  patch:
+    operationId: autoFixSiteOpportunitySuggestions
+    summary: |
+        Trigger autofix for one or multiple suggestions, and set them to 'In Progress'
+    tags:
+      - opportunity-suggestions
+    requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                suggestionIds:
+                  type: array
+                  items:
+                    $ref: './schemas.yaml#/Id'
+              required:
+                - suggestionIds
+
+    responses:
+      '207':
+        description: |
+          A list of suggestions that are sent to autofix, 
+          or the status code and error message for the ones failed.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionStatusUpdateListResponse'
+            examples:
+              broken-backlinks-suggestions-status-update-response:
+                $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-suggestion:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionId'
   get:
+    operationId: getSiteOpportunitySuggestion
     summary: |
       Retrieve details of a specific suggestion
     tags:
@@ -345,6 +395,7 @@ site-opportunity-suggestion:
     security:
       - ims_key: [ ]
   patch:
+    operationId: updateSiteOpportunitySuggestion
     summary: |     
       Update specific attributes of an existing suggestion
     tags:
@@ -384,6 +435,7 @@ site-opportunity-suggestion:
       - ims_key: [ ]
 
   delete:
+    operationId: deleteSiteOpportunitySuggestion
     summary: |
       Delete a suggestion
     tags:

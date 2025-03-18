@@ -11,18 +11,25 @@
  */
 
 import { createUrl } from '@adobe/fetch';
-import { hasText, isString } from '@adobe/spacecat-shared-utils';
+import {
+  hasText, isString, isObject, tracingFetch as fetch,
+} from '@adobe/spacecat-shared-utils';
+import fs from 'fs';
 
 import { URL } from 'url';
+import path from 'path';
+import { Readable } from 'stream';
+import { parse } from 'csv';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
-import { fetch, isAuditForAllUrls } from '../../support/utils.js';
+import { isAuditForAllUrls } from '../../support/utils.js';
 
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
 export const CHARACTER_LIMIT = 2500;
 export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
+export const PROFILE_CONFIG_PATH = path.resolve(process.cwd(), 'static/onboard/profiles.json');
 
 const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;
@@ -282,9 +289,107 @@ const wrapSayForThread = (say, threadTs) => {
   return wrappedFunction;
 };
 
+/**
+ * Downloads a file from Slack.
+ *
+ * @param {Object} file - The Slack file object.
+ * @param {string} token - The Slack bot token for authentication.
+ * @returns {Promise<Buffer | string>} - The file content as a Buffer or string.
+ * @throws {Error} - Throws an error if the request fails.
+ */
+const fetchFile = async (file, token) => {
+  const fileUrl = file.url_private;
+  const response = await fetch(fileUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+    responseType: 'arraybuffer',
+    validateStatus: (status) => status < 500,
+  });
+
+  const responseData = await response.arrayBuffer();
+  const responseBuffer = Buffer.from(responseData);
+
+  if (response.status === 401) throw new Error('Authentication failed: Invalid Slack token.');
+  if (response.status === 403) throw new Error('Access denied: Missing files:read permission.');
+  if (response.status === 404) throw new Error(`File not found at: ${fileUrl}.`);
+
+  if (!responseBuffer || responseBuffer.length === 0) {
+    throw new Error('File download resulted in empty or invalid data.');
+  }
+
+  // Check if the file type is text-based
+  if (file.mimetype?.startsWith('text/') || file.mimetype === 'application/json' || file.name.endsWith('.csv')) {
+    return responseBuffer.toString('utf-8').trim();
+  }
+
+  return responseBuffer;
+};
+
+/**
+ * Parses a CSV file from Slack.
+ *
+ * @param {Object} file - The Slack file object.
+ * @param {string} token - The Slack bot token for authentication.
+ * @returns {Promise<Array<Array<string>>>} - Parsed CSV data as an array of rows.
+ * @throws {Error} - Throws an error if the file cannot be parsed.
+ */
+const parseCSV = async (file, token) => {
+  try {
+    const csvString = await fetchFile(file, token);
+    if (!hasText(csvString)) {
+      throw new Error('CSV parsing resulted in empty or invalid data.');
+    }
+
+    const csvStream = Readable.from(csvString);
+
+    return new Promise((resolve, reject) => {
+      const parsedData = [];
+
+      csvStream
+        .pipe(parse({ delimiter: ',', trim: true, skipEmptyLines: true }))
+        .on('data', (row) => {
+          if (row.length >= 2) {
+            parsedData.push(row);
+          }
+        })
+        .on('end', () => {
+          if (parsedData.length === 0) {
+            reject(new Error('CSV format invalid: Each row must have at least 2 columns.'));
+          } else {
+            resolve(parsedData);
+          }
+        })
+        .on('error', (error) => reject(error));
+    });
+  } catch (error) {
+    throw new Error(`CSV processing failed: ${error.message}`);
+  }
+};
+
 const getHlxConfigMessagePart = (hlxConfig) => {
   const { rso, hlxVersion } = hlxConfig;
   return `, _HLX Version_: *${hlxVersion}*, _Dev URL_: \`https://${rso.ref}--${rso.site}--${rso.owner}.aem.live\``;
+};
+
+/**
+ * Loads profile configuration from JSON file.
+ *
+ * @async
+ * @param {string} profileKey - The profile key to retrieve.
+ * @returns {Object} - The profile configuration object.
+ */
+const loadProfileConfig = (profileKey) => {
+  try {
+    const data = fs.readFileSync(PROFILE_CONFIG_PATH, 'utf-8');
+    const profiles = JSON.parse(data);
+
+    if (!isObject(profiles[profileKey])) {
+      throw new Error(`Profile "${profileKey}" not found in ${PROFILE_CONFIG_PATH}`);
+    }
+
+    return profiles[profileKey];
+  } catch (error) {
+    throw new Error(`Failed to load profile configuration for "${profileKey}": ${error.message}`);
+  }
 };
 
 export {
@@ -299,4 +404,7 @@ export {
   getHlxConfigMessagePart,
   getMessageFromEvent,
   wrapSayForThread,
+  loadProfileConfig,
+  parseCSV,
+  fetchFile,
 };

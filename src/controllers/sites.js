@@ -70,7 +70,8 @@ function SitesController(dataAccess, log, env) {
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAll = async () => {
-    const sites = (await Site.all()).map((site) => SiteDto.toJSON(site));
+    const all = await Site.all({}, { fetchAllPages: true });
+    const sites = all.map((site) => SiteDto.toJSON(site));
     return ok(sites);
   };
 

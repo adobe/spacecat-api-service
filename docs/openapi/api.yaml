@@ -53,6 +53,8 @@ paths:
     $ref: './audits-api.yaml#/latest-audits'
   /auth/google/{siteId}:
     $ref: './auth-api.yaml#/google-auth'
+  /auth/google/{siteId}/status:
+    $ref: './auth-api.yaml#/google-auth-status'
   /configurations:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
@@ -73,6 +75,8 @@ paths:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
     $ref: './organization-api.yaml#/organization'
+  /organizations/{organizationId}/brands:
+    $ref: './brands-api.yaml#/brands-for-organization'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/by-ims-org-id/{imsOrgId}:
@@ -105,6 +109,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
+  /sites/{siteId}/brand-guidelines:
+    $ref: './brands-api.yaml#/brand-guidelines-by-site-id'
   /sites/{siteId}/opportunities:
     $ref: './site-opportunities.yaml#/site-opportunities'
   /sites/{siteId}/opportunities/by-status/{status}:
@@ -119,6 +125,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
@@ -151,8 +159,6 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
-  /tools/import/assistant/prompt:
-    $ref: './tools-api.yaml#/import-assistant'
 
 components:
   securitySchemes:

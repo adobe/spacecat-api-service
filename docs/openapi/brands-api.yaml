@@ -1,0 +1,52 @@
+brands-for-organization:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+  get:
+    tags:
+      - organization
+      - brands
+    summary: Retrieves brands for an organization
+    description: |
+      This endpoint provide a list of brands the user have access to in the given organization.
+    operationId: getBrandsForOrganization
+    responses:
+      '200':
+        description: A list of brands
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+brand-guidelines-by-site-id:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - brand-guidelines
+    summary: Retrieves brand guidelines for a site
+    description: |
+      This endpoint provide the brand guidelines for the given site, if brandId is configured in the site configuration.
+    operationId: getBrandGuidelinesForSite
+    responses:
+      '200':
+        description: Brand guidelines
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandGuidelines'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-brand-not-found-for-siteId'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

@@ -52,9 +52,8 @@ function isStaticRoute(routePattern) {
  * @param {Function} triggerHandler - The trigger handler function.
  * @param {Object} fulfillmentController - The fulfillment controller.
  * @param {Object} importController - The import controller.
- * @param {Object} assistantController - The assistant controller.
  * @param {Object} apiKeyController - The API key controller.
- * @param {Object} sitesAuditsController - The sites audits controller.
+ * @param {Object} sitesAuditsToggleController - The sites audits controller.
  * @param {Object} opportunitiesController - The opportunities controller.
  * @param {Object} suggestionsController - The suggestions controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
@@ -70,11 +69,11 @@ export default function getRouteHandlers(
   triggerHandler,
   fulfillmentController,
   importController,
-  assistantController,
   apiKeyController,
   sitesAuditsToggleController,
   opportunitiesController,
   suggestionsController,
+  brandsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -97,6 +96,7 @@ export default function getRouteHandlers(
     'PATCH /organizations/:organizationId': organizationsController.updateOrganization,
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
+    'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
@@ -127,12 +127,14 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.getAllForOpportunity,
+    'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': suggestionsController.autofixSuggestions,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': suggestionsController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.getByID,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
+    'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
@@ -147,7 +149,6 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/:jobId/progress': importController.getImportJobProgress,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
-    'POST /tools/import/assistant/prompt': assistantController.processImportAssistant,
   };
 
   // Initialization of static and dynamic routes

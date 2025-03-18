@@ -68,17 +68,19 @@ broken-backlinks-suggestion-create-list:
   value:
     - type: 'REDIRECT_UPDATE'
       rank: 571000
+      opportunityId: '123e4567-e89b-12d3-a456-426614174000'
       data:
-      title: 'Black Friday Sale at Example Inc.'
-      url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-      url_to: 'https://www.example.com/CustomerServiceView.aspx'
-      urls_suggested:
-        - 'https://www.example.com/customer-service/contact'
-        - 'https://www.example.com/customer-service'
-      ai_rationale: 'The URL is about customer service, so it should be redirected to the customer service page.'
-      traffic_domain: 571000
+        title: 'Black Friday Sale at Example Inc.'
+        url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+        url_to: 'https://www.example.com/CustomerServiceView.aspx'
+        urls_suggested:
+          - 'https://www.example.com/customer-service/contact'
+          - 'https://www.example.com/customer-service'
+        ai_rationale: 'The URL is about customer service, so it should be redirected to the customer service page.'
+        traffic_domain: 571000
     - type: 'REDIRECT_UPDATE'
       rank: 123000
+      opportunityId: '123e4567-e89b-12d3-a456-426614174000'
       data:
         title: 'Black Friday Sale at Example Inc.'
         url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
@@ -90,8 +92,10 @@ broken-backlinks-suggestion-create-list-response:
   description: Example for a broken backlinks suggestion create list response
   value:
     suggestions:
-      - index: 0
+      - id: '2563e4567-f543-12d3-a456-426614174000'
+        index: 0
         statusCode: 201
+        message: "Successfully created"
         suggestion:
           id: '2563e4567-f543-12d3-a456-426614174000'
           opportunityId: '123e4567-e89b-12d3-a456-426614174000'
@@ -108,7 +112,8 @@ broken-backlinks-suggestion-create-list-response:
             traffic_domain: 571000
           createdAt: '2024-01-22T12:00:00Z'
           updatedAt: '2024-07-26T12:00:00Z'
-      - index: 1
+      - id: 'invalid-suggestion'
+        index: 1
         statusCode: 400
         message: 'Validation failed in suggestion: type is required'
     metadata:
@@ -116,8 +121,9 @@ broken-backlinks-suggestion-create-list-response:
       success: 1
       failure: 1
 broken-backlinks-suggestion-update:
-  description: Example for a broken backlinks suggestion
+  description: Example for a broken backlinks suggestion update
   value:
+    status: 'APPROVED'
     rank: 571000
     data:
       proposedTargetURLs:
@@ -134,24 +140,10 @@ broken-backlinks-suggestions-status-update-response:
   description: Example for broken backlinks suggestions status update response
   value:
     suggestions:
-      - index: 0
+      - id: '213e4567-f543-12d3-a456-426614174000'
+        index: 0
         statusCode: 200
-        suggestion:
-          id: '213e4567-f543-12d3-a456-426614174000'
-          opportunityId: '123e4567-e89b-12d3-a456-426614174000'
-          type: 'REDIRECT_UPDATE'
-          rank: 571000
-          data:
-            title: 'Black Friday Sale at Example Inc.'
-            url_from: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
-            url_to: 'https://www.example.com/CustomerServiceView.aspx'
-            urls_suggested:
-              - 'https://www.example.com/customer-service/contact'
-              - 'https://www.example.com/customer-service'
-            traffic_domain: 571000
-          status: 'APPROVED'
-          createdAt: '2024-01-22T12:00:00Z'
-          updatedAt: '2024-07-26T12:00:00Z'
+        message: "Successfully updated"
       - id: '945e4567-f543-12d3-a456-426614174010'
         index: 1
         statusCode: 400
@@ -163,11 +155,10 @@ broken-backlinks-suggestions-status-update-response:
 generic-audit:
   summary: Example for a generic audit
   value:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    id: '123e4567-e89b-12d3-a456-426614174000'
+    siteId: '456e4567-e89b-12d3-a456-426614174000'
     auditedAt: '2024-01-20T12:00:00Z'
     expiresAt: '2024-07-20T12:00:00Z'
-    auditType: 'cwv'
-    isError: false
     deliveryType: 'aem_edge'
     fullAuditRef: 'https://some-audit-system/full-report/1234'
     auditResult:
@@ -177,13 +168,11 @@ generic-audit:
 broken-backlinks-audit:
   summary: Example for a broken-backlinks audit
   value:
+    id: '123e4567-e89b-12d3-a456-426614174000'
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     auditedAt: '2024-01-20T12:00:00Z'
     expiresAt: '2024-07-20T12:00:00Z'
-    auditType: 'broken-backlinks'
     deliveryType: 'aem_edge'
-    isError: false
-    isLive: true
     fullAuditRef: 'https://api.ahrefs.com/v3/site-explorer/broken-backlinks?select=title%2Curl_from%2Curl_to%2Ctraffic_domain&limit=50&mode=prefix&order_by=domain_rating_source%3Adesc%2Ctraffic_domain%3Adesc&target=example.com&output=json&where=%7B%22and%22%3A%5B%7B%22field%22%3A%22is_dofollow%22%2C%22is%22%3A%5B%22eq%22%2C1%5D%7D%2C%7B%22field%22%3A%22is_content%22%2C%22is%22%3A%5B%22eq%22%2C1%5D%7D%2C%7B%22field%22%3A%22domain_rating_source%22%2C%22is%22%3A%5B%22gte%22%2C29.5%5D%7D%2C%7B%22field%22%3A%22traffic_domain%22%2C%22is%22%3A%5B%22gte%22%2C500%5D%7D%2C%7B%22field%22%3A%22links_external%22%2C%22is%22%3A%5B%22lte%22%2C300%5D%7D%5D%7D'
     auditResult:
       brokenBacklinks:
@@ -196,13 +185,11 @@ broken-backlinks-audit:
 broken-internal-links-audit:
   summary: Example for a broken-internal-links audit
   value:
+    id: '123e4567-e89b-12d3-a456-426614174000'
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     auditedAt: '2024-01-20T12:00:00Z'
     expiresAt: '2024-07-20T12:00:00Z'
-    auditType: 'broken-internal-links'
     deliveryType: 'aem_edge'
-    isError: false
-    isLive: true
     fullAuditRef: 'https://petplace.com' # full audit reference is not available because it depends on RUM data
     auditResult:
       brokenInternalLinks:
@@ -218,13 +205,25 @@ broken-internal-links-audit:
 costs-audit:
   summary: Example for a costs audit
   value:
-    ahrefs:
-      usedApiUnits: 198771
-      limitApiUnits: 1000000
-      fullAuditRef: 'https://api.ahrefs.com/v3/subscription-info/limits-and-usage'
+    id: '123e4567-e89b-12d3-a456-426614174000'
+    siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
+    auditedAt: "2025-01-03T10:14:41.798Z"
+    expiresAt: "2025-07-03T10:14:41.798Z"
+    deliveryType: 'aem_edge'
+    fullAuditRef: 'https://api.ahrefs.com/v3/subscription-info/limits-and-usage'
+    auditResult:
+      ahrefs:
+        usedApiUnits: 198771
+        limitApiUnits: 1000000
 meta-tags-audit:
   summary: Example for a meta-tags audit
   value:
+    id: '123e4567-e89b-12d3-a456-426614174000'
+    siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
+    auditedAt: "2025-01-03T10:14:41.798Z"
+    expiresAt: "2025-07-03T10:14:41.798Z"
+    deliveryType: 'aem_edge'
+    fullAuditRef: "https://example.com/meta-tags-audit"
     auditResult:
       sourceS3Folder: "spacecat-scraper-dev/scrapes/cccdac43-1a22-4659-9086-b762f59b9928/"
       detectedTags:
@@ -235,12 +234,6 @@ meta-tags-audit:
             issueDetails: "Title tag is missing"
             seoImpact: "High"
       finalUrl: "www.bulk.com/uk/"
-    auditType: "meta-tags"
-    auditedAt: "2025-01-03T10:14:41.798Z"
-    fullAuditRef: null
-    isLive: true
-    isError: false
-    siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
 analytics-site-integration-aa-tags:
   summary: Example for an integration with Adobe Analytics via Adobe Tags
   value:

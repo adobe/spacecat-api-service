@@ -18,6 +18,10 @@ runs:
       run: npm run lint
       shell: bash
 
+    - name: Lint Docs
+      run: npm run docs:lint
+      shell: bash
+
     - name: Test
       run: npm run test
       shell: bash

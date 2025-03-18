@@ -16,13 +16,20 @@ import {
   badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  composeBaseURL, deepEqual, hasText, isInteger, isNonEmptyObject, isObject, isValidUrl,
+  composeBaseURL,
+  deepEqual,
+  hasText,
+  isInteger,
+  isNonEmptyObject,
+  isObject,
+  isValidUrl,
+  tracingFetch as fetch,
 } from '@adobe/spacecat-shared-utils';
 import yaml from 'js-yaml';
 
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import { Site as SiteModel, SiteCandidate as SiteCandidateModel } from '@adobe/spacecat-shared-data-access';
-import { fetch, isHelixSite } from '../support/utils.js';
+import { isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';

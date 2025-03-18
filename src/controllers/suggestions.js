@@ -18,26 +18,31 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
-  isArray,
+  isArray, isNonEmptyArray,
+  isNonEmptyObject,
   isObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
+import { sendAutofixMessage } from '../support/utils.js';
 
 /**
  * Suggestions controller.
  * @param {DataAccess} dataAccess - Data access.
+ * @param {SQS} sqs - SQS client.
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(dataAccess) {
+function SuggestionsController(dataAccess, sqs, env) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
-  const { Opportunity, Suggestion } = dataAccess;
+  const {
+    Opportunity, Suggestion, Site, Configuration,
+  } = dataAccess;
 
   if (!isObject(Opportunity)) {
     throw new Error('Data access required');
@@ -382,6 +387,101 @@ function SuggestionsController(dataAccess) {
     };
     return createResponse(fullResponse, 207);
   };
+  const autofixSuggestions = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    // validate request body
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No updates provided');
+    }
+    const { suggestionIds } = context.data;
+    if (!isArray(suggestionIds)) {
+      return badRequest('Request body must be an array of suggestionIds');
+    }
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+    const configuration = await Configuration.findLatest();
+    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
+      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
+    }
+    const suggestions = await Suggestion.allByOpportunityId(
+      opportunityId,
+    );
+    const validSuggestions = [];
+    const failedSuggestions = [];
+    suggestions.forEach((suggestion) => {
+      if (suggestionIds.includes(suggestion.getId())) {
+        if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+          validSuggestions.push(suggestion);
+        } else {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Suggestion is not in NEW status',
+            statusCode: 400,
+          });
+        }
+      }
+    });
+    suggestionIds.forEach((suggestionId, index) => {
+      if (!suggestions.find((s) => s.getId() === suggestionId)) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        });
+      }
+    });
+    let succeededSuggestions = [];
+    if (isNonEmptyArray(validSuggestions)) {
+      succeededSuggestions = await Suggestion.bulkUpdateStatus(
+        validSuggestions,
+        SuggestionModel.STATUSES.IN_PROGRESS,
+      );
+    }
+    const response = {
+      suggestions: [
+        ...succeededSuggestions.map((suggestion) => ({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          statusCode: 200,
+          suggestion: SuggestionDto.toJSON(suggestion),
+        })),
+        ...failedSuggestions,
+      ],
+      metadata: {
+        total: suggestionIds.length,
+        success: succeededSuggestions.length,
+        failed: failedSuggestions.length,
+      },
+    };
+    response.suggestions.sort((a, b) => a.index - b.index);
+    const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
+    await sendAutofixMessage(
+      sqs,
+      queueUrl,
+      opportunityId,
+      siteId,
+      succeededSuggestions.map((s) => s.getId()),
+    );
+    return createResponse(response, 207);
+  };
 
   const removeSuggestion = async (context) => {
     const siteId = context.params?.siteId;
@@ -421,6 +521,7 @@ function SuggestionsController(dataAccess) {
   };
 
   return {
+    autofixSuggestions,
     createSuggestions,
     getAllForOpportunity,
     getByID,

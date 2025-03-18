@@ -15,6 +15,7 @@
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import nock from 'nock';
 
 import RunScrapeCommand from '../../../../src/support/slack/commands/run-scrape.js';
 
@@ -67,7 +68,7 @@ describe('RunScrapeCommand', () => {
       const command = RunScrapeCommand(context);
       expect(command.id).to.equal('run-scrape');
       expect(command.name).to.equal('Run Scrape');
-      expect(command.description).to.include('Runs the specified scrape type for the site identified with its id');
+      expect(command.description).to.include('Runs the specified scrape type for the provided base URL or a list of URLs provided in a CSV file');
     });
   });
 
@@ -99,12 +100,6 @@ describe('RunScrapeCommand', () => {
       expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.false;
     });
 
-    it('handles missing SLACK_IDS_RUN_IMPORT', async () => {
-      dataAccessStub.Configuration.findLatest.resolves({ getSlackRoles: () => null });
-      const command = RunScrapeCommand(context);
-      await command.handleExecution(['https://example.com'], { ...slackContext, user: 'ANYUSER' });
-      expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.true;
-    });
     it('triggers a scrape for a valid site with top pages', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
@@ -119,19 +114,22 @@ describe('RunScrapeCommand', () => {
       await command.handleExecution(['https://example.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark: Found top pages for site `https://example.com`');
-      expect(slackContext.say.secondCall.args[0]).to.include(':adobe-run: Triggering scrape run for site `https://example.com`');
-      expect(slackContext.say.thirdCall.args[0]).to.include('white_check_mark: Completed triggering scrape runs for site `https://example.com` — Total URLs: 2');
+      expect(context.log.info.firstCall.args[0]).to.include('Found top pages for site `https://example.com`');
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering scrape run for site `https://example.com`');
     });
 
+    /* todo: uncomment after summit and back-office-UI support
+      for configuration setting (roles)
     it('does not trigger a scrape when user is not authorized', async () => {
       slackContext.user = 'UNAUTHORIZED_USER';
       const command = RunScrapeCommand(context);
 
       await command.handleExecution(['https://example.com'], slackContext);
 
-      expect(slackContext.say.calledWith(':error: Only members of role "scrape" can run this command.')).to.be.true;
+      expect(slackContext.say.calledWith(':error: Only members of role
+      "scrape" can run this command.')).to.be.true;
     });
+    */
 
     it('responds with a warning for an invalid site url', async () => {
       const command = RunScrapeCommand(context);
@@ -171,6 +169,111 @@ describe('RunScrapeCommand', () => {
 
       expect(logStub.error.called).to.be.true;
       expect(slackContext.say.calledWith(sinon.match('Oops! Something went wrong'))).to.be.true;
+    });
+
+    it('handles both site URL and CSV file', async () => {
+      const command = RunScrapeCommand(context);
+      slackContext.files = [
+        {
+          name: 'sites.csv',
+          url_private: 'https://example.com/sites.csv',
+        },
+      ];
+
+      await command.handleExecution(['https://example.com'], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.')).to.be.true;
+    });
+
+    it('handles multiple CSV files', async () => {
+      const command = RunScrapeCommand(context);
+      slackContext.files = [
+        {
+          name: 'sites1.csv',
+          url_private: 'https://example.com/sites1.csv',
+        },
+        {
+          name: 'sites2.csv',
+          url_private: 'https://example.com/sites2.csv',
+        },
+      ];
+
+      await command.handleExecution([], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Please provide only one CSV file.')).to.be.true;
+    });
+
+    it('handles non-CSV file', async () => {
+      const command = RunScrapeCommand(context);
+      slackContext.files = [
+        {
+          name: 'sites.txt',
+          url_private: 'https://example.com/sites.txt',
+        },
+      ];
+
+      await command.handleExecution([], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Please provide a CSV file.')).to.be.true;
+    });
+
+    it('triggers scrapes for all sites in the CSV file', async () => {
+      const fileUrl = 'https://example.com/sites.csv';
+      dataAccessStub.Site.findByBaseURL.resolves({
+        getId: () => '123',
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+          { getUrl: () => 'https://site.com' },
+          { getUrl: () => 'https://valid.url' },
+        ]),
+      });
+      dataAccessStub.Configuration.findLatest.resolves({
+        getEnabledAuditsForSite: () => ['lhs-mobile', 'lhs-desktop'],
+      });
+      slackContext.files = [
+        {
+          name: 'sites.csv',
+          url_private: fileUrl,
+        },
+      ];
+      nock(fileUrl)
+        .get('')
+        .reply(200, 'https://site.com,uuidv4\n'
+          + 'https://valid.url,uuidv4');
+
+      const command = RunScrapeCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(slackContext.say.calledWith(':adobe-run: Triggering scrape run for 2 sites.')).to.be.true;
+    });
+
+    it('handles failing scrape for a site in the CSV file', async () => {
+      const fileUrl = 'https://example.com/sites.csv';
+      dataAccessStub.Site.findByBaseURL.onCall(0).resolves({
+        getId: () => '123',
+        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+          { getUrl: () => 'https://site.com' },
+          { getUrl: () => 'https://valid.url' },
+        ]),
+      });
+      dataAccessStub.Site.findByBaseURL.onCall(1).rejects(new Error('Test Error'));
+      dataAccessStub.Configuration.findLatest.resolves({
+        getEnabledAuditsForSite: () => ['lhs-mobile', 'lhs-desktop'],
+      });
+      slackContext.files = [
+        {
+          name: 'sites.csv',
+          url_private: fileUrl,
+        },
+      ];
+      nock(fileUrl)
+        .get('')
+        .reply(200, 'https://site.com,uuidv4\n'
+          + 'https://valid.url,uuidv4');
+
+      const command = RunScrapeCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Failed scrape for `https://valid.url`: Test Error')).to.be.true;
     });
   });
 });

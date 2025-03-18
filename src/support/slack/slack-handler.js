@@ -39,12 +39,15 @@ function SlackHandler(commands, log) {
     const threadTs = getThreadTimestamp(event);
     const threadedSay = wrapSayForThread(say, threadTs);
     const message = getMessageFromEvent(event);
+
     const slackContext = {
       say: threadedSay,
       channelId: event.channel,
       threadTs,
       client,
       user: event?.user,
+      botToken: context.botToken || process.env.SLACK_BOT_TOKEN,
+      files: event?.files || [],
     };
 
     log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);

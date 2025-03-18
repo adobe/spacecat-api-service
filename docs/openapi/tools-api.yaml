@@ -4,12 +4,16 @@ import:
       - import
     summary: Create a new import job
     description: |
-      This endpoint can be used to start a new import job with a set of URLs, import API key,
-      optional import.js mapping file, and optional custom headers. The import job will be processed 
-      asynchronously and the status of the job can be queried at the /tools/import/jobs/{jobId} endpoint.
-      If there is no import queue available at the time of the request, a 503 Service Unavailable response will
-      be returned. A single import job per client is permitted, otherwise a 429 Too Many Requests
-      response will be returned.
+      This endpoint starts a new import job with a set of URLs, an import API key, an optional import.js 
+      mapping file, and optional custom headers. The job runs asynchronously, and its status can be 
+      queried at /tools/import/jobs/{jobId}.
+      
+      If no import queue is available when the request is made, the endpoint returns a 503 Service 
+      Unavailable response. Each client is allowed only one active import job; additional requests 
+      will receive a 429 Too Many Requests response.
+  
+      An import job may include a type, specifying the kind of job to create. The available options 
+      are 'doc' and 'xwalk', with 'doc' as the default if no type is provided.
     operationId: startImportJob
     security:
       - scoped_api_key: [ ]
@@ -207,47 +211,6 @@ import-job-result:
           application/json:
             schema:
               $ref: './schemas.yaml#/ImportJobArchive'
-      '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404'
-      '500':
-        $ref: './responses.yaml#/500'
-import-assistant:
-  post:
-    tags:
-      - import
-    summary: Send a prompt to the import assistant
-    description: |
-      Note: Not implemented yet.
-
-      This endpoint can be used to send prompts to the import assistant.
-      Each prompt will make use of AI to analyze a URL and return
-      choices in response to the request.
-    operationId: processImportAssistant
-    security:
-      - scoped_api_key: [ ]
-    requestBody:
-      content:
-        application/json:
-          schema:
-            $ref: './schemas.yaml#/ImportAssistantRequest'
-    parameters:
-      - in: header
-        name: x-api-key
-        schema:
-          type: string
-        description: |
-          Client-specific import API key with the 'imports.assistant' scope.
-    responses:
-      '200':
-        description: Contents of the response from the import AI assistant.
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/ImportAssistantResponse'
       '400':
         $ref: './responses.yaml#/400'
       '401':

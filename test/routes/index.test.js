@@ -75,10 +75,6 @@ describe('getRouteHandlers', () => {
     stopImportJob: sinon.stub(),
   };
 
-  const mockAssistantController = {
-    processImportAssistant: sinon.stub(),
-  };
-
   const mockApiKeyController = {
     createApiKey: sinon.stub(),
     deleteApiKey: sinon.stub(),
@@ -107,6 +103,11 @@ describe('getRouteHandlers', () => {
     patchSuggestionsStatus: sinon.stub(),
   };
 
+  const mockBrandsController = {
+    getBrandsForOrganization: sinon.stub(),
+    getBrandGuidelinesForSite: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -119,11 +120,11 @@ describe('getRouteHandlers', () => {
       mockTrigger,
       mockFulfillmentController,
       mockImportController,
-      mockAssistantController,
       mockApiKeyController,
       mockSitesAuditsToggleController,
       mockOpportunitiesController,
       mockSuggestionsController,
+      mockBrandsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -145,7 +146,6 @@ describe('getRouteHandlers', () => {
       'POST /tools/api-keys',
       'GET /tools/api-keys',
       'POST /tools/import/jobs',
-      'POST /tools/import/assistant/prompt',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -168,6 +168,7 @@ describe('getRouteHandlers', () => {
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
+      'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/sites',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
@@ -199,6 +200,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/import/jobs/:jobId/progress',
       'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
       'DELETE /tools/import/jobs/:jobId',
+      'GET /sites/:siteId/brand-guidelines',
       'GET /sites/:siteId/opportunities',
       'GET /sites/:siteId/opportunities/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId',
@@ -206,6 +208,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions',
