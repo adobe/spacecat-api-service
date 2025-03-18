@@ -64,13 +64,18 @@ async function getDBRoles(dbAccess, {
 
   const roles = await dbAccess.Role.allRolesByIdentities(imsOrgId, idents);
   const roleNames = roles.map((r) => r.name);
-  log.debug(`Found role names for ${imsOrgId} identities: ${idents}: ${roleNames}`);
+  log.debug(`Found role names for ${imsOrgId} identities ${idents}: ${roleNames}`);
   return roleNames;
 }
 
 async function getDBACLs(dbAccess, {
   imsOrgId, roles,
-}) {
+}, log) {
+  const acls = await dbAccess.Role.allAclsByRoleNames(imsOrgId, roles);
+  log.debug((`Found ACLs for ${imsOrgId} roles ${roles}: ${acls}`));
+  return acls;
+
+  /*
   const acls = [];
 
   console.log('§§§ Looking up ACLs for these roles:', JSON.stringify(roles));
@@ -93,6 +98,7 @@ async function getDBACLs(dbAccess, {
   console.log('§§§ Found ACLs:', JSON.stringify(acls));
 
   return acls;
+  */
 }
 
 export default async function getAcls({

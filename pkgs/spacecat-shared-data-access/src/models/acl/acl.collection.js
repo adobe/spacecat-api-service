@@ -20,10 +20,15 @@ import BaseCollection from '../base/base.collection.js';
  * @extends BaseCollection
  */
 class AclCollection extends BaseCollection {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars,class-methods-use-this
-  // async allAclsByRoleIds(roleIds) {
-  //   // todo: use electrodb filter expression as detailed in https://electrodb.dev/en/queries/filters/
-  // }
+  async allAclsByRoleNames(imsOrgId, roleNames) {
+    const res = await this.entity
+      .query['spacecat-data-gsi1pk-gsi1sk']({ imsOrgId })
+      .where((attr, { eq }) => roleNames.map((rn) => eq(attr.roleName, rn)).join(' OR '))
+      .go();
+
+    // TODO is this right? Or do we need to create instances?
+    return res.data;
+  }
 }
 
 export default AclCollection;
