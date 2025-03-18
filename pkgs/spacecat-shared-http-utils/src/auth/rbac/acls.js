@@ -79,7 +79,7 @@ async function getDBACLs(dbAccess, {
       acl: a.acls,
     };
   });
-  log.debug((`Found ACLs for ${imsOrgId} roles ${roles}: ${roleAcls}`));
+  log.debug((`Found ACLs for ${imsOrgId} roles ${roles}: ${JSON.stringify(roleAcls)}`));
   return roleAcls;
 }
 
