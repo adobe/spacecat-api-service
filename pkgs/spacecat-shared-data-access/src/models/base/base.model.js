@@ -101,10 +101,12 @@ class BaseModel {
 
     // Check if the owning collection again is owned by something
     const ownerCollection = this.entityRegistry.getCollection(`${belongsTo[0].getTarget()}Collection`);
-    const ownerBelongsTo = ownerCollection.schema.getReferencesByType(Reference.TYPES.BELONGS_TO);
-    if (ownerBelongsTo.length > 0) {
-      // The owner also belongs to something. Currently this is not supported
-      return null;
+    if (ownerCollection?.schema?.getReferencesByType) {
+      const ownerBelongsTo = ownerCollection.schema.getReferencesByType(Reference.TYPES.BELONGS_TO);
+      if (ownerBelongsTo.length > 0) {
+        // The owner also belongs to something. Currently this is not supported for ACL checks
+        return null;
+      }
     }
 
     const ownerID = this.record[entityNameToIdName(belongsTo[0].target)];
