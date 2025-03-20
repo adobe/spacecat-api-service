@@ -13,7 +13,6 @@
 import { DataAccessError } from '../../errors/index.js';
 import { collectionNameToEntityName, decapitalize } from '../../util/util.js';
 
-import AclCollection from '../acl/acl.collection.js';
 import ApiKeyCollection from '../api-key/api-key.collection.js';
 import AuditCollection from '../audit/audit.collection.js';
 import ConfigurationCollection from '../configuration/configuration.collection.js';
@@ -25,12 +24,12 @@ import LatestAuditCollection from '../latest-audit/latest-audit.collection.js';
 import OpportunityCollection from '../opportunity/opportunity.collection.js';
 import OrganizationCollection from '../organization/organization.collection.js';
 import RoleCollection from '../role/role.collection.js';
+import RoleMemberCollection from '../role-member/role-member.collection.js';
 import SiteCandidateCollection from '../site-candidate/site-candidate.collection.js';
 import SiteCollection from '../site/site.collection.js';
 import SiteTopPageCollection from '../site-top-page/site-top-page.collection.js';
 import SuggestionCollection from '../suggestion/suggestion.collection.js';
 
-import AclSchema from '../acl/acl.schema.js';
 import ApiKeySchema from '../api-key/api-key.schema.js';
 import AuditSchema from '../audit/audit.schema.js';
 import ConfigurationSchema from '../configuration/configuration.schema.js';
@@ -42,6 +41,7 @@ import LatestAuditSchema from '../latest-audit/latest-audit.schema.js';
 import OpportunitySchema from '../opportunity/opportunity.schema.js';
 import OrganizationSchema from '../organization/organization.schema.js';
 import RoleSchema from '../role/role.schema.js';
+import RoleMemberSchema from '../role-member/role-member.schema.js';
 import SiteSchema from '../site/site.schema.js';
 import SiteCandidateSchema from '../site-candidate/site-candidate.schema.js';
 import SiteTopPageSchema from '../site-top-page/site-top-page.schema.js';
@@ -128,7 +128,6 @@ class EntityRegistry {
   }
 }
 
-EntityRegistry.registerEntity(AclSchema, AclCollection);
 EntityRegistry.registerEntity(ApiKeySchema, ApiKeyCollection);
 EntityRegistry.registerEntity(AuditSchema, AuditCollection);
 EntityRegistry.registerEntity(ConfigurationSchema, ConfigurationCollection);
@@ -140,6 +139,7 @@ EntityRegistry.registerEntity(LatestAuditSchema, LatestAuditCollection);
 EntityRegistry.registerEntity(OpportunitySchema, OpportunityCollection);
 EntityRegistry.registerEntity(OrganizationSchema, OrganizationCollection);
 EntityRegistry.registerEntity(RoleSchema, RoleCollection);
+EntityRegistry.registerEntity(RoleMemberSchema, RoleMemberCollection);
 EntityRegistry.registerEntity(SiteSchema, SiteCollection);
 EntityRegistry.registerEntity(SiteCandidateSchema, SiteCandidateCollection);
 EntityRegistry.registerEntity(SiteTopPageSchema, SiteTopPageCollection);
