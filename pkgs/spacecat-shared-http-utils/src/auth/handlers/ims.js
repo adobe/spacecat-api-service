@@ -258,7 +258,7 @@ export default class AdobeImsHandler extends AbstractHandler {
       tableNameData: 'spacecat-services-rbac-dev',
       aclCtx: {
         aclEntities: {
-          exclude: ['acl', 'role'],
+          exclude: ['role', 'roleMember'],
         },
       },
     }, log);

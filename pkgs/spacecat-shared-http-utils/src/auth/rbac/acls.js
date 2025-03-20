@@ -31,7 +31,7 @@ async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') {
     tableNameData: tableName,
     aclCtx: {
       aclEntities: {
-        exclude: ['acl', 'role'],
+        exclude: ['role', 'roleMember'],
       },
     },
   }, log);
