@@ -118,6 +118,8 @@ export default class AdobeImsHandler extends AbstractHandler {
 
   // eslint-disable-next-line class-methods-use-this
   async #addSampleRoleMember(aclAccess, role, item) {
+    // eslint-disable-next-line no-param-reassign
+    item.roleId = role.getId();
     const created = await aclAccess.RoleMember.create(item);
     role.getRoleMembers().add(created);
     console.log('§§§ role member created:', created.getId());
@@ -164,7 +166,6 @@ export default class AdobeImsHandler extends AbstractHandler {
     await this.#addSampleRoleMember(aclAccess, r1, {
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
-      name: 'mysite-importer',
     });
 
     /*
