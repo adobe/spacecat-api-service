@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-export * from './acl/index.js';
 export * from './api-key/index.js';
 export * from './audit/index.js';
 export * from './base/index.js';
@@ -23,6 +22,7 @@ export * from './latest-audit/index.js';
 export * from './opportunity/index.js';
 export * from './organization/index.js';
 export * from './role/index.js';
+export * from './role-member/index.js';
 export * from './site-candidate/index.js';
 export * from './site-top-page/index.js';
 export * from './site/index.js';
