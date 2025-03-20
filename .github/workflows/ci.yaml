@@ -51,7 +51,7 @@ jobs:
       - name: Setup Node & NPM
         uses: ./.github/actions/setup-node-npm
 
-      - name: Configure AWS
+      - name: Configure AWS for PROD
         uses: ./.github/actions/configure-aws
         with:
           aws_role_to_assume: 'arn:aws:iam::${{secrets.AWS_ACCOUNT_ID_PROD}}:role/spacecat-role-github-actions'
@@ -63,6 +63,18 @@ jobs:
           NPM_TOKEN: ${{ secrets.ADOBE_BOT_NPM_TOKEN }}
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID_PROD}}}
+
+      - name: Configure AWS for SAGE
+        uses: ./.github/actions/configure-aws
+        with:
+          aws_role_to_assume: 'arn:aws:iam::${{secrets.AWS_ACCOUNT_ID_STAGE}}:role/spacecat-role-github-actions'
+
+      - name: Branch Deployment
+        run: npm run deploy-stage
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID_STAGE}}
+
 
 
       - name: Configure AWS for STAGE
@@ -95,7 +107,7 @@ jobs:
           aws_role_to_assume: 'arn:aws:iam::${{secrets.AWS_ACCOUNT_ID_DEV}}:role/spacecat-role-github-actions'
 
       - name: Branch Deployment
-        run: npm run deploy-ci
+        run: npm run deploy-dev
         env:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID_DEV}}
