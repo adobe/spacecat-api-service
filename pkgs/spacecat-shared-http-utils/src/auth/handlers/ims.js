@@ -168,16 +168,8 @@ export default class AdobeImsHandler extends AbstractHandler {
       identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
     });
 
-    /*
-    await this.#addSampleRoleMembers(aclAccess, {
-      imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
-      identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
+    const r2 = await this.#addSampleRole(aclAccess, {
       name: 'test-account-writer',
-    }, true);
-    console.log('§§§ New role created r2');
-
-    await this.#addSampleRoles(aclAccess, {
-      roleName: 'test-account-writer',
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       acl: [
         {
@@ -190,15 +182,14 @@ export default class AdobeImsHandler extends AbstractHandler {
         },
       ],
     });
-    await this.#addSampleRoleMembers(aclAccess, {
-      imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
-      identity: 'imsOrgID:F4646ED9626926AA0A49420E@AdobeOrg',
-      name: 'test-account-reader',
-    }, true);
-    console.log('§§§ New role created r3');
 
-    await this.#addSampleRoles(aclAccess, {
-      roleName: 'test-account-reader',
+    await this.#addSampleRoleMember(aclAccess, r2, {
+      imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
+      identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
+    });
+
+    const r3 = await this.#addSampleRole(aclAccess, {
+      name: 'test-account-reader',
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       acl: [
         {
@@ -215,26 +206,24 @@ export default class AdobeImsHandler extends AbstractHandler {
         },
       ],
     });
+    await this.#addSampleRoleMember(aclAccess, r3, {
+      imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
+      identity: 'imsOrgID:F4646ED9626926AA0A49420E@AdobeOrg',
+    });
 
-    await this.#addSampleRoleMembers(aclAccess, {
-      imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
-      identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
-      name: 'another-account-reader',
-    }, true);
-    await this.#addSampleRoleMembers(aclAccess, {
-      imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
-      identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
-      name: 'another-account-writer',
-    }, true);
-    await this.#addSampleRoleMembers(aclAccess, {
-      imsOrgId: '43101FC962E3B1BF0A494217@AdobeOrg',
-      identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
+    // await this.#addSampleRoleMembers(aclAccess, {
+    //   imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
+    //   identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
+    //   name: 'another-account-reader',
+    // }, true);
+    // await this.#addSampleRoleMembers(aclAccess, {
+    //   imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
+    //   identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
+    //   name: 'another-account-writer',
+    // }, true);
+
+    const r4 = await this.#addSampleRole(aclAccess, {
       name: 'test-account-reader',
-    }, true);
-    console.log('§§§ New role created r4');
-
-    await this.#addSampleRoles(aclAccess, {
-      roleName: 'test-account-reader',
       imsOrgId: '43101FC962E3B1BF0A494217@AdobeOrg',
       acl: [
         {
@@ -247,7 +236,10 @@ export default class AdobeImsHandler extends AbstractHandler {
         },
       ],
     });
-    */
+    await this.#addSampleRoleMember(aclAccess, r4, {
+      imsOrgId: '43101FC962E3B1BF0A494217@AdobeOrg',
+      identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
+    });
   }
 
   // eslint-disable-next-line class-methods-use-this
