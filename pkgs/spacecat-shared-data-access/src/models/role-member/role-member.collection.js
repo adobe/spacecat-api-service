@@ -26,7 +26,7 @@ class RoleMemberCollection extends BaseCollection {
    * @param {string} imsOrgId - The IMS Org ID to that the roles should have in its primary key.
    * @param {string[]} identities - The identities to filter roles by.
    */
-  async allRolesByIdentities(imsOrgId, identities) {
+  async allRoleMembershipByIdentities(imsOrgId, identities) {
     // const res = await this.entity
     //   .query['spacecat-data-gsi1pk-gsi1sk']({ imsOrgId })
     //   .where((attr, { eq }) => identities.map((identity) => eq(attr.identity, identity)).join(' OR '))
