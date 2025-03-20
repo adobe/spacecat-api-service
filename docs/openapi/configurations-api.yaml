@@ -1,4 +1,4 @@
-latest-configurations:
+latest-jobs-configurations:
   get:
     tags:
       - configuration
@@ -8,7 +8,7 @@ latest-configurations:
       - admin_key: [ ]
     responses:
       '200':
-        description: A list of all known jobs configurations or empty list if no jobs configurations are present.
+        description: A list of all the latest known jobs configurations or empty list if no jobs configurations are present.
         content:
           application/json:
             schema:
@@ -17,6 +17,26 @@ latest-configurations:
                 $ref: './schemas.yaml#/Configuration'
       '401':
         $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+  post:
+    tags:
+      - configuration
+    summary: Update the latest jobs configurations
+    operationId: updateLatestJobsConfigurations
+    security:
+      - admin_key: [ ]
+    responses:
+      '200':
+        description: The latest jobs configurations have been successfully updated.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Configuration'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Latest configuration not found.
       '500':
         $ref: './responses.yaml#/500'
 configurations:
