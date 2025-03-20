@@ -62,7 +62,7 @@ async function getDBRoles(dbAccess, {
     idents.push(`apiKeyID:${apiKey}`);
   }
 
-  const roles = await dbAccess.Role.allRolesByIdentities(imsOrgId, idents);
+  const roles = await dbAccess.RoleMember.allRolesByIdentities(imsOrgId, idents);
   const roleNames = roles.map((r) => r.name);
   log.debug(`Found role names for ${imsOrgId} identities ${idents}: ${roleNames}`);
   return roleNames;

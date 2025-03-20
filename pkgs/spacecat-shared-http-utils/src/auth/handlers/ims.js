@@ -260,10 +260,10 @@ export default class AdobeImsHandler extends AbstractHandler {
   async checkAuth(request, context) {
     // This is only temporarily to put some things in the database
     /* */
-    console.log('§§§ Get ACL Access via model');
-    const aclAccess = await this.#getAclAccess(context);
-    console.log('§§§ Done getting ACL Access via model');
-    await this.#fillModel(aclAccess);
+    // console.log('§§§ Get ACL Access via model');
+    // const aclAccess = await this.#getAclAccess(context);
+    // console.log('§§§ Done getting ACL Access via model');
+    // await this.#fillModel(aclAccess);
     /* */
 
     // console.log('§§§ context in ims:', JSON.stringify(context));

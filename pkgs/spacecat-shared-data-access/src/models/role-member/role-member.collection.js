@@ -27,15 +27,20 @@ class RoleMemberCollection extends BaseCollection {
    * @param {string[]} identities - The identities to filter roles by.
    */
   async allRolesByIdentities(imsOrgId, identities) {
-    const res = await this.entity
-      .query['spacecat-data-gsi1pk-gsi1sk']({ imsOrgId })
-      .where((attr, { eq }) => identities.map((identity) => eq(attr.identity, identity)).join(' OR '))
-      .go();
+    // const res = await this.entity
+    //   .query['spacecat-data-gsi1pk-gsi1sk']({ imsOrgId })
+    //   .where((attr, { eq }) => identities.map((identity) => eq(attr.identity, identity)).join(' OR '))
+    //   .go();
 
-    console.log('§§§ allRolesByIdentities org', imsOrgId, 'identities', identities, 'result', JSON.stringify(res));
+    // console.log('§§§ allRolesByIdentities org', imsOrgId, 'identities', identities, 'result', JSON.stringify(res));
 
-    // TODO is this right? Or do we need to create instances?
-    return res.data;
+    // // TODO is this right? Or do we need to create instances?
+    // return res.data;
+    const res = await this.allByImsOrgId(imsOrgId); // , filterFunction);
+
+    const filtered = res.filter((rm) => identities.includes(rm.getIdentity()));
+
+    return filtered;
   }
 }
 
