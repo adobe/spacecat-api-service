@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+// eslint-disable-next-line import/no-cycle
 import Role from './role.model.js';
 import RoleCollection from './role.collection.js';
 

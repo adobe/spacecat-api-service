@@ -12,7 +12,9 @@
 
 /* c8 ignore start */
 
+import { hasText } from '@adobe/spacecat-shared-utils';
 import SchemaBuilder from '../base/schema.builder.js';
+import { validateIMSOrg } from '../role-member/role-member.schema.js';
 
 import Role from './role.model.js';
 import RoleCollection from './role.collection.js';
@@ -23,60 +25,38 @@ Attribute Doc: https://electrodb.dev/en/modeling/attributes/
 Indexes Doc: https://electrodb.dev/en/modeling/indexes/
  */
 
-export const validateIMSOrg = (value) => {
-  if (value.length < 1) {
-    throw new Error('IMS Org ID must not be empty');
-  }
-
-  const components = value.split('@');
-  if (components.length !== 2) {
-    throw new Error('Incorrectly formed IMS Org ID');
-  }
-
-  return true;
-};
-
-export const validateIdentity = (value) => {
-  if (value.length < 1) {
-    throw new Error('Identity must not be empty');
-  }
-
-  const components = value.split(':');
-  if (components.length !== 2) {
-    throw new Error('Identity must be in the form of "type:identifier"');
-  }
-
-  switch (components[0]) {
-    case 'imsID':
-    case 'imsOrgID':
-    case 'imsOrgID/groupID':
-    case 'apiKeyID':
-      return true;
-    default:
-      throw new Error(`Unsupperted identity type: ${components[0]}`);
-  }
-};
-
 const schema = new SchemaBuilder(Role, RoleCollection)
-  // it's just a many-to-many reference
-  // .addReference('has_many', 'Acls')
+  .addAttribute('name', {
+    type: 'string',
+    required: true,
+  })
   .addAttribute('imsOrgId', {
     type: 'string',
     required: true,
     validate: (value) => validateIMSOrg(value),
   })
-  .addAttribute('identity', {
-    type: 'string',
+  .addAttribute('acl', {
+    type: 'list',
     required: true,
-    validate: (value) => validateIdentity(value),
-  })
-  .addAttribute('name', {
-    type: 'string',
-    required: true,
+    items: {
+      type: 'map',
+      properties: {
+        actions: {
+          type: 'list',
+          items: {
+            type: 'string',
+          },
+        },
+        path: {
+          type: 'string',
+          validate: (value) => hasText(value),
+        },
+      },
+    },
   })
   .addIndex(
     { composite: ['imsOrgId'] },
-    { composite: ['identity'] },
+    { composite: ['name'] },
   );
 
 export default schema.build();

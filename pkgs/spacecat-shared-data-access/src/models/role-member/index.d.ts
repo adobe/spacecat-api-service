@@ -9,12 +9,13 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+
 import type { BaseCollection, BaseModel } from '../base';
 
-export interface Acl extends BaseModel {
+export interface RoleMember extends BaseModel {
   getImsOrgId(): string;
 }
 
-export interface AclCollection extends BaseCollection<Acl> {
-  findByAclId(roleId: string): Promise<Acl | null>;
+export interface RoleMemberCollection extends BaseCollection<RoleMember> {
+  findByRoleId(roleId: string): Promise<RoleMember | null>;
 }

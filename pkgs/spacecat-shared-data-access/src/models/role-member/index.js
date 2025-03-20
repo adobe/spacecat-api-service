@@ -10,14 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import BaseModel from '../base/base.model.js';
+import RoleMember from './role-member.model.js';
+import RoleMemberCollection from './role-member.collection.js';
 
-/**
- * A class representing a Site entity. Provides methods to access and manipulate Acl-specific data.
- * @class Acl
- * @extends BaseModel
- */
-class Acl extends BaseModel {
-}
-
-export default Acl;
+export {
+  RoleMember,
+  RoleMemberCollection,
+};

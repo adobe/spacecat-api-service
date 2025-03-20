@@ -117,53 +117,38 @@ export default class AdobeImsHandler extends AbstractHandler {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  async #addSampleRoles(aclAccess, item, force) {
-    // only add sample data if it's not already there
-    const role = await aclAccess.Role.findByIndexKeys({
-      imsOrgId: item.imsOrgId,
-      identity: item.identity,
-    });
-
-    if (role) {
-      console.log('§§§ role already exists:', role.getId());
-      if (!force) {
-        return null;
-      }
-    }
-
-    const created = await aclAccess.Role.create(item);
-    return created;
+  async #addSampleRoleMember(aclAccess, role, item) {
+    const created = await aclAccess.RoleMember.create(item);
+    role.getRoleMembers().add(created);
+    console.log('§§§ role member created:', created.getId());
   }
 
   // eslint-disable-next-line class-methods-use-this
-  async #addSampleAcls(aclAccess, item) {
-    console.log('§§§ creating acl:', item);
-    const acl = await aclAccess.Acl.create(item);
-
-    const lookedup = await aclAccess.Acl.findByIndexKeys({
-      roleName: item.roleName,
+  async #addSampleRole(aclAccess, item) {
+    const existing = await aclAccess.Role.findByIndexKeys({
+      name: item.name,
       imsOrgId: item.imsOrgId,
     });
-    console.log('§§§ acl looked up:', lookedup.getId());
+    if (existing) {
+      return null;
+    }
 
-    return acl;
+    console.log('§§§ creating role:', item);
+    await aclAccess.Role.create(item);
+
+    const lookedup = await aclAccess.Role.findByIndexKeys({
+      name: item.name,
+      imsOrgId: item.imsOrgId,
+    });
+    console.log('§§§ role looked up:', lookedup.getId());
+
+    return lookedup;
   }
 
   // eslint-disable-next-line class-methods-use-this
   async #fillModel(aclAccess) {
-    const r1 = await this.#addSampleRoles(aclAccess, {
-      imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
-      identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
+    const r1 = await this.#addSampleRole(aclAccess, {
       name: 'mysite-importer',
-    });
-    if (!r1) {
-      return;
-    }
-    // its a new one
-    console.log('§§§ New role created:', r1);
-
-    await this.#addSampleAcls(aclAccess, {
-      roleName: 'mysite-importer',
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       acls: [
         {
@@ -172,15 +157,25 @@ export default class AdobeImsHandler extends AbstractHandler {
         },
       ],
     });
+    if (!r1) {
+      return;
+    }
+    console.log('§§§ New role created:', r1);
+    await this.#addSampleRoleMember(aclAccess, r1, {
+      imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
+      identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
+      name: 'mysite-importer',
+    });
 
-    await this.#addSampleRoles(aclAccess, {
+    /*
+    await this.#addSampleRoleMembers(aclAccess, {
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       identity: 'imsID:374B0263626BA96D0A49421B@f71261f462692705494128.e',
       name: 'test-account-writer',
     }, true);
     console.log('§§§ New role created r2');
 
-    await this.#addSampleAcls(aclAccess, {
+    await this.#addSampleRoles(aclAccess, {
       roleName: 'test-account-writer',
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       acls: [
@@ -194,14 +189,14 @@ export default class AdobeImsHandler extends AbstractHandler {
         },
       ],
     });
-    await this.#addSampleRoles(aclAccess, {
+    await this.#addSampleRoleMembers(aclAccess, {
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       identity: 'imsOrgID:F4646ED9626926AA0A49420E@AdobeOrg',
       name: 'test-account-reader',
     }, true);
     console.log('§§§ New role created r3');
 
-    await this.#addSampleAcls(aclAccess, {
+    await this.#addSampleRoles(aclAccess, {
       roleName: 'test-account-reader',
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       acls: [
@@ -220,24 +215,24 @@ export default class AdobeImsHandler extends AbstractHandler {
       ],
     });
 
-    await this.#addSampleRoles(aclAccess, {
+    await this.#addSampleRoleMembers(aclAccess, {
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
       name: 'another-account-reader',
     }, true);
-    await this.#addSampleRoles(aclAccess, {
+    await this.#addSampleRoleMembers(aclAccess, {
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
       identity: 'imsOrgID/groupID:F4646ED9626926AA0A49420E/560518161',
       name: 'another-account-writer',
     }, true);
-    await this.#addSampleRoles(aclAccess, {
+    await this.#addSampleRoleMembers(aclAccess, {
       imsOrgId: '43101FC962E3B1BF0A494217@AdobeOrg',
       identity: 'apiKeyID:7b0784db-e05b-4329-acba-84575313fb81',
       name: 'test-account-reader',
     }, true);
     console.log('§§§ New role created r4');
 
-    await this.#addSampleAcls(aclAccess, {
+    await this.#addSampleRoles(aclAccess, {
       roleName: 'test-account-reader',
       imsOrgId: '43101FC962E3B1BF0A494217@AdobeOrg',
       acls: [
@@ -251,6 +246,7 @@ export default class AdobeImsHandler extends AbstractHandler {
         },
       ],
     });
+    */
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -271,10 +267,10 @@ export default class AdobeImsHandler extends AbstractHandler {
   async checkAuth(request, context) {
     // This is only temporarily to put some things in the database
     /* */
-    // console.log('§§§ Get ACL Access via model');
-    // const aclAccess = await this.#getAclAccess(context);
-    // console.log('§§§ Done getting ACL Access via model');
-    // await this.#fillModel(aclAccess);
+    console.log('§§§ Get ACL Access via model');
+    const aclAccess = await this.#getAclAccess(context);
+    console.log('§§§ Done getting ACL Access via model');
+    await this.#fillModel(aclAccess);
     /* */
 
     // console.log('§§§ context in ims:', JSON.stringify(context));

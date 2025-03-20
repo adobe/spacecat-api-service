@@ -10,11 +10,15 @@
  * governing permissions and limitations under the License.
  */
 
-// eslint-disable-next-line import/no-cycle
-import Acl from './acl.model.js';
-import AclCollection from './acl.collection.js';
+import BaseModel from '../base/base.model.js';
 
-export {
-  Acl,
-  AclCollection,
-};
+/**
+ * A class representing a RoleMember entity. Provides methods to access and manipulate
+ * RoleMember-specific data.
+ * @class RoleMember
+ * @extends BaseModel
+ */
+class RoleMember extends BaseModel {
+}
+
+export default RoleMember;
