@@ -121,7 +121,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     // eslint-disable-next-line no-param-reassign
     item.roleId = role.getId();
     const created = await aclAccess.RoleMember.create(item);
-    role.getRoleMembers().add(created);
+    // role.getRoleMembers().add(created);
     console.log('§§§ role member created:', created.getId());
   }
 
