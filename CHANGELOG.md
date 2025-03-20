@@ -1,3 +1,85 @@
+## [1.102.4](https://github.com/adobe/spacecat-api-service/compare/v1.102.3...v1.102.4) (2025-03-08)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#829](https://github.com/adobe/spacecat-api-service/issues/829)) ([a5f7044](https://github.com/adobe/spacecat-api-service/commit/a5f704423e6351000c92dbf6c08b750febf53400))
+
+## [1.102.3](https://github.com/adobe/spacecat-api-service/compare/v1.102.2...v1.102.3) (2025-03-07)
+
+
+### Bug Fixes
+
+* **data-access:** fix fetchAllPages flag to sites all ([#828](https://github.com/adobe/spacecat-api-service/issues/828)) ([c08a90c](https://github.com/adobe/spacecat-api-service/commit/c08a90c58d61831ff1a482b5484c984a314df438))
+
+## [1.102.2](https://github.com/adobe/spacecat-api-service/compare/v1.102.1...v1.102.2) (2025-03-07)
+
+
+### Bug Fixes
+
+* **data-access:** introduce fetchAllPages flag to sites all ([#827](https://github.com/adobe/spacecat-api-service/issues/827)) ([b2b2083](https://github.com/adobe/spacecat-api-service/commit/b2b2083783f540796a1b667009b3b9a54feeca88))
+
+## [1.102.1](https://github.com/adobe/spacecat-api-service/compare/v1.102.0...v1.102.1) (2025-03-07)
+
+
+### Bug Fixes
+
+* use correct organization id when creating site ([#826](https://github.com/adobe/spacecat-api-service/issues/826)) ([fc26ade](https://github.com/adobe/spacecat-api-service/commit/fc26ade9716eca6545cff7fc45564f4e4b30634b))
+
+# [1.102.0](https://github.com/adobe/spacecat-api-service/compare/v1.101.7...v1.102.0) (2025-03-07)
+
+
+### Bug Fixes
+
+* **docs:** validation errors ([ddc6dcd](https://github.com/adobe/spacecat-api-service/commit/ddc6dcda62944e3045a88c9d64ae01cacd746605))
+
+
+### Features
+
+* Brand API ([#763](https://github.com/adobe/spacecat-api-service/issues/763)) ([1021303](https://github.com/adobe/spacecat-api-service/commit/1021303c53f2d665e673500c1bd76164eaa873a7))
+
+# [1.102.0](https://github.com/adobe/spacecat-api-service/compare/v1.101.7...v1.102.0) (2025-03-07)
+
+
+### Features
+
+* Brand API ([#763](https://github.com/adobe/spacecat-api-service/issues/763)) ([1021303](https://github.com/adobe/spacecat-api-service/commit/1021303c53f2d665e673500c1bd76164eaa873a7))
+
+## [1.101.7](https://github.com/adobe/spacecat-api-service/compare/v1.101.6...v1.101.7) (2025-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.35.0 ([#823](https://github.com/adobe/spacecat-api-service/issues/823)) ([b3d57a9](https://github.com/adobe/spacecat-api-service/commit/b3d57a98eaecc179011a33dcd9a0a5c79fd53407))
+
+## [1.101.6](https://github.com/adobe/spacecat-api-service/compare/v1.101.5...v1.101.6) (2025-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.22.0 ([#822](https://github.com/adobe/spacecat-api-service/issues/822)) ([fa17ae3](https://github.com/adobe/spacecat-api-service/commit/fa17ae3e442cc5ec8a72344814de71aa70bc7273))
+
+## [1.101.5](https://github.com/adobe/spacecat-api-service/compare/v1.101.4...v1.101.5) (2025-03-06)
+
+
+### Bug Fixes
+
+* use correct organization id when creating site ([#821](https://github.com/adobe/spacecat-api-service/issues/821)) ([b19054d](https://github.com/adobe/spacecat-api-service/commit/b19054db45aeb2ab145ec3af453a59417454d19b))
+
+## [1.101.4](https://github.com/adobe/spacecat-api-service/compare/v1.101.3...v1.101.4) (2025-03-06)
+
+
+### Bug Fixes
+
+* reduce slack messages amount ([#820](https://github.com/adobe/spacecat-api-service/issues/820)) ([153fd96](https://github.com/adobe/spacecat-api-service/commit/153fd968b76c35cde83ca1b908ee6b30893534eb))
+
+## [1.101.3](https://github.com/adobe/spacecat-api-service/compare/v1.101.2...v1.101.3) (2025-03-06)
+
+
+### Bug Fixes
+
+* we should not bulkUpdateStatus when validSuggestions is empty ([#819](https://github.com/adobe/spacecat-api-service/issues/819)) ([b138907](https://github.com/adobe/spacecat-api-service/commit/b138907f3919c3d4eb84b8e692b294cefd63984e))
+
 ## [1.101.2](https://github.com/adobe/spacecat-api-service/compare/v1.101.1...v1.101.2) (2025-03-06)
 
 

@@ -87,7 +87,6 @@ function OnboardCommand(context) {
     slackContext,
   ) => {
     const { say } = slackContext;
-    const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = context.env;
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -148,8 +147,9 @@ function OnboardCommand(context) {
         log.info(message);
       }
 
-      log.info(`Organization ${organization.getId()} was successfully retrieved or created`);
-      reportLine.spacecatOrgId = organization.getId();
+      const organizationId = organization.getId();
+      log.info(`Organization ${organizationId} was successfully retrieved or created`);
+      reportLine.spacecatOrgId = organizationId;
 
       let site = await Site.findByBaseURL(baseURL);
       if (site) {
@@ -165,7 +165,7 @@ function OnboardCommand(context) {
 
         try {
           site = await Site.create({
-            baseURL, deliveryType, isLive, organizationId: defaultOrgId,
+            baseURL, deliveryType, isLive, organizationId,
           });
         } catch (error) {
           log.error(`Error creating site: ${error.message}`);

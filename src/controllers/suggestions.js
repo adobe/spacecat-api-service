@@ -18,7 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
-  isArray,
+  isArray, isNonEmptyArray,
   isNonEmptyObject,
   isObject,
   isValidUUID,
@@ -448,10 +448,13 @@ function SuggestionsController(dataAccess, sqs, env) {
         });
       }
     });
-    const succeededSuggestions = await Suggestion.bulkUpdateStatus(
-      validSuggestions,
-      SuggestionModel.STATUSES.IN_PROGRESS,
-    );
+    let succeededSuggestions = [];
+    if (isNonEmptyArray(validSuggestions)) {
+      succeededSuggestions = await Suggestion.bulkUpdateStatus(
+        validSuggestions,
+        SuggestionModel.STATUSES.IN_PROGRESS,
+      );
+    }
     const response = {
       suggestions: [
         ...succeededSuggestions.map((suggestion) => ({

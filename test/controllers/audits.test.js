@@ -412,7 +412,7 @@ describe('Audits Controller', () => {
         getImports: () => [],
         getHandlers: () => (({ [auditType]: {} })),
         getFetchConfig: () => {},
-        getBrandConfig: () => {},
+        getBrandConfig: () => ({ brandId: 'test-brand' }),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -447,7 +447,7 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
-        getBrandConfig: () => {},
+        getBrandConfig: () => ({ brandId: 'test-brand' }),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -483,7 +483,7 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
-        getBrandConfig: () => {},
+        getBrandConfig: () => ({ brandId: 'test-brand' }),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -522,7 +522,7 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
-        getBrandConfig: () => {},
+        getBrandConfig: () => ({ brandId: 'test-brand' }),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -602,7 +602,7 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
-        getBrandConfig: () => {},
+        getBrandConfig: () => ({ brandId: 'test-brand' }),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -642,7 +642,7 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
-        getBrandConfig: () => {},
+        getBrandConfig: () => ({ brandId: 'test-brand' }),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -815,7 +815,7 @@ describe('Audits Controller', () => {
           getHandlers: () => {},
           getImports: () => {},
           getFetchConfig: () => {},
-          getBrandConfig: () => {},
+          getBrandConfig: () => ({ brandId: 'test-brand' }),
         };
 
         site.getConfig = () => siteConfig;

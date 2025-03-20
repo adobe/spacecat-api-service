@@ -63,7 +63,6 @@ describe('OnboardCommand', () => {
       sqs: sqsStub,
       env: {
         AUDIT_JOBS_QUEUE_URL: 'testQueueUrl',
-        DEFAULT_ORGANIZATION_ID: 'default',
         token: 'test-token',
       },
       imsClient: imsClientStub,
@@ -135,7 +134,7 @@ describe('OnboardCommand', () => {
         baseURL: 'https://example.com',
         deliveryType: 'other',
         isLive: false,
-        organizationId: 'default',
+        organizationId: '123',
       });
       expect(slackContext.say.calledWith(':white_check_mark: A new organization has been created. Organization ID: 123 Organization name: new-org IMS Org ID: 000000000000000000000000@AdobeOrg.')).to.be.true;
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;

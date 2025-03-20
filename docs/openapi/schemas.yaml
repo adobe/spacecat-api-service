@@ -3,6 +3,11 @@ Id:
   format: uuid
   readOnly: true
   example: '123e4567-e89b-12d3-a456-426614174000'
+BrandId:
+  type: string
+  format: urn
+  readOnly: true
+  example: 'urn:aaid:sc:VA6C2:e64205e7-13ca-51e8-8b83-8d8ef1ebf911'
 DateTime:
   type: string
   format: date-time
@@ -2484,3 +2489,102 @@ Priority:
         - 'medium'
         - 'low'
       example: 'high'
+Brand:
+  type: object
+  properties:
+    id:
+      description: The ID of the brand
+      $ref: '#/BrandId'
+    name:
+      description: The name of the brand
+      type: string
+    imsOrgId:
+      description: The IMS Organization ID of the brand
+      $ref: '#/ImsOrganizationId'
+    createdAt:
+      description: The date and time when the brand was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: The date and time when the brand was last updated
+      $ref: '#/DateTime'
+  example:
+    id: "urn:aaid:sc:VA6C2:e64205e7-13ca-51e8-8b83-8d8ef1ebf911"
+    name: "Brand Foo Bar Example"
+    imsOrgId: "1234567890ABCDEF12345678@AdobeOrg"
+    createdAt: "2025-01-01T00:00:00Z"
+    updatedAt: "2025-02-01T00:00:00Z"
+BrandList:
+  type: array
+  items:
+    $ref: '#/Brand'
+BrandGuideline:
+  type: object
+  properties:
+    text:
+      description: The text of the brand guideline
+      type: string
+BrandGuidelines:
+  allOf:
+    - $ref: '#/Brand'
+    - type: object
+      properties:
+        toneOfVoice:
+          description: The tone of voice of the brand
+          type: array
+          items:
+            $ref: '#/BrandGuideline'
+        coreValues:
+          description: The core values of the brand
+          type: array
+          items:
+            $ref: '#/BrandGuideline'
+        guidelines:
+          description: The guidelines of the brand
+          type: array
+          items:
+            $ref: '#/BrandGuideline'
+        restrictions:
+          description: The restrictions of the brand
+          type: array
+          items:
+            $ref: '#/BrandGuideline'
+        additionalGuidelines:
+          description: Additional guidelines of the brand
+          type: array
+          items:
+            $ref: '#/BrandGuideline'
+      example:
+        toneOfVoice: [
+          {
+            "text": "Encourage Action"
+          },
+          {
+            "text": "Be optimistic"
+          }
+        ]
+        coreValues: [
+          {
+            "text": "Inspiring"
+          },
+          {
+            "text": "Human"
+          }
+        ]
+        guidelines: [
+          {
+            "text": "Use gender-neutral pronouns like 'they', 'them', 'theirs'"
+          },
+          {
+            "text": "Always use sentence case"
+          }
+        ]
+        restrictions: [
+          {
+            "text": "Don't use rhetorical questions"
+          }
+        ]
+        additionalGuidelines: [
+          {
+            "text": "Always use sentence case"
+          }
+        ]
