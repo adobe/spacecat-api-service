@@ -150,7 +150,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     const r1 = await this.#addSampleRole(aclAccess, {
       name: 'mysite-importer',
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
-      acls: [
+      acl: [
         {
           actions: ['C', 'R', 'U', 'D'],
           path: '/organization/45678',
@@ -178,7 +178,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     await this.#addSampleRoles(aclAccess, {
       roleName: 'test-account-writer',
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
-      acls: [
+      acl: [
         {
           actions: ['C', 'R', 'U', 'D'],
           path: '/organization/0f8ff270-968e-4007-aea1-2fa1c5e3332c',
@@ -199,7 +199,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     await this.#addSampleRoles(aclAccess, {
       roleName: 'test-account-reader',
       imsOrgId: 'F4646ED9626926AA0A49420E@AdobeOrg',
-      acls: [
+      acl: [
         {
           actions: ['R'],
           path: '/organization/0f8ff270-968e-4007-aea1-2fa1c5e3332c',
@@ -235,7 +235,7 @@ export default class AdobeImsHandler extends AbstractHandler {
     await this.#addSampleRoles(aclAccess, {
       roleName: 'test-account-reader',
       imsOrgId: '43101FC962E3B1BF0A494217@AdobeOrg',
-      acls: [
+      acl: [
         {
           actions: ['R'],
           path: '/organization/77d14008-649f-4be2-8d40-cba150995410',
