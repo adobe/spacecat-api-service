@@ -89,9 +89,20 @@ export default async function getAcls({
     }
 
     roles.forEach((r) => {
-      const acl = [...r.getAcl()];
+      // const acl = [...r.getAcl()];
+      // const acl = [];
+      // r.getAcl().forEach((a) => {
+      //   acl.push({
+      //     role: r.getName(),
+      //     ...a,
+      //   });
+      // });
+      const acl = r.getAcl().map((a) => ({
+        role: r.getName(),
+        ...a,
+      }));
       acl.sort(pathSorter);
-      acls.push({ role: r.getName(), ...acl });
+      acls.push(acl);
     });
     console.log('§§§ acls:', JSON.stringify(acls));
   }
