@@ -37,7 +37,7 @@ async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') {
   }, log);
 }
 
-async function getDBRolesMemberships(dbAccess, {
+async function getDBRoles(dbAccess, {
   imsUserId, imsOrgId, imsGroups, apiKey,
 }, log) {
   const idents = [
@@ -63,28 +63,11 @@ async function getDBRolesMemberships(dbAccess, {
   }
 
   const roleMemberships = await dbAccess.RoleMember.allRoleMembershipByIdentities(imsOrgId, idents);
-  log.debug(`Found role memberships ${roleMemberships}`);
   const roles = await Promise.all(roleMemberships.map(async (rm) => rm.getRole()));
-  log.debug(`Found roles ${roles}`);
   const roleNames = roles.map((r) => r.getName());
   log.debug(`Found role membership names for ${imsOrgId} identities ${idents}: ${roleNames}`);
-  return roleMemberships;
+  return roles;
 }
-
-// async function getDBACLs(dbAccess, {
-//   imsOrgId, roles,
-// }, log) {
-//   const acls = await dbAccess.Acl.allAclsByRoleNames(imsOrgId, roles);
-//   const roleAcls = acls.map((a) => {
-//     a.acls.sort(pathSorter);
-//     return {
-//       role: a.roleName,
-//       acl: a.acls,
-//     };
-//   });
-//   log.debug((`Found ACLs for ${imsOrgId} roles ${roles}: ${JSON.stringify(roleAcls)}`));
-//   return roleAcls;
-// }
 
 export default async function getAcls({
   imsUserId, imsOrgs, imsGroups, apiKey,
@@ -97,23 +80,16 @@ export default async function getAcls({
   // we'll iterate over it and use all the ACLs we find.
   for (const imsOrgId of imsOrgs) {
     // eslint-disable-next-line no-await-in-loop
-    const roleMemberships = await getDBRolesMemberships(dbAccess, {
+    const roles = await getDBRoles(dbAccess, {
       imsUserId, imsOrgId, imsGroups, apiKey,
     }, log);
-    if (!roleMemberships) {
+    if (!roles) {
       // eslint-disable-next-line no-continue
       continue;
     }
 
-    const roles = roleMemberships.map((rm) => rm.getRole());
-    for (const r of roles) {
-      acls.push(r.getAcl());
-    }
+    roles.forEach((r) => acls.push(r.getAcl()));
     console.log('§§§ acls:', JSON.stringify(acls));
-
-    // // eslint-disable-next-line no-await-in-loop
-    // const aclList = await getDBACLs(dbAccess, { imsOrgId, roles }, log);
-    // acls.push(...aclList);
   }
 
   return {
