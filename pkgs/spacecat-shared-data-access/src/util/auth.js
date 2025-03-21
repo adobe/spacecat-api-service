@@ -82,7 +82,9 @@ function getPermissions(path, acl) {
 export function hasPermisson(entityPath, perm, aclCtx, log) {
   const allActions = [];
   const traces = [];
+  console.log('§§§ hasPermission aclCtx:', JSON.stringify(aclCtx));
   aclCtx.acls.forEach((a) => {
+    console.log('§§§ hasPermission acl element:', JSON.stringify(a));
     const { actions, trace } = getPermissions(entityPath, a.acl);
     allActions.push(...actions);
     if (actions.includes(perm)) {
