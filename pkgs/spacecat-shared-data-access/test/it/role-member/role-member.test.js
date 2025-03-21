@@ -16,7 +16,7 @@ import { expect } from 'chai';
 import { getDataAccess } from '../util/db.js';
 import { seedDatabase } from '../util/seed.js';
 
-describe('RoleMember IT', async () => {
+describe.only('RoleMember IT', async () => {
   let RoleMember;
 
   before(async () => {

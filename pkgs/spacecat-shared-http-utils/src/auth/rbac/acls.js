@@ -93,7 +93,7 @@ export default async function getAcls({
       acl.sort(pathSorter);
       const entry = {
         role: r.getName(),
-        acl: r.getAcl(),
+        acl,
       };
 
       acls.push(entry);

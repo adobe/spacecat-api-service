@@ -246,6 +246,10 @@ class BaseCollection {
         );
       }
 
+      if (options.filter) {
+        query = query.where(options.filter);
+      }
+
       const records = await query.go(queryOptions);
 
       if (options.limit === 1) {
