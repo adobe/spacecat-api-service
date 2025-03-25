@@ -9,6 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { promisify } from 'util';
+import crypto from 'crypto';
 import {
   badRequest,
   createResponse,
@@ -24,9 +26,10 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
+import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
+import { ValidationError, Suggestion as SuggestionModel, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
-import { sendAutofixMessage } from '../support/utils.js';
+import { sendAutofixMessage, getImsUserToken } from '../support/utils.js';
 
 /**
  * Suggestions controller.
@@ -455,6 +458,41 @@ function SuggestionsController(dataAccess, sqs, env) {
         SuggestionModel.STATUSES.IN_PROGRESS,
       );
     }
+
+    let encryptedPromiseToken;
+    if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+      // get IMS promise token and attach to queue message
+      let userToken;
+      try {
+        userToken = getImsUserToken(context);
+      } catch (e) {
+        return badRequest(e.message);
+      }
+      const imsPromiseClient = ImsPromiseClient.createFrom(
+        context,
+        ImsPromiseClient.CLIENT_TYPE.EMITTER,
+      );
+      const promiseToken = await imsPromiseClient.getPromiseToken(userToken);
+
+      // symmetrically encrypt the promise token if secrets are configured. Note that the promise
+      // token is not considered a secret, so encryption is optional.
+      if (!context.env?.AUTOFIX_CRYPT_SECRET || !context.env?.AUTOFIX_CRYPT_SALT) {
+        encryptedPromiseToken = promiseToken;
+      } else {
+        const algorithm = context.env?.AUTOFIX_CRYPT_ALG || 'aes-192-cbc';
+        const key = await promisify(crypto.scrypt)(
+          context.env.AUTOFIX_CRYPT_SECRET,
+          context.env.AUTOFIX_CRYPT_SALT,
+          24,
+        );
+        const iv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv(algorithm, key, iv);
+
+        encryptedPromiseToken = cipher.update(promiseToken, 'utf8', 'hex');
+        encryptedPromiseToken += cipher.final('hex');
+      }
+    }
+
     const response = {
       suggestions: [
         ...succeededSuggestions.map((suggestion) => ({
@@ -479,6 +517,7 @@ function SuggestionsController(dataAccess, sqs, env) {
       opportunityId,
       siteId,
       succeededSuggestions.map((s) => s.getId()),
+      encryptedPromiseToken,
     );
     return createResponse(response, 207);
   };

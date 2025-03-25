@@ -12,6 +12,9 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import URI from 'urijs';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import {
+  STATUS_BAD_REQUEST,
+} from '../utils/constants.js';
 
 /**
  * Checks if the url parameter "url" equals "ALL".
@@ -96,10 +99,12 @@ export const sendAutofixMessage = async (
   opportunityId,
   siteId,
   suggestionIds,
+  promiseToken,
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
   suggestionIds,
+  promiseToken,
 });
 /* c8 ignore end */
 
@@ -317,3 +322,18 @@ export const wwwUrlResolver = (site) => {
   const uri = new URI(baseURL);
   return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
 };
+
+/**
+ * Get the IMS user token from the context.
+ * @param {object} context - The context of the request.
+ * @returns {string} imsUserToken - The IMS User access token.
+ * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
+ */
+export function getImsUserToken(context) {
+  const authorizationHeader = context.pathInfo?.headers?.authorization;
+  const BEARER_PREFIX = 'Bearer ';
+  if (!hasText(authorizationHeader) || !authorizationHeader.startsWith(BEARER_PREFIX)) {
+    throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
+  }
+  return authorizationHeader.substring(BEARER_PREFIX.length);
+}
