@@ -12,8 +12,6 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
-import { promisify } from 'util';
-import crypto from 'crypto';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import {
   STATUS_BAD_REQUEST,
@@ -342,7 +340,7 @@ export function getImsUserToken(context) {
 }
 
 /**
- * Get an IMS promise token from the authorization header in context. Optionally encrypt the token.
+ * Get an IMS promise token from the authorization header in context.
  * @param {object} context - The context of the request.
  * @returns {Promise<{
  *   promise_token: string,
@@ -363,23 +361,9 @@ export async function getCSPromiseToken(context) {
     context,
     ImsPromiseClient.CLIENT_TYPE.EMITTER,
   );
-  const promiseTokenResponse = await imsPromiseClient.getPromiseToken(userToken);
 
-  // symmetrically encrypt the promise token if secrets are configured. Note that the promise
-  // token is not considered a secret, so encryption is optional.
-  if (context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT) {
-    const algorithm = context.env?.AUTOFIX_CRYPT_ALG || 'aes-256-gcm';
-    const key = await promisify(crypto.scrypt)(
-      context.env.AUTOFIX_CRYPT_SECRET,
-      context.env.AUTOFIX_CRYPT_SALT,
-      context.env.AUTOFIX_CRYPT_KEYLENGTH || 32,
-    );
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(algorithm, key, iv);
-
-    promiseTokenResponse.promise_token = cipher.update(promiseTokenResponse.promise_token, 'utf8', 'hex');
-    promiseTokenResponse.promise_token += cipher.final('hex');
-  }
-
-  return promiseTokenResponse;
+  return imsPromiseClient.getPromiseToken(
+    userToken,
+    context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT,
+  );
 }
