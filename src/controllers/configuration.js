@@ -71,15 +71,17 @@ function ConfigurationController(dataAccess) {
     return ok(ConfigurationDto.toJSON(configuration));
   };
 
-  function getLatestJobs(req, res) {
-    return dataAccess.Configuration.findLatest()
-      .then((configuration) => {
-        if (!configuration) {
-          return res.status(404).json({ message: 'Configuration not found' });
-        }
-        return res.json(configuration.getJobs());
-      });
-  }
+  /**
+   * Retrieves all jobs from the latest configuration.
+   * @return {Promise<Response>} Jobs response.
+   */
+  const getLatestJobs = async () => {
+    const configuration = await Configuration.findLatest();
+    if (!configuration) {
+      return notFound('Configuration not found');
+    }
+    return ok(configuration.getJobs());
+  };
 
   /**
    * Creates multiple jobs in the latest configuration.

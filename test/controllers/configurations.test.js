@@ -197,9 +197,9 @@ describe('Configurations Controller', () => {
   describe('Job Management Functions', () => {
     beforeEach(() => {
       mockDataAccess.Configuration.update = sandbox.stub().resolves({
-        ...configurations[1],
+        ...configurations[0],
         getJobs: () => [
-          ...configurations[1].getJobs(),
+          ...configurations[0].getJobs(),
           { group: 'new', type: 'test', interval: 'hourly' },
         ],
       });
