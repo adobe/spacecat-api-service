@@ -58,7 +58,7 @@ paths:
   /configurations:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
-    $ref: './configuration-api.yaml#/latest-configuration'
+    $ref: './configurations-api.yaml#/latest-configuration'
   /configurations/latest/jobs:
     $ref: './configurations-api.yaml#/latest-jobs-configurations'
   /configurations/latest/jobs/{jobType}:
