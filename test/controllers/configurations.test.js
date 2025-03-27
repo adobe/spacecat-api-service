@@ -253,4 +253,39 @@ describe('Configurations Controller', () => {
     expect(error).to.have.property('message', 'Latest configuration not found');
     expect(mockDataAccess.Configuration.update).to.not.have.been.called;
   });
+  it('removes the latest configuration', async () => {
+    // Mock getLatest to return a proper response object
+    const latestVersionResponse = {
+      version: 42,
+      json: () => Promise.resolve({ version: 42 }),
+    };
+
+    sandbox.stub(configurationsController, 'getLatest')
+      .resolves(latestVersionResponse);
+
+    await configurationsController.removeLatestConfiguration();
+
+    expect(mockDataAccess.Configuration.remove)
+      .to.have.been.calledOnceWith(42);
+  });
+
+  it('handles error when removing non-existent configuration', async () => {
+    // Mock getLatest to return a not found response
+    const notFoundResponse = {
+      status: 404,
+      json: () => Promise.resolve({ message: 'Configuration not found' }),
+    };
+
+    sandbox.stub(configurationsController, 'getLatest')
+      .resolves(notFoundResponse);
+
+    try {
+      await configurationsController.removeLatestConfiguration();
+      // The function should throw if getLatest returns not found
+      expect.fail('Should have thrown an error');
+    } catch (error) {
+      expect(error).to.exist;
+      expect(mockDataAccess.Configuration.remove).to.not.have.been.called;
+    }
+  });
 });
