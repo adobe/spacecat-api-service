@@ -1244,7 +1244,7 @@ describe('Suggestions Controller', () => {
           EMITTER: 'emitter',
         },
       };
-      const SuggestionsControllerWithIms = await esmock('../../src/controllers/suggestions.js', {
+      const SuggestionsControllerWithIms = await esmock('../../src/controllers/suggestions.js', {}, {
         '@adobe/spacecat-shared-ims-client': {
           ImsPromiseClient: imsPromiseClient,
         },
@@ -1340,6 +1340,36 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Missing Authorization header');
+    });
+
+    it('auto-fix fails with unknown cipher', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        env: {
+          AUTOFIX_CRYPT_SECRET: 'superSecret',
+          AUTOFIX_CRYPT_SALT: 'salt',
+          AUTOFIX_CRYPT_ALG: 'unknownAlg',
+        },
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(500);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Error getting promise token');
     });
   });
 

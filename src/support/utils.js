@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
+import { promisify } from 'util';
+import crypto from 'crypto';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import {
   STATUS_BAD_REQUEST,
@@ -336,4 +339,47 @@ export function getImsUserToken(context) {
     throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
   }
   return authorizationHeader.substring(BEARER_PREFIX.length);
+}
+
+/**
+ * Get an IMS promise token from the authorization header in context. Optionally encrypt the token.
+ * @param {object} context - The context of the request.
+ * @returns {Promise<{
+ *   promise_token: string,
+ *   expires_in: number,
+ *   token_type: string,
+ * }>} - The promise token response.
+ * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
+ */
+export async function getCSPromiseToken(context) {
+  // get IMS promise token and attach to queue message
+  let userToken;
+  try {
+    userToken = await getImsUserToken(context);
+  } catch (e) {
+    throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
+  }
+  const imsPromiseClient = ImsPromiseClient.createFrom(
+    context,
+    ImsPromiseClient.CLIENT_TYPE.EMITTER,
+  );
+  const promiseTokenResponse = await imsPromiseClient.getPromiseToken(userToken);
+
+  // symmetrically encrypt the promise token if secrets are configured. Note that the promise
+  // token is not considered a secret, so encryption is optional.
+  if (context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT) {
+    const algorithm = context.env?.AUTOFIX_CRYPT_ALG || 'aes-192-cbc';
+    const key = await promisify(crypto.scrypt)(
+      context.env.AUTOFIX_CRYPT_SECRET,
+      context.env.AUTOFIX_CRYPT_SALT,
+      24,
+    );
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv(algorithm, key, iv);
+
+    promiseTokenResponse.promise_token = cipher.update(promiseTokenResponse.promise_token, 'utf8', 'hex');
+    promiseTokenResponse.promise_token += cipher.final('hex');
+  }
+
+  return promiseTokenResponse;
 }
