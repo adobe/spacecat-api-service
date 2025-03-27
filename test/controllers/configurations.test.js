@@ -86,9 +86,22 @@ describe('Configurations Controller', () => {
     'getAll',
     'getLatest',
     'getByVersion',
+    'createConfiguration',
+    'removeLatestConfiguration',
+    'updateLatestConfiguration',
   ];
 
-  let mockDataAccess;
+  let mockDataAccess = {
+    Configuration: {
+      all: sandbox.stub().resolves(configurations),
+      findLatest: sandbox.stub().resolves(configurations[1]),
+      findByVersion: sandbox.stub().resolves(configurations[0]),
+      create: sandbox.stub().resolves(configurations[0]),
+      remove: sandbox.stub().resolves(),
+      update: sandbox.stub().resolves(configurations[1]),
+    },
+  };
+
   let configurationsController;
 
   beforeEach(() => {
@@ -187,5 +200,57 @@ describe('Configurations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Configuration version required to be an integer');
+  });
+
+  it('creates a new configuration', async () => {
+    const result = await configurationsController.createConfiguration();
+    const configuration = await result.json();
+
+    expect(mockDataAccess.Configuration.create.calledOnce).to.be.true;
+    expect(configuration).to.be.an('object');
+    expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[0]));
+  });
+
+  it('removes the latest configuration', async () => {
+    await configurationsController.removeLatestConfiguration();
+
+    expect(mockDataAccess.Configuration.findLatest.calledOnce).to.be.true;
+    // eslint-disable-next-line max-len
+    expect(mockDataAccess.Configuration.remove).to.have.been.calledOnceWith(configurations[1].getVersion());
+  });
+
+  it('updates the latest configuration', async () => {
+    const context = {
+      body: {
+        jobs: [{ group: 'reports', type: 'test', interval: 'monthly' }],
+      },
+    };
+
+    const result = await configurationsController.updateLatestConfiguration(context);
+    const configuration = await result.json();
+
+    expect(mockDataAccess.Configuration.findLatest.calledOnce).to.be.true;
+    expect(mockDataAccess.Configuration.update).to.have.been.calledOnceWith({
+      ...context.body,
+      version: configurations[1].getVersion(),
+    });
+    expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[1]));
+  });
+
+  it('returns not found when no latest configuration exists for update', async () => {
+    mockDataAccess.Configuration.findLatest.resolves(null);
+
+    const context = {
+      body: {
+        jobs: [{ group: 'reports', type: 'test', interval: 'monthly' }],
+      },
+    };
+
+    const result = await configurationsController.updateLatestConfiguration(context);
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Latest configuration not found');
+    expect(mockDataAccess.Configuration.update).to.not.have.been.called;
   });
 });
