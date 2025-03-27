@@ -71,52 +71,134 @@ function ConfigurationController(dataAccess) {
     return ok(ConfigurationDto.toJSON(configuration));
   };
 
-  /**
-   * Creates a new configuration.
-   * @returns {Promise<Response>}
-   */
-  const createConfiguration = async () => {
-    const configuration = await Configuration.create();
-    return ok(ConfigurationDto.toJSON(configuration));
-  };
+  function getLatestJobs(req, res) {
+    return dataAccess.Configuration.findLatest()
+      .then((configuration) => {
+        if (!configuration) {
+          return res.status(404).json({ message: 'Configuration not found' });
+        }
+        return res.json(configuration.getJobs());
+      });
+  }
 
   /**
-   * Removes the latest configuration.
-   * @returns {Promise<Response>}
+   * Creates multiple jobs in the latest configuration.
+   * @param {Object} context - Request context containing the job data
+   * @returns {Promise<Response>} - API response
    */
-  const removeLatestConfiguration = async () => {
+  const createJobs = async (context) => {
     const latestConfig = await Configuration.findLatest();
     if (!latestConfig) {
       return notFound('Latest configuration not found');
     }
-    await Configuration.remove(latestConfig.getVersion());
-    return ok({ message: 'Configuration removed successfully' });
-  };
 
-  /**
-   * Updates the latest configuration.
-   * @param context
-   * @returns {Promise<Response>}
-   */
-  const updateLatestConfiguration = async (context) => {
-    const latestConfig = await Configuration.findLatest();
-    if (!latestConfig) {
-      return notFound('Latest configuration not found');
+    const jobsData = context.body;
+    if (!Array.isArray(jobsData)) {
+      return badRequest('Jobs data must be an array');
     }
-    const configuration = await Configuration.update({
-      ...context.body,
+
+    // Validate each job
+    for (const job of jobsData) {
+      if (!job.group || !job.type || !job.interval) {
+        return badRequest('Invalid job data. Each job requires: group, type, interval');
+      }
+    }
+
+    const currentJobs = latestConfig.getJobs();
+    const updatedConfig = await Configuration.update({
+      jobs: [...currentJobs, ...jobsData],
       version: latestConfig.getVersion(),
     });
-    return ok(ConfigurationDto.toJSON(configuration));
+
+    return ok(ConfigurationDto.toJSON(updatedConfig));
+  };
+
+  /**
+   * Gets jobs of a specific type from the latest configuration.
+   * @param {Object} context - Request context containing the job type
+   * @returns {Promise<Response>} - API response
+   */
+  const getLatestJobsByType = async (context) => {
+    const { type } = context.params;
+    const latestConfig = await Configuration.findLatest();
+
+    if (!latestConfig) {
+      return notFound('Latest configuration not found');
+    }
+
+    const allJobs = latestConfig.getJobs();
+    const filteredJobs = allJobs.filter((job) => job.type === type);
+
+    return ok(filteredJobs);
+  };
+
+  /**
+   * Removes jobs of a specific type from the latest configuration.
+   * @param {Object} context - Request context containing the job type
+   * @returns {Promise<Response>} - API response
+   */
+  const removeLatestJobsByType = async (context) => {
+    const { type } = context.params;
+    const latestConfig = await Configuration.findLatest();
+
+    if (!latestConfig) {
+      return notFound('Latest configuration not found');
+    }
+
+    const allJobs = latestConfig.getJobs();
+    const remainingJobs = allJobs.filter((job) => job.type !== type);
+
+    const updatedConfig = await Configuration.update({
+      jobs: remainingJobs,
+      version: latestConfig.getVersion(),
+    });
+
+    return ok(ConfigurationDto.toJSON(updatedConfig));
+  };
+
+  /**
+   * Updates jobs of a specific type in the latest configuration.
+   * @param {Object} context - Request context containing the job type and update data
+   * @returns {Promise<Response>} - API response
+   */
+  const updateLatestJobsByType = async (context) => {
+    const { type } = context.params;
+    const updateData = context.body;
+
+    if (!isObject(updateData)) {
+      return badRequest('Update data must be an object');
+    }
+
+    const latestConfig = await Configuration.findLatest();
+    if (!latestConfig) {
+      return notFound('Latest configuration not found');
+    }
+
+    const allJobs = latestConfig.getJobs();
+    const updatedJobs = allJobs.map((job) => {
+      if (job.type === type) {
+        return { ...job, ...updateData };
+      }
+      return job;
+    });
+
+    const updatedConfig = await Configuration.update({
+      jobs: updatedJobs,
+      version: latestConfig.getVersion(),
+    });
+
+    return ok(ConfigurationDto.toJSON(updatedConfig));
   };
 
   return {
     getAll,
     getByVersion,
     getLatest,
-    createConfiguration,
-    removeLatestConfiguration,
-    updateLatestConfiguration,
+    getLatestJobs,
+    createJobs,
+    getLatestJobsByType,
+    removeLatestJobsByType,
+    updateLatestJobsByType,
   };
 }
 
