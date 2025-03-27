@@ -83,10 +83,10 @@ export default function getRouteHandlers(
     'GET /configurations': configurationController.getAll,
     'GET /configurations/latest': configurationController.getLatest,
     'GET /configurations/latest/jobs': configurationController.getLatest,
-    'POST /configurations/latest/jobs': configurationController.createConfiguration, // replace
+    'POST /configurations/latest/jobs': configurationController.createConfiguration,
     'GET /configurations/latest/jobs/:type': configurationController.getLatest,
-    'DELETE /configurations/latest/jobs/:type': configurationController.removeLatestConfiguration, // replace
-    'PATCH /configurations/latest/jobs/:type': configurationController.updateLatestConfiguration, // replace
+    'DELETE /configurations/latest/jobs/:type': configurationController.removeLatestConfiguration,
+    'PATCH /configurations/latest/jobs/:type': configurationController.updateLatestConfiguration,
     'PUT /configurations/latest': configurationController.updatLatestConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,

@@ -95,7 +95,14 @@ function ConfigurationController(dataAccess) {
    * @returns {Promise<Response>}
    */
   const updateLatestConfiguration = async (context) => {
-    const configuration = await Configuration.update(context.body);
+    const latestConfig = await Configuration.findLatest();
+    if (!latestConfig) {
+      return notFound('Latest configuration not found');
+    }
+    const configuration = await Configuration.update({
+      ...context.body,
+      version: latestConfig.version,
+    });
     return ok(ConfigurationDto.toJSON(configuration));
   };
 
