@@ -368,11 +368,11 @@ export async function getCSPromiseToken(context) {
   // symmetrically encrypt the promise token if secrets are configured. Note that the promise
   // token is not considered a secret, so encryption is optional.
   if (context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT) {
-    const algorithm = context.env?.AUTOFIX_CRYPT_ALG || 'aes-192-cbc';
+    const algorithm = context.env?.AUTOFIX_CRYPT_ALG || 'aes-256-gcm';
     const key = await promisify(crypto.scrypt)(
       context.env.AUTOFIX_CRYPT_SECRET,
       context.env.AUTOFIX_CRYPT_SALT,
-      24,
+      context.env.AUTOFIX_CRYPT_KEYLENGTH || 32,
     );
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(algorithm, key, iv);
