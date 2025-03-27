@@ -251,4 +251,14 @@ describe('Configurations Controller', () => {
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Latest configuration not found');
   });
+
+  it('returns not found when trying to remove non-existent configuration', async () => {
+    mockDataAccess.Configuration.findLatest.resolves(null);
+
+    const result = await configurationsController.removeLatestConfiguration();
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Latest configuration not found');
+  });
 });
