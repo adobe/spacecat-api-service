@@ -85,8 +85,12 @@ function ConfigurationController(dataAccess) {
    * @returns {Promise<Response>}
    */
   const removeLatestConfiguration = async () => {
-    const latestConfiguration = await getLatest();
-    await Configuration.remove(latestConfiguration.version);
+    const latestConfig = await Configuration.findLatest();
+    if (!latestConfig) {
+      return notFound('Latest configuration not found');
+    }
+    await Configuration.remove(latestConfig.getVersion());
+    return ok({ message: 'Configuration removed successfully' });
   };
 
   /**
@@ -101,7 +105,7 @@ function ConfigurationController(dataAccess) {
     }
     const configuration = await Configuration.update({
       ...context.body,
-      version: latestConfig.version,
+      version: latestConfig.getVersion(),
     });
     return ok(ConfigurationDto.toJSON(configuration));
   };
