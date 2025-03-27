@@ -11,7 +11,7 @@
  */
 import {
   badRequest,
-  createResponse,
+  createResponse, forbidden,
   noContent,
   notFound,
   ok,
@@ -27,6 +27,7 @@ import {
 import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { sendAutofixMessage } from '../support/utils.js';
+import { userHasSubService } from '../utils/authentication.js';
 
 /**
  * Suggestions controller.
@@ -388,6 +389,9 @@ function SuggestionsController(dataAccess, sqs, env) {
     return createResponse(fullResponse, 207);
   };
   const autofixSuggestions = async (context) => {
+    if (!userHasSubService(context, 'autofix')) {
+      return forbidden('User does not have autofix sub-service');
+    }
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 

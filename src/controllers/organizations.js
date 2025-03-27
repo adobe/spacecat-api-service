@@ -15,7 +15,7 @@ import {
   badRequest,
   noContent,
   notFound,
-  ok,
+  ok, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -26,6 +26,7 @@ import {
 
 import { OrganizationDto } from '../dto/organization.js';
 import { SiteDto } from '../dto/site.js';
+import { isAdmin, userBelongsToOrg } from '../utils/authentication.js';
 
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
@@ -51,6 +52,10 @@ function OrganizationsController(dataAccess, env) {
    * @return {Promise<Response>} Organization response.
    */
   const createOrganization = async (context) => {
+    if (!isAdmin(context)) {
+      return forbidden('Only admins can create new Organizations');
+    }
+
     try {
       const organization = await Organization.create(context.data);
       return createResponse(OrganizationDto.toJSON(organization), 201);
@@ -63,7 +68,11 @@ function OrganizationsController(dataAccess, env) {
    * Gets all organizations.
    * @returns {Promise<Response>} Array of organizations response.
    */
-  const getAll = async () => {
+  const getAll = async (context) => {
+    if (!isAdmin(context)) {
+      return forbidden('Only admins can view all Organizations');
+    }
+
     const organizations = (await Organization.all())
       .map((organization) => OrganizationDto.toJSON(organization));
     return ok(organizations);
@@ -76,6 +85,10 @@ function OrganizationsController(dataAccess, env) {
    * @throws {Error} If organization ID is not provided.
    */
   const getByID = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('Only users belonging to the organization can view it');
+    }
+
     const organizationId = context.params?.organizationId;
 
     if (!isValidUUID(organizationId)) {
