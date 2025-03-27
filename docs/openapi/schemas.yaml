@@ -58,6 +58,11 @@ AuditType:
     - 'broken-internal-links'
     - 'experimentation-opportunities'
   example: 'cwv'
+JobType:
+  type: string
+  enum:
+    - 'import'
+  example: 'import'
 URL:
   type: string
   format: url

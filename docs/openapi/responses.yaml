@@ -3,6 +3,11 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-no-job-type':
+  description: Bad request. Job Type is required.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '400-no-audit-type':
   description: Bad request. Audit Type is required.
   headers:

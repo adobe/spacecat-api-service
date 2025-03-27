@@ -61,8 +61,8 @@ paths:
     $ref: './configuration-api.yaml#/latest-configuration'
   /configurations/latest/jobs:
     $ref: './configurations-api.yaml#/latest-jobs-configurations'
-  /configurations/latest/jobs/{auditType}:
-    $ref: './configurations-api.yaml#/latest-jobs-configuration-by-audit-type'
+  /configurations/latest/jobs/{jobType}:
+    $ref: './configurations-api.yaml#/latest-jobs-configuration-by-type'
   /configurations/{version}:
     $ref: './configuration-api.yaml#/configuration'
   /configurations/sites/audits:

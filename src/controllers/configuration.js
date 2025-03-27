@@ -71,10 +71,41 @@ function ConfigurationController(dataAccess) {
     return ok(ConfigurationDto.toJSON(configuration));
   };
 
+  /**
+   * Creates a new configuration.
+   * @returns {Promise<Response>}
+   */
+  const createConfiguration = async () => {
+    const configuration = await Configuration.create();
+    return ok(ConfigurationDto.toJSON(configuration));
+  };
+
+  /**
+   * Removes the latest configuration.
+   * @returns {Promise<Response>}
+   */
+  const removeLatestConfiguration = async () => {
+    const latestConfiguration = await getLatest();
+    await Configuration.remove(latestConfiguration.version);
+  };
+
+  /**
+   * Updates the latest configuration.
+   * @param context
+   * @returns {Promise<Response>}
+   */
+  const updateLatestConfiguration = async (context) => {
+    const configuration = await Configuration.update(context.body);
+    return ok(ConfigurationDto.toJSON(configuration));
+  };
+
   return {
     getAll,
     getByVersion,
     getLatest,
+    createConfiguration,
+    removeLatestConfiguration,
+    updateLatestConfiguration,
   };
 }
 
