@@ -86,6 +86,9 @@ describe('Configurations Controller', () => {
     'getAll',
     'getLatest',
     'getByVersion',
+    'createConfiguration',
+    'removeLatestConfiguration',
+    'updateLatestConfiguration',
   ];
 
   let mockDataAccess;
@@ -187,5 +190,65 @@ describe('Configurations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Configuration version required to be an integer');
+  });
+
+  it('creates a new configuration', async () => {
+    const newConfig = {
+      getVersion: () => 3,
+      getJobs: () => [],
+      getHandlers: () => ({}),
+      getQueues: () => ({}),
+      getSlackRoles: () => ({}),
+    };
+
+    mockDataAccess.Configuration.create = sandbox.stub().resolves(newConfig);
+
+    const result = await configurationsController.createConfiguration();
+    const configuration = await result.json();
+
+    expect(mockDataAccess.Configuration.create.calledOnce).to.be.true;
+    expect(configuration).to.deep.equal(ConfigurationDto.toJSON(newConfig));
+  });
+
+  it('removes the latest configuration', async () => {
+    mockDataAccess.Configuration.remove = sandbox.stub().resolves();
+
+    await configurationsController.removeLatestConfiguration();
+
+    expect(mockDataAccess.Configuration.remove).to.have.been.calledOnceWith(
+      ConfigurationDto.toJSON(configurations[1]).version,
+    );
+  });
+
+  it('updates the latest configuration', async () => {
+    const updatedConfig = {
+      getVersion: () => 2,
+      getJobs: () => [{ group: 'updated', type: 'test', interval: 'monthly' }],
+      getHandlers: () => ({}),
+      getQueues: () => ({}),
+      getSlackRoles: () => ({}),
+    };
+
+    mockDataAccess.Configuration.update = sandbox.stub().resolves(updatedConfig);
+
+    const updateData = { jobs: [{ group: 'updated', type: 'test', interval: 'monthly' }] };
+    const result = await configurationsController.updateLatestConfiguration({ body: updateData });
+    const configuration = await result.json();
+
+    expect(mockDataAccess.Configuration.update).to.have.been.calledOnceWith({
+      ...updateData,
+      version: 2,
+    });
+    expect(configuration).to.deep.equal(ConfigurationDto.toJSON(updatedConfig));
+  });
+
+  it('returns not found when trying to update non-existent configuration', async () => {
+    mockDataAccess.Configuration.findLatest.resolves(null);
+
+    const result = await configurationsController.updateLatestConfiguration({ body: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Latest configuration not found');
   });
 });
