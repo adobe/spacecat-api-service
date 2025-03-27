@@ -459,7 +459,7 @@ function SuggestionsController(dataAccess, sqs, env) {
       );
     }
 
-    let encryptedPromiseToken;
+    let promiseTokenResponse;
     if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
       // get IMS promise token and attach to queue message
       let userToken;
@@ -472,13 +472,11 @@ function SuggestionsController(dataAccess, sqs, env) {
         context,
         ImsPromiseClient.CLIENT_TYPE.EMITTER,
       );
-      const promiseToken = await imsPromiseClient.getPromiseToken(userToken);
+      promiseTokenResponse = await imsPromiseClient.getPromiseToken(userToken);
 
       // symmetrically encrypt the promise token if secrets are configured. Note that the promise
       // token is not considered a secret, so encryption is optional.
-      if (!context.env?.AUTOFIX_CRYPT_SECRET || !context.env?.AUTOFIX_CRYPT_SALT) {
-        encryptedPromiseToken = promiseToken;
-      } else {
+      if (context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT) {
         const algorithm = context.env?.AUTOFIX_CRYPT_ALG || 'aes-192-cbc';
         const key = await promisify(crypto.scrypt)(
           context.env.AUTOFIX_CRYPT_SECRET,
@@ -488,8 +486,8 @@ function SuggestionsController(dataAccess, sqs, env) {
         const iv = crypto.randomBytes(16);
         const cipher = crypto.createCipheriv(algorithm, key, iv);
 
-        encryptedPromiseToken = cipher.update(promiseToken, 'utf8', 'hex');
-        encryptedPromiseToken += cipher.final('hex');
+        promiseTokenResponse.promise_token = cipher.update(promiseTokenResponse.promise_token, 'utf8', 'hex');
+        promiseTokenResponse.promise_token += cipher.final('hex');
       }
     }
 
@@ -517,7 +515,7 @@ function SuggestionsController(dataAccess, sqs, env) {
       opportunityId,
       siteId,
       succeededSuggestions.map((s) => s.getId()),
-      encryptedPromiseToken,
+      promiseTokenResponse,
     );
     return createResponse(response, 207);
   };

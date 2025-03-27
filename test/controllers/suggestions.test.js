@@ -1234,7 +1234,11 @@ describe('Suggestions Controller', () => {
 
       imsPromiseClient = {
         createFrom: () => ({
-          getPromiseToken: sandbox.stub().returns('examplePromiseToken'),
+          getPromiseToken: sandbox.stub().returns({
+            promise_token: 'promiseTokenExample',
+            expires_in: 14399,
+            token_type: 'promise_token',
+          }),
         }),
         CLIENT_TYPE: {
           EMITTER: 'emitter',
@@ -1274,7 +1278,7 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
-      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.length.above(0);
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token');
 
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse).to.have.property('suggestions');
@@ -1314,7 +1318,8 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken', 'examplePromiseToken');
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
     });
 
     it('auto-fix suggestions returns 400 without authorization header', async () => {
