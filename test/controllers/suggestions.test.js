@@ -18,6 +18,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import SuggestionsController from '../../src/controllers/suggestions.js';
 
 use(chaiAsPromised);
@@ -27,9 +28,11 @@ describe('Suggestions Controller', () => {
   const sandbox = sinon.createSandbox();
   const authContext = {
     attributes: {
-      authInfo: {
-        scopes: [{ name: 'admin' }],
-      },
+      authInfo: new AuthInfo()
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true })
+        .withAuthenticated(true)
+      ,
     },
   };
 

@@ -13,21 +13,19 @@
 const SERVICE_CODE = 'dx_aem_perf';
 
 export const isAdmin = (context) => {
-  const { attributes: { authInfo: { scopes } } } = context;
-  return scopes.some((scope) => scope.name === 'admin');
+  const { attributes: { authInfo } } = context;
+  return authInfo.isAuthenticated() && authInfo.isAdmin();
 };
 
 export const userBelongsToOrg = (context) => {
   const {
-    attributes: { authInfo: { profile } },
+    attributes: { authInfo },
     params: { organizationId },
   } = context;
-  return profile.id === organizationId || isAdmin(context);
+  return authInfo.hasOrganization(organizationId) || isAdmin(context);
 };
 
 export const userHasSubService = (context, subService) => {
-  const { attributes: { authInfo: { scopes } } } = context;
-  return scopes.some(
-    (scope) => scope.name === 'user' && scope.subScopes.includes(`${SERVICE_CODE}_${subService}`),
-  ) || isAdmin(context);
+  const { attributes: { authInfo } } = context;
+  return authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`) || isAdmin(context);
 };

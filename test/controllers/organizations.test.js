@@ -23,6 +23,7 @@ import sinon, { stub } from 'sinon';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
 
@@ -34,10 +35,11 @@ describe('Organizations Controller', () => {
   const orgId = '9033554c-de8a-44ac-a356-09b51af8cc28';
   const authContext = {
     attributes: {
-      authInfo: {
-        scopes: [{ name: 'admin' }],
-        profile: { id: orgId },
-      },
+      authInfo: new AuthInfo()
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true })
+        .withAuthenticated(true)
+      ,
     },
   };
   const sites = [
