@@ -247,7 +247,7 @@ describe('Configurations Controller', () => {
       });
 
       it('validates job data', async () => {
-        const invalidJobs = [{ group: 'test' }]; // Missing type and interval
+        const invalidJobs = [{ group: 'test' }]; // Missing type and interval?
         const result = await configurationsController.createJobs({ body: invalidJobs });
 
         expect(result.status).to.equal(400);
