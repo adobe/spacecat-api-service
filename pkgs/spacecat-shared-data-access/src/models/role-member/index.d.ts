@@ -13,9 +13,16 @@
 import type { BaseCollection, BaseModel } from '../base';
 
 export interface RoleMember extends BaseModel {
+  // TODO is this correct?
   getImsOrgId(): string;
+  getIdentity(): string;
+  getRoleId(): string;
+  getRole(): Promise<Role>;
+  setImsOrgId(id: string): RoleMember;
+  setIdentity(identity: string): RoleMember;
+  setRoleId(id: string): RoleMember;
 }
 
 export interface RoleMemberCollection extends BaseCollection<RoleMember> {
-  findByRoleId(roleId: string): Promise<RoleMember | null>;
+  allRoleMembershipByIdentities(imsOrgId: string, identities: string[]): Promise<RoleMember[]>;
 }

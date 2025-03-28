@@ -21,7 +21,7 @@ const TABLE_NAME_DATA = 'spacecat-services-data-dev';
  * @param {function} fn - The function to wrap
  * @returns {function} - The wrapped function
  */
-export default function dataAccessWrapper(fn /* , opts = {} */) {
+export default function dataAccessWrapper(fn) {
   /**
    * Wrapper for data access layer. This wrapper will create a data access layer if it is not
    * already created. It requires the context to have a log object. It will also use the

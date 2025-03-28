@@ -48,6 +48,9 @@ const schema = new SchemaBuilder(Site, SiteCollection)
     required: true,
     validate: (value) => isValidUrl(value),
   })
+  .addAttribute('name', {
+    type: 'string',
+  })
   .addAttribute('config', {
     type: 'any',
     required: true,
@@ -63,6 +66,17 @@ const schema = new SchemaBuilder(Site, SiteCollection)
   .addAttribute('gitHubURL', {
     type: 'string',
     validate: (value) => !value || isValidUrl(value),
+  })
+  .addAttribute('deliveryConfig', {
+    type: 'any',
+    default: {},
+    validate: (value) => isObject(value),
+    properties: {
+      programId: { type: 'string' },
+      environmentId: { type: 'string' },
+      authorURL: { type: 'string', validate: (value) => isValidUrl(value) },
+      siteId: { type: 'string' },
+    },
   })
   .addAttribute('hlxConfig', {
     type: 'any',

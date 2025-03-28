@@ -21,6 +21,7 @@ import {
 
 import configProd from './config/ims.js';
 import configDev from './config/ims-stg.js';
+import { getBearerToken } from './utils/bearer.js';
 
 import AbstractHandler from './abstract.js';
 import AuthInfo from '../auth-info.js';
@@ -48,18 +49,7 @@ const loadConfig = (context) => {
   return isDev ? configDev : configProd;
 };
 
-const getBearerToken = (context) => {
-  const authorizationHeader = context.pathInfo?.headers?.authorization || '';
-
-  if (!authorizationHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  return authorizationHeader.replace('Bearer ', '');
-};
-
 const transformProfile = (payload) => {
-  console.log('§§§ IMS payload pure:', payload);
   const profile = { ...payload };
 
   profile.email = payload.user_id;
@@ -68,6 +58,9 @@ const transformProfile = (payload) => {
   return profile;
 };
 
+/**
+ * @deprecated Use JwtHandler instead in the context of IMS login with subsequent JWT exchange.
+ */
 export default class AdobeImsHandler extends AbstractHandler {
   constructor(log) {
     super('ims', log);
@@ -86,9 +79,9 @@ export default class AdobeImsHandler extends AbstractHandler {
   }
 
   async #validateToken(token, config) {
-    const decoded = await decodeJwt(token);
-    if (config.name !== decoded.as) {
-      throw new Error(`Token not issued by expected idp: ${config.name} != ${decoded.as}`);
+    const claims = await decodeJwt(token);
+    if (config.name !== claims.as) {
+      throw new Error(`Token not issued by expected idp: ${config.name} != ${claims.as}`);
     }
 
     const jwks = await this.#getJwksUri(config);
@@ -266,7 +259,6 @@ export default class AdobeImsHandler extends AbstractHandler {
     // await this.#fillModel(aclAccess);
     /* */
 
-    // console.log('§§§ context in ims:', JSON.stringify(context));
     const token = getBearerToken(context);
     if (!hasText(token)) {
       this.log('No bearer token provided', 'debug');
@@ -275,7 +267,6 @@ export default class AdobeImsHandler extends AbstractHandler {
 
     try {
       const imsProfile = await context.imsClient.getImsUserProfile(token);
-      console.log('§§§ ims profile:', JSON.stringify(imsProfile));
       const acls = await getAcls({
         imsUserId: imsProfile.userId,
         imsOrgs: imsProfile.organizations,
@@ -293,7 +284,6 @@ export default class AdobeImsHandler extends AbstractHandler {
         .withRBAC(acls);
     } catch (e) {
       this.log(`Failed to validate token: ${e.message}`, 'error');
-      console.log('§§§ ims error:', e);
     }
 
     return null;

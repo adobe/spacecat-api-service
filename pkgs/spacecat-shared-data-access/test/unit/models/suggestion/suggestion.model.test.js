@@ -85,6 +85,11 @@ describe('SuggestionModel', () => {
       instance.setStatus('APPROVED');
       expect(instance.record.status).to.equal('APPROVED');
     });
+
+    it('sets the status of the suggestion to OUTDATED', () => {
+      instance.setStatus('OUTDATED');
+      expect(instance.record.status).to.equal('OUTDATED');
+    });
   });
 
   describe('getRank and setRank', () => {

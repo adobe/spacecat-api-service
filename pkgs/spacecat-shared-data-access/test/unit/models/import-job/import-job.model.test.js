@@ -47,13 +47,17 @@ describe('ImportJobModel', () => {
         userAgent: 'someUserAgent',
       },
       options: {
-        someOption: 'someValue',
+        type: 'xwalk',
       },
       redirectCount: 0,
       status: 'RUNNING',
       startedAt: '2022-01-01T00:00:00.000Z',
       successCount: 0,
       urlCount: 0,
+      data: {
+        siteName: 'xwalk',
+        assetFolder: 'xwalk',
+      },
     };
 
     ({
@@ -189,12 +193,23 @@ describe('ImportJobModel', () => {
   });
 
   describe('options', () => {
+    it('no options', () => {
+      instance.setOptions(undefined);
+      expect(instance.getOptions()).to.be.undefined;
+    });
+
     it('gets options', () => {
-      expect(instance.getOptions()).to.deep.equal({ someOption: 'someValue' });
+      expect(instance.getOptions()).to.deep.equal({ type: 'xwalk' });
     });
 
     it('sets options', () => {
       const newOptions = { newOption: 'newValue' };
+      instance.setOptions(newOptions);
+      expect(instance.getOptions()).to.deep.equal(newOptions);
+    });
+
+    it('sets options with data attribute', () => {
+      const newOptions = { data: { siteFolder: 'xwalk', assetFolder: 'xwalk' } };
       instance.setOptions(newOptions);
       expect(instance.getOptions()).to.deep.equal(newOptions);
     });

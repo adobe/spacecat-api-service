@@ -13,20 +13,17 @@
 import { createDataAccess } from '@adobe/spacecat-shared-data-access';
 
 function prepPathForSort(path) {
-  if (path.endsWith('/+**')) return path.slice(0, -3);
   if (path.endsWith('/**')) return path.slice(0, -2);
   return path;
 }
 
-function pathSorter({ path: path1 }, { path: path2 }) {
+export function pathSorter({ path: path1 }, { path: path2 }) {
   const sp1 = prepPathForSort(path1);
   const sp2 = prepPathForSort(path2);
   return sp2.length - sp1.length;
 }
 
-async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') {
-  console.log('§§§ Getting RBAC DB Access');
-
+async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') { // TODO pick up from config
   return createDataAccess({
     tableNameData: tableName,
     aclCtx: {
@@ -40,21 +37,19 @@ async function getDBAccess(log, tableName = 'spacecat-services-rbac-dev') {
 async function getDBRoles(dbAccess, {
   imsUserId, imsOrgId, imsGroups, apiKey,
 }, log) {
-  const idents = [
-    `imsID:${imsUserId}`,
-    `imsOrgID:${imsOrgId}`,
-  ];
+  const idents = [`imsOrgID:${imsOrgId}`];
+  if (imsUserId) {
+    idents.push(`imsID:${imsUserId}`);
+  }
 
   if (imsGroups) {
-    for (const [org, groups] of Object.entries(imsGroups)) {
-      if (org !== imsOrgId) {
+    for (const grp of imsGroups) {
+      if (grp.orgId !== imsOrgId) {
         // eslint-disable-next-line no-continue
         continue;
       }
 
-      for (const group of groups.groups) {
-        idents.push(`imsOrgID/groupID:${imsOrgId}/${group.groupid}`);
-      }
+      idents.push(`imsOrgID/groupID:${imsOrgId}/${grp.groupId}`);
     }
   }
 
@@ -64,8 +59,7 @@ async function getDBRoles(dbAccess, {
 
   const roleMemberships = await dbAccess.RoleMember.allRoleMembershipByIdentities(imsOrgId, idents);
   const roles = await Promise.all(roleMemberships.map(async (rm) => rm.getRole()));
-  const roleNames = roles.map((r) => r.getName());
-  log.debug(`Found role membership names for ${imsOrgId} identities ${idents}: ${roleNames}`);
+  log.debug(`Found role membership names for ${imsOrgId} identities ${idents}: ${roles.map((r) => r.getName())}`);
   return roles;
 }
 
@@ -83,10 +77,6 @@ export default async function getAcls({
     const roles = await getDBRoles(dbAccess, {
       imsUserId, imsOrgId, imsGroups, apiKey,
     }, log);
-    if (!roles) {
-      // eslint-disable-next-line no-continue
-      continue;
-    }
 
     roles.forEach((r) => {
       const acl = [...r.getAcl()];
@@ -98,7 +88,6 @@ export default async function getAcls({
 
       acls.push(entry);
     });
-    console.log('§§§ acls:', JSON.stringify(acls));
   }
 
   return {

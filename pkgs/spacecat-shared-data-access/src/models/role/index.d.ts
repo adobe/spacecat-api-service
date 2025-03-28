@@ -12,9 +12,15 @@
 import type { BaseCollection, BaseModel } from '../base';
 
 export interface Role extends BaseModel {
+  // TODO is this correct?
   getImsOrgId(): string;
+  getName(): string;
+  getAcl(): object;
+  setImsOrgId(id: string): Role;
+  setName(name: string): Role;
+  setAcl(acl: object): Role;
 }
 
 export interface RoleCollection extends BaseCollection<Role> {
-  findByRoleId(roleId: string): Promise<Role | null>;
+  // TODO what to add here?
 }

@@ -22,6 +22,7 @@ export interface Configuration extends BaseModel {
   enableHandlerForSite(type: string, site: Site): void;
   getConfigurationId(): string;
   getEnabledSiteIdsForHandler(type: string): string[];
+  getEnabledAuditsForSite(site: Site): string[];
   getHandler(type: string): object | undefined;
   getHandlers(): object;
   getJobs(): object;

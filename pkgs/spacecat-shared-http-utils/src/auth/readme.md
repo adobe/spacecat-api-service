@@ -80,3 +80,45 @@ export default class ExampleHandler extends AbstractHandler {
   }
 }
 ```
+
+## Provided Authentication Handlers
+
+### JWT Handler
+
+The JWT (JSON Web Token) handler provides authentication using ES256-signed JSON Web Tokens. It validates tokens against a provided public key and ensures they're properly signed and not expired.
+
+#### How It Works
+
+1. The handler extracts the bearer token from the request
+2. It validates the token using a public key (from the `AUTH_PUBLIC_KEY` environment variable)
+3. It verifies:
+   - The token is signed with the ES256 algorithm
+   - The token is not expired
+   - The token has the correct issuer (https://spacecat.experiencecloud.live)
+4. On successful validation, it returns the token payload as the user profile
+
+#### Configuration
+
+To use the JWT handler, you need to:
+
+1. Set the `AUTH_PUBLIC_KEY` environment variable with your SPKI-formatted public key
+2. Add the handler to your auth wrapper configuration
+
+```javascript
+import { wrap } from '@adobe/helix-shared-wrap';
+import auth from './auth-wrapper.js';
+import JwtHandler from './handlers/jwt.js';
+
+export const main = wrap(run)
+  .with(auth, { authHandlers: [JwtHandler] });
+```
+
+#### Token Requirements
+
+JWT tokens must:
+- Be signed with the ES256 algorithm
+- Include standard claims (exp, iat, iss)
+- Use the issuer: `https://spacecat.experiencecloud.live`
+- Be provided as a Bearer token in the Authorization header
+
+Any additional claims in the JWT payload will be available in the `authInfo.profile` object after authentication.

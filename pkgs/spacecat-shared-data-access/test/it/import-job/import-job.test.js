@@ -15,9 +15,11 @@
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 
+import { ElectroValidationError } from 'electrodb';
 import ImportJobModel from '../../../src/models/import-job/import-job.model.js';
 import { getDataAccess } from '../util/db.js';
 import { seedDatabase } from '../util/seed.js';
+import { DataAccessError } from '../../../src/index.js';
 
 use(chaiAsPromised);
 
@@ -41,6 +43,7 @@ function checkImportJob(importJob) {
 describe('ImportJob IT', async () => {
   let sampleData;
   let ImportJob;
+  let newJobData;
 
   before(async () => {
     sampleData = await seedDatabase();
@@ -54,10 +57,8 @@ describe('ImportJob IT', async () => {
     const aclCtx = { acls };
     const dataAccess = getDataAccess({ aclCtx });
     ImportJob = dataAccess.ImportJob;
-  });
 
-  it('adds a new import job', async () => {
-    const data = {
+    newJobData = {
       importQueueId: 'some-queue-id',
       hashedApiKey: 'some-hashed-api-key',
       baseURL: 'https://example-some.com/cars',
@@ -69,18 +70,69 @@ describe('ImportJob IT', async () => {
       hasCustomImportJs: false,
       hasCustomHeaders: true,
     };
-    const importJob = await ImportJob.create(data);
+  });
+
+  it('adds a new import job', async () => {
+    const importJob = await ImportJob.create(newJobData);
 
     checkImportJob(importJob);
 
-    expect(importJob.getImportQueueId()).to.equal(data.importQueueId);
-    expect(importJob.getHashedApiKey()).to.equal(data.hashedApiKey);
-    expect(importJob.getBaseURL()).to.equal(data.baseURL);
-    expect(importJob.getStartedAt()).to.equal(data.startedAt);
-    expect(importJob.getStatus()).to.equal(data.status);
-    expect(importJob.getInitiatedBy()).to.eql(data.initiatedBy);
-    expect(importJob.getHasCustomImportJs()).to.equal(data.hasCustomImportJs);
-    expect(importJob.getHasCustomHeaders()).to.equal(data.hasCustomHeaders);
+    expect(importJob.getImportQueueId()).to.equal(newJobData.importQueueId);
+    expect(importJob.getHashedApiKey()).to.equal(newJobData.hashedApiKey);
+    expect(importJob.getBaseURL()).to.equal(newJobData.baseURL);
+    expect(importJob.getStartedAt()).to.equal(newJobData.startedAt);
+    expect(importJob.getStatus()).to.equal(newJobData.status);
+    expect(importJob.getInitiatedBy()).to.eql(newJobData.initiatedBy);
+    expect(importJob.getHasCustomImportJs()).to.equal(newJobData.hasCustomImportJs);
+    expect(importJob.getHasCustomHeaders()).to.equal(newJobData.hasCustomHeaders);
+  });
+
+  it('adds a new import job with valid options', async () => {
+    const options = {
+      type: 'xwalk',
+      data: {
+        siteName: 'xwalk',
+        assetFolder: 'xwalk',
+      },
+    };
+
+    let data = { ...newJobData, options };
+    let importJob = await ImportJob.create(data);
+
+    checkImportJob(importJob);
+    expect(importJob.getOptions()).to.equal(data.options);
+
+    data = { ...newJobData, options: { type: 'doc' } };
+    importJob = await ImportJob.create(data);
+
+    checkImportJob(importJob);
+    expect(importJob.getOptions()).to.eql({ type: 'doc' });
+
+    // test to make sure data error is thrown if data is not an object
+    data = { ...newJobData, options: { data: 'not-an-object' } };
+    await ImportJob.create(data).catch((err) => {
+      expect(err).to.be.instanceOf(DataAccessError);
+      expect(err.cause).to.be.instanceOf(ElectroValidationError);
+      expect(err.cause.message).to.contain('Invalid value for data: not-an-object');
+    });
+
+    // test to make sure data is not an empty object
+    data = { ...newJobData, options: { data: { } } };
+    await ImportJob.create(data).catch((err) => {
+      expect(err).to.be.instanceOf(DataAccessError);
+      expect(err.cause).to.be.instanceOf(ElectroValidationError);
+      expect(err.cause.message).to.contain('Invalid value for data');
+    });
+  });
+
+  it('throws an error when adding a new import job with invalid options', async () => {
+    const data = { ...newJobData, options: { type: 'invalid' } };
+
+    await ImportJob.create(data).catch((err) => {
+      expect(err).to.be.instanceOf(DataAccessError);
+      expect(err.cause).to.be.instanceOf(ElectroValidationError);
+      expect(err.cause.message).to.contain('Invalid value for type: invalid');
+    });
   });
 
   it('updates an existing import job', async () => {

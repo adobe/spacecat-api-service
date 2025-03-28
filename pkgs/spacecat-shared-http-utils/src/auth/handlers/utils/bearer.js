@@ -10,10 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import Role from './role.model.js';
-import RoleCollection from './role.collection.js';
+export const getBearerToken = (context) => {
+  const authorizationHeader = context.pathInfo?.headers?.authorization || '';
 
-export {
-  Role,
-  RoleCollection,
+  if (!authorizationHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  return authorizationHeader.replace('Bearer ', '');
 };

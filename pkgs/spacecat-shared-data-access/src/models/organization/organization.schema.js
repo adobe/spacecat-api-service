@@ -41,7 +41,7 @@ const schema = new SchemaBuilder(Organization, OrganizationCollection)
   })
   .addAttribute('imsOrgId', {
     type: 'string',
-    default: 'default',
+    validate: (value) => !value || Organization.IMS_ORG_ID_REGEX.test(value),
   })
   .addAttribute('fulfillableItems', {
     type: 'any',

@@ -24,9 +24,11 @@ class Suggestion extends BaseModel {
   static STATUSES = {
     NEW: 'NEW',
     APPROVED: 'APPROVED',
+    IN_PROGRESS: 'IN_PROGRESS',
     SKIPPED: 'SKIPPED',
     FIXED: 'FIXED',
     ERROR: 'ERROR',
+    OUTDATED: 'OUTDATED',
   };
 
   static TYPES = {

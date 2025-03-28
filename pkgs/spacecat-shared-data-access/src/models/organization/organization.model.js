@@ -20,8 +20,9 @@ import BaseModel from '../base/base.model.js';
  * @extends BaseModel
  */
 class Organization extends BaseModel {
-  // add your custom methods or overrides here
+  static IMS_ORG_ID_REGEX = /[a-z0-9]{24}@AdobeOrg/i;
 
+  // add your custom methods or overrides here
 }
 
 export default Organization;

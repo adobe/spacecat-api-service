@@ -44,6 +44,12 @@ const configurations = [
       404: {
         enabledByDefault: true,
       },
+      'rum-ingest': {
+        enabledByDefault: false,
+        enabled: {
+          sites: ['c6f41da6-3a7e-4a59-8b8d-2da742ac2dbe'],
+        },
+      },
       'organic-keywords': {
         enabledByDefault: false,
       },

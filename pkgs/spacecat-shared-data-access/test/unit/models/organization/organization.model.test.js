@@ -77,7 +77,7 @@ describe('OrganizationModel', () => {
 
   describe('imsOrgId', () => {
     it('gets imsOrgId', () => {
-      expect(instance.getImsOrgId()).to.equal('0-1234@AdobeOrg');
+      expect(instance.getImsOrgId()).to.equal('1234567890ABCDEF12345678@AdobeOrg');
     });
 
     it('sets imsOrgId', () => {

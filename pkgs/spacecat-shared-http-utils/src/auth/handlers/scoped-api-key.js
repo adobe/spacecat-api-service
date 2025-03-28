@@ -28,7 +28,6 @@ export default class ScopedApiKeyHandler extends AbstractHandler {
 
   #getDataAccess(tableName = 'spacecat-services-data-dev') { // TODO pick up name from config
     // Data access for the purpose of authorization
-    console.log('§§§ createDataAccess for auth');
     return createDataAccess({
       tableNameData: tableName,
       aclCtx: {
@@ -49,7 +48,6 @@ export default class ScopedApiKeyHandler extends AbstractHandler {
       return null;
     }
 
-    console.log('§§§ apiKeyFromHeader', apiKeyFromHeader);
     // Keys are stored by their hash, so we need to hash the key to look it up
     const hashedApiKey = hashWithSHA256(apiKeyFromHeader);
     const apiKeyEntity = await ApiKey.findByHashedApiKey(hashedApiKey);

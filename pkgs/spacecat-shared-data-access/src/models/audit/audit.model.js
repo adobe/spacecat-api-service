@@ -24,16 +24,29 @@ import BaseModel from '../base/base.model.js';
  */
 class Audit extends BaseModel {
   static AUDIT_TYPES = {
+    APEX: 'apex',
+    CWV: 'cwv',
+    LHS_MOBILE: 'lhs-mobile',
+    LHS_DESKTOP: 'lhs-desktop',
     404: '404',
+    SITEMAP: 'sitemap',
+    CANONICAL: 'canonical',
     BROKEN_BACKLINKS: 'broken-backlinks',
+    BROKEN_INTERNAL_LINKS: 'broken-internal-links',
     EXPERIMENTATION: 'experimentation',
+    CONVERSION: 'conversion',
     ORGANIC_KEYWORDS: 'organic-keywords',
     ORGANIC_TRAFFIC: 'organic-traffic',
-    CWV: 'cwv',
-    LHS_DESKTOP: 'lhs-desktop',
-    LHS_MOBILE: 'lhs-mobile',
-    EXPERIMENTATION_ESS_MONTHLY: 'experimentation-ess-monthly',
     EXPERIMENTATION_ESS_DAILY: 'experimentation-ess-daily',
+    EXPERIMENTATION_ESS_MONTHLY: 'experimentation-ess-monthly',
+    EXPERIMENTATION_OPPORTUNITIES: 'experimentation-opportunities',
+    META_TAGS: 'meta-tags',
+    COSTS: 'costs',
+    STRUCTURED_DATA: 'structured-data',
+    STRUCTURED_DATA_AUTO_SUGGEST: 'structured-data-auto-suggest',
+    FORMS_OPPORTUNITIES: 'forms-opportunities',
+    SITE_DETECTION: 'site-detection',
+    ALT_TEXT: 'alt-text',
   };
 
   static AUDIT_TYPE_PROPERTIES = {
@@ -44,6 +57,80 @@ class Audit extends BaseModel {
   static AUDIT_CONFIG = {
     TYPES: Audit.AUDIT_TYPES,
     PROPERTIES: Audit.AUDIT_TYPE_PROPERTIES,
+  };
+
+  /**
+   * The destinations for the audit steps. Used with AuditBuilder to determine the destination
+   * an audit step should trigger.
+   * @type {{CONTENT_SCRAPER: string, IMPORT_WORKER: string}}
+   */
+  static AUDIT_STEP_DESTINATIONS = {
+    CONTENT_SCRAPER: 'content-scraper',
+    IMPORT_WORKER: 'import-worker',
+  };
+
+  /**
+   * The configurations for the audit step destinations. Used with AuditBuilder to configure
+   * the destination queue URL and payload formatting.
+   * @type {{
+   *   [Audit.AUDIT_STEP_DESTINATIONS.CONTENT_SCRAPER]: {
+   *     getQueueUrl: function,
+   *     formatPayload: function
+   *   },
+   *   [Audit.AUDIT_STEP_DESTINATIONS.IMPORT_WORKER]: {
+   *     getQueueUrl: function,
+   *     formatPayload: function
+   *   }
+   * }}
+   */
+  static AUDIT_STEP_DESTINATION_CONFIGS = {
+    [Audit.AUDIT_STEP_DESTINATIONS.IMPORT_WORKER]: {
+      getQueueUrl: (context) => context.env?.IMPORT_WORKER_QUEUE_URL,
+      /**
+       * Formats the payload for the import worker queue.
+       * @param {object} stepResult - The result of the audit step.
+       * @param {string} stepResult.type - The import type to trigger.
+       * @param {string} stepResult.siteId - The site ID for which the import is triggered.
+       * @param {object} auditContext - The audit context.
+       * @param {object} auditContext.next - The next audit step to run.
+       * @param {string} auditContext.auditId - The audit ID.
+       * @param {string} auditContext.auditType - The audit type.
+       * @param {string} auditContext.fullAuditRef - The full audit reference.
+       * @param {string} auditContext.<string> - Optional. Any additional context properties
+       * as needed by the audit type.
+       *
+       * @returns {object} - The formatted payload.
+       */
+      formatPayload: (stepResult, auditContext) => ({
+        type: stepResult.type,
+        siteId: stepResult.siteId,
+        auditContext,
+      }),
+    },
+    [Audit.AUDIT_STEP_DESTINATIONS.CONTENT_SCRAPER]: {
+      getQueueUrl: (context) => context.env?.CONTENT_SCRAPER_QUEUE_URL,
+      /**
+       * Formats the payload for the content scraper queue.
+       * @param {object} stepResult - The result of the audit step.
+       * @param {object[]} stepResult.urls - The list of URLs to scrape.
+       * @param {string} stepResult.urls[].url - The URL to scrape.
+       * @param {string} stepResult.siteId - The site ID. Will be used as the job ID.
+       * @param {string} stepResult.processingType - The scraping processing type to trigger.
+       * @param {object} auditContext - The audit context.
+       * @param {object} auditContext.next - The next audit step to run.
+       * @param {string} auditContext.auditId - The audit ID.
+       * @param {string} auditContext.auditType - The audit type.
+       * @param {string} auditContext.fullAuditRef - The full audit reference.
+       *
+       * @returns {object} - The formatted payload.
+       */
+      formatPayload: (stepResult, auditContext) => ({
+        urls: stepResult.urls,
+        jobId: stepResult.siteId,
+        processingType: stepResult.processingType || 'default',
+        auditContext,
+      }),
+    },
   };
 
   /**

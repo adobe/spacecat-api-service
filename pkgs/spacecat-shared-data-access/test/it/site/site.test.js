@@ -21,6 +21,7 @@ import siteFixtures from '../../fixtures/sites.fixture.js';
 import { sanitizeTimestamps } from '../../../src/util/util.js';
 import { getDataAccess } from '../util/db.js';
 import { seedDatabase } from '../util/seed.js';
+import { Config } from '../../../src/models/site/config.js';
 
 use(chaiAsPromised);
 
@@ -278,6 +279,7 @@ describe('Site IT', async () => {
     const newSiteData = {
       baseURL: 'https://newexample.com',
       gitHubURL: 'https://github.com/some-org/test-repo',
+      name: 'new-site',
       hlxConfig: {
         cdnProdHost: 'www.another-example.com',
         code: {
@@ -314,6 +316,7 @@ describe('Site IT', async () => {
     await checkSite(newSite);
 
     expect(newSite.getBaseURL()).to.equal(newSiteData.baseURL);
+    expect(newSite.getName()).to.equal(newSiteData.name);
   });
 
   it('updates a site', async () => {
@@ -324,6 +327,7 @@ describe('Site IT', async () => {
       gitHubURL: 'https://updated-github.com',
       isLive: false,
       organizationId: sampleData.organizations[1].getId(),
+      name: 'updated-site',
       hlxConfig: {
         cdnProdHost: 'www.another-example.com',
         code: {
@@ -346,6 +350,7 @@ describe('Site IT', async () => {
     };
 
     site.setBaseURL(updates.baseURL);
+    site.setName(updates.name);
     site.setDeliveryType(updates.deliveryType);
     site.setGitHubURL(updates.gitHubURL);
     site.setHlxConfig(updates.hlxConfig);
@@ -363,10 +368,12 @@ describe('Site IT', async () => {
     expect(updatedSite.getGitHubURL()).to.equal(updates.gitHubURL);
     expect(updatedSite.getIsLive()).to.equal(updates.isLive);
     expect(updatedSite.getOrganizationId()).to.equal(updates.organizationId);
+    expect(updatedSite.getName()).to.equal(updates.name);
   });
 
   it('reads config of a site', async () => {
     const { config: configFixture } = siteFixtures[0];
+    configFixture.imports[0].enabled = true; // set by joi schema default
     const site = await Site.findById('5d6d4439-6659-46c2-b646-92d110fa5a52');
     const config = site.getConfig();
     expect(config).to.be.an('object');
@@ -380,5 +387,150 @@ describe('Site IT', async () => {
 
     const notFound = await Site.findById(sampleData.sites[0].getId());
     expect(notFound).to.be.null;
+  });
+
+  it('gets latest metrics for a site', async () => {
+    const site = await Site.findById('5d6d4439-6659-46c2-b646-92d110fa5a52');
+    const latestMetrics = site.getConfig().getLatestMetrics('latest-metrics');
+
+    expect(latestMetrics).to.be.an('object');
+    expect(latestMetrics.pageViewsChange).to.equal(10);
+    expect(latestMetrics.ctrChange).to.equal(5);
+    expect(latestMetrics.projectedTrafficValue).to.equal(1000);
+  });
+
+  it('updates latest metrics for a site', async () => {
+    const site = await Site.findById('5d6d4439-6659-46c2-b646-92d110fa5a52');
+    const config = site.getConfig();
+
+    const latestMetrics = {
+      pageViewsChange: 20,
+      ctrChange: 10,
+      projectedTrafficValue: 2000,
+    };
+
+    config.updateLatestMetrics('latest-metrics', latestMetrics);
+
+    const updatedMetrics = config.getLatestMetrics('latest-metrics');
+
+    expect(updatedMetrics.pageViewsChange).to.equal(20);
+    expect(updatedMetrics.ctrChange).to.equal(10);
+    expect(updatedMetrics.projectedTrafficValue).to.equal(2000);
+  });
+
+  describe('Site Import Configuration', () => {
+    it('creates a site with import configuration', async () => {
+      const newSiteData = {
+        baseURL: 'https://import-example.com',
+        gitHubURL: 'https://github.com/some-org/import-test-repo',
+        name: 'import-test-site',
+        organizationId: sampleData.organizations[0].getId(),
+        isLive: true,
+        isLiveToggledAt: '2024-12-06T08:35:24.125Z',
+        config: {
+          imports: [{
+            type: 'organic-keywords',
+            destinations: ['default'],
+            sources: ['ahrefs'],
+            enabled: true,
+            pageUrl: 'https://import-example.com/blog',
+          }],
+        },
+      };
+
+      const site = await Site.create(newSiteData);
+      const config = site.getConfig();
+
+      expect(config.getImports()).to.deep.equal(newSiteData.config.imports);
+      expect(config.isImportEnabled('organic-keywords')).to.be.true;
+      expect(config.getImportConfig('organic-keywords')).to.deep.equal(newSiteData.config.imports[0]);
+    });
+
+    it('updates site import configuration', async () => {
+      // First create a site with initial import config
+      const site = await Site.create({
+        baseURL: 'https://import-update-example.com',
+        gitHubURL: 'https://github.com/some-org/import-update-test-repo',
+        name: 'import-update-test-site',
+        organizationId: sampleData.organizations[0].getId(),
+        isLive: true,
+        isLiveToggledAt: '2024-12-06T08:35:24.125Z',
+        config: {
+          imports: [{
+            type: 'organic-keywords',
+            destinations: ['default'],
+            sources: ['ahrefs'],
+            enabled: true,
+          }],
+        },
+      });
+
+      // Update import configuration
+      const config = site.getConfig();
+      config.enableImport('organic-traffic', {
+        sources: ['google'],
+      });
+      config.disableImport('organic-keywords');
+
+      site.setConfig(Config.toDynamoItem(config));
+
+      // Save the site with updated config
+      await site.save();
+
+      // Fetch the site again and verify the changes
+      const updatedSite = await Site.findById(site.getId());
+      const updatedConfig = updatedSite.getConfig();
+
+      expect(updatedConfig.getImports()).to.have.length(2);
+      expect(updatedConfig.isImportEnabled('organic-keywords')).to.be.false;
+      expect(updatedConfig.isImportEnabled('organic-traffic')).to.be.true;
+      expect(updatedConfig.getImportConfig('organic-traffic')).to.deep.equal({
+        type: 'organic-traffic',
+        destinations: ['default'],
+        sources: ['google'],
+        enabled: true,
+      });
+    });
+
+    it('handles multiple import types with different configurations', async () => {
+      const site = await Site.create({
+        baseURL: 'https://multi-import-example.com',
+        gitHubURL: 'https://github.com/some-org/multi-import-test-repo',
+        name: 'multi-import-test-site',
+        organizationId: sampleData.organizations[0].getId(),
+        isLive: true,
+        isLiveToggledAt: '2024-12-06T08:35:24.125Z',
+      });
+
+      const config = site.getConfig();
+
+      // Enable multiple import types with different configs
+      config.enableImport('organic-keywords', {
+        pageUrl: 'https://multi-import-example.com/blog',
+      });
+      config.enableImport('organic-traffic', {
+        sources: ['google'],
+      });
+      config.enableImport('top-pages', {
+        geo: 'us',
+      });
+
+      site.setConfig(Config.toDynamoItem(config));
+
+      await site.save();
+
+      const updatedSite = await Site.findById(site.getId());
+      const updatedConfig = updatedSite.getConfig();
+      const imports = updatedConfig.getImports();
+
+      expect(imports).to.have.length(3);
+      expect(imports.every((imp) => imp.enabled)).to.be.true;
+      expect(updatedConfig.getImportConfig('organic-keywords').pageUrl)
+        .to.equal('https://multi-import-example.com/blog');
+      expect(updatedConfig.getImportConfig('organic-traffic').sources)
+        .to.deep.equal(['google']);
+      expect(updatedConfig.getImportConfig('top-pages').geo)
+        .to.equal('us');
+    });
   });
 });

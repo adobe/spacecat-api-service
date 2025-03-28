@@ -95,7 +95,7 @@ class BaseModel {
    */
   #getACLPath() {
     const belongsTo = this.schema.getReferencesByType(Reference.TYPES.BELONGS_TO);
-    if (belongsTo.length !== 1) {
+    if (belongsTo.length === 0) {
       return `/${this.entityName}/${this.getId()}`;
     }
 
@@ -121,20 +121,16 @@ class BaseModel {
    * @throws {Error} - Throws an error if the action is not permitted.
    */
   ensurePermission(action) {
-    let check = true; // By default ensure permission
     if (this.aclCtx?.aclEntities?.exclude?.includes(this.entityName)) {
-      check = false;
+      this.log.info(`Entity [${this.entityName}] is excluded from ACL checking`);
+      return;
     }
 
-    if (check) {
-      const aclPath = this.#getACLPath();
-      if (aclPath) {
-        ensurePermission(aclPath, action, this.aclCtx, this.log);
-      } else {
-        this.log.info(`Entity [${this.entityName}] is owned more than 1 level deep. Currently excluded from ACL checking`);
-      }
+    const aclPath = this.#getACLPath();
+    if (aclPath) {
+      ensurePermission(aclPath, action, this.aclCtx, this.log);
     } else {
-      this.log.info(`Entity [${this.entityName}] is excluded from ACL checking`);
+      this.log.info(`Entity [${this.entityName}] is owned more than 1 level deep. Currently excluded from ACL checking`);
     }
   }
 

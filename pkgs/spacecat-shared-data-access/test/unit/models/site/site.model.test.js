@@ -16,6 +16,7 @@ import { expect, use as chaiUse } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { stub } from 'sinon';
 import sinonChai from 'sinon-chai';
+import nock from 'nock';
 
 import EntityRegistry from '../../../../src/models/base/entity.registry.js';
 import Site from '../../../../src/models/site/site.model.js';
@@ -99,6 +100,17 @@ describe('SiteModel', () => {
     });
   });
 
+  describe('name', () => {
+    it('gets name', () => {
+      expect(instance.getName()).to.equal('test-site');
+    });
+
+    it('sets name', () => {
+      instance.setName('new-site');
+      expect(instance.getName()).to.equal('new-site');
+    });
+  });
+
   describe('deliveryType', () => {
     it('gets deliveryType', () => {
       expect(instance.getDeliveryType()).to.equal('aem_edge');
@@ -151,6 +163,57 @@ describe('SiteModel', () => {
       instance.toggleLive();
 
       expect(instance.getIsLive()).to.equal(true);
+    });
+  });
+
+  describe('resolveFinalURL', () => {
+    afterEach(() => {
+      nock.cleanAll();
+    });
+
+    it('resolves the final URL using the base URL', async () => {
+      instance.setBaseURL('https://spacecat.com');
+      const config = instance.getConfig();
+      config.getFetchConfig = () => ({});
+
+      nock(instance.getBaseURL())
+        .get('/')
+        .reply(301, undefined, { Location: 'https://redirected.com' });
+      nock('https://redirected.com')
+        .get('/')
+        .reply(200);
+
+      const finalURL = await instance.resolveFinalURL();
+
+      expect(finalURL).to.equal('redirected.com');
+    });
+
+    it('resolves the final URL using the overrideBaseURL', async () => {
+      const config = instance.getConfig();
+      config.getFetchConfig = () => ({ overrideBaseURL: 'http://override.com' });
+
+      const finalURL = await instance.resolveFinalURL();
+
+      expect(finalURL).to.equal('override.com');
+    });
+
+    it('resolves the final URL using the User-Agent header', async () => {
+      instance.setBaseURL('https://spacecat.com');
+      const userAgent = 'Mozilla/5.0';
+      const config = instance.getConfig();
+      config.getFetchConfig = () => ({ headers: { 'User-Agent': userAgent } });
+
+      nock(instance.getBaseURL(), {
+        reqheaders: {
+          'User-Agent': userAgent,
+        },
+      })
+        .get('/')
+        .reply(200);
+
+      const finalURL = await instance.resolveFinalURL();
+
+      expect(finalURL).to.equal(instance.getBaseURL().replace(/^https?:\/\//, ''));
     });
   });
 

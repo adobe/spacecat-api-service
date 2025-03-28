@@ -324,12 +324,13 @@ describe('BaseCollection', () => {
 
     it('logs an error and throws when creation fails', async () => {
       const error = new Error('Create failed');
+      error.fields = [{ field: 'someKey', message: 'Some key is required' }];
       mockElectroService.entities.mockEntityModel.create.returns(
         { go: () => Promise.reject(error) },
       );
 
       await expect(baseCollectionInstance.create(mockRecord.data)).to.be.rejectedWith(DataAccessError, 'Failed to create');
-      expect(mockLogger.error.calledOnce).to.be.true;
+      expect(mockLogger.error.calledTwice).to.be.true;
     });
 
     it('calls the on-create handler if provided', async () => {
@@ -679,6 +680,30 @@ describe('BaseCollection', () => {
       expect(mockElectroService.entities.mockEntityModel.query.all)
         .to.have.been.calledOnceWithExactly({ pk: 'ALL_MOCKENTITYMODELS' });
       expect(mockGo).to.have.been.calledOnceWithExactly({ order: 'desc', attributes: ['test'] });
+    });
+
+    it('handles pagination with fetchAllPages option', async () => {
+      const firstResult = { data: [mockRecord], cursor: 'key1' };
+      const secondRecord = { id: '2', foo: 'bar' };
+      const secondResult = { data: [secondRecord] };
+
+      const goStub = stub();
+      goStub.onFirstCall().resolves(firstResult);
+      goStub.onSecondCall().resolves(secondResult);
+
+      mockElectroService.entities.mockEntityModel.query.all.returns({
+        go: goStub,
+      });
+
+      const result = await baseCollectionInstance.all({}, { fetchAllPages: true });
+      expect(result).to.be.an('array').that.has.length(2);
+      expect(result[0].record).to.deep.include(mockRecord);
+      expect(result[1].record).to.deep.include(secondRecord);
+
+      expect(goStub.callCount).to.equal(2);
+
+      const secondCallArgs = goStub.secondCall.args[0];
+      expect(secondCallArgs).to.deep.include({ order: 'desc', cursor: 'key1' });
     });
   });
 

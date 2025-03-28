@@ -10,6 +10,16 @@
  * governing permissions and limitations under the License.
  */
 
+/**
+ * Convert the entity path so that it can be comparted with a permission path
+ * for if the permission path contains a single star wildcard. This is done by replacing
+ * the elements in the entity path on the same location with the '*'. Some examples:
+ * entityPath: '/foo/bar' and permPath: '/foo/*' => '/foo/*'
+ * entityPath: '/foo/bar' and permPath: '/foo/**' => '/foo/bar'
+ * @param {string} entityPath The entity path to convert
+ * @param {string} permPath The permission path
+ * @returns The converted entity path
+ */
 function prepSingleStarWildcard(entityPath, permPath) {
   if (!permPath.includes('/*')) {
     return entityPath;
@@ -36,21 +46,19 @@ function prepSingleStarWildcard(entityPath, permPath) {
  * - exact match
  * - path ending with '/**' which is a wildcard for all paths starting with the same prefix
  * - path containing 'slash*slash' or ending with '/*' which is a wildcard for all elements
- *  at that position.
+ *   at that position.
  * @param { string } path - the path for which the permission is needed.
  * @param { Object } acl - the acls
  * @returns { Object.actions[] } - the actions permitted for the path.If there are none an
  * empty array is returned.
- * @returns { Object.trace } - the acl entry that matched the path.
+ * @returns { Object.trace } - the acl entry that matched the path, if there is one.
  */
 function getPermissions(path, acl) {
-  console.log('§§§ get permissions for ', path, ' in ', JSON.stringify(acl));
   if (!acl) {
     return { actions: [] };
   }
 
   const match = acl.find((p) => {
-    console.log('§§§ acl canidate ', p);
     const pp = p.path;
     const ep = prepSingleStarWildcard(path, pp);
 
@@ -82,9 +90,7 @@ function getPermissions(path, acl) {
 export function hasPermisson(entityPath, perm, aclCtx, log) {
   const allActions = [];
   const traces = [];
-  console.log('§§§ hasPermission aclCtx:', JSON.stringify(aclCtx));
   aclCtx.acls.forEach((a) => {
-    console.log('§§§ hasPermission acl element:', JSON.stringify(a));
     const { actions, trace } = getPermissions(entityPath, a.acl);
     allActions.push(...actions);
     if (actions.includes(perm)) {

@@ -96,7 +96,7 @@ describe('Organization IT', async () => {
   it('adds a new organization', async () => {
     const data = {
       name: 'New Organization',
-      imsOrgId: 'newOrgId',
+      imsOrgId: '1234567893ABCDEF12345678@AdobeOrg',
       config: {
         some: 'config',
       },
@@ -122,7 +122,7 @@ describe('Organization IT', async () => {
 
     const data = {
       name: 'Updated Organization',
-      imsOrgId: 'updatedOrgId',
+      imsOrgId: '1234567894ABCDEF12345678@AdobeOrg',
       config: {
         some: 'updated',
       },

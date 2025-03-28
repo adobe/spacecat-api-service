@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
+import { isNonEmptyObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 
 import { sanitizeIdAndAuditFields } from '../../util/util.js';
 import BaseModel from '../base/base.model.js';
@@ -60,6 +60,17 @@ class Configuration extends BaseModel {
 
   getEnabledSiteIdsForHandler(type) {
     return this.getHandler(type)?.enabled?.sites || [];
+  }
+
+  getEnabledAuditsForSite(site) {
+    const enabledHandlers = new Set(
+      Object.keys(this.getHandlers() || {})
+        .filter((handler) => this.isHandlerEnabledForSite(handler, site)),
+    );
+
+    return (this.getJobs() || [])
+      .filter((job) => job.group === 'audits' && enabledHandlers.has(job.type))
+      .map((job) => job.type);
   }
 
   isHandlerEnabledForSite(type, site) {
@@ -146,12 +157,58 @@ class Configuration extends BaseModel {
     const siteId = site.getId();
     if (this.isHandlerEnabledForSite(type, site)) return;
 
+    const deps = this.isHandlerDependencyMetForSite(type, site);
+    if (deps !== true) {
+      throw new Error(`Cannot enable handler ${type} for site ${siteId} because of missing dependencies: ${deps}`);
+    }
+
     this.updateHandlerSites(type, siteId, true);
+  }
+
+  /**
+   * Check if all dependencies for a handler of given type are met for the given org.
+   *
+   * @param {string} type handler type
+   * @param {object} org org object
+   * @returns true if all dependencies are met, array with missing dependencies otherwise
+   */
+  isHandlerDependencyMetForOrg(type, org) {
+    const handler = this.getHandler(type);
+
+    if (!handler || !isNonEmptyArray(handler?.dependencies)) return true;
+
+    const unmetDependencies = handler.dependencies
+      .filter(({ handler: depHandler }) => !this.isHandlerEnabledForOrg(depHandler, org))
+      .map(({ handler: depHandler }) => depHandler);
+
+    return isNonEmptyArray(unmetDependencies) ? unmetDependencies : true;
+  }
+
+  /**
+   * Check if all dependencies for a handler of given type are met for the given site.
+   *
+   * @param {string} type handler type
+   * @param {object} site site object
+   * @returns true if all dependencies are met, array with missing dependencies otherwise
+   */
+  isHandlerDependencyMetForSite(type, site) {
+    const handler = this.getHandler(type);
+    if (!handler || !isNonEmptyArray(handler?.dependencies)) return true;
+
+    const unmetDependencies = handler.dependencies
+      .filter(({ handler: depHandler }) => !this.isHandlerEnabledForSite(depHandler, site))
+      .map(({ handler: depHandler }) => depHandler);
+
+    return isNonEmptyArray(unmetDependencies) ? unmetDependencies : true;
   }
 
   enableHandlerForOrg(type, org) {
     const orgId = org.getId();
     if (this.isHandlerEnabledForOrg(type, org)) return;
+    const deps = this.isHandlerDependencyMetForOrg(type, org);
+    if (deps !== true) {
+      throw new Error(`Cannot enable handler ${type} for org ${orgId} because of missing dependencies: ${deps}`);
+    }
 
     this.updateHandlerOrgs(type, orgId, true);
   }

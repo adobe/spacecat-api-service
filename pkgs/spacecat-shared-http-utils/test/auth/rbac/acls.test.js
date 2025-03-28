@@ -13,152 +13,176 @@
 /* eslint-env mocha */
 
 import { expect } from 'chai';
+import esmock from 'esmock';
+
+import { pathSorter } from '../../../src/auth/rbac/acls.js';
 
 describe('RBAC', () => {
-  it('should pass', () => {
-    expect(true).to.be.true;
+  it('test path sorter', () => {
+    const sampleACL = [
+      { path: '/aa/aa/aa', actions: ['C'] },
+      { path: '/qqq/rrr/sss', actions: [] },
+      { path: '/a', actions: ['R'] },
+      { path: '/bbcc/bbcc/**', actions: ['C', 'R', 'U', 'D'] },
+    ];
+    const expectedACL = [
+      { path: '/qqq/rrr/sss', actions: [] },
+      { path: '/bbcc/bbcc/**', actions: ['C', 'R', 'U', 'D'] },
+      { path: '/aa/aa/aa', actions: ['C'] },
+      { path: '/a', actions: ['R'] },
+    ];
+
+    sampleACL.sort(pathSorter);
+    expect(sampleACL).to.deep.equal(expectedACL);
+  });
+
+  it('test getAcls', async () => {
+    const acl1 = [{
+      actions: ['R'],
+      path: '/a/b/c/**',
+    }, {
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/a/b/c/d',
+    }];
+    const acl2 = [{
+      actions: ['C'],
+      path: '/x/y/z',
+    }];
+    const r1 = {
+      getName: () => 'role1',
+      getAcl: () => acl1,
+    };
+    const r2 = {
+      getName: () => 'role2',
+      getAcl: () => acl2,
+    };
+    const mockRoleMembers = [
+      { getRole: () => r1 },
+      { getRole: () => r2 },
+    ];
+    const mockRoleMembersFn = (oid, ids) => {
+      if (oid === 'BAABAABAA@AdobeOrg') {
+        if (ids.length === 4
+          && ids.includes('imsOrgID:BAABAABAA@AdobeOrg')
+          && ids.includes('imsOrgID/groupID:BAABAABAA@AdobeOrg/12345678')
+          && ids.includes('imsOrgID/groupID:BAABAABAA@AdobeOrg/87654321')
+          && ids.includes('imsID:1234@5678.e')) {
+          return mockRoleMembers;
+        }
+      }
+      return null;
+    };
+    const mockDA = {
+      RoleMember: {
+        allRoleMembershipByIdentities: mockRoleMembersFn,
+      },
+    };
+    const mockCDA = async (config) => {
+      if (config.aclCtx.aclEntities.exclude.length === 2
+        && config.aclCtx.aclEntities.exclude.includes('role')
+        && config.aclCtx.aclEntities.exclude.includes('roleMember')) {
+        return mockDA;
+      }
+      return null;
+    };
+    const getAcls = await esmock('../../../src/auth/rbac/acls.js', {
+      '@adobe/spacecat-shared-data-access': {
+        createDataAccess: mockCDA,
+      },
+    });
+
+    const log = { debug: () => { } };
+    const imsUserId = '1234@5678.e';
+    const imsOrgs = ['BAABAABAA@AdobeOrg'];
+    const imsGroups = [{
+      orgId: 'BAABAABAA@AdobeOrg',
+      groupId: 12345678,
+    }, {
+      orgId: 'F00F00@AdobeOrg',
+      groupId: 99999999,
+    }, {
+      orgId: 'BAABAABAA@AdobeOrg',
+      groupId: 87654321,
+    }];
+
+    const acls = await getAcls({ imsUserId, imsOrgs, imsGroups }, log);
+
+    const expectedAcls = [{
+      role: 'role1',
+      acl: [{
+        actions: ['C', 'R', 'U', 'D'],
+        path: '/a/b/c/d',
+      }, {
+        actions: ['R'],
+        path: '/a/b/c/**',
+      }],
+    }, {
+      role: 'role2',
+      acl: [{
+        actions: ['C'],
+        path: '/x/y/z',
+      }],
+    }];
+    expect(acls.acls).to.deep.equal(expectedAcls);
+    expect(acls.aclEntities.exclude.length).to.be.greaterThan(0);
+  });
+
+  it('test getAcls for API Key', async () => {
+    const acl = [
+      { actions: ['R'], path: '/a' },
+      { actions: ['C'], path: '/aaa' },
+      { actions: ['D'], path: '/' },
+      { actions: ['U'], path: '/aa' },
+    ];
+    const mockRole = {
+      getName: () => 'myRole',
+      getAcl: () => acl,
+    };
+    const mockRoleMembers = [{ getRole: () => mockRole }];
+    const mockRoleMembersFn = (oid, ids) => {
+      if (oid === 'DAB0@AdobeOrg') {
+        if (ids.length === 2
+          && ids.includes('imsOrgID:DAB0@AdobeOrg')
+          && ids.includes('apiKeyID:BHEUAARK!')) {
+          return mockRoleMembers;
+        }
+      }
+      return null;
+    };
+    const mockDA = {
+      RoleMember: {
+        allRoleMembershipByIdentities: mockRoleMembersFn,
+      },
+    };
+    const mockCDA = async (config) => {
+      if (config.aclCtx.aclEntities.exclude.length === 2
+        && config.aclCtx.aclEntities.exclude.includes('role')
+        && config.aclCtx.aclEntities.exclude.includes('roleMember')) {
+        return mockDA;
+      }
+      return null;
+    };
+    const getAcls = await esmock('../../../src/auth/rbac/acls.js', {
+      '@adobe/spacecat-shared-data-access': {
+        createDataAccess: mockCDA,
+      },
+    });
+
+    const log = { debug: () => { } };
+    const imsOrgs = ['DAB0@AdobeOrg'];
+    const apiKey = 'BHEUAARK!';
+    const acls = await getAcls({ imsOrgs, apiKey }, log);
+
+    const expectedAcls = [{
+      role: 'myRole',
+      acl: [
+        { actions: ['C'], path: '/aaa' },
+        { actions: ['U'], path: '/aa' },
+        { actions: ['R'], path: '/a' },
+        { actions: ['D'], path: '/' },
+      ],
+    }];
+    expect(acls.acls).to.deep.equal(expectedAcls);
+    expect(acls.aclEntities.exclude.length).to.be.greaterThan(0);
   });
 });
-
-// import { getDBAcls, getDBRoles } from '../../../src/auth/rbac/acls.js';
-
-// describe('Get Roles', () => {
-//   it('get roles from DB', async () => {
-//     const commands = [];
-//     const client = {
-//       send(c) {
-//         commands.push(c);
-//         return {
-//           Items: [
-//             {
-//               roles: {
-//                 SS: ['MY_ROLE1'],
-//               },
-//             },
-//             {
-//               roles: {
-//                 SS: ['MY_ROLE2', 'MY_ROLE3'],
-//               },
-//             },
-//           ],
-//         };
-//       },
-//     };
-
-//     const imsUserId = 'abc@def.g';
-//     const imsOrgId = 'F00FEEFAA123';
-//     const imsGroups = {
-//       'F00FEEFAA123@AdobeOrg': {
-//         groups: [{
-//           groupid: '348994793',
-//           user_visible_name: 'MY_ROLE_PROFILE',
-//         }, {
-//           groupid: '348994794',
-//           user_visible_name: 'YOUR_ROLE_PROFILE',
-//         }],
-//       },
-//       'BAAD11BAA@AdobeOrg': {
-//         groups: [{
-//           groupid: '348994795',
-//           user_visible_name: 'MY_ROLE_PROFILE',
-//         }],
-//       },
-//     };
-
-//     const roles = await getDBRoles(client, { imsUserId, imsOrgId, imsGroups });
-//     expect(roles).to.deep.equal(new Set(['MY_ROLE1', 'MY_ROLE2', 'MY_ROLE3']));
-
-//     expect(commands).to.have.length(1);
-//     expect(commands[0].constructor.name).to.equal('QueryCommand');
-
-//     const eav = {
-//       ':userident': {
-//         S: 'imsID:abc@def.g',
-//       },
-//       ':orgid': {
-//         S: 'F00FEEFAA123',
-//       },
-//       ':orgident': {
-//         S: 'imsOrgID:F00FEEFAA123',
-//       },
-//       ':grp0': {
-//         S: 'imsOrgID/groupID:F00FEEFAA123/348994793',
-//       },
-//       ':grp1': {
-//         S: 'imsOrgID/groupID:F00FEEFAA123/348994794',
-//       },
-//     };
-//     expect(commands[0].input.ExpressionAttributeValues).to.deep.equal(eav);
-//     expect(commands[0].input.KeyConditionExpression).to.equal('orgid = :orgid');
-//     expect(commands[0].input.FilterExpression).to.equal(
-//       'identifier IN (:userident, :orgident, :grp0, :grp1)',
-//     );
-//     expect(commands[0].input.ProjectionExpression).to.equal('#roles');
-//     expect(commands[0].input.ExpressionAttributeNames).to.deep.equal(
-//       { '#roles': 'roles' },
-//     );
-//   });
-// });
-
-// describe('Get ACLs', async () => {
-//   it('get acls from DB', async () => {
-//     const commands = [];
-//     const client = {
-//       send(c) {
-//         commands.push(c);
-//         return {
-//           Items: [
-//             {
-//               role: {
-//                 S: 'role1',
-//               },
-//               acl: {
-//                 L: [{
-//                   M: {
-//                     actions: { SS: ['C', 'R', 'U', 'D'] },
-//                     path: { S: '/**' },
-//                   },
-//                 }, {
-//                   M: {
-//                     actions: { SS: ['R'] },
-//                     path: { S: '/a' },
-//                   },
-//                 }, {
-//                   M: {
-//                     actions: { SS: ['D'] },
-//                     path: { S: '/some/ */long / path;/* ' },
-//                   },
-//                 }],
-//               },
-//             },
-//           ],
-//         };
-//       },
-//     };
-
-//     const orgId = 'FEEFAAF00';
-//     const roles = ['role1', 'role2'];
-//     const acls = await getDBAcls(client, orgId, roles);
-//     expect(acls).to.have.length(1);
-//     expect(acls[0].role).to.equal('role1');
-//     expect(acls[0].acl).to.have.length(3);
-//     expect(acls[0].acl[0].path).to.equal('/some/ */long / path;/* ');
-//     expect(acls[0].acl[0].actions).to.deep.equal(['D']);
-//     expect(acls[0].acl[1].path).to.equal('/a');
-//     expect(acls[0].acl[1].actions).to.deep.equal(['R']);
-//     expect(acls[0].acl[2].path).to.equal('/**');
-//     expect(acls[0].acl[2].actions).to.deep.equal(['C', 'R', 'U', 'D']);
-
-//     expect(commands).to.have.length(1);
-//     const { input } = commands[0];
-//     expect(input.KeyConditionExpression).to.equal('imsorgid = :orgid');
-//     expect(input.ExpressionAttributeValues).to.deep.equal({
-//       ':orgid': { S: orgId },
-//       ':role0': { S: 'role1' },
-//       ':role1': { S: 'role2' },
-//     });
-//     expect(input.FilterExpression).to.equal('#role IN (:role0, :role1)');
-//     expect(input.ProjectionExpression).to.equal('acl, #role');
-//     expect(input.ExpressionAttributeNames).to.deep.equal({ '#role': 'role' });
-//   });
-// });
