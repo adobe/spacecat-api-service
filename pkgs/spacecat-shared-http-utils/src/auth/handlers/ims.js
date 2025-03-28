@@ -283,7 +283,7 @@ export default class AdobeImsHandler extends AbstractHandler {
         .withProfile(profile)
         .withRBAC(acls);
     } catch (e) {
-      this.log(`Failed to validate token: ${e}`, 'error');
+      this.log(`Failed to validate token: ${e.message} - ${e.stack}`, 'error');
     }
 
     return null;
