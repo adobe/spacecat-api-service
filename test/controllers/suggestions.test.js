@@ -25,6 +25,13 @@ use(sinonChai);
 
 describe('Suggestions Controller', () => {
   const sandbox = sinon.createSandbox();
+  const authContext = {
+    attributes: {
+      authInfo: {
+        scopes: [{ name: 'admin' }],
+      },
+    },
+  };
 
   const SUGGESTION_IDS = [
     'a4a6055c-de4b-4552-bc0c-01fdb45b98d5',
@@ -1038,6 +1045,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...authContext,
       });
 
       expect(response.status).to.equal(207);
@@ -1064,6 +1072,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...authContext,
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1076,6 +1085,7 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...authContext,
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1088,6 +1098,7 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
         },
+        ...authContext,
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1101,6 +1112,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: 'not an array' },
+        ...authContext,
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1114,6 +1126,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...authContext,
       });
       expect(response.status).to.equal(404);
       const error = await response.json();
@@ -1127,6 +1140,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID_NOT_FOUND,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...authContext,
       });
       expect(response.status).to.equal(404);
       const error = await response.json();
@@ -1140,6 +1154,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID_NOT_ENABLED,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...authContext,
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1153,6 +1168,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: ['not-found'] },
+        ...authContext,
       });
       expect(response.status).to.equal(207);
       expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
@@ -1168,6 +1184,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: ['not-found', SUGGESTION_IDS[2]] },
+        ...authContext,
       });
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
@@ -1196,6 +1213,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        ...authContext,
       });
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();

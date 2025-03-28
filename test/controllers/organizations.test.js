@@ -31,10 +31,19 @@ use(sinonChai);
 
 describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();
+  const orgId = '9033554c-de8a-44ac-a356-09b51af8cc28';
+  const authContext = {
+    attributes: {
+      authInfo: {
+        scopes: [{ name: 'admin' }],
+        profile: { id: orgId },
+      },
+    },
+  };
   const sites = [
     {
       siteId: 'site1',
-      organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+      organizationId: orgId,
       baseURL: 'https://site1.com',
       deliveryType: 'aem_edge',
       config: Config({}),
@@ -187,6 +196,7 @@ describe('Organizations Controller', () => {
     mockDataAccess.Organization.create.resolves(organizations[0]);
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
+      ...authContext,
     });
 
     expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
@@ -201,6 +211,7 @@ describe('Organizations Controller', () => {
     mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
+      ...authContext,
     });
 
     expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
@@ -308,7 +319,7 @@ describe('Organizations Controller', () => {
   it('gets all organizations', async () => {
     mockDataAccess.Organization.all.resolves(organizations);
 
-    const result = await organizationsController.getAll();
+    const result = await organizationsController.getAll(authContext);
     const resultOrganizations = await result.json();
 
     expect(mockDataAccess.Organization.all).to.have.been.calledOnce;
@@ -339,7 +350,7 @@ describe('Organizations Controller', () => {
 
   it('gets an organization by id', async () => {
     mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
     const organization = await result.json();
 
     expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith('9033554c-de8a-44ac-a356-09b51af8cc28');
@@ -352,7 +363,7 @@ describe('Organizations Controller', () => {
   it('returns not found when an organization is not found by id', async () => {
     mockDataAccess.Organization.findById.resolves(null);
 
-    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
     const error = await result.json();
 
     expect(result.status).to.equal(404);
@@ -360,7 +371,7 @@ describe('Organizations Controller', () => {
   });
 
   it('returns bad request if organization id is not provided', async () => {
-    const result = await organizationsController.getByID({ params: {} });
+    const result = await organizationsController.getByID({ params: {}, ...authContext });
     const error = await result.json();
 
     expect(result.status).to.equal(400);

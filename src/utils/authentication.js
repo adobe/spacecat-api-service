@@ -25,9 +25,9 @@ export const userBelongsToOrg = (context) => {
   return profile.id === organizationId || isAdmin(context);
 };
 
-export const userHasSubService = (context, subservice) => {
+export const userHasSubService = (context, subService) => {
   const { attributes: { authInfo: { scopes } } } = context;
   return scopes.some(
-    (scope) => scope.name === 'user' && scope.subScopes.includes(`${SERVICE_CODE}_${subservice}`),
-  );
+    (scope) => scope.name === 'user' && scope.subScopes.includes(`${SERVICE_CODE}_${subService}`),
+  ) || isAdmin(context);
 };
