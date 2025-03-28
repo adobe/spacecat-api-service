@@ -105,7 +105,7 @@
     "@adobe/helix-universal-devserver": "1.1.93",
     "@adobe/semantic-release-coralogix": "1.1.35",
     "@adobe/semantic-release-skms-cmr": "1.1.5",
-    "@redocly/cli": "1.33.0",
+    "@redocly/cli": "1.34.0",
     "@semantic-release/changelog": "6.0.3",
     "@semantic-release/exec": "7.0.3",
     "@semantic-release/git": "10.0.1",
