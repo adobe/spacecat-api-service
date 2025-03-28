@@ -110,6 +110,10 @@ function OrganizationsController(dataAccess, env) {
    * @throws {Error} If IMS organization ID is not provided, or if not found.
    */
   const getByImsOrgID = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('Only users belonging to the organization can view it');
+    }
+
     const imsOrgId = context.params?.imsOrgId;
 
     if (!hasText(imsOrgId)) {
@@ -131,6 +135,9 @@ function OrganizationsController(dataAccess, env) {
    * @throws {Error} If IMS org ID is not provided, org not found, or Slack config not found.
    */
   const getSlackConfigByImsOrgID = async (context) => {
+    if (!isAdmin(context)) {
+      return forbidden('Only admins can view Slack configurations');
+    }
     const response = await getByImsOrgID(context);
     if (response.status !== 200) {
       return response;
@@ -157,6 +164,9 @@ function OrganizationsController(dataAccess, env) {
    * @returns {Promise<Response>} Sites.
    */
   const getSitesForOrganization = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
     const organizationId = context.params?.organizationId;
 
     if (!isValidUUID(organizationId)) {
@@ -174,6 +184,9 @@ function OrganizationsController(dataAccess, env) {
    * @return {Promise<Response>} Delete response.
    */
   const removeOrganization = async (context) => {
+    if (!isAdmin(context)) {
+      return forbidden('Only admins can delete Organizations');
+    }
     const organizationId = context.params?.organizationId;
 
     if (!isValidUUID(organizationId)) {
@@ -197,6 +210,9 @@ function OrganizationsController(dataAccess, env) {
    * @return {Promise<Response>} Organization response.
    */
   const updateOrganization = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('Only users belonging to the organization can update it');
+    }
     const organizationId = context.params?.organizationId;
 
     if (!isValidUUID(organizationId)) {

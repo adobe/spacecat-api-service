@@ -306,6 +306,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
@@ -315,7 +316,9 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets all suggestions for an opportunity returns bad request if no site ID is passed', async () => {
-    const response = await suggestionsController.getAllForOpportunity({ params: {} });
+    const response = await suggestionsController.getAllForOpportunity(
+      { params: {}, ...authContext },
+    );
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -325,6 +328,7 @@ describe('Suggestions Controller', () => {
   it('gets all suggestions for an opportunity returns bad request if no opportunity ID is passed', async () => {
     const response = await suggestionsController.getAllForOpportunity({
       params: { siteId: SITE_ID },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -338,6 +342,7 @@ describe('Suggestions Controller', () => {
         siteId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
         opportunityId: OPPORTUNITY_ID,
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
@@ -352,6 +357,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         status: 'NEW',
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
@@ -366,6 +372,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         status: 'NEW',
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -376,6 +383,7 @@ describe('Suggestions Controller', () => {
   it('gets all suggestions for an opportunity by status returns bad request if no opportunity ID is passed', async () => {
     const response = await suggestionsController.getByStatus({
       params: { siteId: SITE_ID, status: 'NEW' },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -389,6 +397,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -403,6 +412,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         status: 'NEW',
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
@@ -417,6 +427,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
@@ -430,6 +441,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -443,6 +455,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -456,6 +469,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -471,6 +485,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
@@ -485,6 +500,7 @@ describe('Suggestions Controller', () => {
         opportunityId: 'cd43d166-cebd-40cc-98bd-23777a8608c0', // id does not exist
         suggestionId: SUGGESTION_IDS[0],
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
@@ -499,6 +515,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.true;
     expect(response.status).to.equal(404);
@@ -513,6 +530,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [suggs[0], suggs[1]],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const createResponse = await response.json();
@@ -541,6 +559,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [suggs[0], suggs[1]],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const createResponse = await response.json();
@@ -564,6 +583,7 @@ describe('Suggestions Controller', () => {
     const response = await suggestionsController.createSuggestions({
       params: { opportunityId: OPPORTUNITY_ID },
       data: suggs,
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -575,6 +595,7 @@ describe('Suggestions Controller', () => {
     const response = await suggestionsController.createSuggestions({
       params: { siteId: SITE_ID },
       data: suggs,
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -588,6 +609,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -602,6 +624,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: 'not an array',
+      ...authContext,
     });
     expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
     expect(response.status).to.equal(400);
@@ -618,6 +641,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
+      ...authContext,
     });
 
     expect(response.status).to.equal(200);
@@ -636,6 +660,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -650,6 +675,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -664,6 +690,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: { rank, data, kpiDeltas },
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -680,6 +707,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
+      ...authContext,
     });
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -695,6 +723,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
+      ...authContext,
     });
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -710,6 +739,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
+      ...authContext,
     });
     expect(response.status).to.equal(404);
     const error = await response.json();
@@ -723,6 +753,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -737,6 +768,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: 'not an object',
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -752,6 +784,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank: 'throw-error', data, kpiDeltas },
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -768,6 +801,7 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
+      ...authContext,
     });
     expect(response.status).to.equal(500);
     const error = await response.json();
@@ -781,6 +815,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED-updated' }],
+      ...authContext,
     });
 
     expect(response.status).to.equal(207);
@@ -807,6 +842,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW-NEW' }, { id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }],
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -819,6 +855,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW-NEW' }, { id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }],
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -831,6 +868,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -844,6 +882,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: 'not an array',
+      ...authContext,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -857,6 +896,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { status: 'NEW-APPROVED' }],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
@@ -883,6 +923,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { id: SUGGESTION_IDS[0], status: 'NEW-APPROVED' }],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
@@ -909,6 +950,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { id: SUGGESTION_IDS[0] }],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
@@ -935,6 +977,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: 'wrong-sugg-id', status: 'NEW-NEW' }, { id: SUGGESTION_IDS[0], status: 'NEW-APPROVED' }],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
@@ -961,6 +1004,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW' }, { id: SUGGESTION_IDS[1], status: 'APPROVED' }],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
@@ -987,6 +1031,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'throw-error' }, { id: SUGGESTION_IDS[1], status: 'throw-error' }],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
@@ -1015,6 +1060,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED updated' }],
+      ...authContext,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
@@ -1283,6 +1329,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
           suggestionId: SUGGESTION_IDS[0],
         },
+        ...authContext,
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1295,6 +1342,7 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           suggestionId: SUGGESTION_IDS[0],
         },
+        ...authContext,
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1307,6 +1355,7 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
         },
+        ...authContext,
       });
       expect(response.status).to.equal(400);
       const error = await response.json();
@@ -1320,6 +1369,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID_NOT_FOUND,
           suggestionId: SUGGESTION_IDS[0],
         },
+        ...authContext,
       });
       expect(response.status).to.equal(404);
       const error = await response.json();
@@ -1334,6 +1384,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
           suggestionId: SUGGESTION_IDS[0],
         },
+        ...authContext,
       });
       expect(response.status).to.equal(404);
       const error = await response.json();
@@ -1349,6 +1400,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
           suggestionId: SUGGESTION_IDS[0],
         },
+        ...authContext,
       });
       expect(response.status).to.equal(500);
       const errorResponse = await response.json();
@@ -1363,6 +1415,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
           suggestionId: SUGGESTION_IDS[0],
         },
+        ...authContext,
       });
       expect(response.status).to.equal(204);
       expect(mockSuggestionDataAccess.Suggestion.findById).to.have.been.calledOnce;

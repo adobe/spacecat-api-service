@@ -27,7 +27,7 @@ import {
 import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { sendAutofixMessage } from '../support/utils.js';
-import { userHasSubService } from '../utils/authentication.js';
+import { userBelongsToOrg, userHasSubService } from '../utils/authentication.js';
 
 /**
  * Suggestions controller.
@@ -59,6 +59,9 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} Array of suggestions response.
    */
   const getAllForOpportunity = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('User does not belong to the organization');
+    }
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
 
@@ -88,6 +91,9 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} Array of suggestions response.
    */
   const getByStatus = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('User does not belong to the organization');
+    }
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
@@ -119,6 +125,9 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} Suggestion response.
    */
   const getByID = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('User does not belong to the organization');
+    }
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
@@ -152,6 +161,9 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} Array of suggestions response.
    */
   const createSuggestions = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('User does not belong to the organization');
+    }
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId || undefined;
 
@@ -213,6 +225,9 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} the updated suggestion data
    */
   const patchSuggestion = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('User does not belong to the organization');
+    }
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
@@ -280,6 +295,9 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} the updated opportunity data
    */
   const patchSuggestionsStatus = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('User does not belong to the organization');
+    }
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
@@ -389,6 +407,9 @@ function SuggestionsController(dataAccess, sqs, env) {
     return createResponse(fullResponse, 207);
   };
   const autofixSuggestions = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('User does not belong to the organization');
+    }
     if (!userHasSubService(context, 'autofix')) {
       return forbidden('User does not have autofix sub-service');
     }
@@ -488,6 +509,9 @@ function SuggestionsController(dataAccess, sqs, env) {
   };
 
   const removeSuggestion = async (context) => {
+    if (!userBelongsToOrg(context)) {
+      return forbidden('User does not belong to the organization');
+    }
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;

@@ -20,9 +20,9 @@ export const isAdmin = (context) => {
 export const userBelongsToOrg = (context) => {
   const {
     attributes: { authInfo },
-    params: { organizationId },
+    params: { imsOrgId },
   } = context;
-  return authInfo.hasOrganization(organizationId) || isAdmin(context);
+  return authInfo.hasOrganization(imsOrgId) || isAdmin(context);
 };
 
 export const userHasSubService = (context, subService) => {
