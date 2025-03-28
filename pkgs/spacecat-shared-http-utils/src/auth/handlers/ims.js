@@ -267,6 +267,8 @@ export default class AdobeImsHandler extends AbstractHandler {
 
     try {
       const imsProfile = await context.imsClient.getImsUserProfile(token);
+      this.log.debug(`IMS profile: ${JSON.stringify(imsProfile)}`);
+
       const acls = await getAcls({
         imsUserId: imsProfile.userId,
         imsOrgs: [imsProfile.ownerOrg],

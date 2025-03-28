@@ -367,7 +367,6 @@ export default class ImsClient {
     }
 
     const profile = await profileResponse.json();
-    console.log('§§§ RAW IMS Profile:', profile);
     return {
       ...profile,
       organizations: getOrganizationList(profile.roles),
