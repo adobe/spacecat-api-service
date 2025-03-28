@@ -10,18 +10,14 @@
  * governing permissions and limitations under the License.
  */
 
-import { context as h2, h1 } from '@adobe/fetch';
 import { hasText } from '@adobe/spacecat-shared-utils';
-
-/* c8 ignore next 3 */
-export const { fetch } = process.env.HELIX_FETCH_FORCE_HTTP1
-  ? h1()
-  : h2();
 
 export const IMS_TOKEN_ENDPOINT = '/ims/token/v4';
 export const IMS_TOKEN_ENDPOINT_V3 = '/ims/token/v3';
 export const IMS_PRODUCT_CONTEXT_BY_ORG_ENDPOINT = '/ims/fetch_pc_by_org/v1';
 export const IMS_ORGANIZATIONS_ENDPOINT = '/ims/organizations';
+export const IMS_ALL_ORGANIZATIONS_ENDPOINT = '/ims/organizations/v6';
+export const IMS_VALIDATE_TOKEN_ENDPOINT = '/ims/validate_token/v1';
 export const IMS_PROFILE_ENDPOINT = '/ims/profile/v1';
 
 /**

@@ -12,3 +12,7 @@
 // eslint-disable-next-line no-console
 console.log('Forcing HTTP/1.1 for Adobe Fetch');
 process.env.HELIX_FETCH_FORCE_HTTP1 = 'true';
+
+console.log('Disabling AWS XRay');
+process.env.AWS_XRAY_SDK_ENABLED = 'false';
+process.env.AWS_XRAY_CONTEXT_MISSING = 'IGNORE_ERROR';

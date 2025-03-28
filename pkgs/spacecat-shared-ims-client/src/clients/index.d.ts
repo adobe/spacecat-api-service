@@ -49,4 +49,27 @@ export class ImsClient {
    *     }>} The organization details.
    */
   getImsOrganizationDetails(imsOrgId: string): Promise<object>;
+
+  /**
+   * Returns the user profile for the given IMS access token.
+   * @param {string} imsAccessToken The IMS access token.
+   * @returns {Promise<object>} The user profile.
+   */
+  getImsUserProfile(imsAccessToken: string): Promise<object>;
+
+  /**
+   * Returns the user organizations for the given IMS access token.
+   * @param {string} imsAccessToken The IMS access token.
+   * @returns {Promise<object>} The user organizations
+   * @throws {Error} If the request fails.
+   */
+  getImsUserOrganizations(imsAccessToken: string): Promise<object>;
+
+  /**
+   * Returns the user organizations for the given IMS access token using the v3 APIs.
+   * @param {string} imsAccessToken The IMS access token.
+   * @returns {Promise<object>} The user organizations
+   * @throws {Error} If the request fails.
+   */
+  validateAccessToken(imsAccessToken: string): Promise<boolean>;
 }
