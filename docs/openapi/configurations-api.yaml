@@ -62,7 +62,7 @@ latest-jobs-configurations:
         $ref: './responses.yaml#/500'
 latest-jobs-configuration-by-type:
   parameters:
-    - $ref: './parameters.yaml#/type'
+    - $ref: './parameters.yaml#/jobType'
   get:
     tags:
       - configuration
