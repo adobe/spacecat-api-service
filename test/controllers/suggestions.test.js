@@ -159,7 +159,6 @@ describe('Suggestions Controller', () => {
   beforeEach(() => {
     context = {
       dataAccess: mockSuggestionDataAccess,
-      ...context,
     };
     opportunity = {
       getId: sandbox.stub().returns(OPPORTUNITY_ID),

@@ -91,7 +91,7 @@ async function run(request, context) {
 
   try {
     const routeHandlers = getRouteHandlers(
-      AuditsController(context.dataAccess),
+      AuditsController(context),
       ConfigurationController(context.dataAccess),
       HooksController(context),
       OrganizationsController(context, context.env),

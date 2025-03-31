@@ -15,6 +15,7 @@
 import { Audit, LatestAudit } from '@adobe/spacecat-shared-data-access';
 import AuditSchema from '@adobe/spacecat-shared-data-access/src/models/audit/audit.schema.js';
 import LatestAuditSchema from '@adobe/spacecat-shared-data-access/src/models/latest-audit/latest-audit.schema.js';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -125,8 +126,17 @@ describe('Audits Controller', () => {
     getHandlers: sandbox.stub().returns(handlers),
   };
 
-  let mockDataAccess;
+  const authContext = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true })
+        .withAuthenticated(true)
+      ,
+    },
+  };
 
+  let mockDataAccess;
   let auditsController;
 
   beforeEach(() => {
@@ -151,8 +161,12 @@ describe('Audits Controller', () => {
       getLatestAuditForSite: sandbox.stub(),
       patchAuditForSite: sandbox.stub(),
     };
+    const ctx = {
+      dataAccess: mockDataAccess,
+      ...authContext,
+    };
 
-    auditsController = AuditsController(mockDataAccess);
+    auditsController = AuditsController(ctx);
   });
 
   afterEach(() => {
@@ -171,11 +185,20 @@ describe('Audits Controller', () => {
     });
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => AuditsController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => AuditsController()).to.throw('Data access required');
+    expect(() => AuditsController({ dataAccess: {} })).to.throw('Data access required');
   });
 
   describe('getAllForSite', () => {
+    beforeEach(() => {
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: () => ({}),
+      });
+    });
     it('retrieves all audits for a site', async () => {
       const siteId = SITE_ID;
 
@@ -261,6 +284,9 @@ describe('Audits Controller', () => {
       const siteId = SITE_ID;
 
       mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: () => ({}),
+      });
 
       const result = await auditsController.getAllLatestForSite({ params: { siteId } });
       const audits = await result.json();
@@ -283,6 +309,9 @@ describe('Audits Controller', () => {
       const expectedAudit = AuditDto.toJSON(mockLatestAudits[0]);
 
       mockDataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([mockLatestAudits[0]]);
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: () => ({}),
+      });
 
       const result = await auditsController.getLatestForSite({ params: { siteId, auditType } });
       const audit = await result.json();

@@ -36,7 +36,7 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
-  hasAccess(entity, subService = '') {
+  async hasAccess(entity, subService = '') {
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
@@ -45,7 +45,11 @@ export default class AccessControlUtil {
 
     let imsOrgId;
     if (entity instanceof Site) {
-      imsOrgId = entity.getOrganization().getImsOrgId();
+      const org = await entity.getOrganization();
+      if (!isNonEmptyObject(org)) {
+        throw new Error('Missing organization for site');
+      }
+      imsOrgId = org.getImsOrgId();
     } else if (entity instanceof Organization) {
       imsOrgId = entity.getImsOrgId();
     }

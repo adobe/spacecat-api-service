@@ -30,7 +30,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
- * @param ctx - Context of the request.
+ * @param {object} ctx - Context of the request.
  * @param {object} env - Environment object.
  * @returns {object} Organizations controller.
  * @constructor
@@ -103,7 +103,7 @@ function OrganizationsController(ctx, env) {
       return notFound('Organization not found');
     }
 
-    if (!accessControlUtil.hasAccess(organization)) {
+    if (!await accessControlUtil.hasAccess(organization)) {
       return forbidden('Only users belonging to the organization can view it');
     }
 
@@ -128,7 +128,7 @@ function OrganizationsController(ctx, env) {
       return notFound(`Organization not found by IMS org ID: ${imsOrgId}`);
     }
 
-    if (!accessControlUtil.hasAccess(organization)) {
+    if (!await accessControlUtil.hasAccess(organization)) {
       return forbidden('Only users belonging to the organization can view it');
     }
 
@@ -182,7 +182,7 @@ function OrganizationsController(ctx, env) {
       return notFound(`Organization not found by IMS org ID: ${organization}`);
     }
 
-    if (!accessControlUtil.hasAccess(organization)) {
+    if (!await accessControlUtil.hasAccess(organization)) {
       return forbidden('Only users belonging to the organization can view its sites');
     }
 
@@ -239,7 +239,7 @@ function OrganizationsController(ctx, env) {
       return badRequest('Request body required');
     }
 
-    if (!accessControlUtil.hasAccess(organization)) {
+    if (!await accessControlUtil.hasAccess(organization)) {
       return forbidden('Only users belonging to the organization can update it');
     }
 

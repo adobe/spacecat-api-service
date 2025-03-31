@@ -31,7 +31,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * Suggestions controller.
- * @param ctx - Context of the request.
+ * @param {object} ctx - Context of the request.
  * @param {SQS} sqs - SQS client.
  * @param env
  * @returns {object} Suggestions controller.
@@ -83,7 +83,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
     }
 
@@ -123,7 +123,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
     }
 
@@ -166,7 +166,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
     }
 
@@ -212,7 +212,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
     }
 
@@ -278,7 +278,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
     }
 
@@ -349,7 +349,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
     }
 
@@ -573,7 +573,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!accessControlUtil.hasAccess(site)) {
+    if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
     }
 
