@@ -410,8 +410,8 @@ function SuggestionsController(dataAccess, sqs, env) {
     if (!userBelongsToOrg(context)) {
       return forbidden('User does not belong to the organization');
     }
-    if (!userHasSubService(context, 'autofix')) {
-      return forbidden('User does not have autofix sub-service');
+    if (!userHasSubService(context, 'auto_fix')) {
+      return forbidden('User does not have sufficient permissions');
     }
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
