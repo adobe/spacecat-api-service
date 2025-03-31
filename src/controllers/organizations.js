@@ -18,7 +18,7 @@ import {
   ok, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  hasText,
+  hasText, isNonEmptyObject,
   isObject,
   isString,
   isValidUUID,
@@ -26,25 +26,32 @@ import {
 
 import { OrganizationDto } from '../dto/organization.js';
 import { SiteDto } from '../dto/site.js';
-import { isAdmin, userBelongsToOrg } from '../utils/authentication.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
- * @param {DataAccess} dataAccess - Data access.
+ * @param ctx - Context of the request.
  * @param {object} env - Environment object.
  * @returns {object} Organizations controller.
  * @constructor
  */
-function OrganizationsController(dataAccess, env) {
-  if (!isObject(dataAccess)) {
+function OrganizationsController(ctx, env) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
-  if (!isObject(env)) {
+  if (!isNonEmptyObject(env)) {
     throw new Error('Environment object required');
   }
   const { SLACK_URL_WORKSPACE_EXTERNAL: slackExternalWorkspaceUrl } = env;
   const { Organization, Site } = dataAccess;
+
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Creates an organization. The organization ID is generated automatically.
@@ -52,7 +59,7 @@ function OrganizationsController(dataAccess, env) {
    * @return {Promise<Response>} Organization response.
    */
   const createOrganization = async (context) => {
-    if (!isAdmin(context)) {
+    if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new Organizations');
     }
 
@@ -68,8 +75,8 @@ function OrganizationsController(dataAccess, env) {
    * Gets all organizations.
    * @returns {Promise<Response>} Array of organizations response.
    */
-  const getAll = async (context) => {
-    if (!isAdmin(context)) {
+  const getAll = async () => {
+    if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can view all Organizations');
     }
 
@@ -85,10 +92,6 @@ function OrganizationsController(dataAccess, env) {
    * @throws {Error} If organization ID is not provided.
    */
   const getByID = async (context) => {
-    if (!userBelongsToOrg(context)) {
-      return forbidden('Only users belonging to the organization can view it');
-    }
-
     const organizationId = context.params?.organizationId;
 
     if (!isValidUUID(organizationId)) {
@@ -98,6 +101,10 @@ function OrganizationsController(dataAccess, env) {
     const organization = await Organization.findById(organizationId);
     if (!organization) {
       return notFound('Organization not found');
+    }
+
+    if (!accessControlUtil.hasAccess(organization)) {
+      return forbidden('Only users belonging to the organization can view it');
     }
 
     return ok(OrganizationDto.toJSON(organization));
@@ -110,10 +117,6 @@ function OrganizationsController(dataAccess, env) {
    * @throws {Error} If IMS organization ID is not provided, or if not found.
    */
   const getByImsOrgID = async (context) => {
-    if (!userBelongsToOrg(context)) {
-      return forbidden('Only users belonging to the organization can view it');
-    }
-
     const imsOrgId = context.params?.imsOrgId;
 
     if (!hasText(imsOrgId)) {
@@ -123,6 +126,10 @@ function OrganizationsController(dataAccess, env) {
     const organization = await Organization.findByImsOrgId(imsOrgId);
     if (!organization) {
       return notFound(`Organization not found by IMS org ID: ${imsOrgId}`);
+    }
+
+    if (!accessControlUtil.hasAccess(organization)) {
+      return forbidden('Only users belonging to the organization can view it');
     }
 
     return ok(OrganizationDto.toJSON(organization));
@@ -135,7 +142,7 @@ function OrganizationsController(dataAccess, env) {
    * @throws {Error} If IMS org ID is not provided, org not found, or Slack config not found.
    */
   const getSlackConfigByImsOrgID = async (context) => {
-    if (!isAdmin(context)) {
+    if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can view Slack configurations');
     }
     const response = await getByImsOrgID(context);
@@ -164,13 +171,19 @@ function OrganizationsController(dataAccess, env) {
    * @returns {Promise<Response>} Sites.
    */
   const getSitesForOrganization = async (context) => {
-    if (!userBelongsToOrg(context)) {
-      return forbidden('Only users belonging to the organization can view its sites');
-    }
     const organizationId = context.params?.organizationId;
 
     if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
+    }
+
+    const organization = await Organization.findById(organizationId);
+    if (!organization) {
+      return notFound(`Organization not found by IMS org ID: ${organization}`);
+    }
+
+    if (!accessControlUtil.hasAccess(organization)) {
+      return forbidden('Only users belonging to the organization can view its sites');
     }
 
     const sites = await Site.allByOrganizationId(organizationId);
@@ -184,7 +197,7 @@ function OrganizationsController(dataAccess, env) {
    * @return {Promise<Response>} Delete response.
    */
   const removeOrganization = async (context) => {
-    if (!isAdmin(context)) {
+    if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can delete Organizations');
     }
     const organizationId = context.params?.organizationId;
@@ -210,9 +223,6 @@ function OrganizationsController(dataAccess, env) {
    * @return {Promise<Response>} Organization response.
    */
   const updateOrganization = async (context) => {
-    if (!userBelongsToOrg(context)) {
-      return forbidden('Only users belonging to the organization can update it');
-    }
     const organizationId = context.params?.organizationId;
 
     if (!isValidUUID(organizationId)) {
@@ -227,6 +237,10 @@ function OrganizationsController(dataAccess, env) {
     const requestBody = context.data;
     if (!isObject(requestBody)) {
       return badRequest('Request body required');
+    }
+
+    if (!accessControlUtil.hasAccess(organization)) {
+      return forbidden('Only users belonging to the organization can update it');
     }
 
     let updates = false;

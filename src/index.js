@@ -94,7 +94,7 @@ async function run(request, context) {
       AuditsController(context.dataAccess),
       ConfigurationController(context.dataAccess),
       HooksController(context),
-      OrganizationsController(context.dataAccess, context.env),
+      OrganizationsController(context, context.env),
       SitesController(context.dataAccess, log, context.env),
       ExperimentsController(context.dataAccess),
       SlackController(SlackApp),
@@ -104,7 +104,7 @@ async function run(request, context) {
       ApiKeyController(context),
       SitesAuditsToggleController(context.dataAccess),
       OpportunitiesController(context.dataAccess),
-      SuggestionsController(context.dataAccess, context.sqs, context.env),
+      SuggestionsController(context, context.sqs, context.env),
       BrandsController(context.dataAccess, log, context.env),
     );
 

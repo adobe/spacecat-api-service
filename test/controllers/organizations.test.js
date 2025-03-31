@@ -33,15 +33,6 @@ use(sinonChai);
 describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();
   const orgId = '9033554c-de8a-44ac-a356-09b51af8cc28';
-  const authContext = {
-    attributes: {
-      authInfo: new AuthInfo()
-        .withScopes([{ name: 'admin' }])
-        .withProfile({ is_admin: true })
-        .withAuthenticated(true)
-      ,
-    },
-  };
   const sites = [
     {
       siteId: 'site1',
@@ -149,6 +140,8 @@ describe('Organizations Controller', () => {
 
   let mockDataAccess;
   let organizationsController;
+  let context;
+  let env;
 
   beforeEach(() => {
     mockDataAccess = {
@@ -163,11 +156,22 @@ describe('Organizations Controller', () => {
       },
     };
 
-    const env = {
+    context = {
+      dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true)
+        ,
+      },
+    };
+
+    env = {
       SLACK_URL_WORKSPACE_EXTERNAL: 'https://example-workspace.slack.com',
     };
 
-    organizationsController = OrganizationsController(mockDataAccess, env);
+    organizationsController = OrganizationsController(context, env);
   });
 
   afterEach(() => {
@@ -186,19 +190,23 @@ describe('Organizations Controller', () => {
     });
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => OrganizationsController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => OrganizationsController()).to.throw('Data access required');
+    expect(() => OrganizationsController({ env })).to.throw('Data access required');
   });
 
   it('throws an error if env param is not an object', () => {
-    expect(() => OrganizationsController(mockDataAccess)).to.throw('Environment object required');
+    expect(() => OrganizationsController({ dataAccess: mockDataAccess })).to.throw('Environment object required');
   });
 
   it('creates an organization', async () => {
     mockDataAccess.Organization.create.resolves(organizations[0]);
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
-      ...authContext,
+      ...context,
     });
 
     expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
@@ -213,7 +221,7 @@ describe('Organizations Controller', () => {
     mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
-      ...authContext,
+      ...context,
     });
 
     expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
@@ -233,7 +241,7 @@ describe('Organizations Controller', () => {
         name: 'Organization 1',
         config: {},
       },
-      ...authContext,
+      ...context,
     });
 
     expect(organizations[0].save).to.have.been.calledOnce;
@@ -244,7 +252,7 @@ describe('Organizations Controller', () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
     const response = await organizationsController.updateOrganization(
-      { params: {}, ...authContext },
+      { params: {}, ...context },
     );
     const error = await response.json();
 
@@ -257,7 +265,7 @@ describe('Organizations Controller', () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(null);
 
-    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
+    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const error = await response.json();
 
     expect(organizations[0].save).to.not.have.been.called;
@@ -269,7 +277,7 @@ describe('Organizations Controller', () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
 
-    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
+    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const error = await response.json();
 
     expect(organizations[0].save).to.not.have.been.called;
@@ -281,7 +289,7 @@ describe('Organizations Controller', () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
 
-    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, data: {}, ...authContext });
+    const response = await organizationsController.updateOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, data: {}, ...context });
     const error = await response.json();
 
     expect(organizations[0].save).to.not.have.been.called;
@@ -292,7 +300,7 @@ describe('Organizations Controller', () => {
   it('removes an organization', async () => {
     organizations[0].remove = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
+    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
 
     expect(organizations[0].remove).to.have.been.calledOnce;
     expect(response.status).to.equal(204);
@@ -302,7 +310,7 @@ describe('Organizations Controller', () => {
     organizations[0].remove = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
     const response = await organizationsController.removeOrganization(
-      { params: {}, ...authContext },
+      { params: {}, ...context },
     );
     const error = await response.json();
 
@@ -315,7 +323,7 @@ describe('Organizations Controller', () => {
     organizations[0].remove = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(null);
 
-    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
+    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const error = await response.json();
 
     expect(organizations[0].remove).to.not.have.been.called;
@@ -326,7 +334,7 @@ describe('Organizations Controller', () => {
   it('gets all organizations', async () => {
     mockDataAccess.Organization.all.resolves(organizations);
 
-    const result = await organizationsController.getAll(authContext);
+    const result = await organizationsController.getAll();
     const resultOrganizations = await result.json();
 
     expect(mockDataAccess.Organization.all).to.have.been.calledOnce;
@@ -337,8 +345,9 @@ describe('Organizations Controller', () => {
 
   it('gets all sites of an organization', async () => {
     mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
 
-    const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
+    const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const resultSites = await result.json();
 
     expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledOnceWith('9033554c-de8a-44ac-a356-09b51af8cc28');
@@ -349,7 +358,7 @@ describe('Organizations Controller', () => {
 
   it('returns bad request if organization id is not provided when getting sites for organization', async () => {
     const result = await organizationsController.getSitesForOrganization(
-      { params: {}, ...authContext },
+      { params: {}, ...context },
     );
     const error = await result.json();
 
@@ -359,7 +368,7 @@ describe('Organizations Controller', () => {
 
   it('gets an organization by id', async () => {
     mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const organization = await result.json();
 
     expect(mockDataAccess.Organization.findById).to.have.been.calledOnceWith('9033554c-de8a-44ac-a356-09b51af8cc28');
@@ -372,7 +381,7 @@ describe('Organizations Controller', () => {
   it('returns not found when an organization is not found by id', async () => {
     mockDataAccess.Organization.findById.resolves(null);
 
-    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...authContext });
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const error = await result.json();
 
     expect(result.status).to.equal(404);
@@ -380,7 +389,7 @@ describe('Organizations Controller', () => {
   });
 
   it('returns bad request if organization id is not provided', async () => {
-    const result = await organizationsController.getByID({ params: {}, ...authContext });
+    const result = await organizationsController.getByID({ params: {}, ...context });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
@@ -391,7 +400,7 @@ describe('Organizations Controller', () => {
     mockDataAccess.Organization.findByImsOrgId.resolves(organizations[1]);
     const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
     const result = await organizationsController.getByImsOrgID(
-      { params: { imsOrgId }, ...authContext },
+      { params: { imsOrgId }, ...context },
     );
     const organization = await result.json();
 
@@ -405,7 +414,7 @@ describe('Organizations Controller', () => {
   it('returns not found when an organization is not found by IMS org ID', async () => {
     mockDataAccess.Organization.findByImsOrgId.resolves(null);
 
-    const result = await organizationsController.getByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' }, ...authContext });
+    const result = await organizationsController.getByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' }, ...context });
     const error = await result.json();
 
     expect(result.status).to.equal(404);
@@ -413,7 +422,7 @@ describe('Organizations Controller', () => {
   });
 
   it('returns bad request if IMS org ID is not provided', async () => {
-    const result = await organizationsController.getByImsOrgID({ params: {}, ...authContext });
+    const result = await organizationsController.getByImsOrgID({ params: {}, ...context });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
@@ -424,7 +433,7 @@ describe('Organizations Controller', () => {
     mockDataAccess.Organization.findByImsOrgId.resolves(organizations[1]);
     const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
     const result = await organizationsController.getSlackConfigByImsOrgID(
-      { params: { imsOrgId }, ...authContext },
+      { params: { imsOrgId }, ...context },
     );
     const slackConfig = await result.json();
 
@@ -441,7 +450,7 @@ describe('Organizations Controller', () => {
   it('returns not found when an organization is not found by IMS org ID', async () => {
     mockDataAccess.Organization.findByImsOrgId.resolves(null);
 
-    const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' }, ...authContext });
+    const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId: 'not-found@AdobeOrg' }, ...context });
     const error = await result.json();
 
     expect(result.status).to.equal(404);
@@ -450,7 +459,7 @@ describe('Organizations Controller', () => {
 
   it('returns bad request if IMS org ID is not provided', async () => {
     const result = await organizationsController.getSlackConfigByImsOrgID(
-      { params: {}, ...authContext },
+      { params: {}, ...context },
     );
     const error = await result.json();
 
@@ -461,7 +470,7 @@ describe('Organizations Controller', () => {
   it('returns not found when an organization does not have a Slack channel configuration', async () => {
     mockDataAccess.Organization.findByImsOrgId.resolves(organizations[2]);
 
-    const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId: '9876567890ABCDEF12345678@AdobeOrg' }, ...authContext });
+    const result = await organizationsController.getSlackConfigByImsOrgID({ params: { imsOrgId: '9876567890ABCDEF12345678@AdobeOrg' }, ...context });
     const error = await result.json();
 
     expect(result.status).to.equal(404);
