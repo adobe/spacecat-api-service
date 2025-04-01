@@ -1,3 +1,10 @@
+## [1.102.8](https://github.com/adobe/spacecat-api-service/compare/v1.102.7...v1.102.8) (2025-04-01)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-brand-client to v1.1.2 ([#837](https://github.com/adobe/spacecat-api-service/issues/837)) ([5f2816d](https://github.com/adobe/spacecat-api-service/commit/5f2816d3d8e70fc4b5fd16e4fc5aa0faf94e32b7))
+
 ## [1.102.7](https://github.com/adobe/spacecat-api-service/compare/v1.102.6...v1.102.7) (2025-04-01)
 
 
