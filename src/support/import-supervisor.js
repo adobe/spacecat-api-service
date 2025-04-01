@@ -69,7 +69,7 @@ function ImportSupervisor(services, config) {
     // Check that this import API key has capacity to start an import job
     for (const job of runningImportJobs) {
       if (job.getHashedApiKey() === hashedApiKey) {
-        throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more import jobs`, 429);
+        throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more import jobs. Job ${job.getId()} is active.`, 429);
       }
     }
 
