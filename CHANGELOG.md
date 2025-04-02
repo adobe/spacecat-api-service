@@ -4,6 +4,21 @@
 ### Bug Fixes
 
 * aws subscription ([#743](https://github.com/adobe/spacecat-api-service/issues/743)) ([7259d4c](https://github.com/adobe/spacecat-api-service/commit/7259d4cb5f7ac64bc76e6bf84e4b9d680797b83f))
+* semantic release + stage deployment ([#842](https://github.com/adobe/spacecat-api-service/issues/842)) ([d51cde7](https://github.com/adobe/spacecat-api-service/commit/d51cde72e68b0fc639c23cfaf88cda9933c9dc5d))
+
+## [1.102.12](https://github.com/adobe/spacecat-api-service/compare/v1.102.11...v1.102.12) (2025-04-02)
+
+
+### Bug Fixes
+
+* aws subscription ([#743](https://github.com/adobe/spacecat-api-service/issues/743)) ([7259d4c](https://github.com/adobe/spacecat-api-service/commit/7259d4cb5f7ac64bc76e6bf84e4b9d680797b83f))
+
+## [1.102.12](https://github.com/adobe/spacecat-api-service/compare/v1.102.11...v1.102.12) (2025-04-02)
+
+
+### Bug Fixes
+
+* aws subscription ([#743](https://github.com/adobe/spacecat-api-service/issues/743)) ([7259d4c](https://github.com/adobe/spacecat-api-service/commit/7259d4cb5f7ac64bc76e6bf84e4b9d680797b83f))
 
 ## [1.102.11](https://github.com/adobe/spacecat-api-service/compare/v1.102.10...v1.102.11) (2025-04-02)
 
