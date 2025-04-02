@@ -57,6 +57,15 @@ AuditType:
     - 'meta-tags'
     - 'broken-internal-links'
     - 'experimentation-opportunities'
+    - 'experimentation'
+    - 'conversion'
+    - 'organic-keywords'
+    - 'organic-traffic'
+    - 'experimentation-ess-daily'
+    - 'experimentation-ess-monthly'
+    - 'forms-opportunities'
+    - 'site-detection'
+    - 'alt-text'
   example: 'cwv'
 JobType:
   type: string
