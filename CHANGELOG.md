@@ -1,3 +1,10 @@
+## [1.102.13](https://github.com/adobe/spacecat-api-service/compare/v1.102.12...v1.102.13) (2025-04-02)
+
+
+### Bug Fixes
+
+* stage deployment ([#844](https://github.com/adobe/spacecat-api-service/issues/844)) ([3e0e845](https://github.com/adobe/spacecat-api-service/commit/3e0e845a0c35b8d4a810dd83bab52131c20c6e4b))
+
 ## [1.102.12](https://github.com/adobe/spacecat-api-service/compare/v1.102.11...v1.102.12) (2025-04-02)
 
 
