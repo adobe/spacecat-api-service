@@ -25,7 +25,7 @@ export default class AccessControlUtil {
   }
 
   constructor(context) {
-    this.authInfo = context.attributes.authInfo;
+    this.authInfo = context.attributes?.authInfo;
 
     if (!isNonEmptyObject(this.authInfo)) {
       throw new Error('Missing authInfo');
