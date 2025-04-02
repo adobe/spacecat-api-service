@@ -1,3 +1,31 @@
+## [1.102.12](https://github.com/adobe/spacecat-api-service/compare/v1.102.11...v1.102.12) (2025-04-02)
+
+
+### Bug Fixes
+
+* aws subscription ([#743](https://github.com/adobe/spacecat-api-service/issues/743)) ([7259d4c](https://github.com/adobe/spacecat-api-service/commit/7259d4cb5f7ac64bc76e6bf84e4b9d680797b83f))
+
+## [1.102.11](https://github.com/adobe/spacecat-api-service/compare/v1.102.10...v1.102.11) (2025-04-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.10.2 ([#841](https://github.com/adobe/spacecat-api-service/issues/841)) ([37baf72](https://github.com/adobe/spacecat-api-service/commit/37baf72c08bba0f198a48714419fe5891808faad))
+
+## [1.102.10](https://github.com/adobe/spacecat-api-service/compare/v1.102.9...v1.102.10) (2025-04-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.36.0 ([#840](https://github.com/adobe/spacecat-api-service/issues/840)) ([c425107](https://github.com/adobe/spacecat-api-service/commit/c425107198c44bf820f99f790845d9d84cb4298e))
+
+## [1.102.9](https://github.com/adobe/spacecat-api-service/compare/v1.102.8...v1.102.9) (2025-04-01)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#838](https://github.com/adobe/spacecat-api-service/issues/838)) ([657f8a1](https://github.com/adobe/spacecat-api-service/commit/657f8a1f22153ebc67a5d7b57980aa1cdadafd2b))
+
 ## [1.102.8](https://github.com/adobe/spacecat-api-service/compare/v1.102.7...v1.102.8) (2025-04-01)
 
 
