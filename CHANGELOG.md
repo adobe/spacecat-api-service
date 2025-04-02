@@ -1,3 +1,10 @@
+## [1.102.11](https://github.com/adobe/spacecat-api-service/compare/v1.102.10...v1.102.11) (2025-04-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.10.2 ([#841](https://github.com/adobe/spacecat-api-service/issues/841)) ([37baf72](https://github.com/adobe/spacecat-api-service/commit/37baf72c08bba0f198a48714419fe5891808faad))
+
 ## [1.102.10](https://github.com/adobe/spacecat-api-service/compare/v1.102.9...v1.102.10) (2025-04-02)
 
 
