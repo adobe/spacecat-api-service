@@ -70,8 +70,45 @@ AuditType:
 JobType:
   type: string
   enum:
-    - 'import'
-  example: 'import'
+    - 'rum-to-aa'
+    - 'experimentation-internal'
+    - '404'
+    - 'lhs-mobile'
+    - 'lhs-desktop'
+    - 'experimentation'
+    - 'top-pages'
+    - 'organic-traffic'
+    - 'all-traffic'
+    - 'experimentation-ess-all'
+    - 'experimentation-ess-daily'
+    - 'broken-backlinks-internal'
+    - 'broken-backlinks-external'
+    - '404-internal'
+    - '404-external'
+    - 'organic-traffic-internal'
+    - 'experimentation-opportunities'
+    - 'structured-data'
+    - 'structured-data-internal'
+    - 'cwv'
+    - 'cwv-internal'
+    - 'cwv-external'
+    - 'broken-backlinks'
+    - 'broken-internal-links'
+    - 'broken-internal-links-internal'
+    - 'broken-internal-links-external'
+    - 'meta-tags'
+    - 'scrape-top-pages'
+    - 'forms-opportunities'
+    - 'forms-internal'
+    - 'meta-tags-internal'
+    - 'experimentation-opportunities-internal'
+    - 'experimentation-opportunities-external'
+    - 'site-detection'
+  example:
+    type:
+      - 'broken-backlinks'
+      - 'all-traffic'
+      - 'forms-opportunities'
 URL:
   type: string
   format: url
@@ -1104,6 +1141,8 @@ Job:
       description: Specifies how often the job should run, e.g., 'daily'. This is part of job scheduling information.
     type:
       type: string
+      items:
+        $ref: '#/JobType'
       description: The job type, indicating the specific action or task that the job performs, such as 'rum-to-aa' indicating a data import job from RUM to AA.
 AnalyticsSiteIntegration:
   type: object
