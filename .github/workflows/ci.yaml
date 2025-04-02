@@ -69,6 +69,14 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: 'false'
+
+      - name: Setup Node & NPM
+        uses: ./.github/actions/setup-node-npm
+
       - name: Configure AWS for STAGE
         uses: ./.github/actions/configure-aws
         with:
