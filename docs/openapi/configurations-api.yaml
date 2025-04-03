@@ -50,38 +50,7 @@ latest-jobs-configurations:
       content:
         application/json:
           schema:
-            type: array
-            items:
-              type: object
-              properties:
-                group: # should we create a new schema for this?
-                  type: string
-                  description: The job group.
-                  examples:
-                    - imports
-                    - reports
-                    - audits
-                JobType:
-                  $ref: './schemas.yaml#/JobType'
-                  type: string
-                  description: The type of job.
-                  examples:
-                    - cwv
-                    - 404
-                    - broken-backlinks
-                interval: # should we create a new schema for this?
-                  type: string
-                  description: Set the job interval.
-                  examples:
-                    - daily
-                    - weekly
-                    - every-sunday
-                    - every-saturday
-                    - every-hour
-              required:
-                - group
-                - jobType
-                - interval
+            $ref: './schemas.yaml#/Job'
     security:
       - admin_key: [ ]
     responses:
@@ -155,38 +124,7 @@ latest-jobs-configuration-by-type:
       content:
         application/json:
           schema:
-            type: array
-            items:
-              type: object
-              properties:
-                group: # should we create a new schema for this?
-                  type: string
-                  description: The job group.
-                  examples:
-                    - imports
-                    - reports
-                    - audits
-                JobType:
-                  $ref: './schemas.yaml#/JobType'
-                  type: string
-                  description: The type of job.
-                  examples:
-                    - cwv
-                    - 404
-                    - broken-backlinks
-                interval: # should we create a new schema for this?
-                  type: string
-                  description: Set the job interval.
-                  examples:
-                    - daily
-                    - weekly
-                    - every-sunday
-                    - every-saturday
-                    - every-hour
-              required:
-                - group
-                - jobType
-                - interval
+            $ref: './schemas.yaml#/Job'
     responses:
       '200':
         description: A list of job configurations updated successfully.
