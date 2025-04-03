@@ -1,3 +1,15 @@
+# [1.103.0](https://github.com/adobe/spacecat-api-service/compare/v1.102.13...v1.103.0) (2025-04-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-ims-client to v1.7.0 ([#845](https://github.com/adobe/spacecat-api-service/issues/845)) ([10945b7](https://github.com/adobe/spacecat-api-service/commit/10945b79af89cdaa86adfea6910a228a91696aec))
+
+
+### Features
+
+* Get promise token for CS autofix requests ([#830](https://github.com/adobe/spacecat-api-service/issues/830)) ([356e6bd](https://github.com/adobe/spacecat-api-service/commit/356e6bdfe7a780a9a5de05e907ee3e692b37da07))
+
 ## [1.102.13](https://github.com/adobe/spacecat-api-service/compare/v1.102.12...v1.102.13) (2025-04-02)
 
 
