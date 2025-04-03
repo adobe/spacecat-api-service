@@ -177,12 +177,26 @@ function ConfigurationController(dataAccess) {
     }
 
     const allJobs = latestConfig.getJobs();
-    const updatedJobs = allJobs.map((job) => {
+    const updatedJobs = [];
+    let invalidJob = null;
+
+    for (const job of allJobs) {
       if (job.type === type) {
-        return { ...job, ...updateData };
+        const mergedJob = { ...job, ...updateData };
+
+        if (!mergedJob.group || !mergedJob.type || !mergedJob.interval) {
+          invalidJob = mergedJob;
+          break;
+        }
+        updatedJobs.push(mergedJob);
+      } else {
+        updatedJobs.push(job);
       }
-      return job;
-    });
+    }
+
+    if (invalidJob) {
+      return badRequest('Update would result in invalid job data. Required properties: group, type, interval');
+    }
 
     const updatedConfig = await Configuration.update({
       jobs: updatedJobs,
