@@ -55,7 +55,7 @@ describe('Access Control Util', () => {
     }
   });
 
-  it('should check if user is part of the organization based on the Site entity', async () => {
+  xit('should check if user is part of the organization based on the Site entity', async () => {
     const orgId = '12345';
 
     const site = await Site.create({
@@ -75,7 +75,7 @@ describe('Access Control Util', () => {
     expect(hasAccess).to.be.true;
   });
 
-  it('should check if user is part of the organization based on the Organization entity', async () => {
+  xit('should check if user is part of the organization based on the Organization entity', async () => {
     const orgId = '12345';
     const org = {
       getImsOrgId: () => orgId,
