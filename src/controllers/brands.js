@@ -22,7 +22,7 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode } from '../support/utils.js';
+import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -53,21 +53,6 @@ function BrandsController(dataAccess, log, env) {
   }
 
   /**
-   * Get the IMS user token from the context.
-   * @param {object} context - The context of the request.
-   * @returns {string} imsUserToken - The IMS User access token.
-   * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
-   */
-  function getImsUserToken(context) {
-    const { pathInfo: { headers } } = context;
-    const { authorization: authorizationHeader } = headers;
-    const BEARER_PREFIX = 'Bearer ';
-    if (!hasText(authorizationHeader) || !authorizationHeader.startsWith(BEARER_PREFIX)) {
-      throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
-    }
-    return authorizationHeader;
-  }
-  /**
    * Gets all brands for an organization.
    * @returns {Promise<Response>} Array of brands.
    */
@@ -86,7 +71,7 @@ function BrandsController(dataAccess, log, env) {
       const imsOrgId = organization.getImsOrgId();
       const imsUserToken = getImsUserToken(context);
       const brandClient = BrandClient.createFrom(context);
-      const brands = await brandClient.getBrandsForOrganization(imsOrgId, imsUserToken);
+      const brands = await brandClient.getBrandsForOrganization(imsOrgId, `Bearer ${imsUserToken}`);
       log.info(`Found ${brands.length} brands for organization: ${organizationId}`);
       return ok(brands);
     } catch (error) {
