@@ -32,7 +32,14 @@ export default class AccessControlUtil {
     }
   }
 
+  isAccessTypeJWT() {
+    return this.authInfo.getType() === 'jwt';
+  }
+
   hasAdminAccess() {
+    if (!this.isAccessTypeJWT()) {
+      return true;
+    }
     return this.authInfo.isAdmin();
   }
 
@@ -42,6 +49,9 @@ export default class AccessControlUtil {
     }
 
     const { authInfo } = this;
+    if (!this.isAccessTypeJWT()) {
+      return true;
+    }
 
     let imsOrgId;
     if (entity instanceof Site) {

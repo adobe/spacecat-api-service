@@ -36,6 +36,7 @@ describe('Access Control Util', () => {
 
   it('should check if user has admin access', () => {
     const authInfo = new AuthInfo()
+      .withType('jwt')
       .withProfile({
         is_admin: true,
       });

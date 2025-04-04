@@ -138,7 +138,7 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
   .with(authWrapper, {
-    authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler, JwtHandler],
+    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   })
   .with(dataAccess)
   .with(bodyData)

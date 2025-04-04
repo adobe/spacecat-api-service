@@ -30,6 +30,7 @@ describe('Suggestions Controller', () => {
   const authContext = {
     attributes: {
       authInfo: new AuthInfo()
+        .withType('jwt')
         .withScopes([{ name: 'admin' }])
         .withProfile({ is_admin: true })
         .withAuthenticated(true)
@@ -1324,7 +1325,10 @@ describe('Suggestions Controller', () => {
           ImsPromiseClient: imsPromiseClient,
         },
       });
-      suggestionsControllerWithIms = SuggestionsControllerWithIms(mockSuggestionDataAccess, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      suggestionsControllerWithIms = SuggestionsControllerWithIms({
+        dataAccess: mockSuggestionDataAccess,
+        ...authContext,
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for CS', async () => {
@@ -1429,7 +1433,10 @@ describe('Suggestions Controller', () => {
           ImsPromiseClient: failedImsClient,
         },
       });
-      const suggestionsControllerWithFailedIms = SuggestionsControllerWithFailedIms(mockSuggestionDataAccess, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      const suggestionsControllerWithFailedIms = SuggestionsControllerWithFailedIms({
+        dataAccess: mockSuggestionDataAccess,
+        ...authContext,
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],

@@ -160,6 +160,7 @@ describe('Organizations Controller', () => {
       dataAccess: mockDataAccess,
       attributes: {
         authInfo: new AuthInfo()
+          .withType('jwt')
           .withScopes([{ name: 'admin' }])
           .withProfile({ is_admin: true })
           .withAuthenticated(true)
