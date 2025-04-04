@@ -16,8 +16,9 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
-import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import { ValidationError, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import SuggestionsController from '../../src/controllers/suggestions.js';
 
@@ -172,6 +173,7 @@ describe('Suggestions Controller', () => {
     };
     site = {
       getId: sandbox.stub().returns(SITE_ID),
+      getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
     };
     siteNotEnabled = {
       getId: sandbox.stub().returns(SITE_ID_NOT_ENABLED),
@@ -1287,6 +1289,168 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
+    });
+  });
+
+  describe('auto-fix suggestions for CS', () => {
+    let spySqs;
+    let sqsSpy;
+    let imsPromiseClient;
+    let suggestionsControllerWithIms;
+
+    beforeEach(async () => {
+      site.getDeliveryType = sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_CS);
+
+      sqsSpy = sandbox.spy();
+
+      spySqs = {
+        sendMessage: sqsSpy,
+      };
+
+      imsPromiseClient = {
+        createFrom: () => ({
+          getPromiseToken: sandbox.stub().returns({
+            promise_token: 'promiseTokenExample',
+            expires_in: 14399,
+            token_type: 'promise_token',
+          }),
+        }),
+        CLIENT_TYPE: {
+          EMITTER: 'emitter',
+        },
+      };
+      const SuggestionsControllerWithIms = await esmock('../../src/controllers/suggestions.js', {}, {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: imsPromiseClient,
+        },
+      });
+      suggestionsControllerWithIms = SuggestionsControllerWithIms(mockSuggestionDataAccess, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    });
+
+    it('triggers autofixSuggestion and sets suggestions to in-progress for CS', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        env: {
+          AUTOFIX_CRYPT_SECRET: 'superSecret',
+          AUTOFIX_CRYPT_SALT: 'salt',
+        },
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token');
+
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('triggers autofixSuggestion without encryption secrets', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
+    });
+
+    it('auto-fix suggestions returns 400 without authorization header', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Missing Authorization header');
+    });
+
+    it('auto-fix suggestions throws error for failed IMS client creation', async () => {
+      const failedImsClient = {
+        createFrom: () => (null),
+        CLIENT_TYPE: {
+          EMITTER: 'emitter',
+        },
+      };
+      const SuggestionsControllerWithFailedIms = await esmock('../../src/controllers/suggestions.js', {}, {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: failedImsClient,
+        },
+      });
+      const suggestionsControllerWithFailedIms = SuggestionsControllerWithFailedIms(mockSuggestionDataAccess, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithFailedIms.autofixSuggestions({
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+      expect(response.status).to.equal(500);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Error getting promise token');
     });
   });
 
