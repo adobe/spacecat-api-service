@@ -55,6 +55,8 @@ paths:
     $ref: './auth-api.yaml#/google-auth'
   /auth/google/{siteId}/status:
     $ref: './auth-api.yaml#/google-auth-status'
+  /auth/login:
+    $ref: './auth-api.yaml#/login'
   /configurations:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
