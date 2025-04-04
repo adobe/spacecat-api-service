@@ -28,6 +28,11 @@ describe('getRouteHandlers', () => {
     getAll: sinon.stub(),
     getByVersion: sinon.stub(),
     getLatest: sinon.stub(),
+    getLatestJobs: sinon.stub(),
+    createJobs: sinon.stub(),
+    getLatestJobsByType: sinon.stub(),
+    removeLatestJobsByType: sinon.stub(),
+    updateLatestJobsByType: sinon.stub(),
     updateConfiguration: sinon.stub(),
   };
 
@@ -130,6 +135,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes).to.have.all.keys(
       'GET /configurations',
       'GET /configurations/latest',
+      'GET /configurations/latest/jobs',
+      'POST /configurations/latest/jobs',
       'PUT /configurations/latest',
       'PATCH /configurations/sites/audits',
       'GET /organizations',
@@ -151,6 +158,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PUT /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
+    expect(staticRoutes['GET /configurations/latest/jobs']).to.equal(mockConfigurationController.getLatestJobs);
+    expect(staticRoutes['POST /configurations/latest/jobs']).to.equal(mockConfigurationController.createJobs);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);
@@ -164,6 +173,9 @@ describe('getRouteHandlers', () => {
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
+      'GET /configurations/latest/jobs/:type',
+      'DELETE /configurations/latest/jobs/:type',
+      'PATCH /configurations/latest/jobs/:type',
       'GET /configurations/:version',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
@@ -218,6 +230,9 @@ describe('getRouteHandlers', () => {
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
+    expect(dynamicRoutes['GET /configurations/latest/jobs/:type'].handler).to.equal(mockConfigurationController.getLatestJobsByType);
+    expect(dynamicRoutes['DELETE /configurations/latest/jobs/:type'].handler).to.equal(mockConfigurationController.removeLatestJobsByType);
+    expect(dynamicRoutes['PATCH /configurations/latest/jobs/:type'].handler).to.equal(mockConfigurationController.updateLatestJobsByType);
     expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /configurations/:version'].handler).to.equal(mockConfigurationController.getByVersion);
     expect(dynamicRoutes['GET /configurations/:version'].paramNames).to.deep.equal(['version']);

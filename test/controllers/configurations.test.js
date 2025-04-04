@@ -86,6 +86,11 @@ describe('Configurations Controller', () => {
     'getAll',
     'getLatest',
     'getByVersion',
+    'getLatestJobs',
+    'createJobs',
+    'getLatestJobsByType',
+    'removeLatestJobsByType',
+    'updateLatestJobsByType',
   ];
 
   let mockDataAccess;
@@ -187,5 +192,175 @@ describe('Configurations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Configuration version required to be an integer');
+  });
+
+  describe('Job Management Functions', () => {
+    beforeEach(() => {
+      mockDataAccess.Configuration.update = sandbox.stub().resolves({
+        ...configurations[0],
+        getJobs: () => [
+          ...configurations[0].getJobs(),
+          { group: 'new', type: 'test', interval: 'hourly' },
+        ],
+      });
+    });
+
+    describe('getLatestJobs', () => {
+      it('returns all jobs from latest configuration', async () => {
+        const result = await configurationsController.getLatestJobs();
+        const jobs = await result.json();
+
+        expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
+        expect(jobs).to.deep.equal(configurations[1].getJobs());
+      });
+
+      it('returns not found when configuration does not exist', async () => {
+        mockDataAccess.Configuration.findLatest.resolves(null);
+        const result = await configurationsController.getLatestJobs();
+
+        expect(result.status).to.equal(404);
+        expect(await result.json()).to.have.property('message', 'Configuration not found');
+      });
+    });
+
+    describe('createJobs', () => {
+      it('adds multiple jobs to latest configuration', async () => {
+        const newJobs = [
+          { group: 'new', type: 'test', interval: 'hourly' },
+        ];
+
+        const result = await configurationsController.createJobs({ body: newJobs });
+        const updatedConfig = await result.json();
+
+        expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
+        expect(mockDataAccess.Configuration.update).to.have.been.calledOnce;
+        expect(mockDataAccess.Configuration.update.firstCall.args[0]).to.have.property('jobs');
+        expect(updatedConfig).to.be.an('object');
+      });
+
+      it('returns not found when configuration does not exist', async () => {
+        mockDataAccess.Configuration.findLatest.resolves(null);
+        const result = await configurationsController.createJobs({ body: [] });
+
+        expect(result.status).to.equal(404);
+        expect(await result.json()).to.have.property('message', 'Latest configuration not found');
+      });
+
+      it('validates job data', async () => {
+        const invalidJobs = [{ group: 'test' }]; // Missing type and interval?
+        const result = await configurationsController.createJobs({ body: invalidJobs });
+
+        expect(result.status).to.equal(400);
+        expect(await result.json()).to.have.property('message').that.includes('Invalid job data');
+      });
+
+      it('validates jobs is an array', async () => {
+        const result = await configurationsController.createJobs({ body: {} });
+
+        expect(result.status).to.equal(400);
+        expect(await result.json()).to.have.property('message', 'Jobs data must be an array');
+      });
+    });
+
+    describe('getLatestJobsByType', () => {
+      it('returns jobs filtered by type', async () => {
+        const result = await configurationsController.getLatestJobsByType({ params: { type: 'cwv' } });
+        const jobs = await result.json();
+
+        expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
+        expect(jobs).to.be.an('array').with.lengthOf(1);
+        expect(jobs[0]).to.have.property('type', 'cwv');
+      });
+
+      it('returns empty array when no jobs match type', async () => {
+        const result = await configurationsController.getLatestJobsByType({ params: { type: 'nonexistent' } });
+        const jobs = await result.json();
+
+        expect(jobs).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('returns not found when configuration does not exist', async () => {
+        mockDataAccess.Configuration.findLatest.resolves(null);
+        const result = await configurationsController.getLatestJobsByType({ params: { type: 'test' } });
+
+        expect(result.status).to.equal(404);
+        expect(await result.json()).to.have.property('message', 'Latest configuration not found');
+      });
+    });
+
+    describe('removeLatestJobsByType', () => {
+      it('removes jobs of specified type', async () => {
+        const result = await configurationsController.removeLatestJobsByType({ params: { type: 'cwv' } });
+        const updatedConfig = await result.json();
+
+        expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
+        expect(mockDataAccess.Configuration.update).to.have.been.calledOnce;
+        const updateArg = mockDataAccess.Configuration.update.firstCall.args[0];
+        expect(updateArg.jobs).to.be.an('array');
+        expect(updateArg.jobs.some((job) => job.type === 'cwv')).to.be.false;
+        expect(updatedConfig).to.be.an('object');
+      });
+
+      it('returns not found when configuration does not exist', async () => {
+        mockDataAccess.Configuration.findLatest.resolves(null);
+        const result = await configurationsController.removeLatestJobsByType({ params: { type: 'test' } });
+
+        expect(result.status).to.equal(404);
+        expect(await result.json()).to.have.property('message', 'Latest configuration not found');
+      });
+    });
+
+    describe('updateLatestJobsByType', () => {
+      it('updates properties of jobs with specified type', async () => {
+        const updateData = { interval: 'monthly' };
+        const result = await configurationsController.updateLatestJobsByType({
+          params: { type: 'cwv' },
+          body: updateData,
+        });
+
+        expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
+        expect(mockDataAccess.Configuration.update).to.have.been.calledOnce;
+
+        const updateArg = mockDataAccess.Configuration.update.firstCall.args[0];
+        const updatedJobs = updateArg.jobs;
+        const cwvJob = updatedJobs.find((job) => job.type === 'cwv');
+        expect(cwvJob).to.have.property('interval', 'monthly');
+
+        const updatedConfig = await result.json();
+        expect(updatedConfig).to.be.an('object');
+      });
+
+      it('returns not found when configuration does not exist', async () => {
+        mockDataAccess.Configuration.findLatest.resolves(null);
+        const result = await configurationsController.updateLatestJobsByType({
+          params: { type: 'test' },
+          body: { interval: 'daily' },
+        });
+
+        expect(result.status).to.equal(404);
+        expect(await result.json()).to.have.property('message', 'Latest configuration not found');
+      });
+
+      it('validates updated data is a valid object', async () => {
+        const result = await configurationsController.updateLatestJobsByType({
+          params: { type: 'cwv' },
+          body: 'not-an-object',
+        });
+
+        expect(result.status).to.equal(400);
+        expect(await result.json()).to.have.property('message', 'Update data must be an object');
+      });
+      it('validates all required job properties exist after update', async () => {
+        const updateData = { group: undefined };
+
+        const result = await configurationsController.updateLatestJobsByType({
+          params: { type: 'cwv' },
+          body: updateData,
+        });
+
+        expect(result.status).to.equal(400);
+        expect(await result.json()).to.have.property('message', 'Update would result in invalid job data. Required properties: group, type, interval');
+      });
+    });
   });
 });
