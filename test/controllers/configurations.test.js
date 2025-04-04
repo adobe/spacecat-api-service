@@ -341,7 +341,7 @@ describe('Configurations Controller', () => {
         expect(await result.json()).to.have.property('message', 'Latest configuration not found');
       });
 
-      it('validates update data is an object', async () => {
+      it('validates updated data is a valid object', async () => {
         const result = await configurationsController.updateLatestJobsByType({
           params: { type: 'cwv' },
           body: 'not-an-object',
@@ -349,6 +349,17 @@ describe('Configurations Controller', () => {
 
         expect(result.status).to.equal(400);
         expect(await result.json()).to.have.property('message', 'Update data must be an object');
+      });
+      it('validates all required job properties exist after update', async () => {
+        const updateData = { group: undefined };
+
+        const result = await configurationsController.updateLatestJobsByType({
+          params: { type: 'cwv' },
+          body: updateData,
+        });
+
+        expect(result.status).to.equal(400);
+        expect(await result.json()).to.have.property('message', 'Update would result in invalid job data. Required properties: group, type, interval');
       });
     });
   });
