@@ -49,7 +49,7 @@ export default class AccessControlUtil {
     }
 
     const { authInfo } = this;
-    if (!this.isAccessTypeJWT()) {
+    if (this.hasAdminAccess() || !this.isAccessTypeJWT()) {
       return true;
     }
 
@@ -62,10 +62,6 @@ export default class AccessControlUtil {
       imsOrgId = org.getImsOrgId();
     } else if (entity instanceof Organization) {
       imsOrgId = entity.getImsOrgId();
-    }
-
-    if (this.hasAdminAccess()) {
-      return true;
     }
 
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);

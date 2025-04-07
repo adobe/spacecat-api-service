@@ -16,6 +16,7 @@ import { KeyEvent, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { use, expect } from 'chai';
@@ -177,6 +178,13 @@ describe('Sites Controller', () => {
         DEFAULT_ORGANIZATION_ID: 'default',
       },
       dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
     };
     nock('https://secretsmanager.us-east-1.amazonaws.com/')
       .post('/', (body) => body.SecretId === '/helix-deploy/spacecat-services/customer-secrets/site1_com/ci')
@@ -185,7 +193,7 @@ describe('Sites Controller', () => {
           RUM_DOMAIN_KEY: '42',
         }),
       });
-    sitesController = SitesController(mockDataAccess, loggerStub, context.env);
+    sitesController = SitesController(context, loggerStub, context.env);
   });
 
   afterEach(() => {
@@ -204,8 +212,12 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => SitesController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => SitesController()).to.throw('Data access required');
+    expect(() => SitesController({ dataAccess: {} })).to.throw('Data access required');
   });
 
   it('creates a site', async () => {
@@ -486,7 +498,7 @@ describe('Sites Controller', () => {
     });
     const result = await (
       await sitesControllerMock
-        .default(mockDataAccess, context.log)
+        .default(context, context.log)
         .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
     );
     const metrics = await result.json();
@@ -521,7 +533,7 @@ describe('Sites Controller', () => {
     });
     const result = await (
       await sitesControllerMock
-        .default(mockDataAccess, context.log)
+        .default(context, context.log)
         .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
     );
     const metrics = await result.json();
@@ -806,7 +818,7 @@ describe('Sites Controller', () => {
       },
     });
 
-    const resp = await (await sitesControllerMock.default(mockDataAccess).getSiteMetricsBySource({
+    const resp = await (await sitesControllerMock.default(context).getSiteMetricsBySource({
       params: { siteId, source, metric },
       log: {
         info: sandbox.spy(),
@@ -919,7 +931,7 @@ describe('Sites Controller', () => {
       },
     });
 
-    const resp = await (await sitesControllerMock.default(mockDataAccess).getPageMetricsBySource({
+    const resp = await (await sitesControllerMock.default(context).getPageMetricsBySource({
       params: {
         siteId, source, metric, base64PageUrl,
       },

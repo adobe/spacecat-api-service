@@ -14,6 +14,7 @@
 
 import { Experiment } from '@adobe/spacecat-shared-data-access';
 import ExperimentSchema from '@adobe/spacecat-shared-data-access/src/models/experiment/experiment.schema.js';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -135,18 +136,32 @@ describe('Experiments Controller', () => {
       all: sandbox.stub().resolves(mockExperiments),
       allBySiteId: sandbox.stub().resolves(mockExperiments),
     },
+    Site: {
+      findById: sandbox.stub().resolves({
+        siteId,
+      }),
+    },
   };
 
   let experimentsController;
   let context;
 
   beforeEach(() => {
-    experimentsController = ExperimentsController(mockDataAccess);
     context = {
       params: {
         siteId,
       },
+      dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
     };
+
+    experimentsController = ExperimentsController(context);
   });
 
   afterEach(() => {
@@ -165,8 +180,12 @@ describe('Experiments Controller', () => {
     });
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => ExperimentsController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => ExperimentsController()).to.throw('Data access required');
+    expect(() => ExperimentsController({ dataAccess: {} })).to.throw('Data access required');
   });
 
   describe('getExperiments', () => {

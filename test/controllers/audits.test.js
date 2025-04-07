@@ -126,7 +126,7 @@ describe('Audits Controller', () => {
     getHandlers: sandbox.stub().returns(handlers),
   };
 
-  const authContext = {
+  const authContextAdmin = {
     attributes: {
       authInfo: new AuthInfo()
         .withType('jwt')
@@ -134,6 +134,16 @@ describe('Audits Controller', () => {
         .withProfile({ is_admin: true })
         .withAuthenticated(true)
       ,
+    },
+  };
+
+  const authContextUser = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true),
     },
   };
 
@@ -164,7 +174,7 @@ describe('Audits Controller', () => {
     };
     const ctx = {
       dataAccess: mockDataAccess,
-      ...authContext,
+      ...authContextAdmin,
     };
 
     auditsController = AuditsController(ctx);
@@ -244,6 +254,33 @@ describe('Audits Controller', () => {
 
       expect(result.status).to.equal(400);
     });
+
+    it('handles missing site', async () => {
+      const siteId = SITE_ID;
+
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await auditsController.getAllForSite({ params: { siteId } });
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      const siteId = SITE_ID;
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: sandbox.stub().resolves({
+          getImsOrgId: sandbox.stub().resolves('org-id'),
+        }),
+      });
+      mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
+      const result = await controller.getAllForSite({ params: { siteId } });
+      expect(result.status).to.equal(403);
+    });
   });
 
   describe('getAllLatest', () => {
@@ -278,6 +315,20 @@ describe('Audits Controller', () => {
 
       expect(result.status).to.equal(400);
     });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      const auditType = 'security';
+
+      mockDataAccess.LatestAudit.allByAuditType.resolves(mockLatestAudits);
+
+      const result = await controller.getAllLatest({ params: { auditType } });
+      expect(result.status).to.equal(403);
+    });
   });
 
   describe('getAllLatestForSite', () => {
@@ -300,6 +351,34 @@ describe('Audits Controller', () => {
       const result = await auditsController.getAllLatestForSite({ params: {} });
 
       expect(result.status).to.equal(400);
+    });
+
+    it('handles missing site', async () => {
+      const siteId = SITE_ID;
+
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await auditsController.getAllLatestForSite({ params: { siteId } });
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      const siteId = SITE_ID;
+
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: sandbox.stub().resolves({
+          getImsOrgId: sandbox.stub().resolves('org-id'),
+        }),
+      });
+      mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
+      const result = await controller.getAllLatestForSite({ params: { siteId } });
+      expect(result.status).to.equal(403);
     });
   });
 
@@ -336,10 +415,43 @@ describe('Audits Controller', () => {
 
     it('handles audit not found', async () => {
       mockDataAccess.getLatestAuditForSite.resolves(null);
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: sinon.stub().resolves({
+          getImsOrgId: sinon.stub().resolves('org-id'),
+        }),
+      });
 
       const result = await auditsController.getLatestForSite({ params: { siteId: SITE_ID, auditType: 'lhs-mobile' } });
 
       expect(result.status).to.equal(404);
+    });
+
+    it('handles missing site', async () => {
+      const siteId = SITE_ID;
+
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await auditsController.getLatestForSite({ params: { siteId, auditType: 'lhs-mobile' } });
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      const siteId = SITE_ID;
+
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: sandbox.stub().resolves({
+          getImsOrgId: sandbox.stub().resolves('org-id'),
+        }),
+      });
+      mockDataAccess.LatestAudit.allBySiteIdAndAuditType.resolves(mockLatestAudits);
+      const result = await controller.getLatestForSite({ params: { siteId, auditType: 'lhs-mobile' } });
+      expect(result.status).to.equal(403);
     });
   });
 
@@ -367,6 +479,27 @@ describe('Audits Controller', () => {
     it('returns bad request if audit type is missing', async () => {
       const result = await auditsController.patchAuditForSite({ params: { siteId: SITE_ID } });
       expect(result.status).to.equal(400);
+    });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      const siteId = SITE_ID;
+      const auditType = 'broken-backlinks';
+
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: sandbox.stub().resolves({
+          getImsOrgId: sandbox.stub().resolves('org-id'),
+        }),
+      });
+
+      const result = await controller.patchAuditForSite(
+        { params: { siteId, auditType }, data: {} },
+      );
+      expect(result.status).to.equal(403);
     });
 
     it('returns bad request if no updates are provided', async () => {

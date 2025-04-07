@@ -476,7 +476,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
-    if (!accessControlUtil.hasAccess(site, 'auto_fix')) {
+    if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
     }
 

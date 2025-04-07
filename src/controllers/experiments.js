@@ -12,25 +12,33 @@
 
 import {
   badRequest,
+  forbidden,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { isObject, isValidUUID } from '@adobe/spacecat-shared-utils';
+import { isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ExperimentDto } from '../dto/experiment.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * Experiments controller.
- * @param {DataAccess} dataAccess - Data access.
+ * @param {object} ctx - Context of the request.
  * @param {Logger} log - Logger.
  * @returns {object} Experiments controller.
  * @constructor
  */
-function ExperimentsController(dataAccess) {
-  if (!isObject(dataAccess)) {
+function ExperimentsController(ctx) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
-  const { Experiment } = dataAccess;
+  const { Site, Experiment } = dataAccess;
+
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Gets all experiments for a given site
@@ -42,6 +50,14 @@ function ExperimentsController(dataAccess) {
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return badRequest('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can view its experiments');
     }
 
     const experiments = (await Experiment.allBySiteId(siteId))

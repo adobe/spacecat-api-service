@@ -16,6 +16,8 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import OpportunitiesController from '../../src/controllers/opportunities.js';
 
@@ -155,6 +157,8 @@ describe('Opportunities Controller', () => {
   let mockOpportunityDataAccess;
   let mockOpportunity;
   let opportunitiesController;
+  let mockSite;
+  let mockContext;
 
   beforeEach(() => {
     opptys[0] = {
@@ -181,11 +185,29 @@ describe('Opportunities Controller', () => {
       create: sandbox.stub().resolves(mockOpptyEntity),
     };
 
-    mockOpportunityDataAccess = {
-      Opportunity: mockOpportunity,
+    mockSite = {
+      findById: sandbox.stub().resolves({
+        id: SITE_ID,
+      }),
     };
 
-    opportunitiesController = OpportunitiesController(mockOpportunityDataAccess);
+    mockOpportunityDataAccess = {
+      Opportunity: mockOpportunity,
+      Site: mockSite,
+    };
+
+    mockContext = {
+      dataAccess: mockOpportunityDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+    };
+
+    opportunitiesController = OpportunitiesController(mockContext);
   });
 
   afterEach(() => {
@@ -204,12 +226,16 @@ describe('Opportunities Controller', () => {
     });
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => OpportunitiesController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => OpportunitiesController()).to.throw('Data access required');
+    expect(() => OpportunitiesController({ dataAccess: {} })).to.throw('Data access required');
   });
 
   it('throws an error if data access cannot be destructured to Opportunity', () => {
-    expect(() => OpportunitiesController({ test: {} })).to.throw('Opportunity Collection not available');
+    expect(() => OpportunitiesController({ dataAccess: { Site: {} } })).to.throw('Opportunity Collection not available');
   });
 
   it('gets all opportunities for a site', async () => {

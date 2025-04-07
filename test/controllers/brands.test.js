@@ -16,6 +16,7 @@ import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -138,27 +139,44 @@ describe('Brands Controller', () => {
       BRAND_IMS_CLIENT_SECRET: 'secret123',
     };
 
+    const authContextAdmin = {
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true)
+        ,
+      },
+    };
+
     context = {
       pathInfo: {
         headers: {
           authorization: 'Bearer token123',
         },
       },
+      dataAccess: mockDataAccess,
+      ...authContextAdmin,
     };
 
-    brandsController = BrandsController(mockDataAccess, loggerStub, mockEnv);
+    brandsController = BrandsController(context, loggerStub, mockEnv);
   });
 
   afterEach(() => {
     sandbox.restore();
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => BrandsController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => BrandsController()).to.throw('Data access required');
+    expect(() => BrandsController({ dataAccess: {} })).to.throw('Data access required');
   });
 
   it('throws an error if env is not an object', () => {
-    expect(() => BrandsController(mockDataAccess, loggerStub)).to.throw('Environment object required');
+    expect(() => BrandsController(context, loggerStub)).to.throw('Environment object required');
   });
 
   describe('getBrandsForOrganization', () => {
@@ -217,6 +235,26 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.has('x-error')).to.be.true;
       expect(response.headers.get('x-error')).to.equal('Missing Authorization header');
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedBrandsController = BrandsController({
+        dataAccess: mockDataAccess, ...authContextUser,
+      }, loggerStub, mockEnv);
+      const response = await unauthorizedBrandsController.getBrandsForOrganization({
+        params: { organizationId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(403);
     });
   });
 
@@ -323,7 +361,10 @@ describe('Brands Controller', () => {
     });
 
     it('returns unauthorized if IMS config is missing', async () => {
-      brandsController = BrandsController(mockDataAccess, loggerStub, {});
+      mockEnv = {
+        OTHER_SECRETS: 'other-secrets',
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
 
       const response = await brandsController.getBrandGuidelinesForSite({
         ...context,
@@ -333,6 +374,26 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.has('x-error')).to.be.true;
       expect(response.headers.get('x-error')).to.equal('IMS Config not found in the environment');
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedBrandsController = BrandsController({
+        dataAccess: mockDataAccess, ...authContextUser,
+      }, loggerStub, mockEnv);
+      const response = await unauthorizedBrandsController.getBrandGuidelinesForSite({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(403);
     });
   });
 });

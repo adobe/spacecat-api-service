@@ -92,20 +92,20 @@ async function run(request, context) {
   try {
     const routeHandlers = getRouteHandlers(
       AuditsController(context),
-      ConfigurationController(context.dataAccess),
+      ConfigurationController(context),
       HooksController(context),
       OrganizationsController(context, context.env),
-      SitesController(context.dataAccess, log, context.env),
-      ExperimentsController(context.dataAccess),
+      SitesController(context, log, context.env),
+      ExperimentsController(context),
       SlackController(SlackApp),
       trigger,
       FulfillmentController(context),
       ImportController(context),
       ApiKeyController(context),
-      SitesAuditsToggleController(context.dataAccess),
-      OpportunitiesController(context.dataAccess),
+      SitesAuditsToggleController(context),
+      OpportunitiesController(context),
       SuggestionsController(context, context.sqs, context.env),
-      BrandsController(context.dataAccess, log, context.env),
+      BrandsController(context, log, context.env),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
