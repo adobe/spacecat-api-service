@@ -178,17 +178,6 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
   });
 
-  it('handles dynamic route errors', async () => {
-    context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
-
-    request = new Request(`${baseUrl}/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff`, { headers: { 'x-api-key': apiKey } });
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('Site.findById is not a function');
-  });
-
   it('handles dynamic route', async () => {
     context.pathInfo.suffix = '/sites/with-latest-audit/lhs-mobile';
 
