@@ -48,42 +48,6 @@ describe('Brands Controller', () => {
     },
   });
 
-  const sites = [
-    {
-      siteId: SITE_ID,
-      organizationId: ORGANIZATION_ID,
-      baseURL: 'https://site1.com',
-      deliveryType: 'aem_edge',
-      config: sampleConfig,
-    },
-  ].map((site) => new Site(
-    {
-      entities: {
-        site: {
-          model: {
-            indexes: {},
-            schema: {
-              attributes: {
-                config: { type: 'any', name: 'config', get: (value) => Config(value) },
-                organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
-              },
-            },
-          },
-        },
-      },
-    },
-    {
-      log: loggerStub,
-      getCollection: stub().returns({
-        schema: SiteSchema,
-        findById: stub(),
-      }),
-    },
-    SiteSchema,
-    site,
-    loggerStub,
-  ));
-
   const organizations = [
     {
       organizationId: ORGANIZATION_ID,
@@ -114,6 +78,45 @@ describe('Brands Controller', () => {
     },
     OrganizationSchema,
     org,
+    loggerStub,
+  ));
+
+  const getCollectionStub = stub();
+  getCollectionStub.returns({
+    schema: OrganizationSchema,
+    findById: stub().withArgs(ORGANIZATION_ID).returns(Promise.resolve(organizations[0])),
+  });
+
+  const sites = [
+    {
+      siteId: SITE_ID,
+      organizationId: ORGANIZATION_ID,
+      baseURL: 'https://site1.com',
+      deliveryType: 'aem_edge',
+      config: sampleConfig,
+    },
+  ].map((site) => new Site(
+    {
+      entities: {
+        site: {
+          model: {
+            indexes: {},
+            schema: {
+              attributes: {
+                config: { type: 'any', name: 'config', get: (value) => Config(value) },
+                organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      log: loggerStub,
+      getCollection: getCollectionStub,
+    },
+    SiteSchema,
+    site,
     loggerStub,
   ));
 
