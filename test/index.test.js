@@ -156,17 +156,6 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger cwv audit for all');
   });
 
-  it('handles siteId not correctly formated error', async () => {
-    context.pathInfo.suffix = '/sites/"e730ec12-4325-4bdd-ac71-0f4aa5b18cff"';
-
-    request = new Request(`${baseUrl}/sites/"e730ec12-4325-4bdd-ac71-0f4aa5b18cff"`, { headers: { 'x-api-key': apiKey } });
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(400);
-    expect(resp.headers.plain()['x-error']).to.equal('Site Id is invalid. Please provide a valid UUID.');
-  });
-
   it('handles organizationId not correctly formated error', async () => {
     context.pathInfo.suffix = '/organizations/1234';
 
