@@ -32,10 +32,9 @@ export default class AccessControlUtil {
 
   constructor(context) {
     const { log, pathInfo, attributes } = context;
-    const { suffix, method } = pathInfo;
     this.authInfo = attributes?.authInfo;
 
-    const endpoint = `${method.toUpperCase()} ${suffix}`;
+    const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (ANONYMOUS_ENDPOINTS.includes(endpoint)) {
       log.info(`Anonymous endpoint, skipping authorization: ${endpoint}`);
       const profile = { user_id: 'anonymous' };
