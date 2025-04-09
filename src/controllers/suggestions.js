@@ -24,9 +24,9 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
+import { ValidationError, Suggestion as SuggestionModel, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
-import { sendAutofixMessage } from '../support/utils.js';
+import { sendAutofixMessage, getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 /**
  * Suggestions controller.
@@ -455,6 +455,19 @@ function SuggestionsController(dataAccess, sqs, env) {
         SuggestionModel.STATUSES.IN_PROGRESS,
       );
     }
+
+    let promiseTokenResponse;
+    if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+      try {
+        promiseTokenResponse = await getCSPromiseToken(context);
+      } catch (e) {
+        if (e instanceof ErrorWithStatusCode) {
+          return badRequest(e.message);
+        }
+        return createResponse({ message: 'Error getting promise token' }, 500);
+      }
+    }
+
     const response = {
       suggestions: [
         ...succeededSuggestions.map((suggestion) => ({
@@ -479,6 +492,7 @@ function SuggestionsController(dataAccess, sqs, env) {
       opportunityId,
       siteId,
       succeededSuggestions.map((s) => s.getId()),
+      promiseTokenResponse,
     );
     return createResponse(response, 207);
   };
