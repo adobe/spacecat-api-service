@@ -13,6 +13,12 @@
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { Site, Organization } from '@adobe/spacecat-shared-data-access';
 
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+
+const ANONYMOUS_ENDPOINTS = [
+  'GET /slack/events',
+  'POST /slack/events',
+];
 const SERVICE_CODE = 'dx_aem_perf';
 
 export default class AccessControlUtil {
@@ -25,7 +31,19 @@ export default class AccessControlUtil {
   }
 
   constructor(context) {
-    this.authInfo = context.attributes?.authInfo;
+    const { log, pathInfo, attributes } = context;
+    const { suffix, method } = pathInfo;
+    this.authInfo = attributes?.authInfo;
+
+    const endpoint = `${method.toUpperCase()} ${suffix}`;
+    if (ANONYMOUS_ENDPOINTS.includes(endpoint)) {
+      log.info(`Anonymous endpoint, skipping authorization: ${endpoint}`);
+      const profile = { user_id: 'anonymous' };
+      this.authInfo = new AuthInfo()
+        .withAuthenticated(true)
+        .withProfile(profile)
+        .withType(this.name);
+    }
 
     if (!isNonEmptyObject(this.authInfo)) {
       throw new Error('Missing authInfo');
