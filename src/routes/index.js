@@ -11,6 +11,10 @@
  */
 
 /**
+ * @import type { FixesController } from "../controllers/fixes.js"
+ */
+
+/**
  * Extracts parameter names from a route pattern. For example, for the route pattern
  * /sites/:siteId/audits/:auditType, the parameter names are siteId and auditType.
  * The parameter names are prefixed with a colon (:).
@@ -59,7 +63,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} brandsController - The brands controller.
  * @param {Object} preflightController - The preflight controller.
  * @param {Object} demoController - The demo controller.
- * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
+ * @param {FixesController} fixesController - The fixes controller.
+ * @returns {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
   auditsController,
@@ -79,6 +84,7 @@ export default function getRouteHandlers(
   brandsController,
   preflightController,
   demoController,
+  fixesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -158,6 +164,16 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
     'GET /screenshots': demoController.getScreenshots,
     'POST /screenshots': demoController.takeScreenshots,
+
+    // Fixes
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes': fixesController.getAllForOpportunity,
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': fixesController.getByStatus,
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': fixesController.getByID,
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': fixesController.getAllSuggestionsForFix,
+    'POST /sites/:siteId/opportunities/:opportunityId/fixes': fixesController.createFixes,
+    'PATCH /sites/:siteId/opportunities/:opportunityId/status': fixesController.patchFixesStatus,
+    'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': fixesController.patchFix,
+    'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': fixesController.removeFix,
   };
 
   // Initialization of static and dynamic routes
