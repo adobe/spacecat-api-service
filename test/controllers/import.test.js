@@ -312,7 +312,7 @@ describe('ImportController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No import queue available');
     });
 
-    it('should reject when the given API key is already running an import job', async () => {
+    it('should reject when the given API key is already running an import job with the same baseURL', async () => {
       baseContext.dataAccess.ImportJob.allByStatus = sandbox.stub().resolves([
         createImportJob({
           ...exampleJob,
@@ -322,6 +322,17 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(429);
       expect(response.headers.get('x-error')).to.equal('Too Many Requests: API key hash c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441 cannot be used to start any more import jobs');
+    });
+
+    it('should create an import job when the given API key is already running an import job with a different baseURL', async () => {
+      baseContext.dataAccess.ImportJob.allByStatus = sandbox.stub().resolves([
+        createImportJob({
+          ...exampleJob,
+          baseURL: 'https://www.another-example.com',
+        }),
+      ]);
+      const response = await importController.createImportJob(baseContext);
+      expect(response.status).to.equal(202);
     });
 
     it('should reject when invalid URLs are passed in', async () => {
