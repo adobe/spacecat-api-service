@@ -114,9 +114,9 @@ describe('ImportController tests', () => {
   };
 
   const urls = [
-    'https://example.com/page1',
-    'https://example.com/page2',
-    'https://example.com/page3',
+    'https://www.example.com/page1',
+    'https://www.example.com/page2',
+    'https://www.example.com/page3',
   ];
   const customOptions = { enableJavascript: false };
 
@@ -284,7 +284,7 @@ describe('ImportController tests', () => {
       const response = await importController.createImportJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: URLs not allowed: https://example.com/page1, https://example.com/page2, https://example.com/page3');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: URLs not allowed: https://www.example.com/page1, https://www.example.com/page2, https://www.example.com/page3');
     });
 
     it('should respond with an error code when custom header is not an object', async () => {
