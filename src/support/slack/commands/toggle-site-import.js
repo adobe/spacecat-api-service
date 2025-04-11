@@ -64,9 +64,6 @@ export default (context) => {
   const validateCSVFile = async (fileContent, botToken) => {
     const urls = [];
     const invalidUrls = [];
-    if (hasText(fileContent) === false) {
-      throw new Error('The CSV file is empty.');
-    }
     const csvData = await parseCSV(fileContent, botToken);
 
     if (!isNonEmptyArray(csvData)) {
@@ -105,12 +102,6 @@ export default (context) => {
 
     validateInput(enableImport, importType);
 
-    if (isValidUrl(baseURL) === false) {
-      await say(`${ERROR_MESSAGE_PREFIX}Please provide either a CSV file or a single baseURL.`);
-      result.error = 'Invalid baseURL';
-      return result;
-    }
-
     try {
       const site = await Site.findByBaseURL(baseURL);
       if (!site) {
@@ -142,6 +133,7 @@ export default (context) => {
       result.success = true;
       return result;
     } catch (error) {
+      console.log('debug1', error);
       log.error(error);
       result.error = error.message;
       return result;
@@ -183,26 +175,22 @@ export default (context) => {
 
       let importTypes;
       let isProfile = false;
-      try {
+
       // Check if it's a profile by attempting to load it
-        try {
-          const profile = loadProfileConfig(importTypeOrProfile);
+      try {
+        const profile = loadProfileConfig(importTypeOrProfile);
 
-          importTypes = Object.keys(profile.imports);
-          isProfile = true;
-        } catch (e) {
+        importTypes = Object.keys(profile.imports);
+        isProfile = true;
+      } catch (e) {
         // If loading profile fails, it's a single import type
-          importTypes = [importTypeOrProfile];
-          isProfile = false;
-        }
-
-        const typeDescription = isProfile ? `profile "${importTypeOrProfile}"` : `import type "${importTypeOrProfile}"`;
-
-        await say(`:information_source: Processing ${typeDescription} with ${importTypes.length} import type${importTypes.length > 1 ? 's' : ''}: ${importTypes.join(', ')}`);
-      } catch (error) {
-        await say(`${ERROR_MESSAGE_PREFIX}${error.message}`);
-        return;
+        importTypes = [importTypeOrProfile];
+        isProfile = false;
       }
+
+      const typeDescription = isProfile ? `profile "${importTypeOrProfile}"` : `import type "${importTypeOrProfile}"`;
+
+      await say(`:information_source: Processing ${typeDescription} with ${importTypes.length} import type${importTypes.length > 1 ? 's' : ''}: ${importTypes.join(', ')}`);
 
       const file = files[0];
 
@@ -247,6 +235,7 @@ export default (context) => {
         if (result.success) {
           results.successful.push(result.baseURL);
         } else {
+          console.log('debug2', result);
           results.failed.push({ baseURL, error: result.error });
         }
       });
@@ -283,6 +272,7 @@ export default (context) => {
         message += '```';
       }
 
+      console.log(message);
       await say(message);
     } catch (error) {
       log.error(error);
