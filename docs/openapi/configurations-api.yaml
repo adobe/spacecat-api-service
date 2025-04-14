@@ -5,7 +5,7 @@ latest-configuration:
     summary: Get the latest application configuration
     operationId: getLatestConfiguration
     security:
-      - admin_key: [ ]
+      - ims_key: [ ]
     responses:
       '200':
         description: The latest application configuration.
@@ -26,7 +26,7 @@ latest-jobs-configurations:
     summary: Get the latest jobs configurations
     operationId: getLatestJobsConfigurations
     security:
-      - admin_key: [ ]
+      - ims_key: [ ]
     responses:
       '200':
         description: A list of all the latest known jobs configurations or empty list if no jobs configurations are present.
@@ -52,7 +52,7 @@ latest-jobs-configurations:
           schema:
             $ref: './schemas.yaml#/Job'
     security:
-      - admin_key: [ ]
+      - ims_key: [ ]
     responses:
       '200':
         description: The latest jobs configurations have been successfully updated.
@@ -77,7 +77,7 @@ latest-jobs-configuration-by-type:
       This endpoint is useful for retrieving the latest jobs configurations by type.
     operationId: getLatestJobsConfigurationsByType
     security:
-      - admin_key: [ ]
+      - ims_key: [ ]
     responses:
       '200':
         description: A list of all the latest known jobs configurations for specific type or empty list if no jobs configurations for specific type found.
@@ -101,7 +101,7 @@ latest-jobs-configuration-by-type:
       This endpoint is useful for deleting the latest jobs configurations by a specific type.
     operationId: deleteLatestJobsConfigurationsByType
     security:
-      - admin_key: [ ]
+      - ims_key: [ ]
     responses:
       '204':
         description: Latest jobs configurations for specific type deleted successfully
@@ -141,7 +141,7 @@ configurations:
     summary: Get all application configurations
     operationId: getAllConfigurations
     security:
-      - admin_key: [ ]
+      - ims_key: [ ]
     responses:
       '200':
         description: A list of all known configurations or empty list if no configurations are present.
