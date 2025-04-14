@@ -160,7 +160,6 @@ function OnboardCommand(context) {
         const siteOrgId = site.getOrganizationId();
         if (siteOrgId !== organizationId) {
           site.setOrganizationId(organizationId);
-          await site.save();
           log.info(`Site ${baseURL} organization ID updated to ${organizationId}`);
         }
       } else {
