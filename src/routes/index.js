@@ -56,6 +56,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} sitesAuditsToggleController - The sites audits controller.
  * @param {Object} opportunitiesController - The opportunities controller.
  * @param {Object} suggestionsController - The suggestions controller.
+ * @param {Object} brandsController - The brands controller.
+ * @param {Object} fixesController - The fixes controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -74,6 +76,7 @@ export default function getRouteHandlers(
   opportunitiesController,
   suggestionsController,
   brandsController,
+  fixesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -149,6 +152,15 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/:jobId/progress': importController.getImportJobProgress,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
+
+    // Fixes
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': fixesController.getAllForSuggestion,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes/by-status/:status': fixesController.getByStatus,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes/:fixId': fixesController.getByID,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': fixesController.createFixes,
+    'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/status': fixesController.patchFixesStatus,
+    'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes/:fixId': fixesController.patchFix,
+    'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes/:fixId': fixesController.removeFix,
   };
 
   // Initialization of static and dynamic routes

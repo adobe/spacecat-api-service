@@ -50,6 +50,7 @@ import trigger from './controllers/trigger.js';
 import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
+import FixesController from './controllers/fixes.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
@@ -105,6 +106,7 @@ async function run(request, context) {
       OpportunitiesController(context.dataAccess),
       SuggestionsController(context.dataAccess, context.sqs, context.env),
       BrandsController(context.dataAccess, log, context.env),
+      new FixesController(context.dataAccess, log, context.env),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
