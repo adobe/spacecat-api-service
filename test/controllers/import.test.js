@@ -321,7 +321,7 @@ describe('ImportController tests', () => {
       ]);
       const response = await importController.createImportJob(baseContext);
       expect(response.status).to.equal(429);
-      expect(response.headers.get('x-error')).to.equal('Too Many Requests: API key hash c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441 cannot be used to start any more import jobs');
+      expect(response.headers.get('x-error')).to.equal('Too Many Requests: API key hash c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441 cannot be used to start any more import jobs for https://www.example.com');
     });
 
     it('should create an import job when the given API key is already running an import job with a different baseURL', async () => {

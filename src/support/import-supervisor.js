@@ -71,7 +71,7 @@ function ImportSupervisor(services, config) {
     // with the same base URL
     for (const job of runningImportJobs) {
       if (job.getHashedApiKey() === hashedApiKey && job.getBaseURL() === baseURL) {
-        throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more import jobs`, 429);
+        throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more import jobs for ${baseURL}`, 429);
       }
     }
 
