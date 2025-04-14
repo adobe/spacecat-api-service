@@ -1,3 +1,10 @@
+## [1.103.5](https://github.com/adobe/spacecat-api-service/compare/v1.103.4...v1.103.5) (2025-04-14)
+
+
+### Bug Fixes
+
+* Add a baseURL check while starting import jobs ([#852](https://github.com/adobe/spacecat-api-service/issues/852)) ([a71862f](https://github.com/adobe/spacecat-api-service/commit/a71862fa52fafa0f9cec902c32ba0c50eb4fdd0f))
+
 ## [1.103.4](https://github.com/adobe/spacecat-api-service/compare/v1.103.3...v1.103.4) (2025-04-14)
 
 
