@@ -98,7 +98,7 @@ latest-jobs-configuration-by-type:
       - configuration
     summary: Delete the latest jobs configurations by type
     description: |
-      This endpoint is useful for deleting the latest jobs configurations by a specific type.
+      This endpoint is useful for deleting the latest jobs configuration by a specific type.
     operationId: deleteLatestJobsConfigurationsByType
     security:
       - ims_key: [ ]
