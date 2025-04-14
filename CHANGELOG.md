@@ -1,3 +1,10 @@
+## [1.103.4](https://github.com/adobe/spacecat-api-service/compare/v1.103.3...v1.103.4) (2025-04-14)
+
+
+### Bug Fixes
+
+* onboarding for existing site ([#854](https://github.com/adobe/spacecat-api-service/issues/854)) ([5b5e8d6](https://github.com/adobe/spacecat-api-service/commit/5b5e8d6f3f0bfcc1c40c740cfe3a7e4233d63ed5))
+
 ## [1.103.3](https://github.com/adobe/spacecat-api-service/compare/v1.103.2...v1.103.3) (2025-04-12)
 
 
