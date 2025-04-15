@@ -26,7 +26,7 @@ function RunWorkflowCommand(context) {
     name: 'Onboard Workflow',
     description: 'Runs full onboarding, scrape, audit, and import for a site or list of sites.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {siteURL} {imsOrgId} {profile} {importType} {startDate} {endDate}`,
+    usageText: `${PHRASES[0]} {siteURL} {imsOrgId} {profile}`,
   });
 
   const { log } = context;
