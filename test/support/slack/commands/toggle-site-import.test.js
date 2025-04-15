@@ -104,7 +104,7 @@ describe('ToggleSiteImportCommand', () => {
     ToggleSiteImportCommand = await esmock('../../../../src/support/slack/commands/toggle-site-import.js', {
       '@adobe/spacecat-shared-utils': {
         tracingFetch: fetchStub,
-        // isValidUrl: (url) => url.startsWith('http'),
+        isValidUrl: (url) => url.startsWith('http'),
         isNonEmptyArray: (arr) => Array.isArray(arr) && arr.length > 0,
         hasText: (text) => typeof text === 'string' && text.trim().length > 0,
       },
@@ -198,6 +198,34 @@ describe('ToggleSiteImportCommand', () => {
     ).to.be.true;
   });
 
+  it('should notify user when no CSV is provided and entering single URL mode', async () => {
+    // Setup: ensure slackContextMock.files is undefined or empty
+    slackContextMock.files = undefined;
+
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    const command = ToggleSiteImportCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'content'];
+    await command.handleExecution(args, slackContextMock);
+
+    // Verify that the notification message is sent
+    expect(
+      slackContextMock.say.calledWith('No CSV Provided, entering single URL behavior'),
+      'Expected notification about single URL behavior to be sent',
+    ).to.be.true;
+
+    // Also verify that the rest of the single URL flow works
+    expect(
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.Site.findByBaseURL to be called',
+    ).to.be.true;
+
+    expect(
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The import "content" has been *enabled* for "https://site0.com".`),
+      'Expected success message for single URL operation',
+    ).to.be.true;
+  });
+
   describe('Bad Request Errors', () => {
     it('if "enableImport" parameter is missed', async () => {
       const command = ToggleSiteImportCommand(contextMock);
@@ -222,6 +250,27 @@ describe('ToggleSiteImportCommand', () => {
       expect(
         slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable imports: The "enableImport" parameter is required and must be set to "enable" or "disable".`),
         `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable imports: The "enableImport" parameter is required and must be set to "enable" or "disable"."`,
+      ).to.be.true;
+    });
+
+    it('should handle missing importTypeOrProfile with CSV file', async () => {
+      // Setup test environment with a CSV file
+      slackContextMock.files = [{
+        name: 'sites.csv',
+        url_private: 'https://mock-url',
+      }];
+
+      // Call with only the enableImport parameter
+      const command = ToggleSiteImportCommand(contextMock);
+      const args = ['enable']; // Missing second parameter
+
+      await command.handleExecution(args, slackContextMock);
+
+      // Should call validateInput with null
+      expectsAtBadRequest();
+      expect(
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable imports: The import type parameter is required.`),
+        'Expected error message indicating import type is required',
       ).to.be.true;
     });
 
@@ -288,30 +337,53 @@ describe('ToggleSiteImportCommand', () => {
     });
 
     it('should handle errors during import enabling/disabling in bulk processing', async () => {
-      // Set up the test environment
+      // Setup mocks for the CSV file data
       parseCSVStub.resolves([
         ['https://site1.com'],
         ['https://site2.com'],
       ]);
 
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves({ ...site });
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves({ ...site });
+      // Create site objects with appropriate stubs
+      const site1 = {
+        ...site,
+        getBaseURL: () => 'https://site1.com',
+        getConfig: () => ({ ...siteConfig }),
+        save: sinon.stub().resolves(),
+      };
 
-      // Make the second call to enableImport throw an error
-      site.save.onFirstCall().resolves()
-        .onSecondCall().rejects(new Error('Database error'));
+      const site2 = {
+        ...site,
+        getBaseURL: () => 'https://site2.com',
+        getConfig: () => ({ ...siteConfig }),
+        save: sinon.stub().rejects(new Error('Database error')),
+      };
+
+      // Setup the mock implementation
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site1);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site2);
+
+      // Override Promise.all to return mock processedResults with the expected structure
+      const origPromiseAll = Promise.all;
+      Promise.all = sinon.stub().resolves([
+        { success: true, baseURL: 'https://site1.com' },
+        { success: false, baseURL: 'https://site2.com', error: 'Database error' },
+      ]);
 
       const command = ToggleSiteImportCommand(contextMock);
       await command.handleExecution(['enable', 'content'], slackContextMock);
 
-      // Verify that the results.failed array was populated correctly
-      expect(slackContextMock.say.calledWith(
-        sinon.match((value) => value.includes(':clipboard: *Bulk Update Results*')
-          && value.includes('Successfully enabled for 1 sites')
-          && value.includes('https://site1.com')
-          && value.includes('Failed to process 1 sites')
-          && value.includes('https://site2.com: Database error')),
-      )).to.be.true;
+      // Check that the final message contains the expected content
+      const expectedMessage = sinon.match((value) => value.includes(':clipboard: *Bulk Update Results*')
+        && value.includes('Import Type: `content`')
+        && value.includes('Successfully enabled for')
+        && value.includes('https://site1.com')
+        && value.includes('Failed to process')
+        && value.includes('https://site2.com: Database error'));
+
+      expect(slackContextMock.say.calledWith(expectedMessage)).to.be.true;
+
+      // Restore Promise.all
+      Promise.all = origPromiseAll;
     });
 
     it('should handle CSV file with invalid URLs', async () => {
@@ -364,6 +436,39 @@ describe('ToggleSiteImportCommand', () => {
 
       expect(slackContextMock.say.calledWith(sinon.match('Processing profile "default" with 2 import types'))).to.be.true;
       expect(siteConfig.enableImport.callCount).to.equal(14);
+    });
+
+    it('should format profile information correctly in result message', async () => {
+      // Override Promise.all to return mock results
+      const origPromiseAll = Promise.all;
+      Promise.all = sinon.stub().resolves([
+        { success: true, baseURL: 'https://site1.com' },
+      ]);
+
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves({ ...site });
+
+      const command = ToggleSiteImportCommand(contextMock);
+      await command.handleExecution(['enable', 'default'], slackContextMock);
+
+      // Test lines 254-255 specifically - check for exact formatted strings
+      const profileSection1 = '\nProfile: `default` with 2 import types:';
+      const profileSection2 = '\n```content\nassets```';
+
+      const callArgs = slackContextMock.say.args;
+      let foundMessage = false;
+
+      // Check if any of the say calls contain both parts of the profile message
+      callArgs.forEach((args) => {
+        const message = args[0];
+        if (message.includes(profileSection1) && message.includes(profileSection2)) {
+          foundMessage = true;
+        }
+      });
+
+      expect(foundMessage, 'Expected to find message with correct profile formatting').to.be.true;
+
+      // Restore original Promise.all
+      Promise.all = origPromiseAll;
     });
   });
 

@@ -133,8 +133,8 @@ export default (context) => {
       result.success = true;
       return result;
     } catch (error) {
-      console.log('debug1', error);
       log.error(error);
+      result.success = false;
       result.error = error.message;
       return result;
     }
@@ -235,7 +235,6 @@ export default (context) => {
         if (result.success) {
           results.successful.push(result.baseURL);
         } else {
-          console.log('debug2', result);
           results.failed.push({ baseURL, error: result.error });
         }
       });
