@@ -94,30 +94,6 @@ describe('RunWorkflowCommand', () => {
     expect(slackContext.say).to.have.been.calledWith(command.usage());
   });
 
-  it('should catch error thrown from onboard.handleExecution', async () => {
-    onboardMock.handleExecution.rejects(new Error('onboard failed'));
-    const args = ['https://example.com', 'org123', 'default'];
-    const command = RunWorkflowCommand(context);
-
-    await command.handleExecution(args, slackContext);
-
-    expect(context.log.error).to.have.been.calledWithMatch('Can not call handleExecution from onboard command');
-  });
-
-  it('should catch top-level error in runWorkflowForSite', async () => {
-    // Force onboard.handleExecution to throw an error
-    onboardMock.handleExecution.rejects(new Error('onboard failed'));
-
-    const args = ['https://example.com', 'org123', 'default'];
-    const command = RunWorkflowCommand(context);
-
-    // Run the command and check if it catches the error
-    await command.handleExecution(args, slackContext);
-
-    // Check if the error was logged with the expected message
-    expect(context.log.error).to.have.been.calledWithMatch('Can not call handleExecution from onboard command');
-  });
-
   it('should catch top-level error in handleExecution', async () => {
     const args = ['https://example.com', 'org123', 'default'];
     RunWorkflowCommand(context);
@@ -143,5 +119,21 @@ describe('RunWorkflowCommand', () => {
 
     expect(context.log.error).to.have.been.called;
     expect(postErrorMessageStub).to.have.been.called;
+  });
+
+  it('should catch error from onboard.handleExecution and call postErrorMessage', async () => {
+    const error = new Error('Test error');
+    onboardMock.handleExecution.rejects(error); // Make it throw when awaited
+
+    const args = ['https://example.com', 'org123', 'profile1'];
+    const command = RunWorkflowCommand(context);
+
+    await command.handleExecution(args, slackContext);
+
+    // Check that log.error was called with the error
+    expect(context.log.error).to.have.been.calledWith(error);
+
+    // Check that postErrorMessage was called with slackContext.say and the error
+    expect(postErrorMessageStub).to.have.been.calledWith(slackContext.say, error);
   });
 });

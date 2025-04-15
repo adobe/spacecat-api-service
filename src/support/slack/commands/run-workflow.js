@@ -46,11 +46,7 @@ function RunWorkflowCommand(context) {
 
     try {
       logStep(`Starting onboarding for ${siteUrl}`);
-      try {
-        await onboard.handleExecution([siteUrl, imsOrgId, profile], slackContext);
-      } catch (err) {
-        log.error('Can not call handleExecution from onboard command', err);
-      }
+      await onboard.handleExecution([siteUrl, imsOrgId, profile], slackContext);
       logStep(`Completed full workflow for ${siteUrl}`);
     } catch (error) {
       log.error(error);
