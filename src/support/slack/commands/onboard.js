@@ -280,6 +280,7 @@ function OnboardCommand(context) {
     const {
       say, botToken, files, channelId, client, threadTs,
     } = slackContext;
+    log.debug('Slack context: ', say, botToken, files, channelId, client, threadTs);
 
     await say(':spacecat: Mission Control, we are go for *onboarding*! :satellite:');
 
