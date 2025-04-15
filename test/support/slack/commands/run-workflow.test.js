@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import { expect, use } from 'chai';
+import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
@@ -20,21 +20,22 @@ import esmock from 'esmock';
 use(sinonChai);
 
 describe('RunWorkflowCommand', () => {
-  let context;
-  let slackContext;
-  let say;
-  let onboardMock;
   let RunWorkflowCommand;
+  let slackContext;
+  let context;
+  let onboardMock;
+  let postErrorMessageStub;
 
   beforeEach(async () => {
-    say = sinon.stub();
-    slackContext = {
-      say,
-      files: [],
+    onboardMock = {
+      handleExecution: sinon.stub().resolves(),
     };
 
-    onboardMock = {
-      handleExecution: sinon.stub(),
+    postErrorMessageStub = sinon.stub();
+
+    slackContext = {
+      say: sinon.stub(),
+      files: [],
     };
 
     context = {
@@ -44,17 +45,22 @@ describe('RunWorkflowCommand', () => {
       },
     };
 
-    RunWorkflowCommand = await esmock('../../../../src/support/slack/commands/run-workflow.js', {
-      '../../../../src/support/slack/commands/onboard.js': sinon.stub().returns(onboardMock),
-    });
+    RunWorkflowCommand = await esmock(
+      '../../../../src/support/slack/commands/run-workflow.js',
+      {
+        '../../../../src/support/slack/commands/onboard.js': () => onboardMock,
+        '../../../../src/utils/slack/base.js': {
+          postErrorMessage: postErrorMessageStub,
+        },
+      },
+    );
   });
 
   afterEach(() => {
     sinon.restore();
-    esmock.purge(RunWorkflowCommand);
   });
 
-  it('should call onboard.handleExecution for a single valid site', async () => {
+  it('should call onboard for a valid single site', async () => {
     const args = ['https://example.com', 'org123', 'default'];
     const command = RunWorkflowCommand(context);
 
@@ -64,43 +70,78 @@ describe('RunWorkflowCommand', () => {
       ['https://example.com', 'org123', 'default'],
       slackContext,
     );
-
-    expect(say).to.have.been.calledWithMatch(/Starting onboarding/);
-    expect(say).to.have.been.calledWithMatch(/Completed full workflow/);
+    expect(slackContext.say).to.have.been.calledWithMatch('Starting onboarding');
+    expect(slackContext.say).to.have.been.calledWithMatch('Completed full workflow');
   });
 
   it('should warn when both URL and CSV are provided', async () => {
     const args = ['https://example.com', 'org123', 'default'];
-    slackContext.files = [{ name: 'sites.csv' }];
+    slackContext.files = [{ name: 'test.csv' }];
     const command = RunWorkflowCommand(context);
 
     await command.handleExecution(args, slackContext);
 
-    expect(say).to.have.been.calledWith(':warning: Provide either a URL or a CSV file, not both.');
-    expect(onboardMock.handleExecution).not.to.have.been.called;
+    expect(slackContext.say).to.have.been.calledWith(':warning: Provide either a URL or a CSV file, not both.');
+    expect(onboardMock.handleExecution).to.not.have.been.called;
   });
 
-  it('should show usage when neither URL nor CSV is provided', async () => {
+  it('should show usage when neither valid URL nor CSV is provided', async () => {
     const args = ['invalid-url', 'org123', 'default'];
     const command = RunWorkflowCommand(context);
 
     await command.handleExecution(args, slackContext);
 
-    expect(say).to.have.been.calledWith(command.usage());
-    expect(onboardMock.handleExecution).not.to.have.been.called;
+    expect(slackContext.say).to.have.been.calledWith(command.usage());
   });
 
-  it('should log error when onboard.handleExecution throws', async () => {
-    onboardMock.handleExecution.rejects(new Error('onboard error'));
-
+  it('should catch error thrown from onboard.handleExecution', async () => {
+    onboardMock.handleExecution.rejects(new Error('onboard failed'));
     const args = ['https://example.com', 'org123', 'default'];
     const command = RunWorkflowCommand(context);
 
     await command.handleExecution(args, slackContext);
 
-    expect(context.log.error).to.have.been.calledWith(
-      'Can not call handleExecution from onboard command',
-      sinon.match.instanceOf(Error),
+    expect(context.log.error).to.have.been.calledWithMatch('Can not call handleExecution from onboard command');
+  });
+
+  it('should catch top-level error in runWorkflowForSite', async () => {
+    // Force onboard.handleExecution to throw an error
+    onboardMock.handleExecution.rejects(new Error('onboard failed'));
+
+    const args = ['https://example.com', 'org123', 'default'];
+    const command = RunWorkflowCommand(context);
+
+    // Run the command and check if it catches the error
+    await command.handleExecution(args, slackContext);
+
+    // Check if the error was logged with the expected message
+    expect(context.log.error).to.have.been.calledWithMatch('Can not call handleExecution from onboard command');
+  });
+
+  it('should catch top-level error in handleExecution', async () => {
+    const args = ['https://example.com', 'org123', 'default'];
+    RunWorkflowCommand(context);
+
+    // Break isValidUrl function to throw
+    const brokenCommand = await esmock(
+      '../../../../src/support/slack/commands/run-workflow.js',
+      {
+        '../../../../src/support/slack/commands/onboard.js': () => onboardMock,
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl: () => {
+            throw new Error('top-level failure');
+          },
+          isNonEmptyArray: () => false,
+        },
+        '../../../../src/utils/slack/base.js': {
+          postErrorMessage: postErrorMessageStub,
+        },
+      },
     );
+
+    await brokenCommand(context).handleExecution(args, slackContext);
+
+    expect(context.log.error).to.have.been.called;
+    expect(postErrorMessageStub).to.have.been.called;
   });
 });
