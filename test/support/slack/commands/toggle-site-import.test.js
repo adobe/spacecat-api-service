@@ -198,34 +198,6 @@ describe('ToggleSiteImportCommand', () => {
     ).to.be.true;
   });
 
-  it('should notify user when no CSV is provided and entering single URL mode', async () => {
-    // Setup: ensure slackContextMock.files is undefined or empty
-    slackContextMock.files = undefined;
-
-    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
-
-    const command = ToggleSiteImportCommand(contextMock);
-    const args = ['enable', 'https://site0.com', 'content'];
-    await command.handleExecution(args, slackContextMock);
-
-    // Verify that the notification message is sent
-    expect(
-      slackContextMock.say.calledWith('No CSV Provided, entering single URL behavior'),
-      'Expected notification about single URL behavior to be sent',
-    ).to.be.true;
-
-    // Also verify that the rest of the single URL flow works
-    expect(
-      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
-      'Expected dataAccess.Site.findByBaseURL to be called',
-    ).to.be.true;
-
-    expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The import "content" has been *enabled* for "https://site0.com".`),
-      'Expected success message for single URL operation',
-    ).to.be.true;
-  });
-
   describe('Bad Request Errors', () => {
     it('if "enableImport" parameter is missed', async () => {
       const command = ToggleSiteImportCommand(contextMock);
@@ -238,6 +210,64 @@ describe('ToggleSiteImportCommand', () => {
         slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable imports: The "enableImport" parameter is required and must be set to "enable" or "disable".`),
         `Expected say method to be called with error message "${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable imports: The "enableImport" parameter is required and must be set to "enable" or "disable"."`,
       ).to.be.true;
+    });
+
+    it('if URL is invalid for a single site operation', async () => {
+      // This test specifically tests lines 107-108 in toggle-site-import.js
+      // where it validates the URL and throws an error if invalid
+
+      // Create a stub for isValidUrl that returns false for this specific test
+      const isValidUrlStub = sinon.stub().returns(false);
+
+      // Mock the module with our customized isValidUrl function
+      const CustomToggleSiteImportCommand = await esmock('../../../../src/support/slack/commands/toggle-site-import.js', {
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: fetchStub,
+          isValidUrl: isValidUrlStub, // Override just this function
+          isNonEmptyArray: (arr) => Array.isArray(arr) && arr.length > 0,
+          hasText: (text) => typeof text === 'string' && text.trim().length > 0,
+        },
+        '../../../../src/utils/slack/base.js': {
+          parseCSV: parseCSVStub,
+          extractURLFromSlackInput: (url) => url,
+          loadProfileConfig: (profile) => {
+            if (profile === 'default') {
+              return {
+                imports: {
+                  content: { enabled: true },
+                  assets: { enabled: true },
+                },
+              };
+            }
+            throw new Error(`Invalid profile: ${profile}`);
+          },
+        },
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: {
+            toDynamoItem: configToDynamoItemStub,
+          },
+        },
+      });
+
+      const command = CustomToggleSiteImportCommand(contextMock);
+
+      // Test with a URL that will be identified as invalid
+      const testURL = 'invalid-url';
+      const args = ['enable', testURL, 'content'];
+
+      await command.handleExecution(args, slackContextMock);
+
+      // Verify isValidUrl was called with the URL
+      expect(isValidUrlStub.calledWith(testURL)).to.be.true;
+
+      // Verify the expected error message was displayed
+      expect(
+        slackContextMock.say.calledWith(`${ERROR_MESSAGE_PREFIX}Invalid URL: ${testURL}`),
+        'Expected error message for invalid URL was not shown',
+      ).to.be.true;
+
+      // Verify no site operations were attempted
+      expectsAtBadRequest();
     });
 
     it('if "enableImport" parameter has wrong value', async () => {

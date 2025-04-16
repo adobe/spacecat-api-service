@@ -72,7 +72,7 @@ export default (context) => {
 
     for (const row of csvData) {
       const [baseURL] = row;
-      if (isValidUrl(baseURL) === false) {
+      if (!isValidUrl(baseURL)) {
         invalidUrls.push(baseURL);
       } else {
         urls.push(baseURL);
@@ -103,6 +103,10 @@ export default (context) => {
     validateInput(enableImport, importType);
 
     try {
+      if (!isValidUrl(baseURL)) {
+        throw new Error(`Invalid URL: ${baseURL}`);
+      }
+
       const site = await Site.findByBaseURL(baseURL);
       if (!site) {
         await say(`${ERROR_MESSAGE_PREFIX}Cannot update site with baseURL: "${baseURL}", site not found.`);
@@ -152,10 +156,9 @@ export default (context) => {
         ? importTypeOrProfileInput.toLowerCase() : null;
 
       // single URL behavior
-      if (isNonEmptyArray(files) === false) {
+      if (!isNonEmptyArray(files)) {
         const [, baseURLInput, singleImportType] = args;
 
-        await say('No CSV Provided, entering single URL behavior');
         const result = await handleSingleURL(
           baseURLInput,
           singleImportType,
@@ -271,7 +274,6 @@ export default (context) => {
         message += '```';
       }
 
-      console.log(message);
       await say(message);
     } catch (error) {
       log.error(error);
