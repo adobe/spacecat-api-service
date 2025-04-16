@@ -190,7 +190,7 @@ export const triggerReportForSite = async (
   lambdaContext,
 ) => sendReportMessage(
   lambdaContext.sqs,
-  lambdaContext.env.REPORT_JOBS_QUEUE_URL,
+  'https://sqs.us-east-1.amazonaws.com/682033462621/spacecat-report-jobs',
   reportType,
   {
     slackContext: {
