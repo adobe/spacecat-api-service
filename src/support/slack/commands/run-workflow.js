@@ -74,8 +74,6 @@ function RunWorkflowCommand(context) {
     const {
       say,
     } = slackContext;
-
-    await say(':spacecat: Mission Control, we are go for *runWorkFlow*! :satellite:');
     log.info(`Flow debug - in handleExecution for args ${JSON.stringify(args)} and slackContext ${JSON.stringify(slackContext)}`);
     try {
       const [baseURLInput, imsOrgID, profileName = 'default'] = args;
