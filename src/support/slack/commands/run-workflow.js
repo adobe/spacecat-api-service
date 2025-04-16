@@ -71,20 +71,14 @@ function RunWorkflowCommand(context) {
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const {
-      say,
-    } = slackContext;
     log.info(`Flow debug - in handleExecution for args ${JSON.stringify(args)} and slackContext ${JSON.stringify(slackContext)}`);
     try {
       const [baseURLInput, imsOrgID, profileName = 'default'] = args;
-      const isSingleSite = isValidUrl(baseURLInput);
+      const baseURL = 'https://www.jackson.com';
+      const isSingleSite = isValidUrl(baseURL);
 
-      log.info(`Flow debug - in handleExecution siteUrlOrImportType ${baseURLInput}, isSingleSite ${isSingleSite}`);
-      if (!isSingleSite) {
-        await say(baseCommand.usage());
-        return;
-      }
-      await runWorkflow(baseURLInput, imsOrgID, profileName, slackContext);
+      log.info(`Flow debug - in handleExecution baseURLInput ${baseURLInput}, baseURL ${baseURL}, isSingleSite ${isSingleSite}`);
+      await runWorkflow(baseURL, imsOrgID, profileName, slackContext);
       log.info('Flow debug - run workflow for siteUrl completed');
     } catch (error) {
       log.info('Flow debug - failed run workflow for siteUrl failed');

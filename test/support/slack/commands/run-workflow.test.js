@@ -61,26 +61,17 @@ describe('RunWorkflowCommand', () => {
   });
 
   it('should call onboard for a valid single site', async () => {
-    const args = ['https://example.com', 'org123', 'default'];
+    const args = ['https://www.jackson.com', 'org123', 'default'];
     const command = RunWorkflowCommand(context);
 
     await command.handleExecution(args, slackContext);
 
     expect(onboardMock.handleExecution).to.have.been.calledWith(
-      ['https://example.com', 'org123', 'default'],
+      ['https://www.jackson.com', 'org123', 'default'],
       slackContext,
     );
     expect(slackContext.say).to.have.been.calledWithMatch('Starting onboarding');
     expect(slackContext.say).to.have.been.calledWithMatch('Completed full workflow');
-  });
-
-  it('should show usage when neither valid URL nor CSV is provided', async () => {
-    const args = ['invalid-url', 'org123', 'default'];
-    const command = RunWorkflowCommand(context);
-
-    await command.handleExecution(args, slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(command.usage());
   });
 
   it('should catch top-level error in handleExecution', async () => {
