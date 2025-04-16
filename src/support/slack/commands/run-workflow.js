@@ -43,12 +43,14 @@ function RunWorkflowCommand(context) {
       log.info(msg);
       slackContext.say?.(`${msg}`);
     };
-
+    log.info(`Flow debug - runWorkflowForSite for siteUrl ${JSON.stringify(siteUrl)}, imsOrgId ${JSON.stringify(imsOrgId)}, profile ${profile}, slackContext ${slackContext}`);
     try {
       logStep(`Starting onboarding for ${siteUrl}`);
       await onboard.handleExecution([siteUrl, imsOrgId, profile], slackContext);
+      log.info(`Flow debug - finished onboarding for ${siteUrl}`);
       logStep(`Completed full workflow for ${siteUrl}`);
     } catch (error) {
+      log.info(`Flow debug - failed onboarding for ${siteUrl}`);
       log.error(error);
       await postErrorMessage(slackContext.say, error);
     }
@@ -57,6 +59,7 @@ function RunWorkflowCommand(context) {
   const handleExecution = async (args, slackContext) => {
     const { say, files } = slackContext;
 
+    log.info(`Flow debug - in handleExecution for say ${say} and file ${JSON.stringify(files)}`);
     try {
       const [siteUrlOrImportType, imsOrgId, profile] = args;
 
@@ -73,7 +76,9 @@ function RunWorkflowCommand(context) {
         return;
       }
       await runWorkflowForSite(siteUrlOrImportType, imsOrgId, profile, slackContext);
+      log.info('Flow debug - run workflow for siteUrl completed');
     } catch (error) {
+      log.info('Flow debug - failed run workflow for siteUrl failed');
       log.error(error);
       await postErrorMessage(slackContext.say, error);
     }
