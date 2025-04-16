@@ -160,9 +160,8 @@ Config:
 ContentAiConfig:
   type: object
   properties:
-    key:
-      type: string
     index:
+      description: Optional. The index name for website in the content AI service
       type: string
 OrganizationConfig:
   allOf:
