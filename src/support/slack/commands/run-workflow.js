@@ -66,6 +66,7 @@ function RunWorkflowCommand(context) {
       const hasCSV = isNonEmptyArray(files);
       const isSingleSite = isValidUrl(siteUrlOrImportType);
 
+      log.info(`Flow debug - in handleExecution siteUrlOrImportType ${siteUrlOrImportType}, isSingleSite ${isSingleSite}, hasCSV ${hasCSV}`);
       if (!isSingleSite && !hasCSV) {
         await say(baseCommand.usage());
         return;
