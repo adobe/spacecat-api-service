@@ -602,6 +602,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('patches a suggestion', async () => {
+    const logSpy = sandbox.spy();
     const { rank, data, kpiDeltas } = suggs[1];
     const response = await suggestionsController.patchSuggestion({
       params: {
@@ -610,6 +611,15 @@ describe('Suggestions Controller', () => {
         suggestionId: SUGGESTION_IDS[0],
       },
       data: { rank, data, kpiDeltas },
+      log: { info: logSpy },
+      auth: { userEmail: 'test@test.com' },
+    });
+
+    expect(logSpy).to.have.been.calledWith('Updating suggestion', {
+      method: 'PATCH',
+      resource: `/sites/${SITE_ID}/opportunities/${OPPORTUNITY_ID}/suggestions/${SUGGESTION_IDS[0]}`,
+      userEmail: 'test@test.com',
+      updates: ['rank', 'data', 'kpiDeltas'],
     });
 
     expect(response.status).to.equal(200);
@@ -767,12 +777,22 @@ describe('Suggestions Controller', () => {
   });
 
   it('bulk patches suggestion status 2 successes', async () => {
+    const logSpy = sandbox.spy();
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED-updated' }],
+      log: { info: logSpy },
+      auth: { userEmail: 'test@test.com' },
+    });
+
+    expect(logSpy).to.have.been.calledWith('Updating suggestions status', {
+      method: 'PATCH',
+      resource: `/sites/${SITE_ID}/opportunities/${OPPORTUNITY_ID}/suggestions/status`,
+      userEmail: 'test@test.com',
+      suggestionsCount: 2,
     });
 
     expect(response.status).to.equal(207);
@@ -1028,6 +1048,7 @@ describe('Suggestions Controller', () => {
 
   describe('auto-fix suggestions', () => {
     it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
+      const logSpy = sandbox.spy();
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
@@ -1040,6 +1061,15 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: { info: logSpy },
+        auth: { userEmail: 'test@test.com' },
+      });
+
+      expect(logSpy).to.have.been.calledWith('Autofixing suggestions', {
+        method: 'PATCH',
+        resource: `/sites/${SITE_ID}/opportunities/${OPPORTUNITY_ID}/suggestions/auto-fix`,
+        userEmail: 'test@test.com',
+        suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
       });
 
       expect(response.status).to.equal(207);
@@ -1253,6 +1283,7 @@ describe('Suggestions Controller', () => {
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for CS', async () => {
+      const logSpy = sandbox.spy();
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
@@ -1274,6 +1305,15 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        log: { info: logSpy },
+        auth: { userEmail: 'test@test.com' },
+      });
+
+      expect(logSpy).to.have.been.calledWith('Autofixing suggestions', {
+        method: 'PATCH',
+        resource: `/sites/${SITE_ID}/opportunities/${OPPORTUNITY_ID}/suggestions/auto-fix`,
+        userEmail: 'test@test.com',
+        suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
       });
 
       expect(response.status).to.equal(207);
