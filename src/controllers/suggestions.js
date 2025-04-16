@@ -212,7 +212,7 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} the updated suggestion data
    */
   const patchSuggestion = async (context) => {
-    const { log, auth } = context;
+    const { log = { info: () => {} }, auth } = context;
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
@@ -288,7 +288,7 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} the updated opportunity data
    */
   const patchSuggestionsStatus = async (context) => {
-    const { log, auth } = context;
+    const { log = { info: () => {} }, auth } = context;
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
@@ -406,9 +406,9 @@ function SuggestionsController(dataAccess, sqs, env) {
     return createResponse(fullResponse, 207);
   };
   const autofixSuggestions = async (context) => {
-    const { log, auth } = context;
+    const { log = { info: () => {} }, auth } = context;
     const siteId = context.params?.siteId;
-    const opportunityId = context.params?.opportunityId;
+    const opportunityId = context.params?.opportunityId || undefined;
 
     // Log the autofix request with user context
     log.info('Autofixing suggestions', {
