@@ -212,7 +212,7 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} the updated suggestion data
    */
   const patchSuggestion = async (context) => {
-    const { log = { info: () => {} }, auth } = context;
+    const { log = { info: () => {} }, attributes } = context;
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
@@ -221,8 +221,7 @@ function SuggestionsController(dataAccess, sqs, env) {
     log.info('Updating suggestion', {
       method: 'PATCH',
       resource: `/sites/${siteId}/opportunities/${opportunityId}/suggestions/${suggestionId}`,
-      userEmail: auth?.userEmail,
-      updates: Object.keys(context.data || {}),
+      userEmail: attributes?.authInfo?.profile?.email,
     });
 
     if (!isValidUUID(siteId)) {
@@ -288,7 +287,7 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} the updated opportunity data
    */
   const patchSuggestionsStatus = async (context) => {
-    const { log = { info: () => {} }, auth } = context;
+    const { log = { info: () => {} }, attributes } = context;
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
@@ -296,8 +295,7 @@ function SuggestionsController(dataAccess, sqs, env) {
     log.info('Updating suggestions status', {
       method: 'PATCH',
       resource: `/sites/${siteId}/opportunities/${opportunityId}/suggestions/status`,
-      userEmail: auth?.userEmail,
-      suggestionsCount: context.data?.length,
+      userEmail: attributes?.authInfo?.profile?.email,
     });
 
     if (!isValidUUID(siteId)) {
@@ -406,7 +404,7 @@ function SuggestionsController(dataAccess, sqs, env) {
     return createResponse(fullResponse, 207);
   };
   const autofixSuggestions = async (context) => {
-    const { log = { info: () => {} }, auth } = context;
+    const { log = { info: () => {} }, attributes } = context;
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId || undefined;
 
@@ -414,7 +412,7 @@ function SuggestionsController(dataAccess, sqs, env) {
     log.info('Autofixing suggestions', {
       method: 'PATCH',
       resource: `/sites/${siteId}/opportunities/${opportunityId}/suggestions/auto-fix`,
-      userEmail: auth?.userEmail,
+      userEmail: attributes?.authInfo?.profile?.email,
       suggestionIds: context.data?.suggestionIds,
     });
 

@@ -612,14 +612,19 @@ describe('Suggestions Controller', () => {
       },
       data: { rank, data, kpiDeltas },
       log: { info: logSpy },
-      auth: { userEmail: 'test@test.com' },
+      attributes: {
+        authInfo: {
+          profile: {
+            email: 'test@test.com',
+          },
+        },
+      },
     });
 
     expect(logSpy).to.have.been.calledWith('Updating suggestion', {
       method: 'PATCH',
       resource: `/sites/${SITE_ID}/opportunities/${OPPORTUNITY_ID}/suggestions/${SUGGESTION_IDS[0]}`,
       userEmail: 'test@test.com',
-      updates: ['rank', 'data', 'kpiDeltas'],
     });
 
     expect(response.status).to.equal(200);
@@ -785,14 +790,19 @@ describe('Suggestions Controller', () => {
       },
       data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED-updated' }],
       log: { info: logSpy },
-      auth: { userEmail: 'test@test.com' },
+      attributes: {
+        authInfo: {
+          profile: {
+            email: 'test@test.com',
+          },
+        },
+      },
     });
 
     expect(logSpy).to.have.been.calledWith('Updating suggestions status', {
       method: 'PATCH',
       resource: `/sites/${SITE_ID}/opportunities/${OPPORTUNITY_ID}/suggestions/status`,
       userEmail: 'test@test.com',
-      suggestionsCount: 2,
     });
 
     expect(response.status).to.equal(207);
@@ -1053,8 +1063,10 @@ describe('Suggestions Controller', () => {
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
       );
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -1062,7 +1074,13 @@ describe('Suggestions Controller', () => {
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
         log: { info: logSpy },
-        auth: { userEmail: 'test@test.com' },
+        attributes: {
+          authInfo: {
+            profile: {
+              email: 'test@test.com',
+            },
+          },
+        },
       });
 
       expect(logSpy).to.have.been.calledWith('Autofixing suggestions', {
@@ -1288,8 +1306,10 @@ describe('Suggestions Controller', () => {
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
       );
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
       const response = await suggestionsControllerWithIms.autofixSuggestions({
         env: {
           AUTOFIX_CRYPT_SECRET: 'superSecret',
@@ -1306,7 +1326,13 @@ describe('Suggestions Controller', () => {
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
         log: { info: logSpy },
-        auth: { userEmail: 'test@test.com' },
+        attributes: {
+          authInfo: {
+            profile: {
+              email: 'test@test.com',
+            },
+          },
+        },
       });
 
       expect(logSpy).to.have.been.calledWith('Autofixing suggestions', {
@@ -1342,8 +1368,10 @@ describe('Suggestions Controller', () => {
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
       );
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
       const response = await suggestionsControllerWithIms.autofixSuggestions({
         pathInfo: {
           headers: {
@@ -1367,8 +1395,10 @@ describe('Suggestions Controller', () => {
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
       );
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
       const response = await suggestionsControllerWithIms.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -1399,8 +1429,10 @@ describe('Suggestions Controller', () => {
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
       );
-      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
       const response = await suggestionsControllerWithFailedIms.autofixSuggestions({
         pathInfo: {
           headers: {
