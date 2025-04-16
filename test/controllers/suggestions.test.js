@@ -616,6 +616,7 @@ describe('Suggestions Controller', () => {
         authInfo: {
           profile: {
             email: 'test@test.com',
+            getName: () => 'test@test.com',
           },
         },
       },

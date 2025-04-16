@@ -221,7 +221,7 @@ function SuggestionsController(dataAccess, sqs, env) {
     log.info('Updating suggestion', {
       method: 'PATCH',
       resource: `/sites/${siteId}/opportunities/${opportunityId}/suggestions/${suggestionId}`,
-      userEmail: attributes?.authInfo?.profile?.email,
+      userEmail: attributes?.authInfo?.profile?.getName(),
     });
 
     if (!isValidUUID(siteId)) {
