@@ -154,6 +154,15 @@ Config:
     handlers:
       description: Optional. The Alert configuration
       $ref: '#/HandlerConfig'
+    contentAiConfig:
+      description: Optional. The ContentAi configuration
+      $ref: '#/ContentAiConfig'
+ContentAiConfig:
+  type: object
+  properties:
+    index:
+      description: Optional. The index name for website in the content AI service
+      type: string
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
