@@ -74,17 +74,6 @@ describe('RunWorkflowCommand', () => {
     expect(slackContext.say).to.have.been.calledWithMatch('Completed full workflow');
   });
 
-  it('should warn when both URL and CSV are provided', async () => {
-    const args = ['https://example.com', 'org123', 'default'];
-    slackContext.files = [{ name: 'test.csv' }];
-    const command = RunWorkflowCommand(context);
-
-    await command.handleExecution(args, slackContext);
-
-    expect(slackContext.say).to.have.been.calledWith(':warning: Provide either a URL or a CSV file, not both.');
-    expect(onboardMock.handleExecution).to.not.have.been.called;
-  });
-
   it('should show usage when neither valid URL nor CSV is provided', async () => {
     const args = ['invalid-url', 'org123', 'default'];
     const command = RunWorkflowCommand(context);

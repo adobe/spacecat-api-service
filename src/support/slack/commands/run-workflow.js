@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
@@ -20,6 +20,13 @@ import Onboard from './onboard.js';
 
 const PHRASES = ['run workflow site', 'run workflow sites'];
 
+/**
+ * Factory function to create the RunWorkflowCommand object.
+ *
+ * @param {Object} context - The context object.
+ * @returns {RunWorkflowCommand} - The RunWorkflowCommand object.
+ * @constructor
+ */
 function RunWorkflowCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-workflow',
@@ -30,10 +37,9 @@ function RunWorkflowCommand(context) {
   });
 
   const { log } = context;
-
   const onboard = Onboard(context);
 
-  const runWorkflowForSite = async (
+  const runWorkflow = async (
     siteUrl,
     imsOrgId,
     profile,
@@ -56,27 +62,31 @@ function RunWorkflowCommand(context) {
     }
   };
 
+  /**
+   * Handles run workflow (single site or batch of sites).
+   *
+   * @param {string[]} args - The arguments provided to the command ([site]).
+   * @param {Object} slackContext - The Slack context object.
+   * @param {Function} slackContext.say - The Slack say function.
+   * @returns {Promise} A promise that resolves when the operation is complete.
+   */
   const handleExecution = async (args, slackContext) => {
-    const { say, files } = slackContext;
+    const {
+      say,
+    } = slackContext;
 
-    log.info(`Flow debug - in handleExecution for say ${say} and file ${JSON.stringify(files)}`);
+    await say(':spacecat: Mission Control, we are go for *runWorkFlow*! :satellite:');
+    log.info(`Flow debug - in handleExecution for args ${JSON.stringify(args)} and slackContext ${JSON.stringify(slackContext)}`);
     try {
-      const [siteUrlOrImportType, imsOrgId, profile] = args;
+      const [baseURLInput, imsOrgID, profileName = 'default'] = args;
+      const isSingleSite = isValidUrl(baseURLInput);
 
-      const hasCSV = isNonEmptyArray(files);
-      const isSingleSite = isValidUrl(siteUrlOrImportType);
-
-      log.info(`Flow debug - in handleExecution siteUrlOrImportType ${siteUrlOrImportType}, isSingleSite ${isSingleSite}, hasCSV ${hasCSV}`);
-      if (!isSingleSite && !hasCSV) {
+      log.info(`Flow debug - in handleExecution siteUrlOrImportType ${baseURLInput}, isSingleSite ${isSingleSite}`);
+      if (!isSingleSite) {
         await say(baseCommand.usage());
         return;
       }
-
-      if (isSingleSite && hasCSV) {
-        await say(':warning: Provide either a URL or a CSV file, not both.');
-        return;
-      }
-      await runWorkflowForSite(siteUrlOrImportType, imsOrgId, profile, slackContext);
+      await runWorkflow(baseURLInput, imsOrgID, profileName, slackContext);
       log.info('Flow debug - run workflow for siteUrl completed');
     } catch (error) {
       log.info('Flow debug - failed run workflow for siteUrl failed');
