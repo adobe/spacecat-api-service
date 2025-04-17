@@ -18,7 +18,7 @@ import BaseCommand from './base.js';
 
 import Onboard from './onboard.js';
 
-const PHRASES = ['run workflow site', 'run workflow sites'];
+const PHRASES = ['run workflow'];
 
 /**
  * Factory function to create the RunWorkflowCommand object.
@@ -33,7 +33,7 @@ function RunWorkflowCommand(context) {
     name: 'Onboard Workflow',
     description: 'Runs full onboarding, scrape, audit, and import for a site or list of sites.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {siteURL} {imsOrgId} {profile}`,
+    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`,
   });
 
   const { log } = context;

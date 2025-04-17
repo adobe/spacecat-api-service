@@ -365,6 +365,7 @@ function OnboardCommand(context) {
         const [baseURLInput, imsOrgID, profileName = 'default'] = args;
         const configuration = await Configuration.findLatest();
 
+        log.info('Flow debug - calling onboardSingleSite');
         const reportLine = await onboardSingleSite(
           baseURLInput,
           imsOrgID,
@@ -372,7 +373,7 @@ function OnboardCommand(context) {
           profileName,
           slackContext,
         );
-
+        log.info('Flow debug - finished onboardSingleSite');
         await configuration.save();
 
         if (reportLine.errors) {
