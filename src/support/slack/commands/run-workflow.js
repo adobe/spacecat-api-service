@@ -78,7 +78,7 @@ function RunWorkflowCommand(context) {
       const isSingleSite = isValidUrl(baseURLInput);
 
       log.info(`Flow debug - in handleExecution baseURLInput ${baseURLInput}, isSingleSite ${isSingleSite}`);
-      await runWorkflow(baseURLInput, imsOrgID, profileName, slackContext);
+      await runWorkflow('https://www.visualcomfort.com', imsOrgID, profileName, slackContext);
       log.info('Flow debug - run workflow for siteUrl completed');
     } catch (error) {
       log.info('Flow debug - failed run workflow for siteUrl failed');
