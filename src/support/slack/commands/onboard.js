@@ -258,6 +258,7 @@ function OnboardCommand(context) {
       reportLine.audits = auditTypes.join(',');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
     } catch (error) {
+      log.info(`Flow debug - error running onboard: ${error.message}`);
       log.error(error);
       reportLine.errors = error.message;
       reportLine.status = 'Failed';
