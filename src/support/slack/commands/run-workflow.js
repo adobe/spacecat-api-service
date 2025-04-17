@@ -74,7 +74,7 @@ function RunWorkflowCommand(context) {
     log.info(`Flow debug - in handleExecution for args ${JSON.stringify(args)} and slackContext ${JSON.stringify(slackContext)}`);
     try {
       const [baseURLInput, imsOrgID, profileName = 'default'] = args;
-      const baseURL = 'https://www.jackson.com';
+      const baseURL = 'https://www.visualcomfort.com';
       const isSingleSite = isValidUrl(baseURL);
 
       log.info(`Flow debug - in handleExecution baseURLInput ${baseURLInput}, baseURL ${baseURL}, isSingleSite ${isSingleSite}`);
