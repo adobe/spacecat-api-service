@@ -32,9 +32,9 @@ function RunReportCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-report',
     name: 'Run Report',
-    description: 'Run report for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`',
+    description: 'Run report. Runs forms-internal by default if no report type parameter is provided.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [reportType]`,
+    usageText: `${PHRASES[0]} {reportType}`,
   });
 
   const { log } = context;
