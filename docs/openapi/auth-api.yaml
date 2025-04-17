@@ -51,3 +51,46 @@ google-auth-status:
       '500':
         $ref: './responses.yaml#/500'
     security: []
+login:
+  post:
+    summary: Authenticate with access token
+    description: |
+      Authenticates a user using an IMS access token and returns session information.
+    operationId: login
+    tags:
+      - auth
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - accessToken
+            properties:
+              accessToken:
+                type: string
+                description: The access token to authenticate with
+    responses:
+      '200':
+        description: Login successful
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionToken:
+                  type: string
+                  description: A JWT token signed by the service containing the user profile and tenants.
+      '401':
+        description: Authentication failed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  description: Error message
+                  example: "Invalid access token"
+    security: []  # No security required for login endpoint

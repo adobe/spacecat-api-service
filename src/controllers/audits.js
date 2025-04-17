@@ -11,7 +11,7 @@
  */
 
 import {
-  badRequest,
+  badRequest, forbidden,
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
@@ -20,26 +20,35 @@ import {
   isNonEmptyArray,
   isObject,
   isValidUUID,
-  isValidUrl,
+  isValidUrl, isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { AuditDto } from '../dto/audit.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * Audits controller.
- * @param {DataAccess} dataAccess - Data access.
+ * @param {object} ctx - Context object.
  * @returns {object} Audits controller.
  * @constructor
  */
-function AuditsController(dataAccess) {
-  if (!isObject(dataAccess)) {
+function AuditsController(ctx) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+
+  const { dataAccess } = ctx;
+
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
   const {
     Audit, Configuration, LatestAudit, Site,
   } = dataAccess;
+
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Gets all audits for a given site and audit type. If no audit type is specified,
@@ -56,6 +65,15 @@ function AuditsController(dataAccess) {
       return badRequest('Site ID required');
     }
 
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
     const method = auditType
       ? Audit.allBySiteIdAndAuditType(siteId, auditType, { order })
       : Audit.allBySiteId(siteId, { order });
@@ -65,7 +83,7 @@ function AuditsController(dataAccess) {
   };
 
   /**
-   * Gets all audits for a given site and audit type. Sorts by auditedAt descending.
+   * Gets all audits for a given audit type. Sorts by auditedAt descending.
    * If the url parameter ascending is set to true, sorts by auditedAt ascending.
    *
    * @returns {Promise<Response>} Array of audits response.
@@ -76,6 +94,10 @@ function AuditsController(dataAccess) {
 
     if (!hasText(auditType)) {
       return badRequest('Audit type required');
+    }
+
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Admin access required');
     }
 
     const audits = (await LatestAudit.allByAuditType(auditType, { order }))
@@ -93,6 +115,15 @@ function AuditsController(dataAccess) {
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
     }
 
     const audits = (await LatestAudit.allBySiteId(siteId))
@@ -115,6 +146,15 @@ function AuditsController(dataAccess) {
 
     if (!hasText(auditType)) {
       return badRequest('Audit type required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
     }
 
     const audits = await LatestAudit.allBySiteIdAndAuditType(siteId, auditType);
@@ -165,6 +205,10 @@ function AuditsController(dataAccess) {
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
     }
 
     const configuration = await Configuration.findLatest();

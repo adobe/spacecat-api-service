@@ -12,28 +12,39 @@
 
 import {
   badRequest,
+  forbidden,
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isInteger,
-  isObject,
+  isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 
 import { ConfigurationDto } from '../dto/configuration.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
-function ConfigurationController(dataAccess) {
-  if (!isObject(dataAccess)) {
+function ConfigurationController(ctx) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
   const { Configuration } = dataAccess;
+
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Retrieves all configurations (all versions).
    * @return {Promise<Response>} Array of configurations.
    */
   const getAll = async () => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view configurations');
+    }
     const configurations = (await Configuration.all())
       .map((configuration) => ConfigurationDto.toJSON(configuration));
     return ok(configurations);
@@ -45,6 +56,9 @@ function ConfigurationController(dataAccess) {
    * @return {Promise<Response>} Configuration response.
    */
   const getByVersion = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view configurations');
+    }
     const configurationVersion = context.params?.version;
 
     if (!isInteger(configurationVersion)) {
@@ -64,6 +78,9 @@ function ConfigurationController(dataAccess) {
    * @return {Promise<Response>} Configuration response.
    */
   const getLatest = async () => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view configurations');
+    }
     const configuration = await Configuration.findLatest();
     if (!configuration) {
       return notFound('Configuration not found');

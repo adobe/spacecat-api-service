@@ -25,6 +25,7 @@ import {
   LegacyApiKeyHandler,
   ScopedApiKeyHandler,
   AdobeImsHandler,
+  JwtHandler,
 } from '@adobe/spacecat-shared-http-utils';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
@@ -90,21 +91,21 @@ async function run(request, context) {
 
   try {
     const routeHandlers = getRouteHandlers(
-      AuditsController(context.dataAccess),
-      ConfigurationController(context.dataAccess),
+      AuditsController(context),
+      ConfigurationController(context),
       HooksController(context),
-      OrganizationsController(context.dataAccess, context.env),
-      SitesController(context.dataAccess, log, context.env),
-      ExperimentsController(context.dataAccess),
+      OrganizationsController(context, context.env),
+      SitesController(context, log, context.env),
+      ExperimentsController(context),
       SlackController(SlackApp),
       trigger,
       FulfillmentController(context),
       ImportController(context),
       ApiKeyController(context),
-      SitesAuditsToggleController(context.dataAccess),
-      OpportunitiesController(context.dataAccess),
-      SuggestionsController(context.dataAccess, context.sqs, context.env),
-      BrandsController(context.dataAccess, log, context.env),
+      SitesAuditsToggleController(context),
+      OpportunitiesController(context),
+      SuggestionsController(context, context.sqs, context.env),
+      BrandsController(context, log, context.env),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -136,7 +137,9 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
-  .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler] })
+  .with(authWrapper, {
+    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+  })
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)

@@ -10,22 +10,33 @@
  * governing permissions and limitations under the License.
  */
 
-import { badRequest, createResponse, internalServerError } from '@adobe/spacecat-shared-http-utils';
 import {
-  isObject, isValidUrl, isNonEmptyObject, isString,
+  badRequest,
+  createResponse,
+  forbidden,
+  internalServerError,
+} from '@adobe/spacecat-shared-http-utils';
+import {
+  isValidUrl, isNonEmptyObject, isString,
 } from '@adobe/spacecat-shared-utils';
+import AccessControlUtil from '../support/access-control-util.js';
 
 /**
- * @param {DataAccess} dataAccess - Data access.
+ * @param {object} ctx - Context of the request.
  * @returns {object} Sites Audits controller.
  * @constructor
  */
-export default (dataAccess) => {
-  if (!isObject(dataAccess)) {
+export default (ctx) => {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
   const { Configuration, Site } = dataAccess;
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   const validateInput = ({ baseURL, auditType, enable }) => {
     if (isString(baseURL) === false || baseURL.length === 0) {
@@ -52,6 +63,9 @@ export default (dataAccess) => {
    * @returns {Promise<Response|*>}
    */
   const execute = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can change configuration settings.');
+    }
     if (!isNonEmptyObject(context)) {
       return internalServerError('An error occurred while trying to enable or disable audits.');
     }

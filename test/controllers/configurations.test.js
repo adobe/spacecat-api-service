@@ -17,6 +17,8 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+
 import ConfigurationsController from '../../src/controllers/configuration.js';
 import { ConfigurationDto } from '../../src/dto/configuration.js';
 
@@ -90,6 +92,7 @@ describe('Configurations Controller', () => {
 
   let mockDataAccess;
   let configurationsController;
+  let context;
 
   beforeEach(() => {
     mockDataAccess = {
@@ -100,7 +103,18 @@ describe('Configurations Controller', () => {
       },
     };
 
-    configurationsController = ConfigurationsController(mockDataAccess);
+    context = {
+      dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+    };
+
+    configurationsController = ConfigurationsController(context);
   });
 
   afterEach(() => {
@@ -125,8 +139,14 @@ describe('Configurations Controller', () => {
       });
   });
 
-  it('throws an error if data access is not an object', () => {
+  it('throws an error if context is not an object', () => {
     expect(() => ConfigurationsController())
+      .to
+      .throw('Context required');
+  });
+
+  it('throws an error if data access is not an object', () => {
+    expect(() => ConfigurationsController({ dataAccess: {} }))
       .to
       .throw('Data access required');
   });
