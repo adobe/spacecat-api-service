@@ -57,7 +57,6 @@ function RunReportCommand(context) {
       const reportType = reportTypeInputArg || FORMS_INTERNAL;
       log.info(`Triggering report type: ${reportType}`);
       await triggerReportForSite(reportType, slackContext, context);
-
       say(`:adobe-run: Triggering ${reportType} report`);
     } catch (error) {
       log.error(error);
