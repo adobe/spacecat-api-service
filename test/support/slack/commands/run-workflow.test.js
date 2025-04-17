@@ -61,13 +61,13 @@ describe('RunWorkflowCommand', () => {
   });
 
   it('should call onboard for a valid single site', async () => {
-    const args = ['https://www.jackson.com', 'org123', 'default'];
+    const args = ['https://www.visualcomfort.com', 'org123', 'default'];
     const command = RunWorkflowCommand(context);
 
     await command.handleExecution(args, slackContext);
 
     expect(onboardMock.handleExecution).to.have.been.calledWith(
-      ['https://www.jackson.com', 'org123', 'default'],
+      ['https://www.visualcomfort.com', 'org123', 'default'],
       slackContext,
     );
     expect(slackContext.say).to.have.been.calledWithMatch('Starting onboarding');
