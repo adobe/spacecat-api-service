@@ -48,7 +48,7 @@ describe('RunReportCommand', () => {
       const command = RunReportCommand(context);
       expect(command.id).to.equal('run-report');
       expect(command.name).to.equal('Run Report');
-      expect(command.description).to.equal('Run report for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`');
+      expect(command.description).to.equal('Run report. Runs forms-internal by default if no report type parameter is provided.');
     });
   });
 
