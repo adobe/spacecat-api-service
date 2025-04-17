@@ -74,11 +74,11 @@ function RunWorkflowCommand(context) {
     log.info(`Flow debug - in handleExecution for args ${JSON.stringify(args)} and slackContext ${JSON.stringify(slackContext)}`);
     try {
       const [baseURLInput, imsOrgID, profileName = 'default'] = args;
-      const baseURL = 'https://www.visualcomfort.com';
-      const isSingleSite = isValidUrl(baseURL);
+      // const baseURL = 'https://www.visualcomfort.com';
+      const isSingleSite = isValidUrl(baseURLInput);
 
-      log.info(`Flow debug - in handleExecution baseURLInput ${baseURLInput}, baseURL ${baseURL}, isSingleSite ${isSingleSite}`);
-      await runWorkflow(baseURL, imsOrgID, profileName, slackContext);
+      log.info(`Flow debug - in handleExecution baseURLInput ${baseURLInput}, isSingleSite ${isSingleSite}`);
+      await runWorkflow(baseURLInput, imsOrgID, profileName, slackContext);
       log.info('Flow debug - run workflow for siteUrl completed');
     } catch (error) {
       log.info('Flow debug - failed run workflow for siteUrl failed');
