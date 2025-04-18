@@ -53,6 +53,7 @@ function SlackHandler(commands, log) {
     log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);
 
     const command = commands.find((cmd) => cmd.accepts(message));
+    log.info(`Flow debug - message ${JSON.stringify(message)} and command: ${JSON.stringify(command)}`);
     if (command) {
       await command.execute(message, slackContext, commands);
       return;

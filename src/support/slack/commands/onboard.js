@@ -258,6 +258,7 @@ function OnboardCommand(context) {
       reportLine.audits = auditTypes.join(',');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
     } catch (error) {
+      log.info(`Flow debug - error running onboard: ${error.message}`);
       log.error(error);
       reportLine.errors = error.message;
       reportLine.status = 'Failed';
@@ -280,6 +281,7 @@ function OnboardCommand(context) {
     const {
       say, botToken, files, channelId, client, threadTs,
     } = slackContext;
+    log.debug('Slack context: ', say, botToken, files, channelId, client, threadTs);
 
     await say(':spacecat: Mission Control, we are go for *onboarding*! :satellite:');
 
@@ -364,6 +366,7 @@ function OnboardCommand(context) {
         const [baseURLInput, imsOrgID, profileName = 'default'] = args;
         const configuration = await Configuration.findLatest();
 
+        log.info('Flow debug - calling onboardSingleSite');
         const reportLine = await onboardSingleSite(
           baseURLInput,
           imsOrgID,
@@ -371,7 +374,7 @@ function OnboardCommand(context) {
           profileName,
           slackContext,
         );
-
+        log.info('Flow debug - finished onboardSingleSite');
         await configuration.save();
 
         if (reportLine.errors) {

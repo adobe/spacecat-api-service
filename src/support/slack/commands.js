@@ -24,6 +24,7 @@ import getGoogleLink from './commands/create-google-link.js';
 import help from './commands/help.js';
 import toggleSiteAudit from './commands/toggle-site-audit.js';
 import onboard from './commands/onboard.js';
+import runWorkflow from './commands/run-workflow.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
 
 /**
@@ -47,5 +48,6 @@ export default (context) => [
   help(context),
   toggleSiteAudit(context),
   onboard(context),
+  runWorkflow(context),
   setSiteOrganizationCommand(context),
 ];
