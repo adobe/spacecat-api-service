@@ -17,8 +17,10 @@ import {
 import BaseCommand from './base.js';
 
 import Onboard from './onboard.js';
+import Audit from './run-audit.js';
+// import Imprt from './run-import.js';
 
-const PHRASES = ['run workflow'];
+const PHRASES = ['onboard workflow'];
 
 /**
  * Factory function to create the RunWorkflowCommand object.
@@ -38,6 +40,7 @@ function RunWorkflowCommand(context) {
 
   const { log } = context;
   const onboard = Onboard(context);
+  const audit = Audit(context);
 
   const runWorkflow = async (
     siteUrl,
@@ -53,6 +56,7 @@ function RunWorkflowCommand(context) {
     try {
       logStep(`Starting onboarding for ${siteUrl}`);
       await onboard.handleExecution([siteUrl, imsOrgId, profile], slackContext);
+      await audit.handleExecution([siteUrl, 'all'], slackContext);
       log.info(`Flow debug - finished onboarding for ${siteUrl}`);
       logStep(`Completed full workflow for ${siteUrl}`);
     } catch (error) {

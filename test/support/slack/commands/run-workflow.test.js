@@ -24,10 +24,14 @@ describe('RunWorkflowCommand', () => {
   let slackContext;
   let context;
   let onboardMock;
+  let auditMock;
   let postErrorMessageStub;
 
   beforeEach(async () => {
     onboardMock = {
+      handleExecution: sinon.stub().resolves(),
+    };
+    auditMock = {
       handleExecution: sinon.stub().resolves(),
     };
 
@@ -49,25 +53,26 @@ describe('RunWorkflowCommand', () => {
       '../../../../src/support/slack/commands/run-workflow.js',
       {
         '../../../../src/support/slack/commands/onboard.js': () => onboardMock,
+        '../../../../src/support/slack/commands/run-audit.js': () => auditMock,
         '../../../../src/utils/slack/base.js': {
           postErrorMessage: postErrorMessageStub,
         },
       },
     );
   });
-
   afterEach(() => {
     sinon.restore();
   });
-
   it('should call onboard for a valid single site', async () => {
     const args = ['https://www.visualcomfort.com', 'org123', 'default'];
     const command = RunWorkflowCommand(context);
-
     await command.handleExecution(args, slackContext);
-
     expect(onboardMock.handleExecution).to.have.been.calledWith(
       ['https://www.visualcomfort.com', 'org123', 'default'],
+      slackContext,
+    );
+    expect(auditMock.handleExecution).to.have.been.calledWith(
+      ['https://www.visualcomfort.com', 'all'],
       slackContext,
     );
     expect(slackContext.say).to.have.been.calledWithMatch('Starting onboarding');
@@ -83,6 +88,7 @@ describe('RunWorkflowCommand', () => {
       '../../../../src/support/slack/commands/run-workflow.js',
       {
         '../../../../src/support/slack/commands/onboard.js': () => onboardMock,
+        '../../../../src/support/slack/commands/run-audit.js': () => auditMock,
         '@adobe/spacecat-shared-utils': {
           isValidUrl: () => {
             throw new Error('top-level failure');
