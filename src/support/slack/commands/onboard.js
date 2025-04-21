@@ -19,6 +19,10 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 
+import RunScrape from './run-scrape.js';
+import RunImport from './run-import.js';
+import RunAudit from './run-audit.js';
+
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -26,13 +30,18 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerImportRun } from '../../utils.js';
+import { findDeliveryType } from '../../utils.js';
 
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 
 const PHRASES = ['onboard site', 'onboard sites'];
+
+// Add wait utility function
+const wait = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
 
 /**
  * Factory function to create the OnboardCommand object.
@@ -52,6 +61,10 @@ function OnboardCommand(context) {
 
   const { dataAccess, log, imsClient } = context;
   const { Configuration, Site, Organization } = dataAccess;
+
+  const runScrape = RunScrape(context);
+  const runImport = RunImport(context);
+  const runAudit = RunAudit(context);
 
   const csvStringifier = createObjectCsvStringifier({
     header: [
@@ -216,11 +229,27 @@ function OnboardCommand(context) {
       const importTypes = Object.keys(profile.imports);
       reportLine.imports = importTypes.join(',');
       const siteConfig = site.getConfig();
+      // run scrape
+      await runScrape.handleExecution([baseURL], slackContext);
+      // Wait for 15 minutes after scrape
+      await wait(1000 * 60); // adjust it to 15 minutes later
+      log.info(`Triggered scrape for site ${siteID}`);
+      // enable imports
       for (const importType of importTypes) {
         siteConfig.enableImport(importType);
       }
-
+      // Do we need to wait for enable imports to be finished?
+      reportLine.imports = importTypes.join(',');
       log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
+
+      // enable audits
+      const auditTypes = Object.keys(profile.audits);
+      auditTypes.forEach((auditType) => {
+        configuration.enableHandlerForSite(auditType, site);
+      });
+      // Do we need to wait for enable audits to be finished?
+      reportLine.audits = auditTypes.join(',');
+      log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
 
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
@@ -231,32 +260,27 @@ function OnboardCommand(context) {
         reportLine.status = 'Failed';
         return reportLine;
       }
-
-      log.info(`Site config succesfully saved for site ${siteID}`);
-
+      log.info(`Site config successfully saved for site ${siteID}`);
+      // run imports
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
-        await triggerImportRun(
-          configuration,
+        await runImport.handleExecution([
+          baseURL,
           importType,
-          siteID,
           profile.imports[importType].startDate,
           profile.imports[importType].endDate,
-          slackContext,
-          context,
-        );
+        ], slackContext);
       }
-
+      // Wait for 15 minutes after all imports
+      await wait(1000 * 60); // adjust it to 15 minutes later
       log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
 
-      const auditTypes = Object.keys(profile.audits);
-
-      auditTypes.forEach((auditType) => {
-        configuration.enableHandlerForSite(auditType, site);
-      });
-
-      reportLine.audits = auditTypes.join(',');
-      log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
+      // run audits
+      for (const auditType of auditTypes) {
+        await runAudit.handleExecution([baseURL, auditType], slackContext);
+      }
+      log.info(`Triggered the following audits for site ${siteID}: ${reportLine.audits}`);
+      // disable imports, audits will be done manually after onboarding process is finished?
     } catch (error) {
       log.info(`Flow debug - error running onboard: ${error.message}`);
       log.error(error);
