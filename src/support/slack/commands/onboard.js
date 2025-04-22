@@ -43,6 +43,9 @@ const wait = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
 
+// Convert minutes to milliseconds
+const minutesToMs = (minutes) => minutes * 60 * 1000;
+
 /**
  * Factory function to create the OnboardCommand object.
  *
@@ -62,6 +65,7 @@ function OnboardCommand(context) {
   const { dataAccess, log, imsClient } = context;
   const { Configuration, Site, Organization } = dataAccess;
 
+  // Create run functions for each of the tasks
   const runScrape = RunScrape(context);
   const runImport = RunImport(context);
   const runAudit = RunAudit(context);
@@ -90,10 +94,12 @@ function OnboardCommand(context) {
    * @param {object} configuration - The configuration object.
    * @param {string} profileName - The profile name.
    * @param {Object} slackContext - Slack context.
-   * @param {number} [waitTimeMs=1200000] - Wait time in milliseconds between operations
-   *   (default: 20 minutes).
-   * @param {number} [auditWaitTimeMs=1800000] - Wait time in milliseconds after audits
-   *   (default: 30 minutes).
+   * @param {number} [enableDisableWaitTimeMinutes=2] - Wait time in minutes between
+   *   enable/disable operations (default: 2 minutes).
+   * @param {number} [waitTimeMinutes=20] - Wait time in minutes between
+   *   operations (default: 20 minutes).
+   * @param {number} [auditWaitTimeMinutes=30] - Wait time in minutes after
+   *   audits (default: 30 minutes).
    * @returns {Promise<Object>} - A report line containing execution details.
    */
   const onboardSingleSite = async (
@@ -102,8 +108,9 @@ function OnboardCommand(context) {
     configuration,
     profileName,
     slackContext,
-    waitTimeMs = 1200000, // 20 minutes in milliseconds
-    auditWaitTimeMs = 1800000, // 30 minutes in milliseconds
+    enableDisableWaitTimeMinutes = 2, // 2 minutes
+    waitTimeMinutes = 20, // 20 minutes
+    auditWaitTimeMinutes = 30, // 30 minutes
   ) => {
     const { say } = slackContext;
 
@@ -235,28 +242,34 @@ function OnboardCommand(context) {
       const importTypes = Object.keys(profile.imports);
       reportLine.imports = importTypes.join(',');
       const siteConfig = site.getConfig();
-      // run scrape
+
+      // 1. run scrape
+      log.info(`Running scrape for site ${baseURL}`);
       await runScrape.handleExecution([baseURL], slackContext);
       // Wait after scrape
-      await wait(waitTimeMs);
+      await wait(minutesToMs(waitTimeMinutes));
       log.info(`Triggered scrape for site ${siteID}`);
-      // enable imports
+
+      // 2. enable imports
       for (const importType of importTypes) {
         siteConfig.enableImport(importType);
       }
-      // Do we need to wait for enable imports to be finished?
+      await wait(minutesToMs(enableDisableWaitTimeMinutes));
       reportLine.imports = importTypes.join(',');
-      log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
+      await say(`:adobe-run: Enabled imports for ${baseURL}`);
+      log.info(`Enabled imports forsite ${baseURL}: ${reportLine.imports}`);
 
-      // enable audits
+      // 3. enable audits
       const auditTypes = Object.keys(profile.audits);
       auditTypes.forEach((auditType) => {
         configuration.enableHandlerForSite(auditType, site);
       });
-      // Do we need to wait for enable audits to be finished?
+      await wait(minutesToMs(enableDisableWaitTimeMinutes));
       reportLine.audits = auditTypes.join(',');
-      log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
+      await say(`:adobe-run: Enabled audits for site ${baseURL}`);
+      log.info(`Enabled audits for site ${baseURL}: ${reportLine.audits}`);
 
+      // 4. save site config
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
         await site.save();
@@ -266,8 +279,11 @@ function OnboardCommand(context) {
         reportLine.status = 'Failed';
         return reportLine;
       }
+      await say(':white_check_mark: Site config successfully saved!');
       log.info(`Site config successfully saved for site ${siteID}`);
-      // run imports
+
+      // 5. run imports
+      log.info(`Running imports for site ${baseURL}`);
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
         await runImport.handleExecution([
@@ -277,18 +293,43 @@ function OnboardCommand(context) {
           profile.imports[importType].endDate,
         ], slackContext);
       }
-      // Wait after all imports
-      await wait(waitTimeMs);
-      log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
+      await wait(minutesToMs(waitTimeMinutes));
 
-      // run audits
+      // 6. run audits
+      log.info(`Running audits for site ${baseURL}`);
       for (const auditType of auditTypes) {
         await runAudit.handleExecution([baseURL, auditType], slackContext);
       }
-      // Wait after all audits
-      await wait(auditWaitTimeMs);
-      log.info(`Triggered the following audits for site ${siteID}: ${reportLine.audits}`);
-      // disable imports, audits will be done manually after onboarding process is finished?
+      await wait(minutesToMs(auditWaitTimeMinutes));
+
+      // 7. disable imports
+      for (const importType of importTypes) {
+        siteConfig.disableImport(importType);
+      }
+      await wait(minutesToMs(enableDisableWaitTimeMinutes));
+      reportLine.imports = importTypes.join(',');
+      await say(`:adobe-run: Disabled imports for ${baseURL}`);
+      log.info(`Disabled imports for site ${baseURL}: ${reportLine.imports}`);
+
+      // 8. disable audits
+      auditTypes.forEach((auditType) => {
+        configuration.disableHandlerForSite(auditType, site);
+      });
+      await wait(minutesToMs(enableDisableWaitTimeMinutes));
+      reportLine.audits = auditTypes.join(',');
+      await say(`:adobe-run: Disabled audits for ${baseURL}`);
+      log.info(`Disabled audits for site ${baseURL}: ${reportLine.audits}`);
+
+      // 9. save site config
+      site.setConfig(Config.toDynamoItem(siteConfig));
+      try {
+        await site.save();
+      } catch (error) {
+        log.error(error);
+      } finally {
+        await say(':white_check_mark: Site config successfully saved!');
+        log.info(`Site config successfully saved for site ${siteID}`);
+      }
     } catch (error) {
       log.info(`Flow debug - error running onboard: ${error.message}`);
       log.error(error);
@@ -362,8 +403,9 @@ function OnboardCommand(context) {
             configuration,
             profileName,
             slackContext,
-            undefined, // Use default wait time
-            undefined, // Use default audit wait time
+            undefined, // Use default enableDisableWaitTimeMinutes
+            undefined, // Use default waitTimeMinutes
+            undefined, // Use default auditWaitTimeMinutes
           );
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
@@ -397,20 +439,19 @@ function OnboardCommand(context) {
           return;
         }
 
-        const [baseURLInput, imsOrgID, profileName = 'default', waitTimeMs, auditWaitTimeMs] = args;
+        const [baseURLInput, imsOrgID, profileName = 'default', enableDisableWaitTimeMinutes, waitTimeMinutes, auditWaitTimeMinutes] = args;
         const configuration = await Configuration.findLatest();
 
-        log.info('Flow debug - calling onboardSingleSite');
         const reportLine = await onboardSingleSite(
           baseURLInput,
           imsOrgID,
           configuration,
           profileName,
           slackContext,
-          waitTimeMs ? parseInt(waitTimeMs, 10) : undefined,
-          auditWaitTimeMs ? parseInt(auditWaitTimeMs, 10) : undefined,
+          enableDisableWaitTimeMinutes ? parseInt(enableDisableWaitTimeMinutes, 10) : undefined,
+          waitTimeMinutes ? parseInt(waitTimeMinutes, 10) : undefined,
+          auditWaitTimeMinutes ? parseInt(auditWaitTimeMinutes, 10) : undefined,
         );
-        log.info('Flow debug - finished onboardSingleSite');
         await configuration.save();
 
         if (reportLine.errors) {

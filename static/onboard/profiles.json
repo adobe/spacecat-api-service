@@ -69,15 +69,9 @@
 	},
 	"demo":  {
 		"audits": {
-			"scrape-top-pages": {},
-			"alt-text": {},
 			"broken-backlinks": {},
-			"broken-internal-links-auto-suggest": {},
-			"cwv": {},
 			"broken-internal-links": {},
-			"meta-tags-auto-suggest": {},
 			"meta-tags": {},
-			"sitemap": {},
 			"forms-opportunities": {}
 		},
 		"imports": {
@@ -85,8 +79,7 @@
 				"startDate": "2025-02-24",
 				"endDate": "2025-03-02"
 			},
-			"top-pages" : {},
-			"all-traffic" : {}
+			"top-pages" : {}
 		},
 		"config": {},
 		"integrations": {}
