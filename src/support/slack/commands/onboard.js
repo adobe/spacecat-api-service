@@ -243,33 +243,26 @@ function OnboardCommand(context) {
       reportLine.imports = importTypes.join(',');
       const siteConfig = site.getConfig();
 
-      // 1. run scrape
-      log.info(`Running scrape for site ${baseURL}`);
-      await runScrape.handleExecution([baseURL], slackContext);
-      // Wait after scrape
-      await wait(minutesToMs(waitTimeMinutes));
-      log.info(`Triggered scrape for site ${siteID}`);
-
-      // 2. enable imports
+      // 1. enable imports
       for (const importType of importTypes) {
         siteConfig.enableImport(importType);
       }
       await wait(minutesToMs(enableDisableWaitTimeMinutes));
       reportLine.imports = importTypes.join(',');
-      await say(`:adobe-run: Enabled imports for ${baseURL}`);
+      await say(`:white_check_mark: Enabled imports for ${baseURL}`);
       log.info(`Enabled imports forsite ${baseURL}: ${reportLine.imports}`);
 
-      // 3. enable audits
+      // 2. enable audits
       const auditTypes = Object.keys(profile.audits);
       auditTypes.forEach((auditType) => {
         configuration.enableHandlerForSite(auditType, site);
       });
       await wait(minutesToMs(enableDisableWaitTimeMinutes));
       reportLine.audits = auditTypes.join(',');
-      await say(`:adobe-run: Enabled audits for site ${baseURL}`);
+      await say(`:white_check_mark: Enabled audits for site ${baseURL}`);
       log.info(`Enabled audits for site ${baseURL}: ${reportLine.audits}`);
 
-      // 4. save site config
+      // 3. save site config
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
         await site.save();
@@ -281,6 +274,13 @@ function OnboardCommand(context) {
       }
       await say(':white_check_mark: Site config successfully saved!');
       log.info(`Site config successfully saved for site ${siteID}`);
+
+      // 4. run scrape
+      log.info(`Running scrape for site ${baseURL}`);
+      await runScrape.handleExecution([baseURL], slackContext);
+      await wait(minutesToMs(waitTimeMinutes));
+      await say(`:white_check_mark: Scrape completed for site ${baseURL}`);
+      log.info(`Triggered scrape for site ${siteID}`);
 
       // 5. run imports
       log.info(`Running imports for site ${baseURL}`);
@@ -294,6 +294,8 @@ function OnboardCommand(context) {
         ], slackContext);
       }
       await wait(minutesToMs(waitTimeMinutes));
+      await say(`:white_check_mark: Imports completed for site ${baseURL}`);
+      log.info(`Imports completed for site ${baseURL}`);
 
       // 6. run audits
       log.info(`Running audits for site ${baseURL}`);
@@ -301,6 +303,8 @@ function OnboardCommand(context) {
         await runAudit.handleExecution([baseURL, auditType], slackContext);
       }
       await wait(minutesToMs(auditWaitTimeMinutes));
+      await say(`:white_check_mark: Audits completed for site ${baseURL}`);
+      log.info(`Audits completed for site ${baseURL}`);
 
       // 7. disable imports
       for (const importType of importTypes) {
