@@ -90,6 +90,10 @@ function OnboardCommand(context) {
    * @param {object} configuration - The configuration object.
    * @param {string} profileName - The profile name.
    * @param {Object} slackContext - Slack context.
+   * @param {number} [waitTimeMs=1200000] - Wait time in milliseconds between operations
+   *   (default: 20 minutes).
+   * @param {number} [auditWaitTimeMs=1800000] - Wait time in milliseconds after audits
+   *   (default: 30 minutes).
    * @returns {Promise<Object>} - A report line containing execution details.
    */
   const onboardSingleSite = async (
@@ -98,6 +102,8 @@ function OnboardCommand(context) {
     configuration,
     profileName,
     slackContext,
+    waitTimeMs = 1200000, // 20 minutes in milliseconds
+    auditWaitTimeMs = 1800000, // 30 minutes in milliseconds
   ) => {
     const { say } = slackContext;
 
@@ -231,8 +237,8 @@ function OnboardCommand(context) {
       const siteConfig = site.getConfig();
       // run scrape
       await runScrape.handleExecution([baseURL], slackContext);
-      // Wait for 15 minutes after scrape
-      await wait(1000 * 60); // adjust it to 15 minutes later
+      // Wait after scrape
+      await wait(waitTimeMs);
       log.info(`Triggered scrape for site ${siteID}`);
       // enable imports
       for (const importType of importTypes) {
@@ -271,14 +277,16 @@ function OnboardCommand(context) {
           profile.imports[importType].endDate,
         ], slackContext);
       }
-      // Wait for 15 minutes after all imports
-      await wait(1000 * 60); // adjust it to 15 minutes later
+      // Wait after all imports
+      await wait(waitTimeMs);
       log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
 
       // run audits
       for (const auditType of auditTypes) {
         await runAudit.handleExecution([baseURL, auditType], slackContext);
       }
+      // Wait after all audits
+      await wait(auditWaitTimeMs);
       log.info(`Triggered the following audits for site ${siteID}: ${reportLine.audits}`);
       // disable imports, audits will be done manually after onboarding process is finished?
     } catch (error) {
@@ -354,6 +362,8 @@ function OnboardCommand(context) {
             configuration,
             profileName,
             slackContext,
+            undefined, // Use default wait time
+            undefined, // Use default audit wait time
           );
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
@@ -387,7 +397,7 @@ function OnboardCommand(context) {
           return;
         }
 
-        const [baseURLInput, imsOrgID, profileName = 'default'] = args;
+        const [baseURLInput, imsOrgID, profileName = 'default', waitTimeMs, auditWaitTimeMs] = args;
         const configuration = await Configuration.findLatest();
 
         log.info('Flow debug - calling onboardSingleSite');
@@ -397,6 +407,8 @@ function OnboardCommand(context) {
           configuration,
           profileName,
           slackContext,
+          waitTimeMs ? parseInt(waitTimeMs, 10) : undefined,
+          auditWaitTimeMs ? parseInt(auditWaitTimeMs, 10) : undefined,
         );
         log.info('Flow debug - finished onboardSingleSite');
         await configuration.save();
