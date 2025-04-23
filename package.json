@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.103.9",
+  "version": "1.103.10",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -81,9 +81,9 @@
     "@aws-sdk/client-s3": "3.787.0",
     "@aws-sdk/client-sqs": "3.787.0",
     "@aws-sdk/s3-request-presigner": "3.787.0",
-    "@langchain/core": "0.3.44",
-    "@langchain/langgraph": "0.2.64",
-    "@langchain/openai": "0.5.5",
+    "@langchain/core": "0.3.45",
+    "@langchain/langgraph": "0.2.65",
+    "@langchain/openai": "0.5.6",
     "@octokit/rest": "21.1.1",
     "@slack/bolt": "4.2.1",
     "@slack/web-api": "7.9.1",
@@ -96,7 +96,7 @@
     "psl": "1.15.0",
     "slack-block-builder": "2.8.0",
     "urijs": "1.19.11",
-    "zod": "3.24.2"
+    "zod": "3.24.3"
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.9",
