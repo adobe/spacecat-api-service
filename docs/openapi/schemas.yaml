@@ -154,6 +154,15 @@ Config:
     handlers:
       description: Optional. The Alert configuration
       $ref: '#/HandlerConfig'
+    contentAiConfig:
+      description: Optional. The ContentAi configuration
+      $ref: '#/ContentAiConfig'
+ContentAiConfig:
+  type: object
+  properties:
+    index:
+      description: Optional. The index name for website in the content AI service
+      type: string
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -203,6 +212,8 @@ Organization:
             slack:
               - '@user5'
               - '@user6'
+      contentAiConfig:
+          index: 'example-index-name'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 OrganizationList:
@@ -242,6 +253,8 @@ OrganizationCreate:
             slack:
               - '@user5'
               - '@user6'
+      contentAiConfig:
+        index: 'example-index-name'
 OrganizationUpdate:
   type: object
   properties:
@@ -261,17 +274,19 @@ OrganizationUpdate:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
-        handlers:
-          '404':
-            mentions:
-              slack:
-                - '@user3'
-                - '@user4'
-          'cwv':
-            mentions:
-              slack:
-                - '@user5'
-                - '@user6'
+      handlers:
+        '404':
+          mentions:
+            slack:
+              - '@user3'
+              - '@user4'
+        'cwv':
+          mentions:
+            slack:
+              - '@user5'
+              - '@user6'
+      contentAiConfig:
+        index: 'example-index-name'
 Site:
   type: object
   properties:
@@ -355,6 +370,8 @@ Site:
                 pattern:
                   description: Pattern representing the URL path structure to group
                   type: string
+      contentAiConfig:
+        index: 'example-index-name'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
