@@ -1,3 +1,10 @@
+# [1.104.0](https://github.com/adobe/spacecat-api-service/compare/v1.103.10...v1.104.0) (2025-04-23)
+
+
+### Features
+
+* Add ContentAi configuration entity to the API Service ([#858](https://github.com/adobe/spacecat-api-service/issues/858)) ([1001aba](https://github.com/adobe/spacecat-api-service/commit/1001aba61f249ef497be59fd535fe13cb33e2aa0))
+
 ## [1.103.10](https://github.com/adobe/spacecat-api-service/compare/v1.103.9...v1.103.10) (2025-04-19)
 
 
