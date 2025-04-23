@@ -2588,3 +2588,61 @@ BrandGuidelines:
             "text": "Always use sentence case"
           }
         ]
+AsyncJob:
+  type: object
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    startedAt:
+      type: string
+      format: date-time
+    endedAt:
+      type: string
+      format: date-time
+    recordExpiresAt:
+      type: integer
+      format: int64
+      description: Unix epoch seconds for TTL
+    result:
+      type: object
+    error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+    metadata:
+      type: object
+      required:
+        - pageUrl
+      properties:
+        pageUrl:
+          type: string
+          format: uri
+          description: The URL to be processed by the job
+        submittedBy:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+  required:
+    - jobId
+    - status
+    - createdAt
+    - updatedAt
+    - startedAt
+    - metadata
