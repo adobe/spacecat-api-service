@@ -66,5 +66,22 @@
 		},
 		"config": {},
 		"integrations": {}
+	},
+	"demo":  {
+		"audits": {
+			"broken-backlinks": {},
+			"broken-internal-links": {},
+			"meta-tags": {},
+			"forms-opportunities": {}
+		},
+		"imports": {
+			"organic-traffic" : {
+				"startDate": "2025-02-24",
+				"endDate": "2025-03-02"
+			},
+			"top-pages" : {}
+		},
+		"config": {},
+		"integrations": {}
 	}	
 }

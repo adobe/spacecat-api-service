@@ -18,6 +18,9 @@ import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-ut
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
+import RunScrape from './run-scrape.js';
+import RunImport from './run-import.js';
+import RunAudit from './run-audit.js';
 
 import {
   extractURLFromSlackInput,
@@ -26,13 +29,21 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerImportRun } from '../../utils.js';
+import { findDeliveryType } from '../../utils.js';
 
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 
 const PHRASES = ['onboard site', 'onboard sites'];
+
+// Add wait utility function
+const wait = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
+// Convert minutes to milliseconds
+const minutesToMs = (minutes) => minutes * 60 * 1000;
 
 /**
  * Factory function to create the OnboardCommand object.
@@ -52,6 +63,11 @@ function OnboardCommand(context) {
 
   const { dataAccess, log, imsClient } = context;
   const { Configuration, Site, Organization } = dataAccess;
+
+  // Create run functions for each of the tasks
+  const runScrape = RunScrape(context);
+  const runImport = RunImport(context);
+  const runAudit = RunAudit(context);
 
   const csvStringifier = createObjectCsvStringifier({
     header: [
@@ -77,6 +93,12 @@ function OnboardCommand(context) {
    * @param {object} configuration - The configuration object.
    * @param {string} profileName - The profile name.
    * @param {Object} slackContext - Slack context.
+   * @param {number} [enableDisableWaitTimeMinutes=2] - Wait time in minutes between
+   *   enable/disable operations (default: 2 minutes).
+   * @param {number} [waitTimeMinutes=20] - Wait time in minutes between
+   *   operations (default: 20 minutes).
+   * @param {number} [auditWaitTimeMinutes=30] - Wait time in minutes after
+   *   audits (default: 30 minutes).
    * @returns {Promise<Object>} - A report line containing execution details.
    */
   const onboardSingleSite = async (
@@ -85,6 +107,9 @@ function OnboardCommand(context) {
     configuration,
     profileName,
     slackContext,
+    enableDisableWaitTimeMinutes = 2, // 2 minutes
+    waitTimeMinutes = 20, // 20 minutes
+    auditWaitTimeMinutes = 30, // 30 minutes
   ) => {
     const { say } = slackContext;
 
@@ -216,12 +241,27 @@ function OnboardCommand(context) {
       const importTypes = Object.keys(profile.imports);
       reportLine.imports = importTypes.join(',');
       const siteConfig = site.getConfig();
+
+      // 1. enable imports
       for (const importType of importTypes) {
         siteConfig.enableImport(importType);
       }
+      await wait(minutesToMs(enableDisableWaitTimeMinutes));
+      reportLine.imports = importTypes.join(',');
+      await say(`:white_check_mark: Enabled imports for ${baseURL}`);
+      log.info(`Enabled imports forsite ${baseURL}: ${reportLine.imports}`);
 
-      log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
+      // 2. enable audits
+      const auditTypes = Object.keys(profile.audits);
+      auditTypes.forEach((auditType) => {
+        configuration.enableHandlerForSite(auditType, site);
+      });
+      await wait(minutesToMs(enableDisableWaitTimeMinutes));
+      reportLine.audits = auditTypes.join(',');
+      await say(`:white_check_mark: Enabled audits for site ${baseURL}`);
+      log.info(`Enabled audits for site ${baseURL}: ${reportLine.audits}`);
 
+      // 3. save site config
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
         await site.save();
@@ -231,33 +271,76 @@ function OnboardCommand(context) {
         reportLine.status = 'Failed';
         return reportLine;
       }
+      await say(':white_check_mark: Site config successfully saved!');
+      log.info(`Site config successfully saved for site ${siteID}`);
 
-      log.info(`Site config succesfully saved for site ${siteID}`);
+      // 4. run scrape
+      await say(`:adobe-run: Starting scrape for site ${baseURL}`);
+      log.info(`Running scrape for site ${baseURL}`);
+      await runScrape.handleExecution([baseURL], slackContext);
+      await wait(minutesToMs(waitTimeMinutes));
+      await say(`:white_check_mark: Scrape completed for site ${baseURL}`);
+      log.info(`Triggered scrape for site ${siteID}`);
 
+      // 5. run imports
+      log.info(`Running imports for site ${baseURL}`);
+      await say(`:adobe-run: Starting imports for site ${baseURL}`);
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
-        await triggerImportRun(
-          configuration,
+        await runImport.handleExecution([
           importType,
-          siteID,
+          baseURL,
           profile.imports[importType].startDate,
           profile.imports[importType].endDate,
-          slackContext,
-          context,
-        );
+        ], slackContext);
       }
+      await wait(minutesToMs(waitTimeMinutes));
+      await say(`:white_check_mark: Imports completed for site ${baseURL}`);
+      log.info(`Imports completed for site ${baseURL}`);
 
-      log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
+      // 6. run audits
+      log.info(`Running audits for site ${baseURL}`);
+      await say(`:adobe-run: Starting audits for site ${baseURL}`);
+      for (const auditType of auditTypes) {
+        await runAudit.handleExecution([baseURL, auditType], slackContext);
+      }
+      await wait(minutesToMs(auditWaitTimeMinutes));
+      await say(`:white_check_mark: Audits completed for site ${baseURL}`);
+      log.info(`Audits completed for site ${baseURL}`);
 
-      const auditTypes = Object.keys(profile.audits);
+      // 7. disable imports
+      await say(`:adobe-run: Disabling imports for site ${baseURL}`);
+      for (const importType of importTypes) {
+        siteConfig.disableImport(importType);
+      }
+      await wait(minutesToMs(enableDisableWaitTimeMinutes));
+      reportLine.imports = importTypes.join(',');
+      await say(`:adobe-run: Disabled imports for ${baseURL}`);
+      log.info(`Disabled imports for site ${baseURL}: ${reportLine.imports}`);
 
+      // 8. disable audits
+      await say(`:adobe-run: Disabling audits for site ${baseURL}`);
       auditTypes.forEach((auditType) => {
-        configuration.enableHandlerForSite(auditType, site);
+        configuration.disableHandlerForSite(auditType, site);
       });
-
+      await wait(minutesToMs(enableDisableWaitTimeMinutes));
       reportLine.audits = auditTypes.join(',');
-      log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
+      await say(`:adobe-run: Disabled audits for ${baseURL}`);
+      log.info(`Disabled audits for site ${baseURL}: ${reportLine.audits}`);
+
+      // 9. save site config
+      await say(`:adobe-run: Saving site config for site ${baseURL}`);
+      site.setConfig(Config.toDynamoItem(siteConfig));
+      try {
+        await site.save();
+      } catch (error) {
+        log.error(error);
+      } finally {
+        await say(':white_check_mark: Site config successfully saved!');
+        log.info(`Site config successfully saved for site ${siteID}`);
+      }
     } catch (error) {
+      log.info(`Error running onboard: ${error.message}`);
       log.error(error);
       reportLine.errors = error.message;
       reportLine.status = 'Failed';
@@ -280,6 +363,7 @@ function OnboardCommand(context) {
     const {
       say, botToken, files, channelId, client, threadTs,
     } = slackContext;
+    log.debug('Slack context: ', say, botToken, files, channelId, client, threadTs);
 
     await say(':spacecat: Mission Control, we are go for *onboarding*! :satellite:');
 
@@ -328,6 +412,9 @@ function OnboardCommand(context) {
             configuration,
             profileName,
             slackContext,
+            undefined, // Use default enableDisableWaitTimeMinutes
+            undefined, // Use default waitTimeMinutes
+            undefined, // Use default auditWaitTimeMinutes
           );
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
@@ -361,7 +448,7 @@ function OnboardCommand(context) {
           return;
         }
 
-        const [baseURLInput, imsOrgID, profileName = 'default'] = args;
+        const [baseURLInput, imsOrgID, profileName = 'default', enableDisableWaitTimeMinutes, waitTimeMinutes, auditWaitTimeMinutes] = args;
         const configuration = await Configuration.findLatest();
 
         const reportLine = await onboardSingleSite(
@@ -370,6 +457,9 @@ function OnboardCommand(context) {
           configuration,
           profileName,
           slackContext,
+          enableDisableWaitTimeMinutes ? parseInt(enableDisableWaitTimeMinutes, 10) : undefined,
+          waitTimeMinutes ? parseInt(waitTimeMinutes, 10) : undefined,
+          auditWaitTimeMinutes ? parseInt(auditWaitTimeMinutes, 10) : undefined,
         );
 
         await configuration.save();
