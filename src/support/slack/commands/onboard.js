@@ -276,6 +276,7 @@ function OnboardCommand(context) {
       log.info(`Site config successfully saved for site ${siteID}`);
 
       // 4. run scrape
+      await say(`:adobe-run: Starting scrape for site ${baseURL}`);
       log.info(`Running scrape for site ${baseURL}`);
       await runScrape.handleExecution([baseURL], slackContext);
       await wait(minutesToMs(waitTimeMinutes));
@@ -284,6 +285,7 @@ function OnboardCommand(context) {
 
       // 5. run imports
       log.info(`Running imports for site ${baseURL}`);
+      await say(`:adobe-run: Starting imports for site ${baseURL}`);
       for (const importType of importTypes) {
         /* eslint-disable no-await-in-loop */
         await runImport.handleExecution([
@@ -299,6 +301,7 @@ function OnboardCommand(context) {
 
       // 6. run audits
       log.info(`Running audits for site ${baseURL}`);
+      await say(`:adobe-run: Starting audits for site ${baseURL}`);
       for (const auditType of auditTypes) {
         await runAudit.handleExecution([baseURL, auditType], slackContext);
       }
@@ -307,6 +310,7 @@ function OnboardCommand(context) {
       log.info(`Audits completed for site ${baseURL}`);
 
       // 7. disable imports
+      await say(`:adobe-run: Disabling imports for site ${baseURL}`);
       for (const importType of importTypes) {
         siteConfig.disableImport(importType);
       }
@@ -316,6 +320,7 @@ function OnboardCommand(context) {
       log.info(`Disabled imports for site ${baseURL}: ${reportLine.imports}`);
 
       // 8. disable audits
+      await say(`:adobe-run: Disabling audits for site ${baseURL}`);
       auditTypes.forEach((auditType) => {
         configuration.disableHandlerForSite(auditType, site);
       });
@@ -325,6 +330,7 @@ function OnboardCommand(context) {
       log.info(`Disabled audits for site ${baseURL}: ${reportLine.audits}`);
 
       // 9. save site config
+      await say(`:adobe-run: Saving site config for site ${baseURL}`);
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
         await site.save();
