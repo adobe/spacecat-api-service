@@ -38,7 +38,7 @@ preflight-jobs:
                   format: uuid
                 status:
                   type: string
-                  enum: [ IN_PROGRESS, COMPLETED, FAILED, CANCELLED ]
+                  enum: [ IN_PROGRESS, COMPLETED, FAILED ]
                 createdAt:
                   type: string
                   format: date-time

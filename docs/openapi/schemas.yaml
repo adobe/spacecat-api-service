@@ -2596,7 +2596,7 @@ AsyncJob:
       format: uuid
     status:
       type: string
-      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
     createdAt:
       type: string
       format: date-time
@@ -2613,12 +2613,6 @@ AsyncJob:
       type: integer
       format: int64
       description: Unix epoch seconds for TTL
-    resultLocation:
-      type: string
-      format: uri
-    resultType:
-      type: string
-      enum: [S3, INLINE, URL]
     result:
       type: object
     error:
