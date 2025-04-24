@@ -1,3 +1,10 @@
+## [1.105.2](https://github.com/adobe/spacecat-api-service/compare/v1.105.1...v1.105.2) (2025-04-24)
+
+
+### Bug Fixes
+
+* Support SQS Queue Names ([#877](https://github.com/adobe/spacecat-api-service/issues/877)) ([85dfc7b](https://github.com/adobe/spacecat-api-service/commit/85dfc7b4734e914730d269ff161b6fb2440b7d07))
+
 ## [1.105.1](https://github.com/adobe/spacecat-api-service/compare/v1.105.0...v1.105.1) (2025-04-24)
 
 
