@@ -487,14 +487,14 @@ function SuggestionsController(dataAccess, sqs, env) {
     };
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
-    context.log.info(
+    context.log.warn(
       'Sending autofix message',
-      sqs,
-      queueUrl,
-      opportunityId,
-      siteId,
-      succeededSuggestions.map((s) => s.getId()),
-      promiseTokenResponse,
+      {
+        queueUrl,
+        opportunityId,
+        siteId,
+        promiseTokenResponse,
+      },
     );
     await sendAutofixMessage(
       sqs,
