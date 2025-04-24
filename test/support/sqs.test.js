@@ -171,6 +171,15 @@ describe('sqs', () => {
       await sqs.purgeQueue('the-queue-name');
       expect(sqs.sqsClient.send).to.have.been.calledWith(expectedCmd);
     });
+
+    it('errors if AWS does not return a queue URL', async () => {
+      sendStub
+        .withArgs(matchCmd(new GetQueueUrlCommand({ QueueName: 'queue-that-does-not-exist' })))
+        .resolves({ QueueUrl: undefined });
+
+      await expect(sqs.sendMessage('queue-that-does-not-exist', { value: 1234 }))
+        .to.be.rejectedWith('Unknown queue name: queue-that-does-not-exist');
+    });
   });
 });
 
