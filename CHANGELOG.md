@@ -1,3 +1,10 @@
+# [1.105.0](https://github.com/adobe/spacecat-api-service/compare/v1.104.0...v1.105.0) (2025-04-24)
+
+
+### Features
+
+* toggle-site-imports Slack command for enabling/disabling imports ([#857](https://github.com/adobe/spacecat-api-service/issues/857)) ([43b32e5](https://github.com/adobe/spacecat-api-service/commit/43b32e5c539979b834e1f9d76b7cd1941a0f914e))
+
 # [1.104.0](https://github.com/adobe/spacecat-api-service/compare/v1.103.10...v1.104.0) (2025-04-23)
 
 
