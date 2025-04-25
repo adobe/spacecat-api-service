@@ -1,3 +1,31 @@
+## [1.105.2](https://github.com/adobe/spacecat-api-service/compare/v1.105.1...v1.105.2) (2025-04-24)
+
+
+### Bug Fixes
+
+* Support SQS Queue Names ([#877](https://github.com/adobe/spacecat-api-service/issues/877)) ([85dfc7b](https://github.com/adobe/spacecat-api-service/commit/85dfc7b4734e914730d269ff161b6fb2440b7d07))
+
+## [1.105.1](https://github.com/adobe/spacecat-api-service/compare/v1.105.0...v1.105.1) (2025-04-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.16.0 ([#876](https://github.com/adobe/spacecat-api-service/issues/876)) ([6afe4ea](https://github.com/adobe/spacecat-api-service/commit/6afe4ea6f55baae14ae0e2e5c309e5884192f07c))
+
+# [1.105.0](https://github.com/adobe/spacecat-api-service/compare/v1.104.0...v1.105.0) (2025-04-24)
+
+
+### Features
+
+* toggle-site-imports Slack command for enabling/disabling imports ([#857](https://github.com/adobe/spacecat-api-service/issues/857)) ([43b32e5](https://github.com/adobe/spacecat-api-service/commit/43b32e5c539979b834e1f9d76b7cd1941a0f914e))
+
+# [1.104.0](https://github.com/adobe/spacecat-api-service/compare/v1.103.10...v1.104.0) (2025-04-23)
+
+
+### Features
+
+* Add ContentAi configuration entity to the API Service ([#858](https://github.com/adobe/spacecat-api-service/issues/858)) ([1001aba](https://github.com/adobe/spacecat-api-service/commit/1001aba61f249ef497be59fd535fe13cb33e2aa0))
+
 ## [1.103.10](https://github.com/adobe/spacecat-api-service/compare/v1.103.9...v1.103.10) (2025-04-19)
 
 
