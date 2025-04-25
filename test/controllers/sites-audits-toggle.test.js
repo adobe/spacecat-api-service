@@ -559,6 +559,36 @@ describe('Sites Audits Controller', () => {
         message: 'The audit "404" has been enabled for the "https://site1.com".',
       });
     });
+
+    it('update audits for non admin users', async () => {
+      // Create a new non-admin context
+      const nonAdminContext = {
+        dataAccess: dataAccessMock,
+        env: {},
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+
+      const nonAdminController = SitesAuditsToggleController(nonAdminContext);
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+
+      const response = await nonAdminController.execute({
+        data: requestData,
+        log: logMock,
+      });
+
+      const error = await response.json();
+      expect(response.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can change configuration settings.');
+    });
   });
 
   describe('misc errors', () => {

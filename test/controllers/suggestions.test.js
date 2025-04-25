@@ -21,6 +21,7 @@ import esmock from 'esmock';
 import { ValidationError, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import SuggestionsController from '../../src/controllers/suggestions.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -161,6 +162,13 @@ describe('Suggestions Controller', () => {
   beforeEach(() => {
     context = {
       dataAccess: mockSuggestionDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
     };
     opportunity = {
       getId: sandbox.stub().returns(OPPORTUNITY_ID),
@@ -222,6 +230,7 @@ describe('Suggestions Controller', () => {
           conversionRate: 0.02,
         },
       },
+
     ];
 
     const isHandlerEnabledForSite = sandbox.stub();
@@ -304,11 +313,11 @@ describe('Suggestions Controller', () => {
   });
 
   it('throws an error if data access cannot be destructured to Opportunity', () => {
-    expect(() => SuggestionsController({ test: {} })).to.throw('Data access required');
+    expect(() => SuggestionsController({ dataAccess: { Opportunity: '' } })).to.throw('Data access required');
   });
 
   it('throws an error if data access cannot be destructured to Suggestion', () => {
-    expect(() => SuggestionsController({ Opportunity: {} })).to.throw('Data access required');
+    expect(() => SuggestionsController({ dataAccess: { Opportunity: {}, Suggestion: '' } })).to.throw('Data access required');
   });
 
   it('gets all suggestions for an opportunity and a site', async () => {
@@ -324,6 +333,22 @@ describe('Suggestions Controller', () => {
     const suggestions = await response.json();
     expect(suggestions).to.be.an('array').with.lengthOf(1);
     expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+  });
+
+  it('gets all suggestions for an opportunity and a site for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.false;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'User does not belong to the organization');
   });
 
   it('gets all suggestions for an opportunity returns bad request if no site ID is passed', async () => {
@@ -359,6 +384,20 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets all suggestions for an opportunity returns not found if passed site ID does not exist', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID_NOT_FOUND,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.false;
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site not found');
   });
 
   it('gets all suggestions for an opportunity by status', async () => {
@@ -416,6 +455,38 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Status is required');
   });
 
+  it('gets all suggestions for a site does not exist', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID_NOT_FOUND,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.false;
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('gets all suggestions for a non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.false;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'User does not belong to the organization');
+  });
+
   it('gets all suggestions for an opportunity by status returns not found if site ID passed does not match opportunity site id', async () => {
     const response = await suggestionsController.getByStatus({
       params: {
@@ -444,6 +515,38 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(200);
     const suggestion = await response.json();
     expect(suggestion).to.have.property('id', SUGGESTION_IDS[0]);
+  });
+
+  it('gets suggestion by ID for non existing site', async () => {
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID_NOT_FOUND,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.false;
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('gets suggestion by ID for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.findById.calledOnce).to.be.false;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'User does not belong to the organization');
   });
 
   it('gets suggestion by ID returns bad request if no site ID is passed', async () => {
@@ -614,6 +717,32 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Opportunity ID required');
   });
 
+  it('creates a suggestion for non existing site', async () => {
+    const response = await suggestionsController.createSuggestions({
+      params: { siteId: SITE_ID_NOT_FOUND, opportunityId: OPPORTUNITY_ID },
+      data: suggs,
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('creates a suggestion for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const response = await suggestionsController.createSuggestions({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: suggs,
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.create.calledOnce).to.be.false;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'User does not belong to the organization');
+  });
+
   it('creates a suggestion returns bad request if no data is passed', async () => {
     const response = await suggestionsController.createSuggestions({
       params: {
@@ -661,6 +790,34 @@ describe('Suggestions Controller', () => {
     expect(updatedSuggestion).to.have.property('opportunityId', OPPORTUNITY_ID);
     expect(updatedSuggestion).to.have.property('id', SUGGESTION_IDS[0]);
     expect(updatedSuggestion).to.have.property('rank', 2);
+  });
+
+  it('patches a suggestion for non existing site', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID_NOT_FOUND,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: { rank: 2, data: 'test', kpiDeltas: [] },
+      ...context,
+    });
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('patches a suggestion for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const response = await suggestionsController.patchSuggestion({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+      data: { rank: 2, data: 'test', kpiDeltas: [] },
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'User does not belong to the organization');
   });
 
   it('patches a suggestion returns bad request if no site ID is passed', async () => {
@@ -845,6 +1002,30 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
     expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'NEW-updated');
     expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'APPROVED-updated');
+  });
+
+  it('bulk patches suggestion for non existing site ', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: { siteId: SITE_ID_NOT_FOUND, opportunityId: OPPORTUNITY_ID },
+      data: [{ id: SUGGESTION_IDS[0], status: 'NEW-NEW' }, { id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }],
+      ...context,
+    });
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('bulk patches suggestion for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: [{ id: SUGGESTION_IDS[0], status: 'NEW-NEW' }, { id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }],
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'User does not belong to the organization');
   });
 
   it('bulk patches suggestion status returns bad request if no site ID is passed', async () => {
@@ -1515,6 +1696,36 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Site ID required');
     });
 
+    it('returns bad request if site ID is not valid', async () => {
+      const response = await suggestionsController.removeSuggestion({
+        params: {
+          siteId: SITE_ID_NOT_FOUND,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('returns forbidden if user does not belong to the organization ', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+      const response = await suggestionsController.removeSuggestion({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'User does not belong to the organization');
+    });
+
     it('returns bad request if no opportunity ID is passed', async () => {
       const response = await suggestionsController.removeSuggestion({
         params: {
@@ -1600,6 +1811,109 @@ describe('Suggestions Controller', () => {
       expect(mockSuggestionDataAccess.Suggestion.findById).to.have.been.calledOnce;
       expect(mockSuggestionDataAccess.Opportunity.findById).to.have.been.calledOnce;
       expect(removeStub).to.have.been.calledOnce;
+    });
+  });
+
+  describe('autofixSuggestions access control', () => {
+    it('returns forbidden when user does not have auto_fix permission', async () => {
+      // Mock site and opportunity
+      const testSite = {
+        id: SITE_ID,
+        getImsOrgId: () => 'test-org-id',
+        getDeliveryType: () => 'aem_edge',
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://test.com',
+      };
+
+      // Setup mocks using existing mockSuggestionDataAccess
+      mockSuggestionDataAccess.Site.findById.resolves(testSite);
+      mockSuggestionDataAccess.Opportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getType: () => 'broken-backlinks',
+      });
+
+      // Mock AccessControlUtil to specifically deny auto_fix permission
+      const accessControlStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess');
+      accessControlStub.callsFake((testEntity, permission) => {
+        if (permission === 'auto_fix') {
+          return false;
+        }
+        return true;
+      });
+
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      // Split long line into multiple lines
+      expect(error).to.have.property(
+        'message',
+        'User does not belong to the organization or does not have sufficient permissions',
+      );
+
+      // Verify the access control was called with auto_fix permission
+      expect(accessControlStub).to.have.been.calledWith(
+        sinon.match.has('getId', sinon.match.func),
+        'auto_fix',
+      );
+    });
+
+    it('allows autofix when user has auto_fix permission', async () => {
+      // Mock site and opportunity
+      const testSite = {
+        id: SITE_ID,
+        getImsOrgId: () => 'test-org-id',
+        getDeliveryType: () => 'aem_edge',
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://test.com',
+      };
+
+      // Setup mocks using existing mockSuggestionDataAccess
+      mockSuggestionDataAccess.Site.findById.resolves(testSite);
+      mockSuggestionDataAccess.Opportunity.findById.resolves({
+        getSiteId: () => SITE_ID,
+        getType: () => 'broken-backlinks',
+      });
+      mockSuggestionDataAccess.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+      });
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      // Mock AccessControlUtil to allow auto_fix permission
+      const accessControlStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess');
+      accessControlStub.callsFake((testEntity, permission) => {
+        if (permission === 'auto_fix') {
+          return true;
+        }
+        return true;
+      });
+
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      // Should proceed to next checks (not forbidden)
+      expect(response.status).to.equal(207);
+
+      // Verify the access control was called with auto_fix permission
+      expect(accessControlStub).to.have.been.calledWith(
+        sinon.match.has('getId', sinon.match.func),
+        'auto_fix',
+      );
     });
   });
 });

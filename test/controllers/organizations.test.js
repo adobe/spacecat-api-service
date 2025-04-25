@@ -26,6 +26,7 @@ import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -218,6 +219,19 @@ describe('Organizations Controller', () => {
     expect(organization).to.have.property('name', 'Org 1');
   });
 
+  it('creates an organization for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    mockDataAccess.Organization.create.resolves(organizations[0]);
+    const response = await organizationsController.createOrganization({
+      data: { name: 'Org 1' },
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can create new Organizations');
+  });
+
   it('returns bad request when creating an organization fails', async () => {
     mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
     const response = await organizationsController.createOrganization({
@@ -247,6 +261,28 @@ describe('Organizations Controller', () => {
 
     expect(organizations[0].save).to.have.been.calledOnce;
     expect(response.status).to.equal(200);
+  });
+
+  it('updates an organization for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+      data: {
+        imsOrgId: '1234abcd@AdobeOrg',
+        name: 'Organization 1',
+        config: {},
+      },
+      ...context,
+    });
+
+    expect(organizations[0].save).to.not.have.been.called;
+    expect(response.status).to.equal(403);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only users belonging to the organization can update it');
   });
 
   it('returns bad request when updating an organization if id not provided', async () => {
@@ -320,6 +356,18 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Organization ID required');
   });
 
+  it('returns unauthorized when removing a site for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    organizations[0].remove = sinon.stub().resolves(organizations[0]);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
+    const error = await response.json();
+
+    expect(organizations[0].remove).to.not.have.been.called;
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can delete Organizations');
+  });
+
   it('returns not found when removing a non-existing organization', async () => {
     organizations[0].remove = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(null);
@@ -344,6 +392,17 @@ describe('Organizations Controller', () => {
     expect(resultOrganizations[1]).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
   });
 
+  it('gets all organizations for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    mockDataAccess.Organization.all.resolves(organizations);
+
+    const response = await organizationsController.getAll();
+    const error = await response.json();
+
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all Organizations');
+  });
+
   it('gets all sites of an organization', async () => {
     mockDataAccess.Site.allByOrganizationId.resolves(sites);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
@@ -355,6 +414,30 @@ describe('Organizations Controller', () => {
     expect(resultSites).to.be.an('array').with.lengthOf(2);
     expect(resultSites[0]).to.have.property('id', 'site1');
     expect(resultSites[1]).to.have.property('id', 'site2');
+  });
+
+  it('gets all sites of an organization for non belonging organization', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
+    const error = await result.json();
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+  });
+
+  it('gets all sites of an organization for non existing organization', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    mockDataAccess.Site.allByOrganizationId.resolves(sites);
+    mockDataAccess.Organization.findById.resolves(null);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
+    const error = await result.json();
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Organization not found by IMS org ID: 9033554c-de8a-44ac-a356-09b51af8cc28');
   });
 
   it('returns bad request if organization id is not provided when getting sites for organization', async () => {
@@ -377,6 +460,17 @@ describe('Organizations Controller', () => {
     expect(organization).to.be.an('object');
     expect(result.status).to.equal(200);
     expect(organization).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
+  });
+
+  it('gets an organization by id for non belonging organization', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
+    const error = await result.json();
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view it');
   });
 
   it('returns not found when an organization is not found by id', async () => {
@@ -410,6 +504,22 @@ describe('Organizations Controller', () => {
     expect(organization).to.be.an('object');
     expect(result.status).to.equal(200);
     expect(organization).to.have.property('imsOrgId', imsOrgId);
+  });
+
+  it('gets an organization by IMS org ID for non belonging organization', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    mockDataAccess.Organization.findByImsOrgId.resolves(organizations[1]);
+    const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
+    const result = await organizationsController.getByImsOrgID(
+      { params: { imsOrgId }, ...context },
+    );
+    const error = await result.json();
+
+    expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledOnceWith(imsOrgId);
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view it');
   });
 
   it('returns not found when an organization is not found by IMS org ID', async () => {
@@ -446,6 +556,20 @@ describe('Organizations Controller', () => {
       workspace: SLACK_TARGETS.WORKSPACE_EXTERNAL,
       'channel-url': 'https://example-workspace.slack.com/archives/C0123456789',
     });
+  });
+
+  it('gets the Slack config of an organization by IMS org ID for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+
+    mockDataAccess.Organization.findByImsOrgId.resolves(organizations[1]);
+    const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
+    const result = await organizationsController.getSlackConfigByImsOrgID(
+      { params: { imsOrgId }, ...context },
+    );
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view Slack configurations');
   });
 
   it('returns not found when an organization is not found by IMS org ID', async () => {

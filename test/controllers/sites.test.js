@@ -27,6 +27,7 @@ import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
 import SitesController from '../../src/controllers/sites.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -231,6 +232,16 @@ describe('Sites Controller', () => {
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
+  it('creates a site for a non-admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can create new sites');
+  });
+
   it('updates a site', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
@@ -320,6 +331,16 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'No updates provided');
   });
 
+  it('returns bad request when updating a site for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const response = await sitesController.updateSite({ params: { siteId: SITE_IDS[0] } });
+    const error = await response.json();
+
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can update its sites');
+  });
+
   it('removes a site', async () => {
     const site = sites[0];
     site.remove = sandbox.stub();
@@ -327,6 +348,18 @@ describe('Sites Controller', () => {
 
     expect(site.remove).to.have.been.calledOnce;
     expect(response.status).to.equal(204);
+  });
+
+  it('removes a site for a non-admin user ', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const site = sites[0];
+    site.remove = sandbox.stub();
+    const response = await sitesController.removeSite({ params: { siteId: SITE_IDS[0] } });
+
+    expect(site.remove).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can remove sites');
   });
 
   it('returns bad request when removing a site if id not provided', async () => {
@@ -367,6 +400,18 @@ describe('Sites Controller', () => {
     expect(resultSites[1]).to.have.property('baseURL', 'https://site2.com');
   });
 
+  it('gets all sites for a non-admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    mockDataAccess.Site.all.resolves(sites);
+
+    const result = await sitesController.getAll();
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.all).to.have.not.been.called;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all sites');
+  });
+
   it('gets all sites by delivery type', async () => {
     mockDataAccess.Site.allByDeliveryType.resolves(sites);
 
@@ -377,6 +422,18 @@ describe('Sites Controller', () => {
     expect(resultSites).to.be.an('array').with.lengthOf(2);
     expect(resultSites[0]).to.have.property('id', SITE_IDS[0]);
     expect(resultSites[0]).to.have.property('deliveryType', 'other');
+  });
+
+  it('gets all sites by delivery type for a non-admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    mockDataAccess.Site.allByDeliveryType.resolves(sites);
+
+    const result = await sitesController.getAllByDeliveryType({ params: { deliveryType: 'aem_edge' } });
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.allByDeliveryType).to.have.not.been.called;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all sites');
   });
 
   it('gets all sites with latest audit', async () => {
@@ -410,6 +467,16 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.allWithLatestAudit).to.have.been.calledWith('lhs-mobile', 'asc');
   });
 
+  it('gets all sites with latest audit with ascending true for a non-admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile', ascending: 'true' } });
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.allWithLatestAudit).to.have.not.been.called;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all sites');
+  });
+
   it('gets all sites with latest audit with ascending false', async () => {
     await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile', ascending: 'false' } });
 
@@ -439,11 +506,31 @@ describe('Sites Controller', () => {
     expect(result).to.not.be.null;
   });
 
+  it('gets all sites as CSV for a non-admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await sitesController.getAllAsCSV();
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.all).to.have.not.been.called;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all sites');
+  });
+
   it('gets all sites as XLS', async () => {
     const result = await sitesController.getAllAsXLS();
 
     // expect(mockDataAccess.getSites.calledOnce).to.be.true;
     expect(result).to.not.be.null;
+  });
+
+  it('gets all sites as XLS for a non-admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await sitesController.getAllAsXLS();
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.all).to.have.not.been.called;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all sites');
   });
 
   it('gets a site by ID', async () => {
@@ -457,6 +544,17 @@ describe('Sites Controller', () => {
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
+  it('gets a site by ID for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const result = await sitesController.getByID({ params: { siteId: SITE_IDS[0] } });
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.findById).to.have.been.calledOnce;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+  });
+
   it('gets a site by base URL', async () => {
     const result = await sitesController.getByBaseURL({ params: { baseURL: 'aHR0cHM6Ly9zaXRlMS5jb20K' } });
     const site = await result.json();
@@ -466,6 +564,17 @@ describe('Sites Controller', () => {
     expect(site).to.be.an('object');
     expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('gets a site by base URL for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const result = await sitesController.getByBaseURL({ params: { baseURL: 'aHR0cHM6Ly9zaXRlMS5jb20K' } });
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
   });
 
   it('gets the latest site metrics', async () => {
@@ -587,6 +696,19 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Site not found');
   });
 
+  it('get latest site metrics for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+    const result = await sitesController.getLatestSiteMetrics({
+      params: { siteId: SITE_IDS[0] },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
+  });
+
   it('gets specific audit for a site', async () => {
     const result = await sitesController.getAuditForSite({
       params: {
@@ -605,6 +727,21 @@ describe('Sites Controller', () => {
     expect(audit).to.have.property('auditedAt', '2021-01-01T00:00:00.000Z');
     expect(audit).to.have.property('fullAuditRef', 'https://site1.com/lighthouse/20210101T000000.000Z/lhs-mobile.json');
     expect(audit).to.have.property('auditResult');
+  });
+
+  it('gets specific audit for a site for non belonging to the organization', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const result = await sitesController.getAuditForSite({
+      params: {
+        siteId: SITE_IDS[0],
+        auditType: 'lhs-mobile',
+        auditedAt: '2021-01-01T00:00:00.000Z',
+      },
+    });
+    const error = await result.json();
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its audits');
   });
 
   it('returns bad request if site ID is not provided when getting audit for site', async () => {
@@ -660,6 +797,22 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Audit not found');
+  });
+
+  it('returns Site found when geting audit for non-existing site', async () => {
+    mockDataAccess.Site.findById.resolves(null);
+
+    const result = await sitesController.getAuditForSite({
+      params: {
+        siteId: SITE_IDS[0],
+        auditType: 'lhs-mobile',
+        auditedAt: '2021-01-01T00:00:00.000Z',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Site not found');
   });
 
   it('returns not found when site is not found by id', async () => {
@@ -718,6 +871,37 @@ describe('Sites Controller', () => {
     expect(resp.time).to.equal(keyEvent.getTime());
   });
 
+  it('create key event returns not found when site does not exist', async () => {
+    const siteId = 'site-id';
+    const keyEvent = keyEvents[0];
+
+    mockDataAccess.Site.findById.resolves(null);
+
+    const result = await sitesController.createKeyEvent({
+      params: { siteId },
+      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('create key event returns forbidden when site does not exist', async () => {
+    const siteId = 'site-id';
+    const keyEvent = keyEvents[0];
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+    const result = await sitesController.createKeyEvent({
+      params: { siteId },
+      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can create key events');
+  });
+
   it('get key events returns list of key events', async () => {
     const site = sites[0];
     site.getKeyEvents = sandbox.stub().resolves(keyEvents);
@@ -731,6 +915,22 @@ describe('Sites Controller', () => {
 
     expect(site.getKeyEvents).to.have.been.calledOnce;
     expect(resp.length).to.equal(keyEvents.length);
+  });
+
+  it('get key events returns list of key events for non belonging to the organization', async () => {
+    const site = sites[0];
+    site.getKeyEvents = sandbox.stub().resolves(keyEvents);
+    const siteId = sites[0].getId();
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+    const result = await sitesController.getKeyEventsBySiteID({
+      params: { siteId },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its key events');
   });
 
   it('get key events returns bad request when siteId is missing', async () => {
@@ -766,6 +966,20 @@ describe('Sites Controller', () => {
     });
 
     expect(keyEvent.remove).to.have.been.calledOnce;
+  });
+
+  it('remove key events endpoint call for a non-admin user', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const keyEvent = keyEvents[0];
+    keyEvent.remove = sinon.stub().resolves();
+    const keyEventId = keyEvent.getId();
+    const result = await sitesController.removeKeyEvent({
+      params: { keyEventId },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can remove key events');
   });
 
   it('remove key events returns bad request when keyEventId is missing', async () => {
@@ -889,6 +1103,22 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('get site metrics for non belonging to the organization', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+    const result = await sitesController.getSiteMetricsBySource({
+      params: { siteId, source, metric },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
   });
 
   it('get page metrics by source returns list of metrics', async () => {
@@ -1028,6 +1258,25 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('get page metrics for non belonging to the organization', async () => {
+    const siteId = sites[0].getId();
+    const source = 'ahrefs';
+    const metric = 'organic-traffic';
+    const base64PageUrl = 'aHR0cHM6Ly9leGFtcGxlLmNvbS9mb28vYmFy';
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+    const result = await sitesController.getPageMetricsBySource({
+      params: {
+        siteId, source, metric, base64PageUrl,
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
   });
 
   it('updates a site name', async () => {

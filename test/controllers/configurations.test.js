@@ -161,6 +161,15 @@ describe('Configurations Controller', () => {
     expect(resultConfigurations[1]).to.deep.equal(ConfigurationDto.toJSON(configurations[1]));
   });
 
+  it('gets all configurations for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await configurationsController.getAll();
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view configurations');
+  });
+
   it('gets latest configuration', async () => {
     const result = await configurationsController.getLatest();
     const configuration = await result.json();
@@ -169,6 +178,15 @@ describe('Configurations Controller', () => {
 
     expect(configuration).to.be.an('object');
     expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[1]));
+  });
+
+  it('gets latest configuration for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await configurationsController.getLatest();
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view configurations');
   });
 
   it('returns not found when no latest configuration is available', async () => {
@@ -189,6 +207,15 @@ describe('Configurations Controller', () => {
 
     expect(configuration).to.be.an('object');
     expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[0]));
+  });
+
+  it('gets an configuration by version for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await configurationsController.getByVersion({ params: { version: 1 } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view configurations');
   });
 
   it('returns not found when a configuration is not found by version', async () => {

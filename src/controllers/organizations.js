@@ -179,7 +179,7 @@ function OrganizationsController(ctx, env) {
 
     const organization = await Organization.findById(organizationId);
     if (!organization) {
-      return notFound(`Organization not found by IMS org ID: ${organization}`);
+      return notFound(`Organization not found by IMS org ID: ${organizationId}`);
     }
 
     if (!await accessControlUtil.hasAccess(organization)) {
