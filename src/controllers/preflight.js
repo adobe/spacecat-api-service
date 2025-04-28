@@ -17,7 +17,12 @@ import { badRequest, notFound, ok } from '@adobe/spacecat-shared-http-utils';
 
 const MOCK_JOB_ID = '9d222c6d-893e-4e79-8201-3c9ca16a0f39';
 
-function PreflightController(dataAccess, log, env) {
+function PreflightController(ctx, log, env) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess } = ctx;
+
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }

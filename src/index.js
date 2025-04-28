@@ -107,7 +107,7 @@ async function run(request, context) {
       OpportunitiesController(context),
       SuggestionsController(context, context.sqs, context.env),
       BrandsController(context, log, context.env),
-      PreflightController(context.dataAccess, log, context.env),
+      PreflightController(context, log, context.env),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
