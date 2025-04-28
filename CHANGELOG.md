@@ -1,3 +1,10 @@
+# [1.106.0](https://github.com/adobe/spacecat-api-service/compare/v1.105.5...v1.106.0) (2025-04-28)
+
+
+### Features
+
+* introduce preflight endpoint with mocked data ([#874](https://github.com/adobe/spacecat-api-service/issues/874)) ([4c519ee](https://github.com/adobe/spacecat-api-service/commit/4c519ee6336664a2d90b99b181cdd961e06ec094))
+
 ## [1.105.5](https://github.com/adobe/spacecat-api-service/compare/v1.105.4...v1.105.5) (2025-04-26)
 
 
