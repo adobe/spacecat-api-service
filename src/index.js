@@ -58,6 +58,7 @@ import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
+import PreflightController from './controllers/preflight.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -106,6 +107,7 @@ async function run(request, context) {
       OpportunitiesController(context),
       SuggestionsController(context, context.sqs, context.env),
       BrandsController(context, log, context.env),
+      PreflightController(context.dataAccess, log, context.env),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

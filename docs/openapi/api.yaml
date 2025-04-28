@@ -85,6 +85,10 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /preflight/jobs:
+    $ref: './preflight-api.yaml#/preflight-jobs'
+  /preflight/jobs/{jobId}:
+    $ref: './preflight-api.yaml#/preflight-job-status'
   /scrape:
     $ref: './scrape-api.yaml#/scrape'
   /sites:

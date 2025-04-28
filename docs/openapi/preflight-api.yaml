@@ -1,0 +1,77 @@
+preflight-jobs:
+  post:
+    tags:
+      - preflight
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+    summary: Submit a new preflight async job
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+      This endpoint is useful for submitting a new preflight async job.
+      The job will process the provided URL and return the results.
+      The jobId can be used to poll for the status of the job.
+    operationId: submitPreflightJob
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              pageUrl:
+                type: string
+                format: uri
+                description: The URL to be processed by the job
+            required:
+              - pageUrl
+    responses:
+      '202':
+        description: Job accepted
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                  enum: [ IN_PROGRESS, COMPLETED, FAILED ]
+                createdAt:
+                  type: string
+                  format: date-time
+                pollUrl:
+                  type: string
+                  format: uri
+                  description: URL to poll for job status
+      '400':
+        description: Invalid request (missing pageUrl or other required fields)
+
+preflight-job-status:
+  parameters:
+    - $ref: './parameters.yaml#/jobId'
+  get:
+    tags:
+      - preflight
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+    summary: Get preflight job status and result
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+      This endpoint is useful for retrieving the status of a preflight async job.
+      The jobId must be provided in the path parameter.
+      If the job is completed, the result will be included in the response.
+      If the job is still in progress, a 202 response will be returned.
+    operationId: getPreflightJobStatus
+    responses:
+      '200':
+        description: Job status and (if available) result
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AsyncJob'
+      '404':
+        description: Job not found

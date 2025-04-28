@@ -56,6 +56,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} sitesAuditsToggleController - The sites audits controller.
  * @param {Object} opportunitiesController - The opportunities controller.
  * @param {Object} suggestionsController - The suggestions controller.
+ * @param {Object} brandsController - The brands controller.
+ * @param {Object} preflightController - The preflight controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -74,6 +76,7 @@ export default function getRouteHandlers(
   opportunitiesController,
   suggestionsController,
   brandsController,
+  preflightController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -97,6 +100,8 @@ export default function getRouteHandlers(
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
+    'POST /preflight/jobs': preflightController.createPreflightJob,
+    'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,
     'GET /sites.csv': sitesController.getAllAsCsv,
