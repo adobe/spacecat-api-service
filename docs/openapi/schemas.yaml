@@ -1729,9 +1729,8 @@ ScrapeRequest:
             description: The URL to scrape
             $ref: '#/URL'
       example:
-        urls:
-          - url: 'https://example.com/en/page1'
-          - url: 'https://example.com/fr/page2'
+        - url: 'https://example.com/en/page1'
+        - url: 'https://example.com/fr/page2'
 ScrapeResponse:
   type: object
   properties:
