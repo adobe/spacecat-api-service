@@ -15,6 +15,7 @@
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -26,8 +27,7 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerImportRun } from '../../utils.js';
-
+import { findDeliveryType } from '../../utils.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -70,6 +70,43 @@ function OnboardCommand(context) {
   });
 
   /**
+   * Configures both imports and audits for a site and updates all configurations
+   *
+   * @param {Object} site - The site object
+   * @param {Array<string>} importTypes - Array of import types to enable
+   * @param {Array<string>} auditTypes - Array of audit types to enable
+   * @param {Object} configuration - The configuration object
+   * @returns {Promise<void>}
+   */
+  const enableImportsAndAudits = async (site, importTypes, auditTypes, configuration) => {
+    const siteConfig = site.getConfig();
+
+    // 1. First, enable all imports in the site config
+    log.info(`Enabling imports for site ${site.getId()}: ${importTypes.join(', ')}`);
+    for (const importType of importTypes) {
+      siteConfig.enableImport(importType);
+      log.info(`Enabled import: ${importType}`);
+    }
+
+    // TODO: verify if this needs to be moved after the audits are enabled
+    // 2. save the site config
+    site.setConfig(Config.toDynamoItem(siteConfig));
+    await site.save();
+
+    // 3. Next, enable all audits for the site in the configuration
+    log.info(`Enabling audits for site ${site.getId()}: ${auditTypes.join(', ')}`);
+    for (const auditType of auditTypes) {
+      configuration.enableHandlerForSite(auditType, site);
+      log.info(`Enabled audit: ${auditType}`);
+    }
+
+    // TODO: verify this is correct
+    // 4. Update site config and save configuration
+    await Site.updateSiteConfig(site.getId(), siteConfig);
+    await configuration.save();
+  };
+
+  /**
    * Onboards a single site.
    *
    * @param {string} baseURLInput - The site URL.
@@ -86,7 +123,8 @@ function OnboardCommand(context) {
     profileName,
     slackContext,
   ) => {
-    const { say } = slackContext;
+    const { say, channelId, botToken } = slackContext;
+    const sfnClient = new SFNClient();
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -97,8 +135,8 @@ function OnboardCommand(context) {
       siteId: '',
       profile: profileName,
       deliveryType: '',
-      audits: '',
       imports: '',
+      audits: '',
       errors: '',
       status: 'Success',
       existingSite: 'No',
@@ -213,18 +251,17 @@ function OnboardCommand(context) {
         return reportLine;
       }
 
+      // Get import and audit types from profile
       const importTypes = Object.keys(profile.imports);
+      const auditTypes = Object.keys(profile.audits);
+
       reportLine.imports = importTypes.join(',');
-      const siteConfig = site.getConfig();
-      for (const importType of importTypes) {
-        siteConfig.enableImport(importType);
-      }
+      reportLine.audits = auditTypes.join(',');
 
-      log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
-
-      site.setConfig(Config.toDynamoItem(siteConfig));
+      // Enable imports and audits directly before starting the workflow
+      await say('Enabling imports and audits...');
       try {
-        await site.save();
+        await enableImportsAndAudits(site, importTypes, auditTypes, configuration);
       } catch (error) {
         log.error(error);
         reportLine.errors = error.message;
@@ -232,31 +269,38 @@ function OnboardCommand(context) {
         return reportLine;
       }
 
-      log.info(`Site config succesfully saved for site ${siteID}`);
+      // Prepare and start step function workflow
+      const workflowInput = {
+        siteUrl: baseURL, // Using baseURL as siteUrl for workflow
+        imsOrgId: imsOrgID,
+        profile: profileName,
+        slackChannel: channelId,
+        botToken, // Pass the botToken for reuse in workflow-handler
+        importTypes,
+        auditTypes,
+        timestamp: new Date().toISOString(),
+      };
 
-      for (const importType of importTypes) {
-        /* eslint-disable no-await-in-loop */
-        await triggerImportRun(
-          configuration,
-          importType,
-          siteID,
-          profile.imports[importType].startDate,
-          profile.imports[importType].endDate,
-          slackContext,
-          context,
-        );
+      // Get workflow ARN from configuration using the standardized name 'onboard-workflow
+      // Reference: spacecat-infrastructure/modules/step_functions/onboard_workflow.tf
+      // The environment variable ONBOARD_WORKFLOW_STATE_MACHINE_ARN is used as a fallback
+      const onboardWorkflowArn = configuration.getWorkflow('onboard-workflow')
+        || process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
+
+      if (!onboardWorkflowArn) {
+        throw new Error('Onboarding workflow ARN is not configured in the system');
       }
 
-      log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
-
-      const auditTypes = Object.keys(profile.audits);
-
-      auditTypes.forEach((auditType) => {
-        configuration.enableHandlerForSite(auditType, site);
+      const startCommand = new StartExecutionCommand({
+        stateMachineArn: onboardWorkflowArn,
+        input: JSON.stringify(workflowInput),
+        name: `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
       });
 
-      reportLine.audits = auditTypes.join(',');
-      log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
+      const response = await sfnClient.send(startCommand);
+      log.info(`Step Functions workflow started successfully. Execution ARN: ${response.executionArn}`);
+
+      await say(`:rocket: Onboarding workflow started for ${baseURL}. The workflow will automatically handle imports, scrapes, and audits, and will disable the imports and audits when completed.`);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;

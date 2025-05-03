@@ -11,3 +11,5 @@ admin-idp-p*.json
 *.env
 .idea
 .nvmrc
+.husky/
+modules/
