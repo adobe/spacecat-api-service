@@ -229,9 +229,15 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
       const config = await fetchHlxConfig(hlxConfig, hlxAdminToken, log);
       if (isObject(config)) {
         const { cdn, code, content } = config;
-        hlxConfig.cdn = cdn;
-        hlxConfig.code = code;
-        hlxConfig.content = content;
+        if (isObject(cdn)) {
+          hlxConfig.cdn = cdn;
+        }
+        if (isObject(code)) {
+          hlxConfig.code = code;
+        }
+        if (isObject(content)) {
+          hlxConfig.content = content;
+        }
         hlxConfig.hlxVersion = 5;
         log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`);
       } else {
@@ -373,7 +379,7 @@ function HooksController(lambdaContext) {
         });
 
         if (hlxConfigChanged) {
-          site.setHlxConfig(siteCandidate.hlxConfig);
+          site.setHlxConfig(updatedHlxConfig);
           await site.save();
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
