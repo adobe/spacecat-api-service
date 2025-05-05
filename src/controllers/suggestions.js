@@ -212,9 +212,17 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} the updated suggestion data
    */
   const patchSuggestion = async (context) => {
+    const { log = { info: () => {} }, attributes } = context;
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
+
+    // Log the PATCH request with user context
+    log.info('Updating suggestion', {
+      method: 'PATCH',
+      resource: `/sites/${siteId}/opportunities/${opportunityId}/suggestions/${suggestionId}`,
+      userEmail: attributes?.authInfo?.profile.email,
+    });
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -279,8 +287,16 @@ function SuggestionsController(dataAccess, sqs, env) {
    * @returns {Promise<Response>} the updated opportunity data
    */
   const patchSuggestionsStatus = async (context) => {
+    const { log = { info: () => {} }, attributes } = context;
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+
+    // Log the PATCH status request with user context
+    log.info('Updating suggestions status', {
+      method: 'PATCH',
+      resource: `/sites/${siteId}/opportunities/${opportunityId}/suggestions/status`,
+      userEmail: attributes?.authInfo?.profile?.email,
+    });
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -388,8 +404,17 @@ function SuggestionsController(dataAccess, sqs, env) {
     return createResponse(fullResponse, 207);
   };
   const autofixSuggestions = async (context) => {
+    const { log = { info: () => {} }, attributes } = context;
     const siteId = context.params?.siteId;
-    const opportunityId = context.params?.opportunityId;
+    const opportunityId = context.params?.opportunityId || undefined;
+
+    // Log the autofix request with user context
+    log.info('Autofixing suggestions', {
+      method: 'PATCH',
+      resource: `/sites/${siteId}/opportunities/${opportunityId}/suggestions/auto-fix`,
+      userEmail: attributes?.authInfo?.profile?.email,
+      suggestionIds: context.data?.suggestionIds,
+    });
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
