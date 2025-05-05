@@ -361,7 +361,16 @@ function HooksController(lambdaContext) {
         const siteHlxConfig = site.getHlxConfig();
         const siteHasHlxConfig = isNonEmptyObject(siteHlxConfig);
         const candidateHlxConfig = siteCandidate.hlxConfig;
-        const hlxConfigChanged = !deepEqual(siteHlxConfig, candidateHlxConfig);
+        let hlxConfigChanged = false;
+        const updatedHlxConfig = { ...siteHlxConfig };
+
+        Object.keys(candidateHlxConfig).forEach((key) => {
+          if (!deepEqual(siteHlxConfig[key], candidateHlxConfig[key])) {
+            updatedHlxConfig[key] = candidateHlxConfig[key];
+            hlxConfigChanged = true;
+            log.info(`HLX config key "${key}" updated for site: ${baseURL}`);
+          }
+        });
 
         if (hlxConfigChanged) {
           site.setHlxConfig(siteCandidate.hlxConfig);
