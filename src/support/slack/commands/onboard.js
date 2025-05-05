@@ -156,6 +156,12 @@ function OnboardCommand(context) {
         reportLine.existingSite = 'Yes';
         reportLine.deliveryType = site.getDeliveryType();
         log.info(`Site ${baseURL} already exists. Site ID: ${site.getId()}, Delivery Type: ${reportLine.deliveryType}`);
+
+        const siteOrgId = site.getOrganizationId();
+        if (siteOrgId !== organizationId) {
+          site.setOrganizationId(organizationId);
+          log.info(`Site ${baseURL} organization ID updated to ${organizationId}`);
+        }
       } else {
         log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
         const deliveryType = await findDeliveryType(baseURL);

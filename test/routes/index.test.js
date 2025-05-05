@@ -108,6 +108,11 @@ describe('getRouteHandlers', () => {
     getBrandGuidelinesForSite: sinon.stub(),
   };
 
+  const mockPreflightController = {
+    createPreflightJob: sinon.stub(),
+    getPreflightJobStatusAndResult: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -125,6 +130,7 @@ describe('getRouteHandlers', () => {
       mockOpportunitiesController,
       mockSuggestionsController,
       mockBrandsController,
+      mockPreflightController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -134,6 +140,7 @@ describe('getRouteHandlers', () => {
       'PATCH /configurations/sites/audits',
       'GET /organizations',
       'POST /organizations',
+      'POST /preflight/jobs',
       'GET /sites',
       'POST /sites',
       'GET /sites.csv',
@@ -174,6 +181,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'PATCH /organizations/:organizationId',
       'DELETE /organizations/:organizationId',
+      'GET /preflight/jobs/:jobId',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'DELETE /sites/:siteId',
