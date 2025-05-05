@@ -1,3 +1,10 @@
+## [1.106.3](https://github.com/adobe/spacecat-api-service/compare/v1.106.2...v1.106.3) (2025-05-05)
+
+
+### Bug Fixes
+
+* site candidate content source override ([#886](https://github.com/adobe/spacecat-api-service/issues/886)) ([117db89](https://github.com/adobe/spacecat-api-service/commit/117db89f4a60c8b2c757a009d41c6b71cee93926))
+
 ## [1.106.2](https://github.com/adobe/spacecat-api-service/compare/v1.106.1...v1.106.2) (2025-05-03)
 
 
