@@ -348,6 +348,7 @@ async function disableImportsAndAudits(siteUrl, imsOrgId, importTypes, auditType
  * @param {string} params.botToken - Slack bot token
  * @param {Array<string>} [params.importTypes] - Array of import types to process
  * @param {Array<string>} [params.auditTypes] - Array of audit types to process
+ * @param {string} [params.message] - The error message to send
  * @param {Object} slackContext - The Slack context for sending notifications
  * @returns {Promise<Object>} - Command execution result
  */
@@ -358,6 +359,7 @@ async function handleWorkflowCommand(command, params, slackContext) {
     profile,
     importTypes,
     auditTypes,
+    message,
   } = params;
 
   const { say } = slackContext;
@@ -368,6 +370,18 @@ async function handleWorkflowCommand(command, params, slackContext) {
   };
 
   switch (command) {
+    case 'notify': {
+      const formattedMessage = `:x: ${message}`;
+      await say(formattedMessage);
+      return {
+        statusCode: 200,
+        body: {
+          message: 'Error notification sent',
+          sentMessage: formattedMessage,
+        },
+      };
+    }
+
     case 'run-batch-imports': {
       const importResults = await processBatchImports(
         siteUrl,
@@ -462,7 +476,8 @@ async function handleWorkflowCommand(command, params, slackContext) {
     }
 
     default: {
-      const errorMessage = `Unknown command: '${command}'. Supported commands are: run-scrape, run-batch-imports, run-batch-audits, disable-imports-audits.`;
+      const validCommands = ['run-scrape', 'run-batch-imports', 'run-batch-audits', 'disable-imports-audits', 'notify'];
+      const errorMessage = `Unknown command: '${command}'. Supported commands are: ${validCommands.join(', ')}.`;
       await say(`:x: ${errorMessage}`);
       throw new Error(errorMessage);
     }
@@ -481,6 +496,7 @@ async function handleWorkflowCommand(command, params, slackContext) {
  * @param {Array<string>} [event.importTypes] - Array of import types to run
  * @param {Array<string>} [event.auditTypes] - Array of audit types to run
  * @param {string} [event.command] - Command to execute (onboard, import, audit)
+ * @param {string} [event.message] - The message to send
  * @returns {Object} - Result of the workflow execution
  */
 export async function handler(event) {
@@ -493,6 +509,7 @@ export async function handler(event) {
     importTypes = [],
     auditTypes = [],
     command,
+    message,
   } = event;
 
   const slackContext = createSlackContext(slackChannel, botToken);
@@ -501,7 +518,7 @@ export async function handler(event) {
   try {
     // If no command is specified, return an error
     if (!command) {
-      const validCommands = ['run-batch-imports', 'run-scrape', 'run-batch-audits', 'disable-imports-audits'];
+      const validCommands = ['run-batch-imports', 'run-scrape', 'run-batch-audits', 'disable-imports-audits', 'notify'];
       await say(`:warning: Command parameter is required. Please specify one of: *${validCommands.join(', ')}*`);
       return {
         status: 'error',
@@ -517,6 +534,7 @@ export async function handler(event) {
       profile,
       importTypes,
       auditTypes,
+      message,
     }, slackContext);
   } catch (error) {
     await say(`:x: Workflow failed for ${siteUrl}: ${error.message}`);
