@@ -1,147 +1,139 @@
-# SpaceCat Onboard Workflow
+# SpaceCat Onboarding Workflow
 
 ## Overview
 
-The onboard workflow architecture solves the scalability limitations of the previous design. Instead of defining individual steps for each import and audit type in the Step Functions workflow, this implementation uses batch processing to handle multiple imports and audits through profile-driven configuration. The recent changes further streamline the flow by consolidating functionality in onboard.js and integrating automatic cleanup at the end of the workflow.
-
-## Key Benefits
-
-1. **Scalability**: Adding new import or audit types to profiles doesn't require workflow changes
-2. **Maintainability**: Fewer states in the Step Functions workflow means easier maintenance
-3. **Flexibility**: Profile-driven configuration simplifies customization
-4. **Efficiency**: Batch processing reduces Lambda invocations
-5. **Unified Command Handling**: All workflow commands are now processed through a single Lambda handler
-6. **Simplified Architecture**: Removed unnecessary components and redundant checks
-7. **Automatic Cleanup**: Disables imports and audits at the end of the workflow
-8. **Clear Responsibility Boundaries**: Separation between initial setup (onboard.js) and workflow execution (step_functions)
+The SpaceCat onboarding workflow provides an efficient and scalable solution for onboarding new sites to the SpaceCat system. This architecture employs AWS Step Functions to orchestrate long-running processes while avoiding Lambda timeout limitations. The design follows a profile-driven approach that enables flexible configuration of imports and audits without requiring workflow changes.
 
 ## Architecture Components
 
-### 1. Step Functions Workflow Definition
-
-- Located at: `/modules/step_functions/templates/onboard-workflow.json`
-- Simplified to three main steps: Batch Imports, Scrape, and Batch Audits, plus Disable Imports/Audits
-- Each step invokes the `workflow-handler` Lambda with different command parameters
-- Onboarding happens before Step Functions, directly in onboard.js
-
-### 2. Workflow Handler Lambda
-
-- Located at: `src/support/slack/commands/step_functions/workflow-handler.js` (renamed from lambda to step_functions)
-- Handles workflow commands:
-  - `run-scrape`: Directly executes the scrape command
-  - `run-batch-imports`: Processes all imports defined in the profile
-  - `run-batch-audits`: Processes all audits defined in the profile
-  - `disable-imports-audits`: Disables imports and audits at the end of the workflow
-  - `notify`: Sends Slack notifications at various workflow stages
-
-### 3. Onboard.js
+### 1. Entry Point: Onboard.js
 
 - Located at: `src/support/slack/commands/onboard.js`
-- Now serves as the central entry point for onboarding
-- Handles site creation, validation, and enabling imports/audits
-- Starts the Step Functions workflow
+- Serves as the central entry point for the onboarding process
+- Responsibilities:
+  - Validates site URL and IMS organization ID
+  - Creates or retrieves the organization and site
+  - Determines site delivery type
+  - Loads the appropriate profile configuration
+  - Enables imports and audits in the site configuration
+  - Initiates direct imports for the site
+  - Starts the Step Functions workflow for subsequent operations
+
+### 2. Step Functions State Machine
+
+- Defined in the spacecat-infrastructure repository
+  - modules/step_functions/statemachine/onboard-workflow.js
+- Orchestrates the workflow with the following key states:
+  - Scrape: Executes site scraping
+  - Batch Audits: Processes all audits defined in the profile
+  - Disable Imports/Audits: Cleans up by disabling imports and audits
+- Error handling states that send notifications on failures
+- Each state invokes the workflow handler with appropriate command parameters
+
+### 3. Workflow Handler
+
+- Located at: `src/support/slack/commands/step_functions/workflow-handler.js`
+- Provides a unified interface for workflow operations
+- Supports the following commands:
+  - `run-scrape`: Executes site scraping
+  - `run-batch-audits`: Processes all audits defined in the profile
+  - `disable-imports-audits`: Disables imports and audits at the end of the workflow
+  - `notify`: Sends error notifications to Slack
 
 ### 4. Slack Integration
 
-- Workflow execution is triggered via Slack commands
-- Command parameters are passed to Step Functions
-- Status updates are sent to Slack throughout the workflow
-- Simplified notifications using emoji-based status indicators
+- Commands triggered via Slack interface
+- Error notifications sent back to the originating Slack channel
+- Consistent error formatting with clear indicators
 
-## Implementation Details
+## Workflow Sequence
 
-### Command Processing Flow
+1. **Initial Setup (Onboard.js)**:
+   - User triggers onboarding via Slack command
+   - Site and organization are created or validated
+   - Profile configuration is loaded
+   - Imports and audits are enabled in site configuration
+   - Direct imports are initiated
 
-1. User enters a Slack command for onboarding
-2. The command is routed to `onboard.js`
-3. `onboard.js` creates/validates the site, enables imports/audits, and starts the Step Functions workflow
-4. Step Functions runs batch imports, scrape, and batch audits
-5. Step Functions automatically disables imports and audits at workflow completion
-6. Notifications are sent to Slack at each step
+2. **Step Functions Execution**:
+   - Step Functions workflow is started with site information and profile details
+   - Site scraping is executed
+   - Batch audits are processed
+   - Imports and audits are disabled at completion
 
-### Profile-Driven Configuration
+3. **Error Handling**:
+   - Failures at any step send error notifications to Slack
+   - Workflow continues to cleanup phase even after non-critical failures
+   - Critical failures transition to WorkflowFailed state
 
-Profiles define which imports and audits to run for each site:
+## Profile-Driven Configuration
 
-```json
-{
-  "default": {
-    "imports": {
-      "ahrefs": {}
-    },
-    "audits": {
-      "cwv": {},
-      "404": {}
-    }
-  }
-}
-```
-
-## Key Files
-
-1. **onboard.js**: Central entry point for starting the onboarding process
-2. **workflow-handler.js**: Handler for workflow commands
-3. **onboard-workflow.json**: Step Functions state machine definition
-4. **onboard_workflow.tf**: Terraform configuration for Step Functions
-
-## Monitoring and Management
-
-- CloudWatch logs for Lambda functions and Step Functions
-- Slack notifications for workflow status
-- Step Functions visualization for workflow execution tracking
-
-## Workflow Steps
-
-1. **Onboard Site**: Handled directly by onboard.js (before Step Functions)
-2. **Batch Imports**: Process all imports defined in the profile
-3. **Scrape**: Execute site scrape
-4. **Batch Audits**: Process all audits defined in the profile
-5. **Disable Imports/Audits**: Clean up by disabling imports and audits
-
-## Error Handling
-
-Each step includes error handling and notification:
-
-- Failed steps direct to WorkflowFailed instead of continuing
-- Error messages are sent to Slack with appropriate emoji indicators
-- The final disable-imports-audits step runs even after audit failures
-
-## Implementation Files
-
-- `src/support/slack/commands/step_functions/workflow-handler.js`: Handles workflow steps
-- `src/support/slack/commands/onboard.js`: Handles onboarding and workflow initiation
-
-## Usage
-
-To start an onboarding process, use the Slack command:
-
-```
-@spacecat run onboard https://example.com 123456789@AdobeOrg default
-```
-
-## Adding New Import/Audit Types
-
-To add new import or audit types:
-
-1. Update the profile configuration in `static/onboard/profiles.json`
-2. No changes to the workflow definition required!
-
-Example profile update:
+The workflow uses profile-based configuration to determine which imports and audits to run:
 
 ```json
 {
   "default": {
     "imports": {
-      "organic-traffic": {},
-      "top-pages": {},
-      "all-traffic": {},
-      "new-import-type": {}
+      "ahrefs": {
+        "startDate": "2023-01-01",
+        "endDate": "2023-12-31"
+      }
     },
     "audits": {
       "cwv": {},
       "404": {},
-      "new-audit-type": {}
+      "lhs-mobile": {}
     }
   }
 }
-``` 
+```
+
+Benefits of this approach:
+- Add or remove import/audit types without changing workflow code
+- Configure date ranges or other parameters per import type
+- Create different profiles for different site categories
+
+## Error Notification System
+
+The workflow includes a focused error notification system:
+- Error messages sent to Slack using the `:x:` emoji indicator
+- Clear error context provided in messages
+- Error details logged to CloudWatch for troubleshooting
+
+## Implementation Best Practices
+
+1. **Profile Configuration**:
+   - Store profiles in `static/onboard/profiles.json`
+   - Include proper date ranges for time-based imports
+   - Document any special parameters needed for custom audit types
+
+2. **Error Handling**:
+   - Log detailed error information for debugging
+   - Send clear error notifications to users
+   - Consider recovery options for non-critical failures
+
+3. **Monitoring**:
+   - Use AWS CloudWatch for logs and metrics
+   - Monitor Step Functions execution status
+   - Track Lambda function performance
+
+## Usage Example
+
+To onboard a new site using the default profile:
+
+```
+@spacecat onboard site https://example.com 123456789@AdobeOrg default
+```
+
+To use a custom profile:
+
+```
+@spacecat onboard site https://example.com 123456789@AdobeOrg custom-profile
+```
+
+## Extending the Workflow
+
+To add new audit or import types:
+
+1. Add the new type to your profile configuration
+2. No changes needed to the workflow definition or state machine 

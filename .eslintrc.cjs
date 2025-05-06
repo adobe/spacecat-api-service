@@ -13,13 +13,6 @@
 module.exports = {
   root: true,
   extends: '@adobe/helix',
-  settings: {
-    'import/resolver': {
-      node: {
-        extensions: ['.js', '.jsx', '.ts', '.tsx'],
-      },
-    },
-  },
   overrides: [
     {
       files: ['*.test.js', 'test/e2e/**/*'],
