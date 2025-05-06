@@ -19,7 +19,6 @@
  * @param {Object} event - Lambda event object
  * @param {string} event.siteUrl - URL of the site to onboard
  * @param {string} event.imsOrgId - IMS organization ID
- * @param {string} [event.profile='default'] - Profile name to use
  * @param {string} [event.slackChannel] - Slack channel to send notifications to
  * @param {Array<string>} [event.importTypes] - Array of import types to run
  * @param {Array<string>} [event.auditTypes] - Array of audit types to run
@@ -30,7 +29,6 @@ import dataAccess from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import RunScrape from '../run-scrape.js';
-import RunImport from '../run-import.js';
 import RunAudit from '../run-audit.js';
 
 /**
@@ -80,108 +78,7 @@ function createSlackContext(channel, botToken) {
 }
 
 /**
- * Process all imports for a site in batch mode for each import type.
- * Note: Each handleExecution call will trigger a separate Lambda invocation.
- *
- * @param {string} siteUrl - The site URL
- * @param {string} imsOrgId - The IMS organization ID
- * @param {string} profile - The profile to use
- * @param {Array<string>} importTypes - Array of import types to process
- * @param {Object} slackContext - The Slack context for notifications
- * @param {Object} context - The context for the workflow
- * @returns {Promise<Object>} - Result of batch import processing
- */
-async function processBatchImports(siteUrl, imsOrgId, profile, importTypes, slackContext, context) {
-  const { Site } = dataAccess;
-  const { say } = slackContext;
-
-  if (!importTypes || importTypes.length === 0) {
-    return {
-      success: true,
-      message: 'No import types to process',
-      processedImports: [],
-    };
-  }
-
-  try {
-    await say(`:rocket: Starting batch imports for ${siteUrl}: ${importTypes.join(', ')}`);
-
-    // Load the site from the database - site is already validated in onboard.js
-    const site = await Site.findByBaseURL(siteUrl);
-    const baseURL = site.getBaseURL();
-
-    // Initialize the import handler
-    const runImport = RunImport(context);
-
-    // Process all import types in parallel using Promise.all
-    const importPromises = importTypes.map(async (importType) => {
-      try {
-        // Call the handleExecution method directly - this will trigger a Lambda invocation
-        const result = await runImport.handleExecution([
-          importType,
-          baseURL,
-          profile.imports[importType].startDate,
-          profile.imports[importType].endDate,
-        ], slackContext);
-
-        return {
-          siteUrl,
-          imsOrgId,
-          importType,
-          success: true,
-          result,
-        };
-      } catch (error) {
-        return {
-          siteUrl,
-          imsOrgId,
-          importType,
-          success: false,
-          error: error.message,
-        };
-      }
-    });
-
-    // Wait for all imports to complete in parallel
-    const results = await Promise.all(importPromises);
-
-    // Count successes and failures
-    const successResults = results.filter((r) => r.success);
-    const errorResults = results.filter((r) => !r.success);
-    const successCount = successResults.length;
-    const failureCount = errorResults.length;
-
-    // Notify completion of batch import process
-    let statusMessage;
-    if (failureCount === 0) {
-      statusMessage = `:white_check_mark: Successfully processed all ${successCount} imports for ${siteUrl}`;
-    } else if (successCount === 0) {
-      statusMessage = `:x: Failed to process all ${failureCount} imports for ${siteUrl}`;
-    } else {
-      statusMessage = `:warning: Processed ${successCount} imports successfully and ${failureCount} with errors for ${siteUrl}`;
-    }
-
-    await say(statusMessage);
-
-    return {
-      success: successCount > 0,
-      message: statusMessage,
-      siteUrl,
-      imsOrgId,
-      results: successResults,
-      errors: errorResults,
-      successCount,
-      failureCount,
-    };
-  } catch (error) {
-    await say(`:x: Error in batch import process for ${siteUrl}: ${error.message}`);
-    throw error;
-  }
-}
-
-/**
  * Process all audits for a site in batch for each audit type.
- * Note: Each handleExecution call will trigger a separate Lambda invocation.
  *
  * @param {string} siteUrl - The site URL
  * @param {string} imsOrgId - The IMS organization ID
@@ -191,33 +88,16 @@ async function processBatchImports(siteUrl, imsOrgId, profile, importTypes, slac
  * @returns {Promise<Object>} - Result of batch audit processing
  */
 async function processBatchAudits(siteUrl, imsOrgId, auditTypes, slackContext, context) {
-  const { Site } = dataAccess;
   const { say } = slackContext;
 
-  if (!auditTypes || auditTypes.length === 0) {
-    return {
-      success: true,
-      message: 'No audit types to process',
-      processedAudits: [],
-    };
-  }
-
   try {
-    // Use simpler notification with slackContext.say
     await say(`:rocket: Starting batch audits for site ${siteUrl}: ${auditTypes.join(', ')}`);
 
-    const site = await Site.findByBaseURL(siteUrl);
-    const baseURL = site.getBaseURL();
-
-    // Initialize the audit handler
     const runAudit = RunAudit(context);
-
-    // Process all audit types in parallel using Promise.all
     const auditPromises = auditTypes.map(async (auditType) => {
       try {
-        // Call the handleExecution method directly - this will trigger a Lambda invocation
         const result = await runAudit.handleExecution([
-          baseURL,
+          siteUrl,
           auditType,
         ], slackContext);
 
@@ -242,36 +122,16 @@ async function processBatchAudits(siteUrl, imsOrgId, auditTypes, slackContext, c
     // Wait for all audits to complete in parallel
     const results = await Promise.all(auditPromises);
 
-    // Count successes and failures
-    const successResults = results.filter((r) => r.success);
-    const errorResults = results.filter((r) => !r.success);
-    const successCount = successResults.length;
-    const failureCount = errorResults.length;
-
-    // Notify completion of batch audit process
-    let statusMessage;
-    if (failureCount === 0) {
-      statusMessage = `:white_check_mark: Successfully initiated all ${successCount} audits for ${siteUrl}`;
-    } else if (successCount === 0) {
-      statusMessage = `:x: Failed to initiate all ${failureCount} audits for ${siteUrl}`;
-    } else {
-      statusMessage = `:warning: Initiated ${successCount} audits successfully and ${failureCount} with errors for ${siteUrl}`;
-    }
-
+    const statusMessage = `:hourglass: Initiated audits ${auditTypes} for ${siteUrl}`;
     await say(statusMessage);
 
     return {
-      success: successCount > 0,
-      message: statusMessage,
       siteUrl,
       imsOrgId,
-      results: successResults,
-      errors: errorResults,
-      successCount,
-      failureCount,
+      message: statusMessage,
+      results,
     };
   } catch (error) {
-    // Use simpler notification with slackContext.say for error
     await say(`:x: Error in batch audit process for ${siteUrl}: ${error.message}`);
     throw error;
   }
@@ -313,12 +173,11 @@ async function disableImportsAndAudits(siteUrl, imsOrgId, importTypes, auditType
       configuration.disableHandlerForSite(auditType, site);
     });
 
-    // 4. Update site config and save configuration
+    // TODO: verify - 4. Update site config and save configuration
     // These DB operations can't be parallelized due to potential conflicts
     await Site.updateSiteConfig(site.getId(), siteConfig);
     await configuration.save();
 
-    // Notify completion
     await say(`:white_check_mark: Successfully disabled imports and audits for ${siteUrl}`);
     await say(':tada: Workflow completed successfully!');
 
@@ -343,7 +202,6 @@ async function disableImportsAndAudits(siteUrl, imsOrgId, importTypes, auditType
  * @param {Object} params - Command parameters
  * @param {string} params.siteUrl - The site URL
  * @param {string} params.imsOrgId - The IMS organization ID
- * @param {string} params.profile - The profile to use
  * @param {string} params.slackChannel - The Slack channel for notifications
  * @param {string} params.botToken - Slack bot token
  * @param {Array<string>} [params.importTypes] - Array of import types to process
@@ -356,7 +214,6 @@ async function handleWorkflowCommand(command, params, slackContext) {
   const {
     siteUrl,
     imsOrgId,
-    profile,
     importTypes,
     auditTypes,
     message,
@@ -382,36 +239,11 @@ async function handleWorkflowCommand(command, params, slackContext) {
       };
     }
 
-    case 'run-batch-imports': {
-      const importResults = await processBatchImports(
-        siteUrl,
-        imsOrgId,
-        profile,
-        importTypes,
-        slackContext,
-        context,
-      );
-      await say(':hourglass: Import operations initiated. Waiting 20 minutes for them to complete...');
-      return {
-        statusCode: 200,
-        body: {
-          message: 'Successfully processed batch imports',
-          siteUrl,
-          imsOrgId,
-          results: importResults,
-        },
-      };
-    }
-
     case 'run-scrape': {
       try {
-        const { Site } = dataAccess;
-        const site = await Site.findByBaseURL(siteUrl);
-        const baseURL = site.getBaseURL();
         const runScrape = RunScrape(context);
-        // Execute the scrape command directly
         const result = await runScrape.handleExecution([
-          baseURL,
+          siteUrl,
         ], slackContext);
 
         await say(':hourglass: Scrape operation initiated. Waiting 20 minutes for it to complete...');
@@ -476,7 +308,7 @@ async function handleWorkflowCommand(command, params, slackContext) {
     }
 
     default: {
-      const validCommands = ['run-scrape', 'run-batch-imports', 'run-batch-audits', 'disable-imports-audits', 'notify'];
+      const validCommands = ['run-scrape', 'run-batch-audits', 'disable-imports-audits', 'notify'];
       const errorMessage = `Unknown command: '${command}'. Supported commands are: ${validCommands.join(', ')}.`;
       await say(`:x: ${errorMessage}`);
       throw new Error(errorMessage);
@@ -490,7 +322,6 @@ async function handleWorkflowCommand(command, params, slackContext) {
  * @param {Object} event - Lambda event object
  * @param {string} event.siteUrl - URL of the site to onboard
  * @param {string} event.imsOrgId - IMS organization ID
- * @param {string} [event.profile='default'] - Profile name to use
  * @param {string} [event.slackChannel] - Slack channel to send notifications to
  * @param {string} [event.botToken] - Slack bot token for notifications
  * @param {Array<string>} [event.importTypes] - Array of import types to run
@@ -503,7 +334,6 @@ export async function handler(event) {
   const {
     siteUrl,
     imsOrgId,
-    profile = 'default',
     slackChannel,
     botToken = process.env.SLACK_BOT_TOKEN,
     importTypes = [],
@@ -518,7 +348,7 @@ export async function handler(event) {
   try {
     // If no command is specified, return an error
     if (!command) {
-      const validCommands = ['run-batch-imports', 'run-scrape', 'run-batch-audits', 'disable-imports-audits', 'notify'];
+      const validCommands = ['run-scrape', 'run-batch-audits', 'disable-imports-audits', 'notify'];
       await say(`:warning: Command parameter is required. Please specify one of: *${validCommands.join(', ')}*`);
       return {
         status: 'error',
@@ -531,7 +361,6 @@ export async function handler(event) {
     return await handleWorkflowCommand(command, {
       siteUrl,
       imsOrgId,
-      profile,
       importTypes,
       auditTypes,
       message,
@@ -549,7 +378,6 @@ export async function handler(event) {
 // Export named functions for testing and reuse
 export {
   handleWorkflowCommand,
-  processBatchImports,
   processBatchAudits,
   disableImportsAndAudits,
 };
