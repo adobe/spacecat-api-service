@@ -77,7 +77,7 @@
     "@adobe/spacecat-shared-rum-api-client": "2.23.4",
     "@adobe/spacecat-shared-brand-client": "1.1.6",
     "@adobe/spacecat-shared-slack-client": "1.5.13",
-    "@adobe/spacecat-shared-utils": "1.37.1",
+    "@adobe/spacecat-shared-utils": "1.37.2",
     "@aws-sdk/client-s3": "3.802.0",
     "@aws-sdk/client-sqs": "3.799.0",
     "@aws-sdk/s3-request-presigner": "3.802.0",
