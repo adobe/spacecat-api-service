@@ -1,4 +1,15 @@
 /*
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+/*
  * Copyright 2024 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
@@ -9,7 +20,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-
+/* c8 ignore start */
 /**
  * Lambda function to handle the onboarding workflow
  *
@@ -26,10 +37,11 @@
  */
 
 import dataAccess from '@adobe/spacecat-shared-data-access';
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import RunScrape from '../run-scrape.js';
 import RunAudit from '../run-audit.js';
+import ToggleImports from '../toggle-site-import.js';
+import ToggleAudits from '../toggle-site-audit.js';
 
 /**
  * Create a context for Slack notifications
@@ -145,38 +157,40 @@ async function processBatchAudits(siteUrl, imsOrgId, auditTypes, slackContext, c
  * @param {Array<string>} importTypes - Array of import types to disable
  * @param {Array<string>} auditTypes - Array of audit types to disable
  * @param {Object} slackContext - The Slack context for notifications
+ * @param {Object} context - The context for the workflow
  * @returns {Promise<Object>} - Result of disabling imports and audits
  */
-async function disableImportsAndAudits(siteUrl, imsOrgId, importTypes, auditTypes, slackContext) {
+async function disable(siteUrl, imsOrgId, importTypes, auditTypes, slackContext, context) {
   const { say } = slackContext;
-  const { Site, Configuration } = dataAccess;
 
   try {
     await say(`:gear: Disabling imports and audits for ${siteUrl}`);
 
-    // Load the site from the database - site is already validated in onboard.js
-    const site = await Site.findByBaseURL(siteUrl);
-    const configuration = await Configuration.findLatest();
-    const siteConfig = site.getConfig();
+    const toggleImports = ToggleImports(context);
+    const disableImport = 'disable';
 
-    // 1. Disable all imports in the site config in parallel (though this is just a local operation)
-    importTypes.forEach((importType) => {
-      siteConfig.disableImport(importType);
+    const importPromises = importTypes.map(async (importType) => {
+      const result = await toggleImports.handleExecution([
+        disableImport,
+        siteUrl,
+        importType,
+      ], slackContext);
+      return { importType, result };
     });
+    const importResults = await Promise.all(importPromises);
 
-    // 2. Save the site config
-    site.setConfig(Config.toDynamoItem(siteConfig));
-    await site.save();
+    const toggleAudits = ToggleAudits(context);
+    const disableAudit = 'disable';
 
-    // 3. Disable all audits for the site in the configuration in parallel
-    auditTypes.forEach((auditType) => {
-      configuration.disableHandlerForSite(auditType, site);
+    const auditPromises = auditTypes.map(async (auditType) => {
+      const result = await toggleAudits.handleExecution([
+        disableAudit,
+        siteUrl,
+        auditType,
+      ], slackContext);
+      return { auditType, result };
     });
-
-    // TODO: verify - 4. Update site config and save configuration
-    // These DB operations can't be parallelized due to potential conflicts
-    await Site.updateSiteConfig(site.getId(), siteConfig);
-    await configuration.save();
+    const auditResults = await Promise.all(auditPromises);
 
     await say(`:white_check_mark: Successfully disabled imports and audits for ${siteUrl}`);
     await say(':tada: Workflow completed successfully!');
@@ -188,6 +202,8 @@ async function disableImportsAndAudits(siteUrl, imsOrgId, importTypes, auditType
       imsOrgId,
       disabledImports: importTypes,
       disabledAudits: auditTypes,
+      importResults,
+      auditResults,
     };
   } catch (error) {
     await say(`:x: Error disabling imports and audits for ${siteUrl}: ${error.message}`);
@@ -269,42 +285,61 @@ async function handleWorkflowCommand(command, params, slackContext) {
     }
 
     case 'run-batch-audits': {
-      const auditResults = await processBatchAudits(
-        siteUrl,
-        imsOrgId,
-        auditTypes,
-        slackContext,
-        context,
-      );
-      await say(':hourglass: Audit operations initiated. Waiting 30 minutes for them to complete...');
-      return {
-        statusCode: 200,
-        body: {
-          message: 'Successfully processed batch audits',
+      try {
+        const auditResults = await processBatchAudits(
           siteUrl,
           imsOrgId,
-          results: auditResults,
-        },
-      };
+          auditTypes,
+          slackContext,
+          context,
+        );
+        await say(':hourglass: Audit operations initiated. Waiting 30 minutes for them to complete...');
+        return {
+          statusCode: 200,
+          body: {
+            message: 'Successfully processed batch audits',
+            siteUrl,
+            imsOrgId,
+            results: auditResults,
+          },
+        };
+      } catch (error) {
+        return {
+          statusCode: 500,
+          body: {
+            error: `Batch audit failed: ${error.message}`,
+          },
+        };
+      }
     }
 
     case 'disable-imports-audits': {
-      const disableResults = await disableImportsAndAudits(
-        siteUrl,
-        imsOrgId,
-        importTypes,
-        auditTypes,
-        slackContext,
-      );
-      return {
-        statusCode: 200,
-        body: {
-          message: 'Successfully disabled imports and audits',
+      try {
+        const disableResults = await disable(
           siteUrl,
           imsOrgId,
-          results: disableResults,
-        },
-      };
+          importTypes,
+          auditTypes,
+          slackContext,
+          context,
+        );
+        return {
+          statusCode: 200,
+          body: {
+            message: 'Successfully disabled imports and audits',
+            siteUrl,
+            imsOrgId,
+            results: disableResults,
+          },
+        };
+      } catch (error) {
+        return {
+          statusCode: 500,
+          body: {
+            error: `Disable imports and audits failed: ${error.message}`,
+          },
+        };
+      }
     }
 
     default: {
@@ -379,5 +414,6 @@ export async function handler(event) {
 export {
   handleWorkflowCommand,
   processBatchAudits,
-  disableImportsAndAudits,
+  disable,
 };
+/* c8 ignore end */
