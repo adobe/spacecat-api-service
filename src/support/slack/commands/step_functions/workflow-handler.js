@@ -9,33 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-/*
- * Copyright 2024 Adobe. All rights reserved.
- * This file is licensed to you under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License. You may obtain a copy
- * of the License at http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under
- * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
- * OF ANY KIND, either express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
- */
 /* c8 ignore start */
-/**
- * Lambda function to handle the onboarding workflow
- *
- * This function triggers a Step Functions state machine to orchestrate the long-running
- * processes (onboard, import, scrape, audit) to avoid the 15-minute Lambda timeout.
- *
- * @param {Object} event - Lambda event object
- * @param {string} event.siteUrl - URL of the site to onboard
- * @param {string} event.imsOrgId - IMS organization ID
- * @param {string} [event.slackChannel] - Slack channel to send notifications to
- * @param {Array<string>} [event.importTypes] - Array of import types to run
- * @param {Array<string>} [event.auditTypes] - Array of audit types to run
- * @returns {Object} - Result of the workflow execution
- */
-
 import dataAccess from '@adobe/spacecat-shared-data-access';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 import RunScrape from '../run-scrape.js';
