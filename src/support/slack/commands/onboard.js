@@ -259,10 +259,6 @@ function OnboardCommand(context) {
       reportLine.audits = auditTypes.join(',');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
 
-      // TODO: verify - pdate site config and save configuration
-      await Site.updateSiteConfig(site.getId(), siteConfig);
-      await configuration.save();
-
       await say(`Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits} for site ${siteID}`);
 
       // Prepare and start step function workflow
@@ -277,16 +273,11 @@ function OnboardCommand(context) {
         timestamp: new Date().toISOString(),
       };
 
-      // Get workflow ARN from configuration using the standardized name 'onboard-workflow
-      // Reference: spacecat-infrastructure/modules/step_functions/onboard_workflow.tf
-      // The environment variable ONBOARD_WORKFLOW_STATE_MACHINE_ARN is used as a fallback
-      const onboardWorkflowArn = configuration.getWorkflow('onboard-workflow')
-        || process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN
-        || 'arn:aws:states:us-east-1:682033462621:stateMachine:spacecat-dev-onboard-workflow'; // Temporarily hardcoded for testing
+      // Get workflow ARN - first check environment variable, then fallback to hardcoded value
+      const onboardWorkflowArn = process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN
+        || 'arn:aws:states:us-east-1:682033462621:stateMachine:spacecat-dev-onboard-workflow';
 
-      if (!onboardWorkflowArn) {
-        throw new Error('Onboarding workflow ARN is not configured in the system');
-      }
+      log.info(`Using Step Functions workflow ARN: ${onboardWorkflowArn}`);
 
       const startCommand = new StartExecutionCommand({
         stateMachineArn: onboardWorkflowArn,
