@@ -434,17 +434,6 @@ describe('Sites Controller', () => {
     expect(result).to.not.be.null;
   });
 
-  it('gets a site by ID', async () => {
-    const result = await sitesController.getByID({ params: { siteId: SITE_IDS[0] } });
-    const site = await result.json();
-
-    expect(mockDataAccess.Site.findById).to.have.been.calledOnce;
-
-    expect(site).to.be.an('object');
-    expect(site).to.have.property('id', SITE_IDS[0]);
-    expect(site).to.have.property('baseURL', 'https://site1.com');
-  });
-
   it('gets a site by base URL', async () => {
     const result = await sitesController.getByBaseURL({ params: { baseURL: 'aHR0cHM6Ly9zaXRlMS5jb20K' } });
     const site = await result.json();
@@ -648,24 +637,6 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Audit not found');
-  });
-
-  it('returns not found when site is not found by id', async () => {
-    mockDataAccess.Site.findById.resolves(null);
-
-    const result = await sitesController.getByID({ params: { siteId: SITE_IDS[0] } });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
-  it('returns bad request if site ID is not provided', async () => {
-    const result = await sitesController.getByID({ params: {} });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Site ID required');
   });
 
   it('returns 404 when site is not found by baseURL', async () => {

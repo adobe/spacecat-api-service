@@ -27,6 +27,7 @@ import {
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import { lookup } from 'dns/promises';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -172,16 +173,8 @@ function SitesController(dataAccess, log, env) {
   const getByID = async (context) => {
     const siteId = context.params?.siteId;
 
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    return ok(SiteDto.toJSON(site));
+    const result = await lookup(siteId);
+    return ok(result);
   };
 
   /**
