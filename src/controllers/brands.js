@@ -14,11 +14,11 @@ import {
   badRequest,
   notFound,
   ok,
-  createResponse,
+  createResponse, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
-  isObject,
+  isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
@@ -26,25 +26,32 @@ import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 const HEADER_ERROR = 'x-error';
 
 /**
  * BrandsController. Provides methods to read brands and brand guidelines.
- * @param {DataAccess} dataAccess - Data access.
+ * @param {object} ctx - Context of the request.
  * @param {Object} env - Environment object.
  * @returns {object} Brands controller.
  * @constructor
  */
-function BrandsController(dataAccess, log, env) {
-  if (!isObject(dataAccess)) {
+function BrandsController(ctx, log, env) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
-  if (!isObject(env)) {
+  if (!isNonEmptyObject(env)) {
     throw new Error('Environment object required');
   }
   const { Organization, Site } = dataAccess;
+
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   function createErrorResponse(error) {
     return createResponse({ message: error.message }, error.status, {
@@ -68,6 +75,11 @@ function BrandsController(dataAccess, log, env) {
       if (!organization) {
         return notFound(`Organization not found: ${organizationId}`);
       }
+
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only users belonging to the organization can view its brands');
+      }
+
       const imsOrgId = organization.getImsOrgId();
       const imsUserToken = getImsUserToken(context);
       const brandClient = BrandClient.createFrom(context);
@@ -120,6 +132,10 @@ function BrandsController(dataAccess, log, env) {
       if (!site) {
         return notFound(`Site not found: ${siteId}`);
       }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization of the site can view its brand guidelines');
+      }
+
       const brandId = site.getConfig()?.getBrandConfig()?.brandId;
       log.info(`Brand ID mapping for site: ${siteId} is ${brandId}`);
       if (!hasText(brandId)) {

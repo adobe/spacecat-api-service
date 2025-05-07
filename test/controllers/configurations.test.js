@@ -17,6 +17,8 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+
 import ConfigurationsController from '../../src/controllers/configuration.js';
 import { ConfigurationDto } from '../../src/dto/configuration.js';
 
@@ -90,6 +92,7 @@ describe('Configurations Controller', () => {
 
   let mockDataAccess;
   let configurationsController;
+  let context;
 
   beforeEach(() => {
     mockDataAccess = {
@@ -100,7 +103,18 @@ describe('Configurations Controller', () => {
       },
     };
 
-    configurationsController = ConfigurationsController(mockDataAccess);
+    context = {
+      dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+    };
+
+    configurationsController = ConfigurationsController(context);
   });
 
   afterEach(() => {
@@ -125,8 +139,14 @@ describe('Configurations Controller', () => {
       });
   });
 
-  it('throws an error if data access is not an object', () => {
+  it('throws an error if context is not an object', () => {
     expect(() => ConfigurationsController())
+      .to
+      .throw('Context required');
+  });
+
+  it('throws an error if data access is not an object', () => {
+    expect(() => ConfigurationsController({ dataAccess: {} }))
       .to
       .throw('Data access required');
   });
@@ -141,6 +161,15 @@ describe('Configurations Controller', () => {
     expect(resultConfigurations[1]).to.deep.equal(ConfigurationDto.toJSON(configurations[1]));
   });
 
+  it('gets all configurations for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await configurationsController.getAll();
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view configurations');
+  });
+
   it('gets latest configuration', async () => {
     const result = await configurationsController.getLatest();
     const configuration = await result.json();
@@ -149,6 +178,15 @@ describe('Configurations Controller', () => {
 
     expect(configuration).to.be.an('object');
     expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[1]));
+  });
+
+  it('gets latest configuration for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await configurationsController.getLatest();
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view configurations');
   });
 
   it('returns not found when no latest configuration is available', async () => {
@@ -169,6 +207,15 @@ describe('Configurations Controller', () => {
 
     expect(configuration).to.be.an('object');
     expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[0]));
+  });
+
+  it('gets an configuration by version for non admin users', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await configurationsController.getByVersion({ params: { version: 1 } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view configurations');
   });
 
   it('returns not found when a configuration is not found by version', async () => {

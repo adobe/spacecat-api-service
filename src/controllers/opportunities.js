@@ -16,30 +16,41 @@ import {
   ok,
   createResponse,
   noContent,
+  forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
   isObject,
   isNonEmptyObject,
-  arrayEquals, isValidUUID,
+  arrayEquals,
+  isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * Opportunities controller.
- * @param {DataAccess} dataAccess - Data access.
+ * @param {object} ctx - Context of the request.
  * @returns {object} Opportunities controller.
  * @constructor
  */
-function OpportunitiesController(dataAccess) {
-  if (!isObject(dataAccess)) {
+function OpportunitiesController(ctx) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
   const { Opportunity } = dataAccess;
   if (!isObject(Opportunity)) {
     throw new Error('Opportunity Collection not available');
   }
+
+  const { Site } = dataAccess;
+
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * returns a response for a data access error.
@@ -71,6 +82,14 @@ function OpportunitiesController(dataAccess) {
       return badRequest('Site ID required');
     }
 
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can view its opportunities');
+    }
+
     const opptys = (await Opportunity.allBySiteId(siteId))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
@@ -91,6 +110,14 @@ function OpportunitiesController(dataAccess) {
     }
     if (!hasText(status)) {
       return badRequest('Status required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
     const opptys = (await Opportunity.allBySiteIdAndStatus(siteId, status))
@@ -116,6 +143,14 @@ function OpportunitiesController(dataAccess) {
       return badRequest('Opportunity ID required');
     }
 
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can view its opportunities');
+    }
+
     const oppty = await Opportunity.findById(opptyId);
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
@@ -135,6 +170,14 @@ function OpportunitiesController(dataAccess) {
     }
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can create its opportunities');
     }
 
     context.data.siteId = siteId;
@@ -160,6 +203,14 @@ function OpportunitiesController(dataAccess) {
     }
     if (!isValidUUID(opportunityId)) {
       return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can edit its opportunities');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
@@ -234,6 +285,14 @@ function OpportunitiesController(dataAccess) {
 
     if (!isValidUUID(opportunityId)) {
       return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can remove its opportunities');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);

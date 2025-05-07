@@ -94,6 +94,9 @@ describe('Index Tests', () => {
         },
         Site: {
           allWithLatestAudit: sinon.stub().resolves([]),
+          findById: sinon.stub().resolves({
+            id: 'site-id',
+          }),
         },
         Opportunity: {},
         Suggestion: {},
@@ -186,7 +189,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('Site.findById is not a function');
+    expect(resp.headers.plain()['x-error']).to.equal('site.getId is not a function');
   });
 
   it('handles dynamic route', async () => {
