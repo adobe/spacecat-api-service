@@ -1,3 +1,10 @@
+# [1.107.0](https://github.com/adobe/spacecat-api-service/compare/v1.106.4...v1.107.0) (2025-05-07)
+
+
+### Features
+
+* introduce ims authorization ([#832](https://github.com/adobe/spacecat-api-service/issues/832)) ([a67d389](https://github.com/adobe/spacecat-api-service/commit/a67d3893801c0ef90ca7703f3ab68ccf9889b575))
+
 ## [1.106.4](https://github.com/adobe/spacecat-api-service/compare/v1.106.3...v1.106.4) (2025-05-06)
 
 
