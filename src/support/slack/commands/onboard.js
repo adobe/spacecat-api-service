@@ -281,7 +281,8 @@ function OnboardCommand(context) {
       // Reference: spacecat-infrastructure/modules/step_functions/onboard_workflow.tf
       // The environment variable ONBOARD_WORKFLOW_STATE_MACHINE_ARN is used as a fallback
       const onboardWorkflowArn = configuration.getWorkflow('onboard-workflow')
-        || process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
+        || process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN
+        || 'arn:aws:states:us-east-1:682033462621:stateMachine:spacecat-dev-onboard-workflow'; // Temporarily hardcoded for testing
 
       if (!onboardWorkflowArn) {
         throw new Error('Onboarding workflow ARN is not configured in the system');
