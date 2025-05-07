@@ -93,4 +93,16 @@ login:
                   type: string
                   description: Error message
                   example: "Invalid access token"
+
+      '403':
+        description: Forbidden
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  description: Error message
+                  example: "Access denied"
     security: []  # No security required for login endpoint
