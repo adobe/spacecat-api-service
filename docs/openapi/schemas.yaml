@@ -2674,3 +2674,13 @@ CreateAsyncJobAcceptedResponse:
       type: string
       format: uri
       description: URL to poll for job status
+
+ScrapedContentResponse:
+  type: array
+  items:
+    type: string
+    format: uri
+    description: Pre-signed S3 URL to access the scraped content
+  example:
+    - "https://spacecat-bucket.s3.amazonaws.com/scrapes/123/content?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAXXXXXXXX%2F20240315%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20240315T200000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=XXXXX"
+    - "https://spacecat-bucket.s3.amazonaws.com/scrapes/124/content?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAXXXXXXXX%2F20240315%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20240315T200000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=XXXXX"

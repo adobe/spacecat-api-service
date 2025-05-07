@@ -1,0 +1,98 @@
+scraped-content:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/scrapeType'
+    - name: contentPath
+      description: |
+        The full URL of the page to fetch content from (e.g., 'https://example.com/about').
+        - If provided: Fetches content for that specific URL only
+        - If not provided: Fetches content for ALL URLs under the given siteId
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uri
+  get:
+    tags:
+      - scrape
+    summary: Get scraped content URLs
+    description: |
+      Fetches pre-signed URLs to access scraped content.
+
+      The siteId is provided as a path parameter, while scrapeType and contentPath are provided as query parameters.
+      
+      - If scrapeType and contentPath are provided: Fetches a single pre-signed URL for that specific content
+      - If contentPath is not provided: Fetches pre-signed URLs for all content under the given siteId
+      
+      Each URL in the response is a pre-signed S3 URL that provides temporary access to the scraped content.
+    responses:
+      '200':
+        description: Successfully retrieved content URLs
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ScrapedContentResponse'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+scraped-screenshot:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/scrapeType'
+    - name: screenshotPath
+      description: |
+        The full URL of the page to fetch a screenshot from (e.g., 'https://example.com/about').
+        - If provided: Fetches a screenshot for that specific URL
+        - If not provided: Fetches the root/homepage screenshot for the site
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uri
+    - $ref: './parameters.yaml#/screenshotDevice'
+    - $ref: './parameters.yaml#/screenshotType'
+  get:
+    tags:
+      - scrape
+    summary: Get screenshot URL
+    description: |
+      Fetches a pre-signed URL to access a screenshot.
+
+      The siteId is provided as a path parameter, while screenshotPath, device, and type are provided as query parameters.
+      
+      Two modes of operation:
+      1. When screenshotPath is provided:
+         - Fetches a pre-signed URL for the screenshot of that specific URL
+         - screenshotPath must be a full URL including protocol and domain (e.g., 'https://example.com/about/team')
+      
+      2. When screenshotPath is not provided:
+         - Fetches a pre-signed URL for the root/homepage screenshot of the site
+         - The screenshot is located at: s3://spacecat-prod-scraper/scrapes/{siteId}/screenshot-{device}-{type}.png
+
+      The response provides a pre-signed S3 URL that provides temporary access to the screenshot.
+    responses:
+      '200':
+        description: Successfully retrieved screenshot URL
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                downloadUrl:
+                  type: string
+                  format: uri
+                  description: Pre-signed S3 URL to download the screenshot.
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
