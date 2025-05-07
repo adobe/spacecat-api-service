@@ -273,6 +273,8 @@ function OnboardCommand(context) {
         timestamp: new Date().toISOString(),
       };
 
+      log.info('SFN ARN Environment Variable:', process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN);
+
       // Get workflow ARN - first check environment variable, then fallback to hardcoded value
       const onboardWorkflowArn = process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN
         || 'arn:aws:states:us-east-1:682033462621:stateMachine:spacecat-dev-onboard-workflow';

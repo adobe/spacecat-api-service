@@ -83,6 +83,7 @@
     "@aws-sdk/client-s3": "3.802.0",
     "@aws-sdk/client-sfn": "3.799.0",
     "@aws-sdk/client-sqs": "3.799.0",
+    "@aws-sdk/lib-dynamodb": "3.787.0",
     "@aws-sdk/s3-request-presigner": "3.802.0",
     "@langchain/core": "0.3.51",
     "@langchain/langgraph": "0.2.67",
