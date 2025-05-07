@@ -1,3 +1,31 @@
+## [1.106.4](https://github.com/adobe/spacecat-api-service/compare/v1.106.3...v1.106.4) (2025-05-06)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#883](https://github.com/adobe/spacecat-api-service/issues/883)) ([376f5f2](https://github.com/adobe/spacecat-api-service/commit/376f5f2935241e79ae5794fe6829445a27158bb0))
+
+## [1.106.3](https://github.com/adobe/spacecat-api-service/compare/v1.106.2...v1.106.3) (2025-05-05)
+
+
+### Bug Fixes
+
+* site candidate content source override ([#886](https://github.com/adobe/spacecat-api-service/issues/886)) ([117db89](https://github.com/adobe/spacecat-api-service/commit/117db89f4a60c8b2c757a009d41c6b71cee93926))
+
+## [1.106.2](https://github.com/adobe/spacecat-api-service/compare/v1.106.1...v1.106.2) (2025-05-03)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#885](https://github.com/adobe/spacecat-api-service/issues/885)) ([e17d3bb](https://github.com/adobe/spacecat-api-service/commit/e17d3bb2ec097347eb0c3d3ca6608e89f577a2f6))
+
+## [1.106.1](https://github.com/adobe/spacecat-api-service/compare/v1.106.0...v1.106.1) (2025-04-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.17.0 ([#882](https://github.com/adobe/spacecat-api-service/issues/882)) ([1c76dbf](https://github.com/adobe/spacecat-api-service/commit/1c76dbf85a6cdac19f6aee77dfbd000636af840e))
+
 # [1.106.0](https://github.com/adobe/spacecat-api-service/compare/v1.105.5...v1.106.0) (2025-04-28)
 
 
