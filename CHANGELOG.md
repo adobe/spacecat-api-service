@@ -1,3 +1,10 @@
+## [1.107.1](https://github.com/adobe/spacecat-api-service/compare/v1.107.0...v1.107.1) (2025-05-07)
+
+
+### Bug Fixes
+
+* allow x-client-type header in  Access-Control-Allow-Headers ([#888](https://github.com/adobe/spacecat-api-service/issues/888)) ([aa0a6a3](https://github.com/adobe/spacecat-api-service/commit/aa0a6a3112a210c6c47f9668b67a3212aeaf7873))
+
 # [1.107.0](https://github.com/adobe/spacecat-api-service/compare/v1.106.4...v1.107.0) (2025-05-07)
 
 
