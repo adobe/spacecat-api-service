@@ -72,8 +72,65 @@ function DemoController(ctx) {
     return ok(result);
   };
 
+  const takeScreenshots = async (context) => {
+    const { sqs } = context;
+    const { SCRAPING_JOBS_QUEUE_URL: queueUrl } = context.env;
+    const { url } = context.data;
+
+    if (!hasText(url) || !URL.canParse(url)) {
+      return badRequest(`No valid URL provided: ${url}`);
+    }
+
+    const { origin } = new URL(url);
+
+    const site = await Site.findByBaseURL(composeBaseURL(origin));
+
+    // with banner
+    await sqs.sendMessage(queueUrl, {
+      processingType: 'default',
+      jobId: site.getId(),
+      skipMessage: true,
+      skipStorage: false,
+      options: {
+        pageLoadTimeout: 10000,
+        enableJavaScript: true,
+        enableAuthentication: false,
+        screenshotTypes: [
+          'viewport',
+        ],
+        waitForSelector: '#onetrust-policy-text',
+      },
+      urls: [{
+        url,
+      }],
+    });
+
+    // without banner
+    await sqs.sendMessage(queueUrl, {
+      processingType: 'default',
+      jobId: site.getId(),
+      skipMessage: true,
+      skipStorage: false,
+      options: {
+        storagePrefix: 'consent-banner-off',
+        pageLoadTimeout: 10000,
+        enableJavaScript: true,
+        enableAuthentication: false,
+        screenshotTypes: ['viewport'],
+        waitForSelector: '.footer[data-block-status="loaded"]',
+        hideConsentBanners: true,
+      },
+      urls: [{
+        url,
+      }],
+    });
+
+    return ok('done.');
+  };
+
   return {
     getScreenshots,
+    takeScreenshots,
   };
 }
 
