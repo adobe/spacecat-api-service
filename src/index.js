@@ -88,6 +88,13 @@ async function run(request, context) {
     });
   }
 
+  // Extract client type if present
+  const clientType = request.headers.get('x-client-type');
+  if (clientType) {
+    log.info(`Request from client type: ${clientType}`);
+    context.clientType = clientType;
+  }
+
   const t0 = Date.now();
 
   try {
