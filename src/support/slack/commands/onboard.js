@@ -50,7 +50,9 @@ function OnboardCommand(context) {
     usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
   });
 
-  const { dataAccess, log, imsClient } = context;
+  const {
+    dataAccess, log, imsClient, env,
+  } = context;
   const { Configuration, Site, Organization } = dataAccess;
 
   const csvStringifier = createObjectCsvStringifier({
@@ -274,10 +276,10 @@ function OnboardCommand(context) {
       };
 
       log.info('SFN ARN Environment Variable:', process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN);
+      log.info('SFN ARN from Secrets Manager:', env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN);
 
       // Get workflow ARN - first check environment variable, then fallback to hardcoded value
-      const onboardWorkflowArn = process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN
-        || 'arn:aws:states:us-east-1:682033462621:stateMachine:spacecat-dev-onboard-workflow';
+      const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
 
       log.info(`Using Step Functions workflow ARN: ${onboardWorkflowArn}`);
 
