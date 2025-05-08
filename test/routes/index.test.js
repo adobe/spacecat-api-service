@@ -159,6 +159,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/api-keys',
       'POST /tools/import/jobs',
       'GET /screenshots',
+      'POST /screenshots',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
