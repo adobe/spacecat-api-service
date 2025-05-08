@@ -122,7 +122,7 @@ function DemoController(ctx) {
         enableAuthentication: false,
         screenshotTypes: ['viewport'],
         hideConsentBanners: true,
-        ...(waitForSelector && { waitForSelector }),
+        ...(waitForSelector ? { waitForSelector } : {}),
       },
       urls: [{
         url,
