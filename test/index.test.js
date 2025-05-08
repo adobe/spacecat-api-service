@@ -156,7 +156,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger cwv audit for all');
+    expect(resp.headers.plain()['x-error']).to.equal('Failed to trigger cwv audit for all. URL: https://base.spacecat/trigger?url=all&type=cwv');
   });
 
   it('handles siteId not correctly formated error', async () => {
@@ -189,7 +189,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('site.getId is not a function');
+    expect(resp.headers.plain()['x-error']).to.equal('site.getId is not a function. URL: https://base.spacecat/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff');
   });
 
   it('handles dynamic route', async () => {
