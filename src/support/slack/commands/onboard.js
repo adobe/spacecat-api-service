@@ -275,24 +275,15 @@ function OnboardCommand(context) {
         timestamp: new Date().toISOString(),
       };
 
-      log.info('SFN ARN Environment Variable:', process.env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN);
-      log.info('SFN ARN from Secrets Manager:', env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN);
-
-      // Get workflow ARN - first check environment variable, then fallback to hardcoded value
       const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
-
-      log.info(`Using Step Functions workflow ARN: ${onboardWorkflowArn}`);
-
       const startCommand = new StartExecutionCommand({
         stateMachineArn: onboardWorkflowArn,
         input: JSON.stringify(workflowInput),
         name: `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
       });
-
       const response = await sfnClient.send(startCommand);
       log.info(`Step Functions workflow started successfully. Execution ARN: ${response.executionArn}`);
-
-      await say(`:rocket: Onboarding workflow started for ${baseURL}. The workflow will automatically handle imports, scrapes, and audits, and will disable the imports and audits when completed.`);
+      await say(`:rocket:  Step Functions workflow started successfully to handle imports, scrapes, and audits for ${baseURL}. Execution ARN: ${response.executionArn}`);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -415,7 +406,8 @@ function OnboardCommand(context) {
         }
 
         const message = `
-        *:spacecat: :satellite: Onboarding complete for ${reportLine.site}*
+        *:spacecat: :satellite: Onboarding workflow started for ${reportLine.site}*
+        This workflow will automatically handle imports, scrapes, and audits in the background. After the workflow is complete, the imports and audits will be disabled.
         :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
         :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
         :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
@@ -424,7 +416,7 @@ function OnboardCommand(context) {
         :gear: *Profile:* ${reportLine.profile}
         :clipboard: *Audits:* ${reportLine.audits || 'None'}
         :inbox_tray: *Imports:* ${reportLine.imports || 'None'}
-        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : `:check: *Status:* ${reportLine.status}`}
+        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : ':hourglass_flowing_sand: *Status:* In-Progress'}
         `;
 
         await say(message);
