@@ -105,6 +105,10 @@ function DemoController(ctx) {
       }],
     });
 
+    const waitForSelector = site.getDeliveryType() === 'aem_edge'
+      ? '.footer[data-block-status="loaded"]'
+      : undefined;
+
     // without banner
     await sqs.sendMessage(queueUrl, {
       processingType: 'default',
@@ -117,8 +121,8 @@ function DemoController(ctx) {
         enableJavaScript: true,
         enableAuthentication: false,
         screenshotTypes: ['viewport'],
-        waitForSelector: '.footer[data-block-status="loaded"]',
         hideConsentBanners: true,
+        ...(waitForSelector && { waitForSelector }),
       },
       urls: [{
         url,
