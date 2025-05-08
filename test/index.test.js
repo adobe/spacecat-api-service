@@ -140,6 +140,21 @@ describe('Index Tests', () => {
     });
   });
 
+  it('extracts client type from header', async () => {
+    context.pathInfo.suffix = '/sites/with-latest-audit/lhs-mobile';
+    context.pathInfo.method = 'GET';
+
+    request = new Request(baseUrl, {
+      headers: {
+        'x-api-key': apiKey,
+        'x-client-type': 'test-client',
+      },
+    });
+
+    await main(request, context);
+    expect(context.clientType).to.equal('test-client');
+  });
+
   it('returns 404 when unknown route', async () => {
     context.pathInfo.suffix = '/unknown-handler';
     const resp = await main(request, context);
