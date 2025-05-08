@@ -16,7 +16,7 @@ import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 import { badRequest, ok } from '@adobe/spacecat-shared-http-utils';
 
 async function generatePresignedUrl(s3, bucket, siteId, pathname, variant) {
-  const key = `${siteId}${pathname}${pathname.endsWith('/') ? '' : '/'}${variant}.png`;
+  const key = `scrapes/${siteId}${pathname}${pathname.endsWith('/') ? '' : '/'}${variant}.png`;
   console.log(`key: ${key}`);
 
   const command = new GetObjectCommand({
