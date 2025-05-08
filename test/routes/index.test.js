@@ -113,6 +113,10 @@ describe('getRouteHandlers', () => {
     getPreflightJobStatusAndResult: sinon.stub(),
   };
 
+  const mockDemoController = {
+    getScreenshots: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -131,6 +135,7 @@ describe('getRouteHandlers', () => {
       mockSuggestionsController,
       mockBrandsController,
       mockPreflightController,
+      mockDemoController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -153,6 +158,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/api-keys',
       'GET /tools/api-keys',
       'POST /tools/import/jobs',
+      'GET /screenshots',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -168,6 +174,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /trigger']).to.equal(mockTrigger);
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
+    expect(staticRoutes['GET /screenshots']).to.equal(mockDemoController.getScreenshots);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',

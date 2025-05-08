@@ -13,6 +13,7 @@
   ],
   "exclude": [
     "src/agents/org-detector/agent.js",
-    "src/agents/org-detector/instructions.js"
+    "src/agents/org-detector/instructions.js",
+    "src/controllers/demo.js"
   ]
 }
