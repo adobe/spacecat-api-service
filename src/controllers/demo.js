@@ -44,7 +44,7 @@ function DemoController(ctx) {
     const { S3_SCRAPER_BUCKET: bucketName } = context.env;
     const { url } = context.data;
 
-    if (!hasText(url) || URL.canParse(url)) {
+    if (!hasText(url) || !URL.canParse(url)) {
       return badRequest(`No valid URL provided: ${url}`);
     }
 
