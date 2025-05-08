@@ -134,7 +134,7 @@ async function run(request, context) {
   } catch (e) {
     const t1 = Date.now();
     log.error(`Handler exception after ${t1 - t0} ms. Path: ${sanitizePath(suffix)}`, e);
-    return internalServerError(e.message);
+    return internalServerError(`${e.message}. URL: ${request.url}`);
   }
 }
 
