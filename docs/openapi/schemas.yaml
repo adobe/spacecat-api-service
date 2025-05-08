@@ -1723,15 +1723,11 @@ ScrapeRequest:
       description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
       type: array
       items:
-        type: object
-        properties:
-          url:
-            description: The URL to scrape
-            $ref: '#/URL'
+        $ref: '#/URL'
       example:
         urls:
-          - url: 'https://example.com/en/page1'
-          - url: 'https://example.com/fr/page2'
+          - 'https://example.com/en/page1'
+          - 'https://example.com/fr/page2'
 ScrapeResponse:
   type: object
   properties:
@@ -1742,6 +1738,7 @@ ScrapeResponse:
       description: The status of the scrape job
       type: string
       enum:
+        - 'IN_PROGRESS'
         - 'COMPLETE'
         - 'FAILED'
     startTime:
@@ -1761,9 +1758,7 @@ ScrapeResponse:
       type: integer
     results:
       description: The scrape results
-      type: array
-      items:
-        $ref: '#/ScrapeResult'
+      $ref: '#/ScrapeResult'
   example:
     id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
     status: 'COMPLETE'
@@ -2663,3 +2658,19 @@ AsyncJob:
     - updatedAt
     - startedAt
     - metadata
+
+CreateAsyncJobAcceptedResponse:
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [ IN_PROGRESS, COMPLETED, FAILED ]
+    createdAt:
+      type: string
+      format: date-time
+    pollUrl:
+      type: string
+      format: uri
+      description: URL to poll for job status
