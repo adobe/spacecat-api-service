@@ -125,7 +125,7 @@ async function run(request, context) {
       }
       context.params = params;
 
-      return await handler(context, request);
+      return await handler(context);
     } else {
       const notFoundMessage = `no such route /${route}`;
       log.info(notFoundMessage);
@@ -134,7 +134,7 @@ async function run(request, context) {
   } catch (e) {
     const t1 = Date.now();
     log.error(`Handler exception after ${t1 - t0} ms. Path: ${sanitizePath(suffix)}`, e);
-    return internalServerError(`${e.message}. URL: ${request.url}`);
+    return internalServerError(e.message);
   }
 }
 

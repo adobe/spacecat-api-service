@@ -40,9 +40,10 @@ function DemoController(ctx) {
 
   const { Site } = dataAccess;
 
-  const getScreenshots = async (context, request) => {
+  const getScreenshots = async (context) => {
     const { S3_SCRAPER_BUCKET: bucketName } = context.env;
-    const url = decodeURIComponent(request.query.url);
+    const { url: urlEncoded } = context.data;
+    const url = decodeURIComponent(urlEncoded);
 
     if (!hasText(url) || URL.canParse(url)) {
       return badRequest('No valid URL provided');
