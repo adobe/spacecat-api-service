@@ -42,11 +42,10 @@ function DemoController(ctx) {
 
   const getScreenshots = async (context) => {
     const { S3_SCRAPER_BUCKET: bucketName } = context.env;
-    const { url: urlEncoded } = context.data;
-    const url = decodeURIComponent(urlEncoded);
+    const { url } = context.data;
 
     if (!hasText(url) || URL.canParse(url)) {
-      return badRequest('No valid URL provided');
+      return badRequest(`No valid URL provided: ${url}`);
     }
 
     const { origin, pathname } = new URL(url);
