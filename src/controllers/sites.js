@@ -575,6 +575,11 @@ function SitesController(ctx, log, env) {
     return ok(metrics);
   };
 
+  const test = async () => ok({
+    executionEnv: process.env.AWS_EXECUTION_ENV,
+    funcName: process.env.AWS_LAMBDA_FUNCTION_NAME,
+  });
+
   return {
     createSite,
     getAll,
@@ -597,6 +602,8 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
+
+    test,
   };
 }
 
