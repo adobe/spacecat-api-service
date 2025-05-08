@@ -229,9 +229,15 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
       const config = await fetchHlxConfig(hlxConfig, hlxAdminToken, log);
       if (isObject(config)) {
         const { cdn, code, content } = config;
-        hlxConfig.cdn = cdn;
-        hlxConfig.code = code;
-        hlxConfig.content = content;
+        if (isObject(cdn)) {
+          hlxConfig.cdn = cdn;
+        }
+        if (isObject(code)) {
+          hlxConfig.code = code;
+        }
+        if (isObject(content)) {
+          hlxConfig.content = content;
+        }
         hlxConfig.hlxVersion = 5;
         log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`);
       } else {
@@ -361,10 +367,19 @@ function HooksController(lambdaContext) {
         const siteHlxConfig = site.getHlxConfig();
         const siteHasHlxConfig = isNonEmptyObject(siteHlxConfig);
         const candidateHlxConfig = siteCandidate.hlxConfig;
-        const hlxConfigChanged = !deepEqual(siteHlxConfig, candidateHlxConfig);
+        let hlxConfigChanged = false;
+        const updatedHlxConfig = { ...siteHlxConfig };
+
+        Object.keys(candidateHlxConfig).forEach((key) => {
+          if (!deepEqual(siteHlxConfig[key], candidateHlxConfig[key])) {
+            updatedHlxConfig[key] = candidateHlxConfig[key];
+            hlxConfigChanged = true;
+            log.info(`HLX config key "${key}" updated for site: ${baseURL}`);
+          }
+        });
 
         if (hlxConfigChanged) {
-          site.setHlxConfig(siteCandidate.hlxConfig);
+          site.setHlxConfig(updatedHlxConfig);
           await site.save();
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';

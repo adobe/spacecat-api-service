@@ -25,6 +25,7 @@ import {
   LegacyApiKeyHandler,
   ScopedApiKeyHandler,
   AdobeImsHandler,
+  JwtHandler,
 } from '@adobe/spacecat-shared-http-utils';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
@@ -58,6 +59,7 @@ import OpportunitiesController from './controllers/opportunities.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
+import DemoController from './controllers/demo.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -81,7 +83,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -91,22 +93,23 @@ async function run(request, context) {
 
   try {
     const routeHandlers = getRouteHandlers(
-      AuditsController(context.dataAccess),
-      ConfigurationController(context.dataAccess),
+      AuditsController(context),
+      ConfigurationController(context),
       HooksController(context),
-      OrganizationsController(context.dataAccess, context.env),
-      SitesController(context.dataAccess, log, context.env),
-      ExperimentsController(context.dataAccess),
+      OrganizationsController(context, context.env),
+      SitesController(context, log, context.env),
+      ExperimentsController(context),
       SlackController(SlackApp),
       trigger,
       FulfillmentController(context),
       ImportController(context),
       ApiKeyController(context),
-      SitesAuditsToggleController(context.dataAccess),
-      OpportunitiesController(context.dataAccess),
-      SuggestionsController(context.dataAccess, context.sqs, context.env),
-      BrandsController(context.dataAccess, log, context.env),
-      PreflightController(context.dataAccess, log, context.env),
+      SitesAuditsToggleController(context),
+      OpportunitiesController(context),
+      SuggestionsController(context, context.sqs, context.env),
+      BrandsController(context, log, context.env),
+      PreflightController(context, log, context.env),
+      DemoController(context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -138,7 +141,9 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
-  .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler] })
+  .with(authWrapper, {
+    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+  })
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)

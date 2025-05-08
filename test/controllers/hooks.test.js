@@ -478,6 +478,77 @@ describe('Hooks Controller', () => {
       expect(context.log.info).to.have.been.calledWith('HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`');
       expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
     });
+
+    it('only hlx config keys from site candidate are updated when different from site', async () => {
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
+      context.data = {
+        hlxVersion: 5,
+        requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
+      };
+
+      const hlxConfig = {
+        cdn: { prod: { host: 'some-domain.com' } },
+        code: {},
+        hlxVersion: 5,
+      };
+
+      const expectedConfig = {
+        ...hlxConfig,
+        content: {
+          title: 'helix-website',
+          contentBusId: 'fooid',
+          source: {
+            type: 'google',
+            url: 'https://drive.google.com/drive/u/3/folders/16251625162516',
+            id: '1234',
+          },
+        },
+        rso: {
+          ref: 'main',
+          site: 'some-site',
+          owner: 'some-owner',
+          tld: 'hlx.live',
+        },
+      };
+
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({
+          cdn: { prod: { host: 'some-cdn-host.com' } },
+          content: {
+            title: 'helix-website',
+            contentBusId: 'fooid',
+            source: {
+              type: 'google',
+              url: 'https://drive.google.com/drive/u/3/folders/16251625162516',
+              id: '1234',
+            },
+          },
+          hlxVersion: 5,
+          rso: {
+            ref: 'main',
+            site: 'some-site',
+            owner: 'some-owner',
+          },
+        }),
+        setHlxConfig: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(200, hlxConfig);
+
+      const resp = await (await hooksController.processCDNHook(context)).json();
+      expect(resp).to.equal('CDN site candidate disregarded');
+      expect(site.setHlxConfig).to.have.been.calledWithExactly(expectedConfig);
+      expect(site.save).to.have.been.calledOnce;
+      expect(context.log.info).to.have.been.calledWith('HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`');
+      expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+    });
   });
 
   describe('Site candidate processed', () => {

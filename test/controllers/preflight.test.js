@@ -35,19 +35,23 @@ describe('Preflight Controller', () => {
   let preflightController;
 
   beforeEach(() => {
-    preflightController = PreflightController({ test: 'dataAccess' }, loggerStub, { test: 'env' });
+    preflightController = PreflightController({ dataAccess: { test: 'property' } }, loggerStub, { test: 'env' });
   });
 
   afterEach(() => {
     sandbox.restore();
   });
 
-  it('throws an error if data access is not an object', () => {
-    expect(() => PreflightController(null, loggerStub, { test: 'env' })).to.throw('Data access required');
+  it('throws an error if context is not an object', () => {
+    expect(() => PreflightController(null, loggerStub, { test: 'env' })).to.throw('Context required');
+  });
+
+  it('throws an error if dataAccess is not an object', () => {
+    expect(() => PreflightController({ dataAccess: null }, loggerStub, { test: 'env' })).to.throw('Data access required');
   });
 
   it('throws an error if env is not object', () => {
-    expect(() => PreflightController({ test: 'dataAccess' }, loggerStub, null)).to.throw('Environment object required');
+    expect(() => PreflightController({ dataAccess: { test: 'property' } }, loggerStub, null)).to.throw('Environment object required');
   });
 
   describe('createPreflightJob', () => {

@@ -16,6 +16,8 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+
 import SitesAuditsToggleController from '../../src/controllers/sites-audits-toggle.js';
 
 use(chaiAsPromised);
@@ -35,6 +37,7 @@ describe('Sites Audits Controller', () => {
   let dataAccessMock;
   let logMock;
   let sitesAuditsToggleController;
+  let contextMock;
 
   const checkRequestFailure = (response, responseErrorCode, error, errorMessage) => {
     expect(configurationMock.enableHandlerForSite.called, 'Expected configuration.enableHandlerForSite to not be called').to.be.false;
@@ -74,11 +77,22 @@ describe('Sites Audits Controller', () => {
       },
     };
 
+    contextMock = {
+      dataAccess: dataAccessMock,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+    };
+
     logMock = {
       error: sandbox.stub(),
     };
 
-    sitesAuditsToggleController = SitesAuditsToggleController(dataAccessMock);
+    sitesAuditsToggleController = SitesAuditsToggleController(contextMock);
   });
 
   afterEach(() => {
@@ -545,11 +559,45 @@ describe('Sites Audits Controller', () => {
         message: 'The audit "404" has been enabled for the "https://site1.com".',
       });
     });
+
+    it('update audits for non admin users', async () => {
+      // Create a new non-admin context
+      const nonAdminContext = {
+        dataAccess: dataAccessMock,
+        env: {},
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+
+      const nonAdminController = SitesAuditsToggleController(nonAdminContext);
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+
+      const response = await nonAdminController.execute({
+        data: requestData,
+        log: logMock,
+      });
+
+      const error = await response.json();
+      expect(response.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can change configuration settings.');
+    });
   });
 
   describe('misc errors', () => {
+    it('throws an error if context is not an object', () => {
+      expect(() => SitesAuditsToggleController()).to.throw('Context required');
+    });
+
     it('throws an error if data access is not an object', () => {
-      expect(() => SitesAuditsToggleController()).to.throw('Data access required');
+      expect(() => SitesAuditsToggleController({ dataAccess: {} })).to.throw('Data access required');
     });
   });
 });

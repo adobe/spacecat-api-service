@@ -94,6 +94,9 @@ describe('Index Tests', () => {
         },
         Site: {
           allWithLatestAudit: sinon.stub().resolves([]),
+          findById: sinon.stub().resolves({
+            id: 'site-id',
+          }),
         },
         Opportunity: {},
         Suggestion: {},
@@ -130,7 +133,7 @@ describe('Index Tests', () => {
     expect(resp.status).to.equal(204);
     expect(resp.headers.plain()).to.eql({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
       'content-type': 'application/json; charset=utf-8',
@@ -186,7 +189,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('Site.findById is not a function');
+    expect(resp.headers.plain()['x-error']).to.equal('site.getId is not a function');
   });
 
   it('handles dynamic route', async () => {
