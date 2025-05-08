@@ -10,12 +10,16 @@
  * governing permissions and limitations under the License.
  */
 
-import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 import { badRequest, ok } from '@adobe/spacecat-shared-http-utils';
 
 async function generatePresignedUrl(s3, bucket, siteId, pathname, variant) {
+  const {
+    s3Client,
+    getSignedUrl,
+    GetObjectCommand,
+  } = s3;
+
   const key = `scrapes/${siteId}${pathname}${pathname.endsWith('/') ? '' : '/'}${variant}.png`;
   console.log(`key: ${key}`);
 
@@ -27,7 +31,7 @@ async function generatePresignedUrl(s3, bucket, siteId, pathname, variant) {
   // 7 days
   const expiresIn = 60 * 60 * 24 * 7;
 
-  return getSignedUrl(s3, command, { expiresIn });
+  return getSignedUrl(s3Client, command, { expiresIn });
 }
 
 /*
