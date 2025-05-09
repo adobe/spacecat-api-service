@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -24,91 +24,170 @@ use(sinonChai);
 describe('Preflight Controller', () => {
   const sandbox = sinon.createSandbox();
 
-  const preflightFunctions = [
-    'createPreflightJob',
-    'getPreflightJobStatusAndResult',
-  ];
+  const loggerStub = {
+    info: sandbox.stub(),
+    error: sandbox.stub(),
+    warn: sandbox.stub(),
+  };
 
-  const MOCK_JOB_ID = 'test-job-id';
-  const MOCK_PAGE_URL = 'https://example.com';
-  const MOCK_CREATED_AT = '2024-01-01T00:00:00.000Z';
-  const MOCK_UPDATED_AT = '2024-01-01T00:01:00.000Z';
-  const MOCK_STARTED_AT = '2024-01-01T00:00:01.000Z';
-  const MOCK_ENDED_AT = '2024-01-01T00:02:00.000Z';
-  const MOCK_RECORD_EXPIRES_AT = '2024-01-08T00:00:00.000Z';
-  const MOCK_RESULT = { test: 'result' };
-  const MOCK_ERROR = { message: 'test error' };
-  const MOCK_QUEUE_URL = 'https://sqs.queue.url';
+  const MOCK_JOB_ID = '9d222c6d-893e-4e79-8201-3c9ca16a0f39';
+  const MOCK_CREATED_AT = '2019-08-24T14:15:22Z';
+  const MOCK_UPDATED_AT = '2019-08-24T14:15:22Z';
+  const MOCK_STARTED_AT = '2019-08-24T14:15:22Z';
+  const MOCK_ENDED_AT = '2019-08-24T14:15:22Z';
+  const MOCK_RECORD_EXPIRES_AT = 0;
+  const MOCK_RESULT = {
+    audits: [
+      {
+        name: 'metatags',
+        type: 'seo',
+        opportunities: [
+          {
+            tagName: 'description',
+            tagContent: 'Enjoy.',
+            issue: 'Description too short',
+            issueDetails: '94 chars below limit',
+            seoImpact: 'Moderate',
+            seoRecommendation: '140-160 characters long',
+            aiSuggestion: 'Enjoy the best of Adobe Creative Cloud.',
+            aiRationale: "Short descriptions can be less informative and may not attract users' attention.",
+          },
+          {
+            tagName: 'title',
+            tagContent: 'Adobe',
+            issue: 'Title too short',
+            issueDetails: '20 chars below limit',
+            seoImpact: 'Moderate',
+            seoRecommendation: '40-60 characters long',
+            aiSuggestion: 'Adobe Creative Cloud: Your All-in-One Solution',
+            aiRationale: "Short titles can be less informative and may not attract users' attention.",
+          },
+        ],
+      },
+      {
+        name: 'canonical',
+        type: 'seo',
+        opportunities: [
+          {
+            check: 'canonical-url-4xx',
+            explanation: 'The canonical URL returns a 4xx error, indicating it is inaccessible, which can harm SEO visibility.',
+          },
+        ],
+      },
+    ],
+  };
+  const MOCK_ERROR = {
+    code: 'string',
+    message: 'string',
+    details: {},
+  };
 
-  let loggerStub;
-  let asyncJobStub;
-  let asyncJobCollectionStub;
-  let sqsStub;
-  let mockDataAccess;
+  class MockAsyncJob {
+    constructor() {
+      this.id = MOCK_JOB_ID;
+      this.status = 'IN_PROGRESS';
+      this.createdAt = MOCK_CREATED_AT;
+      this.updatedAt = MOCK_UPDATED_AT;
+      this.startedAt = MOCK_STARTED_AT;
+      this.endedAt = MOCK_ENDED_AT;
+      this.recordExpiresAt = MOCK_RECORD_EXPIRES_AT;
+      this.result = MOCK_RESULT;
+      this.error = MOCK_ERROR;
+      this.data = {};
+      this.type = null;
+    }
+
+    getId() {
+      return this.id;
+    }
+
+    getStatus() {
+      return this.status;
+    }
+
+    getCreatedAt() {
+      return this.createdAt;
+    }
+
+    getUpdatedAt() {
+      return this.updatedAt;
+    }
+
+    getStartedAt() {
+      return this.startedAt;
+    }
+
+    getEndedAt() {
+      return this.endedAt;
+    }
+
+    getRecordExpiresAt() {
+      return this.recordExpiresAt;
+    }
+
+    getResult() {
+      return this.result;
+    }
+
+    getError() {
+      return this.error;
+    }
+
+    static getEntityName() {
+      return 'AsyncJob';
+    }
+
+    setStatus(status) {
+      this.status = status;
+    }
+
+    setType(type) {
+      this.type = type;
+    }
+
+    setData(data) {
+      this.data = data;
+    }
+  }
+
   let preflightController;
-  let context;
-  let AsyncJobConstructorStub;
-  let utilsStub;
+  let mockAsyncJob;
+  let mockAsyncJobInstance;
 
-  beforeEach(async () => {
-    loggerStub = {
-      info: sandbox.stub(),
-      error: sandbox.stub(),
+  const createTestContext = ({
+    data = {},
+    params = {},
+    func = { version: 'ci' },
+    sqs = { sendMessage: sandbox.stub().resolves() },
+    dataAccess = { AsyncJob: mockAsyncJob },
+  } = {}) => ({
+    data,
+    params,
+    func,
+    sqs,
+    dataAccess,
+  });
+
+  beforeEach(() => {
+    mockAsyncJobInstance = new MockAsyncJob();
+    mockAsyncJob = {
+      findById: sandbox.stub().resolves(mockAsyncJobInstance),
+      save: sandbox.stub().resolves(mockAsyncJobInstance),
+      create: sandbox.stub().returns(mockAsyncJobInstance),
     };
 
-    asyncJobStub = {
-      getId: sandbox.stub().returns(MOCK_JOB_ID),
-      getStatus: sandbox.stub().returns('IN_PROGRESS'),
-      getCreatedAt: sandbox.stub().returns(MOCK_CREATED_AT),
-      getUpdatedAt: sandbox.stub().returns(MOCK_UPDATED_AT),
-      getStartedAt: sandbox.stub().returns(MOCK_STARTED_AT),
-      getEndedAt: sandbox.stub().returns(MOCK_ENDED_AT),
-      getRecordExpiresAt: sandbox.stub().returns(MOCK_RECORD_EXPIRES_AT),
-      getResult: sandbox.stub().returns(MOCK_RESULT),
-      getError: sandbox.stub().returns(MOCK_ERROR),
-      setStatus: sandbox.stub(),
-      setType: sandbox.stub(),
-      setData: sandbox.stub(),
-      save: sandbox.stub().resolves(),
-    };
-
-    AsyncJobConstructorStub = sandbox.stub().returns(asyncJobStub);
-    AsyncJobConstructorStub.Status = {
+    MockAsyncJob.Status = {
       IN_PROGRESS: 'IN_PROGRESS',
-      COMPLETED: 'COMPLETED',
-      FAILED: 'FAILED',
-    };
-
-    asyncJobCollectionStub = {
-      findById: sandbox.stub().resolves(asyncJobStub),
-    };
-
-    sqsStub = {
-      sendMessage: sandbox.stub().resolves(),
-    };
-
-    mockDataAccess = {
-      AsyncJob: asyncJobCollectionStub,
-    };
-
-    utilsStub = {
-      isNonEmptyObject: sandbox.stub().returns(true),
-      isValidUrl: sandbox.stub().returns(true),
-    };
-
-    context = {
-      data: { pageUrl: MOCK_PAGE_URL },
-      func: { version: 'v1' },
-      sqs: sqsStub,
-      env: { AUDIT_WORKER_QUEUE_URL: MOCK_QUEUE_URL },
     };
 
     preflightController = PreflightController(
-      mockDataAccess,
+      {
+        dataAccess: {
+          AsyncJob: mockAsyncJob,
+        },
+      },
       loggerStub,
-      context.env,
-      utilsStub,
-      AsyncJobConstructorStub,
+      { AUDIT_WORKER_QUEUE_URL: 'test' },
     );
   });
 
@@ -116,264 +195,207 @@ describe('Preflight Controller', () => {
     sandbox.restore();
   });
 
-  it('contains all controller functions', () => {
-    preflightFunctions.forEach((funcName) => {
-      expect(preflightController).to.have.property(funcName);
-    });
+  it('throws an error if context is not an object', () => {
+    expect(() => PreflightController(null, loggerStub, { test: 'env' })).to.throw('Context required');
   });
 
-  it('does not contain any unexpected functions', () => {
-    Object.keys(preflightController).forEach((funcName) => {
-      expect(preflightFunctions).to.include(funcName);
-    });
+  it('throws an error if dataAccess is not an object', () => {
+    const context = { dataAccess: null };
+    const preflightControllerWithNullDataAccess = PreflightController(context, loggerStub, { test: 'env' });
+    return expect(preflightControllerWithNullDataAccess.createPreflightJob({ data: {} })).to.be.rejectedWith('Data access required');
   });
 
-  it('throws an error if data access is not provided', () => {
-    expect(() => PreflightController()).to.throw('Data access required');
-  });
-
-  it('throws an error if data access is not an object', () => {
-    expect(() => PreflightController('not-an-object', loggerStub, context.env)).to.throw('Data access required');
-  });
-
-  it('throws an error if environment object is not provided', () => {
-    expect(() => PreflightController(mockDataAccess)).to.throw('Environment object required');
-  });
-
-  it('throws an error if environment object is not an object', () => {
-    expect(() => PreflightController(mockDataAccess, loggerStub, 'not-an-object')).to.throw('Environment object required');
+  it('throws an error if env is not object', () => {
+    expect(() => PreflightController({ dataAccess: { AsyncJob: mockAsyncJob } }, loggerStub, null)).to.throw('Environment object required');
   });
 
   describe('createPreflightJob', () => {
-    it('should return 400 when request data is missing', async () => {
-      utilsStub.isNonEmptyObject.returns(false);
-      const response = await preflightController.createPreflightJob({ func: { version: 'v1' } });
-      expect(response.status).to.equal(400);
-      const body = await response.json();
-      expect(body.message).to.equal('Invalid request: missing application/json data');
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Invalid request: missing application/json data');
-    });
-
-    it('should return 400 when pageUrl is missing', async () => {
-      const response = await preflightController.createPreflightJob({ data: {}, func: { version: 'v1' } });
-      expect(response.status).to.equal(400);
-      const body = await response.json();
-      expect(body.message).to.equal('Invalid request: missing pageUrl in request data');
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Invalid request: missing pageUrl in request data');
-    });
-
-    it('should return 400 when pageUrl is invalid', async () => {
-      utilsStub.isValidUrl.returns(false);
-      const response = await preflightController.createPreflightJob({ data: { pageUrl: 'invalid-url' }, func: { version: 'v1' } });
-      expect(response.status).to.equal(400);
-      const body = await response.json();
-      expect(body.message).to.equal('Invalid request: missing pageUrl in request data');
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Invalid request: missing pageUrl in request data');
-    });
-
-    it('should return 500 when AsyncJob constructor fails', async () => {
-      AsyncJobConstructorStub.throws(new Error('Failed to create job'));
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Failed to create job');
-    });
-
-    it('should return 500 when setStatus fails', async () => {
-      asyncJobStub.setStatus.throws(new Error('Failed to set status'));
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Failed to set status');
-    });
-
-    it('should return 500 when setType fails', async () => {
-      asyncJobStub.setType.throws(new Error('Failed to set type'));
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Failed to set type');
-    });
-
-    it('should return 500 when setData fails', async () => {
-      asyncJobStub.setData.throws(new Error('Failed to set data'));
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Failed to set data');
-    });
-
-    it('should return 500 when save fails', async () => {
-      asyncJobStub.save.rejects(new Error('Failed to save job'));
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Failed to save job');
-    });
-
-    it('should return 500 when sending SQS message fails', async () => {
-      const error = new Error('Failed to send SQS message');
-      error.name = 'SQSError';
-
-      delete context.sqs;
+    it('creates a preflight job successfully', async () => {
+      const url = 'https://example.com';
+      const context = createTestContext({
+        data: { pageUrl: url },
+      });
 
       const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.match(/Cannot read properties of undefined/);
-      expect(loggerStub.error).to.have.been.calledWith(sinon.match(/Failed to create preflight job: Cannot read properties of undefined/));
-      expect(asyncJobStub.setType).to.have.been.calledWith('preflight');
-      expect(asyncJobStub.setData).to.have.been.calledWith({ pageUrl: MOCK_PAGE_URL });
-      expect(asyncJobStub.setStatus).to.have.been.calledWith('IN_PROGRESS');
-      expect(asyncJobStub.save).to.have.been.called;
-    });
-
-    it('should return 500 when an unexpected error occurs in createPreflightJob', async () => {
-      delete context.sqs;
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.match(/Cannot read properties of undefined/);
-      expect(loggerStub.error).to.have.been.calledWith(sinon.match(/Failed to create preflight job: Cannot read properties of undefined/));
-    });
-
-    it('should return 500 when SQS message sending fails', async () => {
-      sqsStub.sendMessage.throws(new Error('Failed to send SQS message'));
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Failed to send SQS message');
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Failed to send SQS message');
-    });
-
-    it('should return 500 when outer catch block is hit', async () => {
-      const malformedContext = {
-        data: { pageUrl: MOCK_PAGE_URL },
-        func: { version: 'v1' },
-        sqs: undefined,
-      };
-      const response = await preflightController.createPreflightJob(malformedContext);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Cannot read properties of undefined (reading \'sendMessage\')');
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Cannot read properties of undefined (reading \'sendMessage\')');
-    });
-
-    it('should successfully create a preflight job with valid input', async () => {
-      const response = await preflightController.createPreflightJob(context);
+      expect(loggerStub.info).to.have.been.calledWith(`Creating preflight job for pageUrl: ${url}`);
       expect(response.status).to.equal(202);
-      const body = await response.json();
-      expect(body).to.deep.include({
+
+      const jobResult = await response.json();
+      expect(jobResult).to.deep.equal({
         jobId: MOCK_JOB_ID,
         status: 'IN_PROGRESS',
         createdAt: MOCK_CREATED_AT,
-        pollUrl: 'https://spacecat.experiencecloud.live/api/v1/preflight/jobs/test-job-id',
+        pollUrl: 'https://spacecat.experiencecloud.live/api/ci/preflight/jobs/9d222c6d-893e-4e79-8201-3c9ca16a0f39',
       });
-      expect(asyncJobStub.setType).to.have.been.calledWith('preflight');
-      expect(asyncJobStub.setData).to.have.been.calledWith({ pageUrl: MOCK_PAGE_URL });
-      expect(sqsStub.sendMessage).to.have.been.calledWith(
-        MOCK_QUEUE_URL,
+
+      expect(context.sqs.sendMessage).to.have.been.calledWith(
+        'test',
         {
           jobId: MOCK_JOB_ID,
-          pageUrl: MOCK_PAGE_URL,
+          urls: [{ url }],
           type: 'preflight',
         },
       );
     });
 
-    it('should use ci base URL when func.version is ci', async () => {
-      const ciContext = { ...context, func: { version: 'ci' } };
-      const response = await preflightController.createPreflightJob(ciContext);
+    it('returns correct pollUrl for non-ci version', async () => {
+      const url = 'https://example.com';
+      const context = createTestContext({
+        data: { pageUrl: url },
+        func: { version: 'v1' },
+      });
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(loggerStub.info).to.have.been.calledWith(`Creating preflight job for pageUrl: ${url}`);
       expect(response.status).to.equal(202);
-      const body = await response.json();
-      expect(body.pollUrl).to.equal('https://spacecat.experiencecloud.live/api/ci/preflight/jobs/test-job-id');
+
+      const jobResult = await response.json();
+      expect(jobResult).to.deep.equal({
+        jobId: MOCK_JOB_ID,
+        status: 'IN_PROGRESS',
+        createdAt: MOCK_CREATED_AT,
+        pollUrl: 'https://spacecat.experiencecloud.live/api/v1/preflight/jobs/9d222c6d-893e-4e79-8201-3c9ca16a0f39',
+      });
     });
 
-    it('should return 500 when AsyncJob constructor throws an error', async () => {
-      const error = new Error('AsyncJob constructor error');
-      AsyncJobConstructorStub.throws(error);
+    it('returns bad request for missing request data', async () => {
+      const context = createTestContext({
+        data: null,
+      });
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'Invalid request: missing application/json in request data' } });
+    });
+
+    it('returns bad request for missing pageUrl in request data', async () => {
+      const context = createTestContext({
+        data: {},
+      });
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'Invalid request: missing application/json in request data' } });
+    });
+
+    it('returns bad request for invalid pageUrl format', async () => {
+      const context = createTestContext({
+        data: { pageUrl: 'invalid-url' },
+      });
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'Invalid request: invalid pageUrl format' } });
+    });
+
+    it('handles SQS send message error', async () => {
+      const url = 'https://example.com';
+      const context = createTestContext({
+        data: { pageUrl: url },
+        sqs: { sendMessage: sandbox.stub().rejects(new Error('SQS error')) },
+      });
 
       const response = await preflightController.createPreflightJob(context);
       expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('AsyncJob constructor error');
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: AsyncJob constructor error');
-
-      AsyncJobConstructorStub.reset();
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'SQS error' } });
     });
 
-    it('should return 500 when an error occurs after AsyncJob creation but before SQS message', async () => {
-      const errorAsyncJob = {
-        ...asyncJobStub,
-        getId: sandbox.stub().throws(new Error('Failed to get job ID')),
+    it('handles AsyncJob.save() error', async () => {
+      const url = 'https://example.com';
+      mockAsyncJob.save.rejects(new Error('Save error'));
+      const context = createTestContext({
+        data: { pageUrl: url },
+      });
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'Save error' } });
+    });
+
+    it('handles AsyncJob.create() error', async () => {
+      const url = 'https://example.com';
+      mockAsyncJob.create.throws(new Error('Create error'));
+      const context = createTestContext({
+        data: { pageUrl: url },
+      });
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'Create error' } });
+    });
+
+    it('handles missing dataAccess in createPreflightJob', async () => {
+      const context = createTestContext({ dataAccess: null });
+      await expect(preflightController.createPreflightJob(context)).to.be.rejectedWith('Data access required');
+    });
+
+    it('should hit final catch in createPreflightJob due to unexpected error outside inner blocks', async () => {
+      const mockAsyncJobRepo = {
+        create: () => ({
+          setStatus: () => {},
+          setType: () => {},
+          setData: () => {},
+          getId: () => 'abc-123',
+        }),
+        save: async () => {},
       };
-      AsyncJobConstructorStub.returns(errorAsyncJob);
 
-      const response = await preflightController.createPreflightJob(context);
+      const controller = PreflightController(
+        { dataAccess: { AsyncJob: mockAsyncJobRepo } },
+        loggerStub,
+        { AUDIT_WORKER_QUEUE_URL: 'test' },
+      );
+
+      const context = {
+        data: { pageUrl: 'https://example.com' },
+        func: null,
+        sqs: { sendMessage: sinon.stub().resolves() },
+        dataAccess: { AsyncJob: mockAsyncJobRepo },
+      };
+
+      const response = await controller.createPreflightJob(context);
       expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Failed to get job ID');
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Failed to get job ID');
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: "Cannot read properties of null (reading 'version')" } });
+    });
 
-      AsyncJobConstructorStub.reset();
+    it('should return 400 when pageUrl is empty string', async () => {
+      const context = {
+        data: { pageUrl: '' },
+        func: { version: 'ci' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        dataAccess: {
+          AsyncJob: {
+            create: () => ({}),
+            save: async () => {},
+          },
+        },
+      };
+
+      const controller = PreflightController(context, loggerStub, { AUDIT_WORKER_QUEUE_URL: 'test' });
+      const response = await controller.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'Invalid request: missing pageUrl in request data' } });
     });
   });
 
   describe('getPreflightJobStatusAndResult', () => {
-    it('should return 400 when jobId is missing', async () => {
-      const response = await preflightController.getPreflightJobStatusAndResult({ params: {} });
-      expect(response.status).to.equal(400);
-      const body = await response.json();
-      expect(body.message).to.equal('Invalid request: missing jobId parameter');
-    });
+    it('returns job status and result successfully', async () => {
+      const context = createTestContext({
+        params: { jobId: MOCK_JOB_ID },
+      });
 
-    it('should return 404 when job is not found', async () => {
-      asyncJobCollectionStub.findById.resolves(null);
-      const response = await preflightController.getPreflightJobStatusAndResult(
-        { params: { jobId: 'non-existent' } },
-      );
-      expect(response.status).to.equal(404);
-      const body = await response.json();
-      expect(body.message).to.equal('Job not found');
-    });
-
-    it('should return 500 when findById fails', async () => {
-      asyncJobCollectionStub.findById.rejects(new Error('Database error'));
-      const response = await preflightController.getPreflightJobStatusAndResult(
-        { params: { jobId: MOCK_JOB_ID } },
-      );
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Database error');
-    });
-
-    it('should return 500 when a getter method fails', async () => {
-      asyncJobStub.getStatus.throws(new Error('Failed to get status'));
-      const response = await preflightController.getPreflightJobStatusAndResult(
-        { params: { jobId: MOCK_JOB_ID } },
-      );
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.equal('Failed to get status');
-    });
-
-    it('should return 500 when an unexpected error occurs in getPreflightJobStatusAndResult', async () => {
-      // Force an error that will be caught by the outer catch block
-      delete context.params;
       const response = await preflightController.getPreflightJobStatusAndResult(context);
-      expect(response.status).to.equal(500);
-      const body = await response.json();
-      expect(body.message).to.match(/Cannot destructure property/);
-      expect(loggerStub.error).to.have.been.calledWith(sinon.match(/Failed to get preflight job: Cannot destructure property/));
-    });
-
-    it('should successfully return job status and result', async () => {
-      const response = await preflightController.getPreflightJobStatusAndResult(
-        { params: { jobId: MOCK_JOB_ID } },
-      );
       expect(response.status).to.equal(200);
-      const body = await response.json();
-      expect(body).to.deep.equal({
+      const result = await response.json();
+      expect(result).to.deep.equal({
         jobId: MOCK_JOB_ID,
         status: 'IN_PROGRESS',
         createdAt: MOCK_CREATED_AT,
@@ -384,6 +406,76 @@ describe('Preflight Controller', () => {
         result: MOCK_RESULT,
         error: MOCK_ERROR,
       });
+    });
+
+    it('returns 404 for non-existent job', async () => {
+      mockAsyncJob.findById.resolves(null);
+      const context = createTestContext({
+        params: { jobId: MOCK_JOB_ID },
+      });
+
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(404);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: `Job with ID ${MOCK_JOB_ID} not found` } });
+    });
+
+    it('returns 400 for invalid jobId', async () => {
+      const context = createTestContext({
+        params: { jobId: 'invalid-id' },
+      });
+
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'Invalid jobId' } });
+    });
+
+    it('handles database error', async () => {
+      mockAsyncJob.findById.rejects(new Error('Database error'));
+      const context = createTestContext({
+        params: { jobId: MOCK_JOB_ID },
+      });
+
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: 'Database error' } });
+    });
+
+    it('handles missing dataAccess in getPreflightJobStatusAndResult', async () => {
+      const context = createTestContext({ dataAccess: null });
+      await expect(preflightController.getPreflightJobStatusAndResult(context)).to.be.rejectedWith('Data access required');
+    });
+
+    it('handles response creation error', async () => {
+      const circularJob = new MockAsyncJob();
+      circularJob.result = { circular: circularJob };
+      mockAsyncJob.findById.resolves(circularJob);
+      const context = createTestContext({
+        params: { jobId: MOCK_JOB_ID },
+      });
+
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: {
+          message: "Converting circular structure to JSON\n    --> starting at object with constructor 'Object'\n    |     property 'circular' -> object with constructor 'MockAsyncJob'\n    --- property 'result' closes the circle",
+        },
+      });
+    });
+
+    it('should hit final catch in getPreflightJobStatusAndResult due to broken context structure', async () => {
+      const context = {
+        dataAccess: { AsyncJob: mockAsyncJob },
+      };
+
+      const controller = PreflightController(context, loggerStub, { AUDIT_WORKER_QUEUE_URL: 'test' });
+      const response = await controller.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({ message: { message: "Cannot destructure property 'jobId' of 'params' as it is undefined." } });
     });
   });
 });

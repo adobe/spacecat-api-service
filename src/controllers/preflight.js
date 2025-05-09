@@ -10,160 +10,219 @@
  * governing permissions and limitations under the License.
  */
 
-import { AsyncJob } from '@adobe/spacecat-shared-data-access';
-import { isNonEmptyObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import {
+  isNonEmptyObject,
+  isValidUrl,
+  hasText,
+  isValidUUID,
+} from '@adobe/spacecat-shared-utils';
 
+import {
+  badRequest,
+  internalServerError,
+  notFound,
+  ok,
+  createResponse,
+} from '@adobe/spacecat-shared-http-utils';
+
+/**
+ * Preflight Controller. Provides methods to create and manage preflight jobs for URL validation.
+ * @param {object} context - The context object containing dataAccess and other dependencies
+ * @param {
+ *   object
+ * } context.dataAccess - Data access object containing AsyncJob repository
+ * @param {object} logger - Logger instance for logging operations and errors
+ * @param {object} env - Environment configuration object
+ * @param {string} env.AUDIT_WORKER_QUEUE_URL - URL of the SQS queue for audit jobs
+ * @returns {object} Preflight controller with methods for job management
+ * @throws {Error} If context or env is not provided
+ */
 export default function PreflightController(
-  dataAccess,
+  context,
   logger,
   env,
-  utils = { isNonEmptyObject, isValidUrl },
-  AsyncJobClass = AsyncJob,
 ) {
-  if (!dataAccess || typeof dataAccess !== 'object') {
-    throw new Error('Data access required');
+  if (!isNonEmptyObject(context)) {
+    throw new Error('Context required');
   }
 
-  if (!env || typeof env !== 'object') {
+  if (!isNonEmptyObject(env)) {
     throw new Error('Environment object required');
   }
 
-  const { AsyncJob: asyncJobCollection } = dataAccess;
+  /**
+   * Creates a validation error with a 400 status code
+   * @param {string} message - Error message
+   * @returns {Error} Error object with statusCode property
+   */
+  function createValidationError(message) {
+    const error = new Error(message);
+    error.statusCode = 400;
+    return error;
+  }
+
+  /**
+   * Validates the request data for preflight job creation
+   * @param {object} data - Request data object
+   * @param {string} data.pageUrl - URL to be validated
+   * @throws {Error} If request data is invalid
+   */
+  function validateRequestData(data) {
+    if (!isNonEmptyObject(data)) {
+      throw createValidationError('Invalid request: missing application/json in request data');
+    }
+    if (!hasText(data.pageUrl)) {
+      throw createValidationError('Invalid request: missing pageUrl in request data');
+    }
+    if (!isValidUrl(data.pageUrl)) {
+      throw createValidationError('Invalid request: invalid pageUrl format');
+    }
+  }
+
+  /**
+   * Validates the job ID format
+   * @param {string} jobId - UUID of the job
+   * @throws {Error} If jobId is invalid
+   */
+  function validateJobId(jobId) {
+    if (!isValidUUID(jobId)) {
+      throw createValidationError('Invalid jobId');
+    }
+  }
 
   return {
-    async createPreflightJob(context) {
+    /**
+     * Creates a new preflight job for URL validation
+     * @param {object} requestContext - Request context
+     * @param {object} requestContext.data - Request data containing pageUrl
+     * @param {object} requestContext.func - Function context containing version info
+     * @param {object} requestContext.sqs - SQS client for message sending
+     * @param {object} requestContext.dataAccess - Data access object
+     * @returns {Promise<Response>} Response object with job details
+     * @throws {Error} If dataAccess is missing
+     */
+    async createPreflightJob(requestContext) {
+      if (!isNonEmptyObject(requestContext.dataAccess)) {
+        throw new Error('Data access required');
+      }
+
       try {
-        const { data, func } = context;
-        if (!data || !utils.isNonEmptyObject(data)) {
-          logger.error('Failed to create preflight job: Invalid request: missing application/json data');
-          return new Response(JSON.stringify({ message: 'Invalid request: missing application/json data' }), { status: 400 });
+        const { data, func, sqs } = requestContext;
+        const { AsyncJob } = requestContext.dataAccess;
+
+        try {
+          validateRequestData(data);
+        } catch (error) {
+          logger.error(`Failed to create preflight job: ${error.message}`);
+          return badRequest({ message: error.message });
         }
 
         const { pageUrl } = data;
-        if (!pageUrl || typeof pageUrl !== 'string' || !utils.isValidUrl(pageUrl)) {
-          logger.error('Failed to create preflight job: Invalid request: missing pageUrl in request data');
-          return new Response(JSON.stringify({ message: 'Invalid request: missing pageUrl in request data' }), { status: 400 });
-        }
-
         logger.info(`Creating preflight job for pageUrl: ${pageUrl}`);
 
         // Create a new async job
         let asyncJob;
         try {
-          asyncJob = new AsyncJobClass();
-        } catch (error) {
-          logger.error(`Failed to create preflight job: ${error.message}`);
-          return new Response(JSON.stringify({ message: error.message }), { status: 500 });
-        }
-
-        try {
-          asyncJob.setStatus(AsyncJobClass.Status.IN_PROGRESS);
+          asyncJob = AsyncJob.create();
+          asyncJob.setStatus('IN_PROGRESS');
           asyncJob.setType('preflight');
-          asyncJob.setData({ pageUrl });
+          asyncJob.setData({ urls: [{ url: pageUrl }] });
+          await AsyncJob.save(asyncJob);
         } catch (error) {
           logger.error(`Failed to create preflight job: ${error.message}`);
-          return new Response(JSON.stringify({ message: error.message }), { status: 500 });
-        }
-
-        try {
-          await asyncJob.save();
-        } catch (error) {
-          logger.error(`Failed to create preflight job: ${error.message}`);
-          return new Response(JSON.stringify({ message: error.message }), { status: 500 });
+          return internalServerError({ message: error.message });
         }
 
         // Send message to SQS queue
         const message = {
           jobId: asyncJob.getId(),
-          pageUrl,
+          urls: [{ url: pageUrl }],
           type: 'preflight',
         };
 
         try {
-          await context.sqs.sendMessage(env.AUDIT_WORKER_QUEUE_URL, message);
+          await sqs.sendMessage(env.AUDIT_WORKER_QUEUE_URL, message);
         } catch (error) {
           logger.error(`Failed to create preflight job: ${error.message}`);
-          return new Response(JSON.stringify({ message: error.message }), { status: 500 });
+          return internalServerError({ message: error.message });
         }
 
-        const baseUrl = func.version === 'ci' ? 'https://spacecat.experiencecloud.live/api/ci' : 'https://spacecat.experiencecloud.live/api/v1';
+        const baseUrl = func.version === 'ci'
+          ? 'https://spacecat.experiencecloud.live/api/ci'
+          : 'https://spacecat.experiencecloud.live/api/v1';
         const pollUrl = `${baseUrl}/preflight/jobs/${asyncJob.getId()}`;
 
-        return new Response(JSON.stringify({
+        return createResponse({
           jobId: asyncJob.getId(),
           status: asyncJob.getStatus(),
           createdAt: asyncJob.getCreatedAt(),
           pollUrl,
-        }), { status: 202 });
+        }, 202);
       } catch (error) {
         logger.error(`Failed to create preflight job: ${error.message}`);
-        return new Response(JSON.stringify({ message: error.message }), { status: 500 });
+        return internalServerError({ message: error.message });
       }
     },
 
-    async getPreflightJobStatusAndResult(context) {
+    /**
+     * Retrieves the status and result of a preflight job
+     * @param {object} requestContext - Request context
+     * @param {object} requestContext.params - Request parameters containing jobId
+     * @param {object} requestContext.dataAccess - Data access object
+     * @returns {Promise<Response>} Response object with job status and result
+     * @throws {Error} If dataAccess is missing
+     */
+    async getPreflightJobStatusAndResult(requestContext) {
+      if (!isNonEmptyObject(requestContext.dataAccess)) {
+        throw new Error('Data access required');
+      }
+
       try {
-        const { params } = context;
+        const { params } = requestContext;
+        const { AsyncJob } = requestContext.dataAccess;
         const { jobId } = params;
 
-        if (!jobId) {
-          logger.error('Failed to get preflight job: Invalid request: missing jobId parameter');
-          return new Response(JSON.stringify({ message: 'Invalid request: missing jobId parameter' }), { status: 400 });
+        try {
+          validateJobId(jobId);
+        } catch (error) {
+          logger.error(`Failed to get preflight job: ${error.message}`);
+          return badRequest({ message: error.message });
         }
 
         logger.info(`Getting preflight job status for jobId: ${jobId}`);
 
         let asyncJob;
         try {
-          asyncJob = await asyncJobCollection.findById(jobId);
+          asyncJob = await AsyncJob.findById(jobId);
         } catch (error) {
           logger.error(`Failed to get preflight job: ${error.message}`);
-          return new Response(JSON.stringify({ message: error.message }), { status: 500 });
+          return internalServerError({ message: error.message });
         }
 
         if (!asyncJob) {
           logger.error(`Failed to get preflight job: Job not found with id: ${jobId}`);
-          return new Response(JSON.stringify({ message: 'Job not found' }), { status: 404 });
+          return notFound({ message: `Job with ID ${jobId} not found` });
         }
 
-        let jobIdValue;
-        let status;
-        let createdAt;
-        let updatedAt;
-        let startedAt;
-        let endedAt;
-        let recordExpiresAt;
-        let result;
-        let error;
         try {
-          jobIdValue = asyncJob.getId();
-          status = asyncJob.getStatus();
-          createdAt = asyncJob.getCreatedAt();
-          updatedAt = asyncJob.getUpdatedAt();
-          startedAt = asyncJob.getStartedAt();
-          endedAt = asyncJob.getEndedAt();
-          recordExpiresAt = asyncJob.getRecordExpiresAt();
-          result = asyncJob.getResult();
-          error = asyncJob.getError();
-        } catch (err) {
-          logger.error(`Failed to get preflight job: ${err.message}`);
-          return new Response(JSON.stringify({ message: err.message }), { status: 500 });
+          return ok({
+            jobId: asyncJob.getId(),
+            status: asyncJob.getStatus(),
+            createdAt: asyncJob.getCreatedAt(),
+            updatedAt: asyncJob.getUpdatedAt(),
+            startedAt: asyncJob.getStartedAt(),
+            endedAt: asyncJob.getEndedAt(),
+            recordExpiresAt: asyncJob.getRecordExpiresAt(),
+            result: asyncJob.getResult(),
+            error: asyncJob.getError(),
+          });
+        } catch (error) {
+          logger.error(`Failed to get preflight job: ${error.message}`);
+          return internalServerError({ message: error.message });
         }
-
-        return new Response(JSON.stringify({
-          jobId: jobIdValue,
-          status,
-          createdAt,
-          updatedAt,
-          startedAt,
-          endedAt,
-          recordExpiresAt,
-          result,
-          error,
-        }), { status: 200 });
       } catch (error) {
         logger.error(`Failed to get preflight job: ${error.message}`);
-        return new Response(JSON.stringify({ message: error.message }), { status: 500 });
+        return internalServerError({ message: error.message });
       }
     },
   };
