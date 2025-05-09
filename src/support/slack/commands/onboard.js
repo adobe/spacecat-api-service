@@ -15,6 +15,7 @@
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -27,7 +28,6 @@ import {
 } from '../../../utils/slack/base.js';
 
 import { findDeliveryType, triggerImportRun } from '../../utils.js';
-
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -50,7 +50,14 @@ function OnboardCommand(context) {
     usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
   });
 
-  const { dataAccess, log, imsClient } = context;
+  const {
+    dataAccess, log, imsClient, env,
+  } = context;
+
+  // Simple log of auth related environment
+  log.info('AUTH-LOG: Onboard command initialized with the following auth environment:');
+  log.info(`AUTH-LOG: Available auth tokens: ${Object.keys(env || {}).filter((k) => k.includes('TOKEN') || k.includes('SECRET')).join(', ')}`);
+
   const { Configuration, Site, Organization } = dataAccess;
 
   const csvStringifier = createObjectCsvStringifier({
@@ -86,7 +93,8 @@ function OnboardCommand(context) {
     profileName,
     slackContext,
   ) => {
-    const { say } = slackContext;
+    const { say, channelId } = slackContext;
+    const sfnClient = new SFNClient();
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -97,8 +105,8 @@ function OnboardCommand(context) {
       siteId: '',
       profile: profileName,
       deliveryType: '',
-      audits: '',
       imports: '',
+      audits: '',
       errors: '',
       status: 'Success',
       existingSite: 'No',
@@ -123,7 +131,8 @@ function OnboardCommand(context) {
         let imsOrgDetails;
         try {
           imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
-          log.info(`IMS Org Details: ${imsOrgDetails}`);
+          log.info(`IMS Org Details retrieved for ID: ${imsOrgID}`);
+          log.info(`IMS Org Name: ${imsOrgDetails?.orgName || 'unknown'}`);
         } catch (error) {
           log.error(`Error retrieving IMS Org details: ${error.message}`);
           reportLine.errors = `Error retrieving IMS org with the ID *${imsOrgID}*.`;
@@ -257,6 +266,46 @@ function OnboardCommand(context) {
 
       reportLine.audits = auditTypes.join(',');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
+
+      await say(`Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits} for site ${siteID}`);
+
+      // Log context directly without stringify
+      log.info('Context object keys:', Object.keys(context || {}));
+      if (context?.pathInfo) {
+        log.info('Context pathInfo keys:', Object.keys(context.pathInfo || {}));
+        if (context.pathInfo.headers) {
+          log.info('Context headers keys:', Object.keys(context.pathInfo.headers || {}));
+          log.info('Authorization header present:', !!context.pathInfo.headers.authorization);
+          log.info('Edge authorization header present:', !!context.pathInfo.headers['x-edge-authorization']);
+        }
+      }
+
+      // Prepare and start step function workflow
+      const workflowInput = {
+        siteUrl: baseURLInput,
+        imsOrgId: imsOrgID,
+        profile: profileName,
+        slackChannel: channelId,
+        importTypes,
+        auditTypes,
+        timestamp: new Date().toISOString(),
+        // Include authentication token from edge header or service token
+        authToken: context.pathInfo?.headers?.['x-edge-authorization'] || process.env.SPACECAT_SERVICE_TOKEN,
+      };
+
+      // Simple logging without object serialization
+      log.info(`Starting workflow for site ${baseURLInput} with profile ${profileName}`);
+      log.info(`Auth token available: ${!!workflowInput.authToken}`);
+
+      const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
+      const startCommand = new StartExecutionCommand({
+        stateMachineArn: onboardWorkflowArn,
+        input: JSON.stringify(workflowInput),
+        name: `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
+      });
+      const response = await sfnClient.send(startCommand);
+      log.info(`Step Functions workflow started successfully. Execution ARN: ${response.executionArn}`);
+      await say(`:rocket:  Step Functions workflow started successfully to handle imports, scrapes, and audits for ${baseURL}. Execution ARN: ${response.executionArn}`);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -379,7 +428,8 @@ function OnboardCommand(context) {
         }
 
         const message = `
-        *:spacecat: :satellite: Onboarding complete for ${reportLine.site}*
+        *:spacecat: :satellite: Onboarding workflow started for ${reportLine.site}*
+        This workflow will automatically handle imports, scrapes, and audits in the background. After the workflow is complete, the imports and audits will be disabled.
         :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
         :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
         :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
@@ -388,7 +438,7 @@ function OnboardCommand(context) {
         :gear: *Profile:* ${reportLine.profile}
         :clipboard: *Audits:* ${reportLine.audits || 'None'}
         :inbox_tray: *Imports:* ${reportLine.imports || 'None'}
-        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : `:check: *Status:* ${reportLine.status}`}
+        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : ':hourglass_flowing_sand: *Status:* In-Progress'}
         `;
 
         await say(message);
