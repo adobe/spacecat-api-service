@@ -13,9 +13,9 @@
 import {
   hasText, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-import { badRequest, notFound, ok } from '@adobe/spacecat-shared-http-utils';
-
-const MOCK_JOB_ID = '9d222c6d-893e-4e79-8201-3c9ca16a0f39';
+import {
+  badRequest, internalServerError, notFound, ok,
+} from '@adobe/spacecat-shared-http-utils';
 
 function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
@@ -36,7 +36,7 @@ function PreflightController(ctx, log, env) {
       throw new Error('Invalid request: missing application/json data');
     }
 
-    if (!hasText(data.pageUrl)) {
+    if (!hasText(data.pageUrl?.trim())) {
       throw new Error('Invalid request: missing pageUrl in request data');
     }
   }
@@ -46,23 +46,38 @@ function PreflightController(ctx, log, env) {
 
     try {
       validateRequestData(data);
+    } catch (error) {
+      log.error(`Invalid request data: ${error.message}`);
+      return badRequest(error.message);
+    }
 
+    try {
       const funcVersion = context.func?.version;
       const isDev = /^ci\d*$/i.test(funcVersion);
-      const pollUrl = `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}/preflight/jobs/${MOCK_JOB_ID}`;
 
       log.info(`Creating preflight job for pageUrl: ${data.pageUrl}`);
 
-      // TODO: implement async job creation instead of mock data
-      return ok({
-        jobId: MOCK_JOB_ID,
+      // Create a new async job
+      const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
-        createdAt: '2019-08-24T14:15:22Z',
-        pollUrl,
+        metadata: {
+          payload: {
+            pageUrl: data.pageUrl,
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+
+      return ok({
+        jobId: job.getId(),
+        status: job.getStatus(),
+        createdAt: job.getCreatedAt(),
+        pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}/preflight/jobs/${job.getId()}`,
       });
     } catch (error) {
       log.error(`Failed to create preflight job: ${error.message}`);
-      return badRequest(error.message);
+      return internalServerError(error.message);
     }
   };
 
@@ -74,73 +89,32 @@ function PreflightController(ctx, log, env) {
     if (!isValidUUID(jobId)) {
       return badRequest('Invalid jobId');
     }
-    //   TODO: implement async job fetch instead of mock data
 
-    if (jobId === MOCK_JOB_ID) {
+    try {
+      const job = await dataAccess.AsyncJob.findById(jobId);
+
+      if (!job) {
+        return notFound(`Job with ID ${jobId} not found`);
+      }
+
       return ok({
-        jobId: MOCK_JOB_ID,
-        status: 'COMPLETED',
-        createdAt: '2019-08-24T14:15:22Z',
-        updatedAt: '2019-08-24T14:15:22Z',
-        startedAt: '2019-08-24T14:15:22Z',
-        endedAt: '2019-08-24T14:15:22Z',
-        recordExpiresAt: 0,
-        result: {
-          audits: [
-            {
-              name: 'metatags',
-              type: 'seo',
-              opportunities: [
-                {
-                  tagName: 'description',
-                  tagContent: 'Enjoy.',
-                  issue: 'Description too short',
-                  issueDetails: '94 chars below limit',
-                  seoImpact: 'Moderate',
-                  seoRecommendation: '140-160 characters long',
-                  aiSuggestion: 'Enjoy the best of Adobe Creative Cloud.',
-                  aiRationale: "Short descriptions can be less informative and may not attract users' attention.",
-                },
-                {
-                  tagName: 'title',
-                  tagContent: 'Adobe',
-                  issue: 'Title too short',
-                  issueDetails: '20 chars below limit',
-                  seoImpact: 'Moderate',
-                  seoRecommendation: '40-60 characters long',
-                  aiSuggestion: 'Adobe Creative Cloud: Your All-in-One Solution',
-                  aiRationale: "Short titles can be less informative and may not attract users' attention.",
-                },
-              ],
-            },
-            {
-              name: 'canonical',
-              type: 'seo',
-              opportunities: [
-                {
-                  check: 'canonical-url-4xx',
-                  explanation: 'The canonical URL returns a 4xx error, indicating it is inaccessible, which can harm SEO visibility.',
-                },
-              ],
-            },
-          ],
-        },
-        error: {
-          code: 'string',
-          message: 'string',
-          details: {},
-        },
-        metadata: {
-          pageUrl: 'https://main--cc--adobecom.aem.page/drafts/narcis/creativecloud',
-          submittedBy: 'string',
-          tags: [
-            'string',
-          ],
-        },
+        jobId: job.getId(),
+        status: job.getStatus(),
+        createdAt: job.getCreatedAt(),
+        updatedAt: job.getUpdatedAt(),
+        startedAt: job.getStartedAt(),
+        endedAt: job.getEndedAt(),
+        recordExpiresAt: job.getRecordExpiresAt(),
+        resultLocation: job.getResultLocation(),
+        resultType: job.getResultType(),
+        result: job.getResult(),
+        error: job.getError(),
+        metadata: job.getMetadata(),
       });
+    } catch (error) {
+      log.error(`Failed to get preflight job status: ${error.message}`);
+      return internalServerError(error.message);
     }
-
-    return notFound(`Job with ID ${jobId} not found`);
   };
 
   return {

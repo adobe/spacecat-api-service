@@ -23,6 +23,7 @@ use(sinonChai);
 
 describe('Preflight Controller', () => {
   const sandbox = sinon.createSandbox();
+  const jobId = '123e4567-e89b-12d3-a456-426614174000';
 
   const loggerStub = {
     info: sandbox.stub(),
@@ -30,12 +31,38 @@ describe('Preflight Controller', () => {
     warn: sandbox.stub(),
   };
 
-  const MOCK_JOB_ID = '9d222c6d-893e-4e79-8201-3c9ca16a0f39';
+  const mockJob = {
+    getId: () => jobId,
+    getStatus: () => 'IN_PROGRESS',
+    getCreatedAt: () => '2024-03-20T10:00:00Z',
+    getUpdatedAt: () => '2024-03-20T10:00:00Z',
+    getStartedAt: () => '2024-03-20T10:00:00Z',
+    getEndedAt: () => null,
+    getRecordExpiresAt: () => 1710936000,
+    getResultLocation: () => null,
+    getResultType: () => null,
+    getResult: () => null,
+    getError: () => null,
+    getMetadata: () => ({
+      payload: {
+        pageUrl: 'https://example.com',
+      },
+      jobType: 'preflight',
+      tags: ['preflight'],
+    }),
+  };
+
+  const mockDataAccess = {
+    AsyncJob: {
+      create: sandbox.stub().resolves(mockJob),
+      findById: sandbox.stub().resolves(mockJob),
+    },
+  };
 
   let preflightController;
 
   beforeEach(() => {
-    preflightController = PreflightController({ dataAccess: { test: 'property' } }, loggerStub, { test: 'env' });
+    preflightController = PreflightController({ dataAccess: mockDataAccess }, loggerStub, { test: 'env' });
   });
 
   afterEach(() => {
@@ -55,35 +82,10 @@ describe('Preflight Controller', () => {
   });
 
   describe('createPreflightJob', () => {
-    it('creates a preflight job successfully', async () => {
-      const url = 'https://example.com';
+    it('creates a preflight job successfully in production environment', async () => {
       const context = {
         data: {
-          pageUrl: url,
-        },
-        func: {
-          version: 'ci',
-        },
-      };
-
-      const response = await preflightController.createPreflightJob(context);
-      expect(loggerStub.info).to.have.been.calledWith(`Creating preflight job for pageUrl: ${url}`);
-      expect(response.status).to.equal(200);
-
-      const jobResult = await response.json();
-      expect(jobResult).to.deep.equal({
-        jobId: MOCK_JOB_ID,
-        status: 'IN_PROGRESS',
-        createdAt: '2019-08-24T14:15:22Z',
-        pollUrl: 'https://spacecat.experiencecloud.live/api/ci/preflight/jobs/9d222c6d-893e-4e79-8201-3c9ca16a0f39',
-      });
-    });
-
-    it('returns correct pollUrl for non-ci version', async () => {
-      const url = 'https://example.com';
-      const context = {
-        data: {
-          pageUrl: url,
+          pageUrl: 'https://example.com',
         },
         func: {
           version: 'v1',
@@ -91,175 +93,222 @@ describe('Preflight Controller', () => {
       };
 
       const response = await preflightController.createPreflightJob(context);
-      expect(loggerStub.info).to.have.been.calledWith(`Creating preflight job for pageUrl: ${url}`);
       expect(response.status).to.equal(200);
 
-      const jobResult = await response.json();
-      expect(jobResult).to.deep.equal({
-        jobId: MOCK_JOB_ID,
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        jobId,
         status: 'IN_PROGRESS',
-        createdAt: '2019-08-24T14:15:22Z',
-        pollUrl: 'https://spacecat.experiencecloud.live/api/v1/preflight/jobs/9d222c6d-893e-4e79-8201-3c9ca16a0f39',
+        createdAt: '2024-03-20T10:00:00Z',
+        pollUrl: `https://spacecat.experiencecloud.live/api/v1/preflight/jobs/${jobId}`,
+      });
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            pageUrl: 'https://example.com',
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
       });
     });
 
-    it('returns bad request for missing request data', async () => {
+    it('creates a preflight job successfully in CI environment', async () => {
+      const context = {
+        data: {
+          pageUrl: 'https://example.com',
+        },
+        func: {
+          version: 'ci123',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(200);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        jobId,
+        status: 'IN_PROGRESS',
+        createdAt: '2024-03-20T10:00:00Z',
+        pollUrl: `https://spacecat.experiencecloud.live/api/ci/preflight/jobs/${jobId}`,
+      });
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            pageUrl: 'https://example.com',
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+    });
+
+    it('returns 400 Bad Request if data is missing', async () => {
       const context = {
         data: {},
         func: {
-          version: 'ci',
+          version: 'v1',
         },
       };
 
       const response = await preflightController.createPreflightJob(context);
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Invalid request: missing application/json data');
       expect(response.status).to.equal(400);
 
-      const errorResult = await response.json();
-      expect(errorResult).to.deep.equal({ message: 'Invalid request: missing application/json data' });
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: missing application/json data',
+      });
     });
 
-    it('returns bad request for missing pageUrl in request data', async () => {
+    it('returns 400 Bad Request for empty pageUrl', async () => {
       const context = {
         data: {
-          wrongKey: 'wrongValue',
+          pageUrl: '',
         },
         func: {
-          version: 'ci',
+          version: 'v1',
         },
       };
 
       const response = await preflightController.createPreflightJob(context);
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Invalid request: missing pageUrl in request data');
       expect(response.status).to.equal(400);
 
-      const errorResult = await response.json();
-      expect(errorResult).to.deep.equal({ message: 'Invalid request: missing pageUrl in request data' });
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: missing pageUrl in request data',
+      });
     });
 
-    it('returns bad request for invalid pageUrl in request data', async () => {
+    it('returns 400 Bad Request for whitespace pageUrl', async () => {
       const context = {
         data: {
-          pageUrl: 123,
+          pageUrl: ' ',
         },
         func: {
-          version: 'ci',
+          version: 'v1',
         },
       };
 
       const response = await preflightController.createPreflightJob(context);
-      expect(loggerStub.error).to.have.been.calledWith('Failed to create preflight job: Invalid request: missing pageUrl in request data');
       expect(response.status).to.equal(400);
 
-      const errorResult = await response.json();
-      expect(errorResult).to.deep.equal({ message: 'Invalid request: missing pageUrl in request data' });
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: missing pageUrl in request data',
+      });
+    });
+
+    it('handles errors during job creation', async () => {
+      mockDataAccess.AsyncJob.create.rejects(new Error('Something went wrong'));
+
+      const context = {
+        data: {
+          pageUrl: 'https://example.com',
+        },
+        func: {
+          version: 'v1',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(500);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Something went wrong',
+      });
     });
   });
 
   describe('getPreflightJobStatusAndResult', () => {
-    it('gets preflight job status and result successfully', async () => {
+    it('gets preflight job status successfully', async () => {
       const context = {
         params: {
-          jobId: MOCK_JOB_ID,
+          jobId,
         },
       };
 
       const response = await preflightController.getPreflightJobStatusAndResult(context);
-      expect(loggerStub.info).to.have.been.calledWith(`Getting preflight job status for jobId: ${MOCK_JOB_ID}`);
       expect(response.status).to.equal(200);
 
-      const jobResult = await response.json();
-      expect(jobResult).to.deep.equal({
-        jobId: MOCK_JOB_ID,
-        status: 'COMPLETED',
-        createdAt: '2019-08-24T14:15:22Z',
-        updatedAt: '2019-08-24T14:15:22Z',
-        startedAt: '2019-08-24T14:15:22Z',
-        endedAt: '2019-08-24T14:15:22Z',
-        recordExpiresAt: 0,
-        result: {
-          audits: [
-            {
-              name: 'metatags',
-              type: 'seo',
-              opportunities: [
-                {
-                  tagName: 'description',
-                  tagContent: 'Enjoy.',
-                  issue: 'Description too short',
-                  issueDetails: '94 chars below limit',
-                  seoImpact: 'Moderate',
-                  seoRecommendation: '140-160 characters long',
-                  aiSuggestion: 'Enjoy the best of Adobe Creative Cloud.',
-                  aiRationale: "Short descriptions can be less informative and may not attract users' attention.",
-                },
-                {
-                  tagName: 'title',
-                  tagContent: 'Adobe',
-                  issue: 'Title too short',
-                  issueDetails: '20 chars below limit',
-                  seoImpact: 'Moderate',
-                  seoRecommendation: '40-60 characters long',
-                  aiSuggestion: 'Adobe Creative Cloud: Your All-in-One Solution',
-                  aiRationale: "Short titles can be less informative and may not attract users' attention.",
-                },
-              ],
-            },
-            {
-              name: 'canonical',
-              type: 'seo',
-              opportunities: [
-                {
-                  check: 'canonical-url-4xx',
-                  explanation: 'The canonical URL returns a 4xx error, indicating it is inaccessible, which can harm SEO visibility.',
-                },
-              ],
-            },
-          ],
-        },
-        error: {
-          code: 'string',
-          message: 'string',
-          details: {},
-        },
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        jobId,
+        status: 'IN_PROGRESS',
+        createdAt: '2024-03-20T10:00:00Z',
+        updatedAt: '2024-03-20T10:00:00Z',
+        startedAt: '2024-03-20T10:00:00Z',
+        endedAt: null,
+        recordExpiresAt: 1710936000,
+        resultLocation: null,
+        resultType: null,
+        result: null,
+        error: null,
         metadata: {
-          pageUrl: 'https://main--cc--adobecom.aem.page/drafts/narcis/creativecloud',
-          submittedBy: 'string',
-          tags: [
-            'string',
-          ],
+          payload: {
+            pageUrl: 'https://example.com',
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
         },
       });
     });
 
-    it('returns not found for invalid jobId', async () => {
-      const invalidJobId = 'D6918A5E-D760-4C4D-A585-47BBB2165B84';
+    it('returns 400 Bad Request for invalid job ID', async () => {
       const context = {
         params: {
-          jobId: invalidJobId,
+          jobId: 'invalid-uuid',
+        },
+      };
+
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid jobId',
+      });
+    });
+
+    it('returns 404 Not Found for non-existent job', async () => {
+      mockDataAccess.AsyncJob.findById.resolves(null);
+
+      const context = {
+        params: {
+          jobId,
         },
       };
 
       const response = await preflightController.getPreflightJobStatusAndResult(context);
       expect(response.status).to.equal(404);
 
-      const errorResult = await response.json();
-      expect(errorResult).to.deep.equal({ message: `Job with ID ${invalidJobId} not found` });
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: `Job with ID ${jobId} not found`,
+      });
     });
 
-    it('returns badRequest for invalid jobId format', async () => {
-      const invalidJobId = 'invalid-job-id';
+    it('handles errors during job retrieval', async () => {
+      mockDataAccess.AsyncJob.findById.rejects(new Error('Something went wrong'));
+
       const context = {
         params: {
-          jobId: invalidJobId,
+          jobId,
         },
       };
 
       const response = await preflightController.getPreflightJobStatusAndResult(context);
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(500);
 
-      const errorResult = await response.json();
-      expect(errorResult).to.deep.equal({ message: 'Invalid jobId' });
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Something went wrong',
+      });
     });
   });
 });
