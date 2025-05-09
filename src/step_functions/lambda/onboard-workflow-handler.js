@@ -12,11 +12,13 @@
 import { handler as workflowHandler } from '../workflow-handler.js';
 
 export async function handler(event, context) {
-  // Validate that the request is coming from an authorized Step Functions state machine
-  console.log('Step Functions handler invoked with event:', JSON.stringify({
-    ...event,
+  // Safely log event without circular references
+  console.log('Step Functions handler invoked with event:', {
+    siteUrl: event.siteUrl,
+    imsOrgId: event.imsOrgId,
+    command: event.command,
     authToken: event.authToken ? 'TOKEN_PROVIDED' : 'NO_TOKEN',
-  }));
+  });
 
   // Check if auth token is available
   if (event.authToken) {

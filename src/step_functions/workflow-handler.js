@@ -282,7 +282,15 @@ async function disable(siteUrl, imsOrgId, importTypes, auditTypes, slackContext,
  * @returns {Promise<Object>} - Command execution result
  */
 async function handleWorkflowCommand(command, params, slackContext) {
-  console.log(`Handling workflow command: ${command} with params:`, JSON.stringify(params, null, 2));
+  // Safely log params without circular references
+  console.log(`Handling workflow command: ${command} with params:`, {
+    siteUrl: params.siteUrl,
+    imsOrgId: params.imsOrgId,
+    importTypes: params.importTypes?.length || 0,
+    auditTypes: params.auditTypes?.length || 0,
+    hasMessage: !!params.message,
+    hasAuthToken: !!params.authToken,
+  });
 
   const {
     siteUrl,
@@ -440,8 +448,6 @@ async function handleWorkflowCommand(command, params, slackContext) {
 
 /**
  * Lambda handler function for workflow processing - directly invoked by Step Functions
- * This handler bypasses authentication and is only meant to be called by the
- * Step Functions state machine
  *
  * @param {Object} event - Lambda event object from Step Functions
  * @param {string} event.siteUrl - URL of the site to onboard
@@ -454,10 +460,17 @@ async function handleWorkflowCommand(command, params, slackContext) {
  */
 export async function handler(event) {
   try {
-    console.log('Step Functions workflow handler invoked with event:', JSON.stringify({
-      ...event,
+    // Safely log event without circular references
+    console.log('Step Functions workflow handler invoked with event:', {
+      siteUrl: event.siteUrl,
+      imsOrgId: event.imsOrgId,
+      slackChannel: event.slackChannel,
+      command: event.command,
+      importTypes: event.importTypes,
+      auditTypes: event.auditTypes,
       authToken: event.authToken ? 'TOKEN_PROVIDED' : 'NO_TOKEN',
-    }, null, 2));
+      timestamp: event.timestamp,
+    });
 
     // Check for auth token
     if (event.authToken) {

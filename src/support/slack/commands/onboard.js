@@ -285,7 +285,9 @@ function OnboardCommand(context) {
         authToken: context.pathInfo?.headers?.authorization || process.env.SPACECAT_SERVICE_TOKEN,
       };
 
+      // Safely log without circular references
       log.info(`Including auth token in workflow input: ${workflowInput.authToken ? 'Auth token present' : 'No auth token available'}`);
+      log.info(`Workflow input parameters: siteUrl=${workflowInput.siteUrl}, imsOrgId=${workflowInput.imsOrgId}, profile=${workflowInput.profile}`);
 
       const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
       const startCommand = new StartExecutionCommand({
