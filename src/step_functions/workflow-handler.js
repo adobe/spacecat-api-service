@@ -25,7 +25,7 @@ import ToggleAudits from '../support/slack/commands/toggle-site-audit.js';
  * @throws {Error} If channel is not provided
  */
 function createSlackContext(channel) {
-  console.log('Creating Slack context with channel:', channel);
+  console.log(`Creating Slack context for channel: ${channel}`);
   // Validate required parameters
   if (!channel) {
     throw new Error('Slack channel ID is required for notifications. Check that slackChannel is provided in the workflow input.');
@@ -33,7 +33,7 @@ function createSlackContext(channel) {
 
   // Get the Slack token from the environment
   const slackBotToken = process.env.SLACK_BOT_TOKEN;
-  console.log('SLACK_BOT_TOKEN:', slackBotToken ? 'Available' : 'Missing');
+  console.log(`Slack bot token available: ${!!slackBotToken}`);
   if (!slackBotToken) {
     throw new Error('SLACK_BOT_TOKEN environment variable is missing. This should be configured in the Lambda environment.');
   }
@@ -51,37 +51,42 @@ function createSlackContext(channel) {
     },
   };
 
-  // Create the Slack client using the shared client library
-  // Using WORKSPACE_INTERNAL as it matches what's defined in the library
-  const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
+  try {
+    // Create the Slack client using the shared client library
+    // Using WORKSPACE_INTERNAL as it matches what's defined in the library
+    const slackClient = BaseSlackClient.createFrom(lambdaContext, SLACK_TARGETS.WORKSPACE_INTERNAL);
+    console.log('Slack client created successfully');
 
-  // Create a Slack context object with the necessary methods for command execution
-  // This matches the structure expected by other command handlers
-  return {
-    say: async (message) => {
-      try {
-        console.log(`Attempting to send Slack message to channel ${channel}`);
-        if (typeof message === 'string') {
-          await slackClient.postMessage({
-            channel,
-            text: message,
-          });
-        } else {
-          await slackClient.postMessage({
-            channel,
-            ...message,
-          });
+    // Create a Slack context object with the necessary methods for command execution
+    // This matches the structure expected by other command handlers
+    return {
+      say: async (message) => {
+        try {
+          console.log(`Sending Slack message to channel ${channel}`);
+          if (typeof message === 'string') {
+            await slackClient.postMessage({
+              channel,
+              text: message,
+            });
+          } else {
+            await slackClient.postMessage({
+              channel,
+              ...message,
+            });
+          }
+          console.log('Slack message sent successfully');
+        } catch (error) {
+          console.error(`Error sending Slack message: ${error.message}`);
+          // Don't throw the error so workflow can continue even if Slack notification fails
         }
-        console.log('Slack message sent successfully');
-      } catch (error) {
-        console.error(`Error sending Slack message: ${error.message}`);
-        console.error(error.stack);
-        // Don't throw the error so workflow can continue even if Slack notification fails
-      }
-    },
-    channel: { id: channel },
-    channelId: channel,
-  };
+      },
+      channel: { id: channel },
+      channelId: channel,
+    };
+  } catch (error) {
+    console.error(`Error creating Slack client: ${error.message}`);
+    throw error;
+  }
 }
 
 /**
@@ -92,7 +97,7 @@ function createSlackContext(channel) {
  */
 function createServiceContext(event = {}) {
   const { authToken } = event;
-  console.log(`Service context creation with auth token: ${authToken ? 'Token provided' : 'No token provided'}`);
+  console.log(`Creating service context. Auth token present: ${!!authToken}`);
 
   return {
     dataAccess,
@@ -124,16 +129,13 @@ function createServiceContext(event = {}) {
         });
 
         try {
-          console.log(`Sending SQS message to ${queueUrl}:`, JSON.stringify(messageBody));
+          console.log(`Sending SQS message to ${queueUrl}`);
+          console.log(`Message type: ${messageBody.type || 'unknown'}`);
           const result = await sqs.send(command);
-          console.log('SQS message sent successfully:', result.MessageId);
-          console.log('SQS message metadata:', JSON.stringify(result.$metadata || {}));
+          console.log(`SQS message sent successfully. MessageID: ${result.MessageId}`);
           return result;
         } catch (error) {
           console.error(`Error sending SQS message: ${error.message}`);
-          console.error('Error stack:', error.stack);
-          console.error('Error code:', error.code || 'N/A');
-          console.error('Error metadata:', JSON.stringify(error.$metadata || {}));
           throw error;
         }
       },
@@ -282,15 +284,10 @@ async function disable(siteUrl, imsOrgId, importTypes, auditTypes, slackContext,
  * @returns {Promise<Object>} - Command execution result
  */
 async function handleWorkflowCommand(command, params, slackContext) {
-  // Safely log params without circular references
-  console.log(`Handling workflow command: ${command} with params:`, {
-    siteUrl: params.siteUrl,
-    imsOrgId: params.imsOrgId,
-    importTypes: params.importTypes?.length || 0,
-    auditTypes: params.auditTypes?.length || 0,
-    hasMessage: !!params.message,
-    hasAuthToken: !!params.authToken,
-  });
+  // Minimal logging
+  console.log(`Handling workflow command: ${command}`);
+  console.log(`Site URL: ${params.siteUrl}`);
+  console.log(`IMS Org ID: ${params.imsOrgId}`);
 
   const {
     siteUrl,
@@ -460,24 +457,10 @@ async function handleWorkflowCommand(command, params, slackContext) {
  */
 export async function handler(event) {
   try {
-    // Safely log event without circular references
-    console.log('Step Functions workflow handler invoked with event:', {
-      siteUrl: event.siteUrl,
-      imsOrgId: event.imsOrgId,
-      slackChannel: event.slackChannel,
-      command: event.command,
-      importTypes: event.importTypes,
-      auditTypes: event.auditTypes,
-      authToken: event.authToken ? 'TOKEN_PROVIDED' : 'NO_TOKEN',
-      timestamp: event.timestamp,
-    });
-
-    // Check for auth token
-    if (event.authToken) {
-      console.log('Authentication: Using provided auth token for downstream requests');
-    } else {
-      console.log('Authentication: No auth token provided, will attempt to use IAM role permissions');
-    }
+    // Minimal logging
+    console.log(`Workflow handler invoked for site: ${event.siteUrl}`);
+    console.log(`Command: ${event.command || 'none'}`);
+    console.log(`Auth token present: ${!!event.authToken}`);
 
     const {
       siteUrl,

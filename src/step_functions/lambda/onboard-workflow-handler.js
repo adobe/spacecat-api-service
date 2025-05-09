@@ -12,20 +12,10 @@
 import { handler as workflowHandler } from '../workflow-handler.js';
 
 export async function handler(event, context) {
-  // Safely log event without circular references
-  console.log('Step Functions handler invoked with event:', {
-    siteUrl: event.siteUrl,
-    imsOrgId: event.imsOrgId,
-    command: event.command,
-    authToken: event.authToken ? 'TOKEN_PROVIDED' : 'NO_TOKEN',
-  });
-
-  // Check if auth token is available
-  if (event.authToken) {
-    console.log('Using provided auth token for API authentication instead of IAM role');
-  } else {
-    console.log('WARNING: No auth token provided in event. API calls requiring authentication may fail.');
-  }
+  // Minimal logging
+  console.log(`Onboard workflow handler invoked for site: ${event.siteUrl || 'unknown'}`);
+  console.log(`Command: ${event.command || 'none'}`);
+  console.log(`Auth token present: ${!!event.authToken}`);
 
   // Directly invoke the workflow handler with auth token
   return workflowHandler(event, context);

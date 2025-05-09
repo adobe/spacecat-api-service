@@ -131,7 +131,8 @@ function OnboardCommand(context) {
         let imsOrgDetails;
         try {
           imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
-          log.info(`IMS Org Details: ${imsOrgDetails}`);
+          log.info(`IMS Org Details retrieved for ID: ${imsOrgID}`);
+          log.info(`IMS Org Name: ${imsOrgDetails?.orgName || 'unknown'}`);
         } catch (error) {
           log.error(`Error retrieving IMS Org details: ${error.message}`);
           reportLine.errors = `Error retrieving IMS org with the ID *${imsOrgID}*.`;
@@ -268,10 +269,16 @@ function OnboardCommand(context) {
 
       await say(`Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits} for site ${siteID}`);
 
-      log.info(`context: ${JSON.stringify(context)}`);
-      log.info(`context.pathInfo: ${JSON.stringify(context.pathInfo)}`);
-      log.info(`context.pathInfo.headers: ${JSON.stringify(context.pathInfo.headers)}`);
-      log.info(`context.pathInfo.headers.authorization: ${JSON.stringify(context.pathInfo.headers.authorization)}`);
+      // Log context directly without stringify
+      log.info('Context object keys:', Object.keys(context || {}));
+      if (context?.pathInfo) {
+        log.info('Context pathInfo keys:', Object.keys(context.pathInfo || {}));
+        if (context.pathInfo.headers) {
+          log.info('Context headers keys:', Object.keys(context.pathInfo.headers || {}));
+          log.info('Authorization header present:', !!context.pathInfo.headers.authorization);
+        }
+      }
+
       // Prepare and start step function workflow
       const workflowInput = {
         siteUrl: baseURLInput,
@@ -285,9 +292,9 @@ function OnboardCommand(context) {
         authToken: context.pathInfo?.headers?.authorization || process.env.SPACECAT_SERVICE_TOKEN,
       };
 
-      // Safely log without circular references
-      log.info(`Including auth token in workflow input: ${workflowInput.authToken ? 'Auth token present' : 'No auth token available'}`);
-      log.info(`Workflow input parameters: siteUrl=${workflowInput.siteUrl}, imsOrgId=${workflowInput.imsOrgId}, profile=${workflowInput.profile}`);
+      // Simple logging without object serialization
+      log.info(`Starting workflow for site ${baseURLInput} with profile ${profileName}`);
+      log.info(`Auth token available: ${!!workflowInput.authToken}`);
 
       const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
       const startCommand = new StartExecutionCommand({
