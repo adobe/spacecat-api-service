@@ -12,10 +12,10 @@
 /* c8 ignore start */
 import dataAccess from '@adobe/spacecat-shared-data-access';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
-import RunScrape from '../run-scrape.js';
-import RunAudit from '../run-audit.js';
-import ToggleImports from '../toggle-site-import.js';
-import ToggleAudits from '../toggle-site-audit.js';
+import RunScrape from '../support/slack/commands/run-scrape.js';
+import RunAudit from '../support/slack/commands/run-audit.js';
+import ToggleImports from '../support/slack/commands/toggle-site-import.js';
+import ToggleAudits from '../support/slack/commands/toggle-site-audit.js';
 
 /**
  * Create a context for Slack notifications
@@ -45,6 +45,8 @@ function createSlackContext(channel) {
       SLACK_BOT_TOKEN: slackBotToken,
       // Map SLACK_BOT_TOKEN to what BaseSlackClient expects for WORKSPACE_INTERNAL
       SLACK_TOKEN_WORKSPACE_INTERNAL: slackBotToken,
+      // Use the channel passed from onboard.js as the ops channel
+      // This ensures we always send messages to the same channel where the command was initiated
       SLACK_OPS_CHANNEL_WORKSPACE_INTERNAL: channel,
     },
   };
@@ -80,6 +82,67 @@ function createSlackContext(channel) {
     channel: { id: channel },
     channelId: channel,
   };
+}
+
+/**
+ * Creates a standard API service context
+ *
+ * @returns {Object} - Context object with data access and other required properties
+ */
+function createServiceContext() {
+  console.log('Creating service context with IAM role-based authentication');
+  console.log('Available environment variables:', Object.keys(process.env).filter((key) => !key.includes('TOKEN') && !key.includes('SECRET')).join(', '));
+  console.log('Service token available:', process.env.SPACECAT_SERVICE_TOKEN ? 'Yes' : 'No');
+
+  const serviceContext = {
+    dataAccess,
+    // Add necessary service credentials for API calls
+    env: {
+      ...process.env,
+      // Add any required authentication tokens from environment variables
+      SPACECAT_SERVICE_TOKEN: process.env.SPACECAT_SERVICE_TOKEN,
+      SCRAPING_JOBS_QUEUE_URL: process.env.SCRAPING_JOBS_QUEUE_URL,
+      AUDIT_JOBS_QUEUE_URL: process.env.AUDIT_JOBS_QUEUE_URL,
+    },
+    // Set up SQS client for message sending
+    sqs: {
+      sendMessage: async (queueUrl, messageBody) => {
+        // Import the SQS client on-demand to avoid initialization cost if not needed
+        const { SQSClient, SendMessageCommand } = await import('@aws-sdk/client-sqs');
+
+        console.log('Creating SQS client using Lambda IAM role credentials');
+        const sqs = new SQSClient();
+        const command = new SendMessageCommand({
+          QueueUrl: queueUrl,
+          MessageBody: JSON.stringify(messageBody),
+        });
+
+        try {
+          console.log(`Sending SQS message to ${queueUrl}:`, JSON.stringify(messageBody));
+          const result = await sqs.send(command);
+          console.log('SQS message sent successfully:', result.MessageId);
+          console.log('SQS message metadata:', JSON.stringify(result.$metadata || {}));
+          return result;
+        } catch (error) {
+          console.error(`Error sending SQS message: ${error.message}`);
+          console.error('Error stack:', error.stack);
+          console.error('Error code:', error.code || 'N/A');
+          console.error('Error metadata:', JSON.stringify(error.$metadata || {}));
+          throw error;
+        }
+      },
+    },
+    // Add logging functions
+    log: {
+      debug: console.log,
+      info: console.log,
+      warn: console.warn,
+      error: console.error,
+    },
+  };
+
+  console.log('Service context created successfully with IAM role-based authentication');
+  return serviceContext;
 }
 
 /**
@@ -228,10 +291,8 @@ async function handleWorkflowCommand(command, params, slackContext) {
 
   const { say } = slackContext;
 
-  // Create a context with dataAccess
-  const context = {
-    dataAccess,
-  };
+  // Create a service context with all the necessary access and credentials
+  const serviceContext = createServiceContext();
 
   switch (command) {
     case 'notify': {
@@ -248,22 +309,24 @@ async function handleWorkflowCommand(command, params, slackContext) {
         };
       } catch (error) {
         console.error(`Error in notify command: ${error.message}`);
-        return {
-          statusCode: 500,
-          body: {
-            error: `Failed to send notification: ${error.message}`,
-          },
-        };
+        // Let Step Functions know this failed
+        throw new Error(`Failed to send notification: ${error.message}`);
       }
     }
 
     case 'run-scrape': {
       try {
         console.log(`Initiating scrape for site: ${siteUrl}`);
-        const runScrape = RunScrape(context);
+        const runScrape = RunScrape(serviceContext);
         const result = await runScrape.handleExecution([
           siteUrl,
         ], slackContext);
+
+        // Check for errors in the result
+        if (result && (result.error || (result.status && result.status >= 400))) {
+          // If there's an error in the result, throw it to trigger the Step Functions error path
+          throw new Error(result.error || `Scrape operation failed with status ${result.status}`);
+        }
 
         console.log('Scrape initiated successfully');
         await say(':hourglass: Scrape operation initiated. Waiting 20 minutes for it to complete...');
@@ -281,14 +344,9 @@ async function handleWorkflowCommand(command, params, slackContext) {
         console.error(`Error in run-scrape command: ${error.message}`);
         console.error(error.stack);
         await say(`:x: Scrape failed for ${siteUrl}: ${error.message}`);
-        return {
-          statusCode: 500,
-          body: {
-            error: `Scrape failed: ${error.message}`,
-            siteUrl,
-            imsOrgId,
-          },
-        };
+
+        // Throw the error to ensure Step Functions catches it and follows the error path
+        throw new Error(`Scrape failed: ${error.message}`);
       }
     }
 
@@ -300,8 +358,14 @@ async function handleWorkflowCommand(command, params, slackContext) {
           imsOrgId,
           auditTypes,
           slackContext,
-          context,
+          serviceContext,
         );
+
+        // Check for errors in the results
+        if (auditResults && auditResults.error) {
+          throw new Error(auditResults.error);
+        }
+
         console.log('Batch audits initiated successfully');
         await say(':hourglass: Audit operations initiated. Waiting 30 minutes for them to complete...');
         return {
@@ -317,14 +381,9 @@ async function handleWorkflowCommand(command, params, slackContext) {
         console.error(`Error in run-batch-audits command: ${error.message}`);
         console.error(error.stack);
         await say(`:x: Batch audit failed for ${siteUrl}: ${error.message}`);
-        return {
-          statusCode: 500,
-          body: {
-            error: `Batch audit failed: ${error.message}`,
-            siteUrl,
-            imsOrgId,
-          },
-        };
+
+        // Throw the error to ensure Step Functions catches it and follows the error path
+        throw new Error(`Batch audit failed: ${error.message}`);
       }
     }
 
@@ -337,8 +396,14 @@ async function handleWorkflowCommand(command, params, slackContext) {
           importTypes,
           auditTypes,
           slackContext,
-          context,
+          serviceContext,
         );
+
+        // Check for errors in the results
+        if (disableResults && disableResults.error) {
+          throw new Error(disableResults.error);
+        }
+
         console.log('Successfully disabled imports and audits');
         return {
           statusCode: 200,
@@ -353,14 +418,9 @@ async function handleWorkflowCommand(command, params, slackContext) {
         console.error(`Error in disable-imports-audits command: ${error.message}`);
         console.error(error.stack);
         await say(`:x: Failed to disable imports and audits for ${siteUrl}: ${error.message}`);
-        return {
-          statusCode: 500,
-          body: {
-            error: `Disable imports and audits failed: ${error.message}`,
-            siteUrl,
-            imsOrgId,
-          },
-        };
+
+        // Throw the error to ensure Step Functions catches it and follows the error path
+        throw new Error(`Disable imports and audits failed: ${error.message}`);
       }
     }
 
@@ -375,19 +435,25 @@ async function handleWorkflowCommand(command, params, slackContext) {
 }
 
 /**
- * Lambda handler function for workflow processing
+ * Lambda handler function for workflow processing - directly invoked by Step Functions
+ * This handler bypasses authentication and is only meant to be called by the
+ * Step Functions state machine
  *
- * @param {Object} event - Lambda event object
+ * @param {Object} event - Lambda event object from Step Functions
  * @param {string} event.siteUrl - URL of the site to onboard
  * @param {string} event.imsOrgId - IMS organization ID
  * @param {string} [event.slackChannel] - Slack channel to send notifications to
- * @param {string} [event.command] - Command to execute (onboard, import, audit)
- * @param {string} [event.message] - The message to send
+ * @param {string} [event.command] - Command to execute (run-scrape, run-batch-audits, etc.)
+ * @param {string} [event.message] - The message to send for notifications
  * @returns {Object} - Result of the workflow execution
  */
 export async function handler(event) {
   try {
     console.log('Step Functions workflow handler invoked with event:', JSON.stringify(event, null, 2));
+
+    // Validate that this is a Step Functions invocation
+    // This is handled implicitly through IAM policies on the Lambda function
+    console.log('Authentication: IAM role-based (no tokens required)');
 
     const {
       siteUrl,
@@ -408,6 +474,8 @@ export async function handler(event) {
     } catch (slackError) {
       console.error('Error creating Slack context:', slackError.message);
       console.error(slackError.stack);
+      // For Slack context errors, we return an error but don't throw
+      // This allows the workflow to continue even if notifications fail
       return {
         status: 'error',
         message: `Failed to create Slack context: ${slackError.message}`,
@@ -423,14 +491,12 @@ export async function handler(event) {
         const validCommands = ['run-scrape', 'run-batch-audits', 'disable-imports-audits', 'notify'];
         console.warn('No command specified in event');
         await say(`:warning: Command parameter is required. Please specify one of: *${validCommands.join(', ')}*`);
-        return {
-          status: 'error',
-          message: `Command parameter is required. Valid commands: ${validCommands.join(', ')}`,
-          validCommands,
-        };
+
+        // This is a validation error - throw it to trigger the Step Functions error path
+        throw new Error(`Command parameter is required. Valid commands: ${validCommands.join(', ')}`);
       }
 
-      console.log(`Executing command: ${command}`);
+      console.log(`Executing command: ${command} with IAM role authorization`);
       // Process command
       return await handleWorkflowCommand(command, {
         siteUrl,
@@ -442,21 +508,22 @@ export async function handler(event) {
     } catch (error) {
       console.error(`Error during workflow execution: ${error.message}`);
       console.error(error.stack);
-      await say(`:x: Workflow failed for ${siteUrl}: ${error.message}`);
-      return {
-        status: 'error',
-        message: `Workflow failed for ${siteUrl}: ${error.message}`,
-        error: error.message,
-      };
+
+      // Try to notify via Slack, but don't fail if this doesn't work
+      try {
+        await say(`:x: Workflow failed for ${siteUrl}: ${error.message}`);
+      } catch (slackError) {
+        console.error('Failed to send Slack notification about error:', slackError.message);
+      }
+
+      // Re-throw the error to ensure Step Functions catches it
+      throw error;
     }
   } catch (error) {
     console.error('Unhandled error in workflow handler:', error.message);
     console.error(error.stack);
-    return {
-      status: 'error',
-      message: `Unhandled error in workflow handler: ${error.message}`,
-      error: error.message,
-    };
+    // Re-throw for Step Functions error handling
+    throw error;
   }
 }
 
@@ -465,5 +532,6 @@ export {
   handleWorkflowCommand,
   processBatchAudits,
   disable,
+  createServiceContext,
 };
 /* c8 ignore end */

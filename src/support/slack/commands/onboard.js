@@ -53,6 +53,11 @@ function OnboardCommand(context) {
   const {
     dataAccess, log, imsClient, env,
   } = context;
+
+  // Simple log of auth related environment
+  log.info('AUTH-LOG: Onboard command initialized with the following auth environment:');
+  log.info(`AUTH-LOG: Available auth tokens: ${Object.keys(env || {}).filter((k) => k.includes('TOKEN') || k.includes('SECRET')).join(', ')}`);
+
   const { Configuration, Site, Organization } = dataAccess;
 
   const csvStringifier = createObjectCsvStringifier({
