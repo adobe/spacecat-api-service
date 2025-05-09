@@ -88,7 +88,7 @@ function OnboardCommand(context) {
     profileName,
     slackContext,
   ) => {
-    const { say, channelId, botToken } = slackContext;
+    const { say, channelId } = slackContext;
     const sfnClient = new SFNClient();
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
@@ -269,7 +269,6 @@ function OnboardCommand(context) {
         imsOrgId: imsOrgID,
         profile: profileName,
         slackChannel: channelId,
-        botToken, // Pass the botToken for reuse in workflow-handler
         importTypes,
         auditTypes,
         timestamp: new Date().toISOString(),
