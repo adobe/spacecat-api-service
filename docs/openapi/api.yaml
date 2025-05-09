@@ -139,6 +139,10 @@ paths:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
     $ref: './key-event-api.yaml#/key-event'
+  /sites/{siteId}/scraped-content:
+    $ref: './site-scrape-api.yaml#/scraped-content'
+  /sites/{siteId}/scraped-screenshot:
+    $ref: './site-scrape-api.yaml#/scraped-screenshot'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:

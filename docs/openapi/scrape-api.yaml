@@ -57,3 +57,4 @@ get-scrape-job-status:
               $ref: './schemas.yaml#/ScrapeResponse'
       '404':
         description: Job not found
+
