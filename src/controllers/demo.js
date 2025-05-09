@@ -11,17 +11,29 @@
  */
 
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
-import { badRequest, ok } from '@adobe/spacecat-shared-http-utils';
+import { badRequest, notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 
-async function generatePresignedUrl(s3, bucket, siteId, pathname, variant) {
+function getKey(siteId, pathname, variant) {
+  return `scrapes/${siteId}${pathname}${pathname.endsWith('/') ? '' : '/'}${variant}.png`;
+}
+
+async function exists(s3, bucket, key) {
+  try {
+    const { s3Client } = s3;
+    await s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function generatePresignedUrl(s3, bucket, key) {
   const {
     s3Client,
     getSignedUrl,
     GetObjectCommand,
   } = s3;
-
-  const key = `scrapes/${siteId}${pathname}${pathname.endsWith('/') ? '' : '/'}${variant}.png`;
-  console.log(`key: ${key}`);
 
   const command = new GetObjectCommand({
     Bucket: bucket,
@@ -43,34 +55,6 @@ function DemoController(ctx) {
   const { dataAccess, s3 } = ctx;
 
   const { Site } = dataAccess;
-
-  const getScreenshots = async (context) => {
-    const { S3_SCRAPER_BUCKET: bucketName } = context.env;
-    const { url } = context.data;
-
-    if (!hasText(url) || !URL.canParse(url)) {
-      return badRequest(`No valid URL provided: ${url}`);
-    }
-
-    const { origin, pathname } = new URL(url);
-
-    const site = await Site.findByBaseURL(composeBaseURL(origin));
-
-    const desktopOn = await generatePresignedUrl(s3, bucketName, site.getId(), pathname, 'screenshot-desktop-viewport');
-    const desktopOff = await generatePresignedUrl(s3, bucketName, site.getId(), pathname, 'consent-banner-off/screenshot-desktop-viewport');
-
-    const mobileOn = await generatePresignedUrl(s3, bucketName, site.getId(), pathname, 'screenshot-iphone-6-viewport');
-    const mobileOff = await generatePresignedUrl(s3, bucketName, site.getId(), pathname, 'consent-banner-off/screenshot-iphone-6-viewport');
-
-    const result = {
-      mobile_cookie_banner_on: mobileOn,
-      mobile_cookie_banner_off: mobileOff,
-      desktop_cookie_banner_on: desktopOn,
-      desktop_cookie_banner_off: desktopOff,
-    };
-
-    return ok(result);
-  };
 
   const takeScreenshots = async (context) => {
     const { sqs } = context;
@@ -130,6 +114,51 @@ function DemoController(ctx) {
     });
 
     return ok('done.');
+  };
+
+  const getScreenshots = async (context) => {
+    const { S3_SCRAPER_BUCKET: bucketName } = context.env;
+    const { url, forceCapture = false } = context.data;
+
+    if (!hasText(url) || !URL.canParse(url)) {
+      return badRequest(`No valid URL provided: ${url}`);
+    }
+
+    const { origin, pathname } = new URL(url);
+
+    const site = await Site.findByBaseURL(composeBaseURL(origin));
+
+    const desktopOnKey = getKey(site.getId(), pathname, 'screenshot-desktop-viewport');
+    const desktopOffKey = getKey(site.getId(), pathname, 'consent-banner-off/screenshot-desktop-viewport');
+    const mobileOnKey = getKey(site.getId(), pathname, 'screenshot-iphone-6-viewport');
+    const mobileOffKey = getKey(site.getId(), pathname, 'consent-banner-off/screenshot-iphone-6-viewport');
+
+    const checks = await Promise.all(
+      [desktopOnKey, desktopOffKey, mobileOnKey, mobileOffKey]
+        .map((key) => exists(s3, bucketName, key)),
+    );
+    if (checks.some((exist) => !exist)) {
+      let message = 'Some/all of the screenshots requested does not exist.';
+      if (forceCapture) {
+        await takeScreenshots(context);
+        message += ' Initiated taking screenshots. Try again in a few secs.';
+      }
+      return notFound(message);
+    }
+
+    const desktopOn = await generatePresignedUrl(s3, bucketName, desktopOnKey);
+    const desktopOff = await generatePresignedUrl(s3, bucketName, desktopOffKey);
+    const mobileOn = await generatePresignedUrl(s3, bucketName, mobileOnKey);
+    const mobileOff = await generatePresignedUrl(s3, bucketName, mobileOffKey);
+
+    const result = {
+      mobile_cookie_banner_on: mobileOn,
+      mobile_cookie_banner_off: mobileOff,
+      desktop_cookie_banner_on: desktopOn,
+      desktop_cookie_banner_off: desktopOff,
+    };
+
+    return ok(result);
   };
 
   return {
