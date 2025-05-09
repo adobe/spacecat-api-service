@@ -10,8 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
+import { hasText } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
+import { triggerInternalReportRun } from '../../utils.js';
 
 const PHRASES = ['run internal report'];
 const REPORTS = [
@@ -26,7 +28,7 @@ const REPORTS = [
  * @return {runInternalReportCommand} The runInternalReportCommand object.
  */
 function runInternalReportCommand(context) {
-  const { log } = context;
+  const { log, Configuration } = context;
 
   const baseCommand = BaseCommand({
     id: 'run-internal-report',
@@ -39,19 +41,36 @@ function runInternalReportCommand(context) {
   /**
    * Runs an internal report for the given type.
    *
+   * @param {string[]} args - The arguments provided to the command ([site]).
    * @param {Object} slackContext - The Slack context object.
-   * @param {string} reportType - The report type.
    */
-  const handleExecution = async (slackContext, reportType) => {
+  const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
 
+    const config = await Configuration.findLatest();
+
     try {
-      if (!reportType) {
+      const [reportType] = args;
+      if (!hasText(reportType)) {
         await say(baseCommand.usage());
         return;
       }
-      await say(`Starting report generation for: *${reportType}* for all sites`);
-      log.info(REPORTS);
+
+      if (reportType in REPORTS) {
+        await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: ${REPORTS.join(', ')}`);
+        return;
+      }
+
+      await say(`Triggering report generation for: *${reportType}* for all sites`);
+
+      await triggerInternalReportRun(
+        config,
+        reportType,
+        slackContext,
+        context,
+      );
+
+      await say(`:adobe-run: Triggered report generation for: *${reportType}* for all sites`);
     } catch (error) {
       log.error(`Error running internal report: ${error.message}`);
       await postErrorMessage(say, error);
