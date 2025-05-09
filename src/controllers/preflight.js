@@ -11,7 +11,7 @@
  */
 
 import {
-  hasText, isNonEmptyObject, isValidUUID,
+  hasText, isNonEmptyObject, isValidUUID, isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok,
@@ -38,6 +38,10 @@ function PreflightController(ctx, log, env) {
 
     if (!hasText(data.pageUrl?.trim())) {
       throw new Error('Invalid request: missing pageUrl in request data');
+    }
+
+    if (!isValidUrl(data.pageUrl)) {
+      throw new Error('Invalid request: invalid pageUrl in request data');
     }
   }
 
@@ -73,7 +77,9 @@ function PreflightController(ctx, log, env) {
       await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
         jobId: job.getId(),
         auditType: 'preflight',
-        pageUrl: data.pageUrl,
+        urls: [
+          { url: data.pageUrl },
+        ],
       });
 
       return ok({

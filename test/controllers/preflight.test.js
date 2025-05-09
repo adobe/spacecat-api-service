@@ -134,7 +134,9 @@ describe('Preflight Controller', () => {
         {
           jobId,
           auditType: 'preflight',
-          pageUrl: 'https://example.com',
+          urls: [
+            { url: 'https://example.com' },
+          ],
         },
       );
     });
@@ -180,7 +182,9 @@ describe('Preflight Controller', () => {
         {
           jobId,
           auditType: 'preflight',
-          pageUrl: 'https://example.com',
+          urls: [
+            { url: 'https://example.com' },
+          ],
         },
       );
     });
@@ -237,6 +241,25 @@ describe('Preflight Controller', () => {
       const result = await response.json();
       expect(result).to.deep.equal({
         message: 'Invalid request: missing pageUrl in request data',
+      });
+    });
+
+    it('returns 400 Bad Request for invalid URL format', async () => {
+      const context = {
+        data: {
+          pageUrl: 'not-a-valid-url',
+        },
+        func: {
+          version: 'v1',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: invalid pageUrl in request data',
       });
     });
 
