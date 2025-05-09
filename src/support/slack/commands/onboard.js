@@ -276,6 +276,7 @@ function OnboardCommand(context) {
         if (context.pathInfo.headers) {
           log.info('Context headers keys:', Object.keys(context.pathInfo.headers || {}));
           log.info('Authorization header present:', !!context.pathInfo.headers.authorization);
+          log.info('Edge authorization header present:', !!context.pathInfo.headers['x-edge-authorization']);
         }
       }
 
@@ -288,8 +289,8 @@ function OnboardCommand(context) {
         importTypes,
         auditTypes,
         timestamp: new Date().toISOString(),
-        // Include authentication token for downstream Lambda calls
-        authToken: context.pathInfo?.headers?.authorization || process.env.SPACECAT_SERVICE_TOKEN,
+        // Include authentication token from edge header or service token
+        authToken: context.pathInfo?.headers?.['x-edge-authorization'] || process.env.SPACECAT_SERVICE_TOKEN,
       };
 
       // Simple logging without object serialization

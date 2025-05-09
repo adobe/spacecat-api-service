@@ -112,7 +112,10 @@ function createServiceContext(event = {}) {
     // Include auth header for downstream requests if token is provided
     pathInfo: authToken ? {
       headers: {
+        // Use either x-edge-authorization or standard authorization header
+        // This ensures compatibility with both header formats
         authorization: authToken,
+        'x-edge-authorization': authToken,
       },
     } : undefined,
     // Set up SQS client for message sending
