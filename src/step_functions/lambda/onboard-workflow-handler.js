@@ -13,35 +13,18 @@ import { handler as workflowHandler } from '../workflow-handler.js';
 
 export async function handler(event, context) {
   // Validate that the request is coming from an authorized Step Functions state machine
-  // This validation is done using IAM roles, not tokens
-  console.log('Step Functions handler invoked with event:', JSON.stringify(event));
+  console.log('Step Functions handler invoked with event:', JSON.stringify({
+    ...event,
+    authToken: event.authToken ? 'TOKEN_PROVIDED' : 'NO_TOKEN',
+  }));
 
-  // Log authentication context
-  console.log('Authentication method: IAM role-based (no auth tokens needed)');
-  console.log('Lambda context:', {
-    functionName: context.functionName,
-    functionVersion: context.functionVersion,
-    awsRequestId: context.awsRequestId,
-    logGroupName: context.logGroupName,
-    logStreamName: context.logStreamName,
-    invokedFunctionArn: context.invokedFunctionArn,
-  });
-
-  if (context.clientContext) {
-    console.log('Client context available:', JSON.stringify(context.clientContext));
+  // Check if auth token is available
+  if (event.authToken) {
+    console.log('Using provided auth token for API authentication instead of IAM role');
+  } else {
+    console.log('WARNING: No auth token provided in event. API calls requiring authentication may fail.');
   }
 
-  if (context.identity) {
-    console.log('Identity available:', JSON.stringify(context.identity));
-  }
-
-  try {
-    // Directly invoke the workflow handler
-    console.log('Forwarding request to workflow handler with IAM role credentials');
-    return workflowHandler(event, context);
-  } catch (error) {
-    console.error('Error in onboard-workflow-handler:', error.message);
-    console.error('Error stack:', error.stack);
-    throw error; // Re-throw to ensure Step Functions detects the failure
-  }
+  // Directly invoke the workflow handler with auth token
+  return workflowHandler(event, context);
 }

@@ -87,14 +87,14 @@ function createSlackContext(channel) {
 /**
  * Creates a standard API service context
  *
+ * @param {Object} event - The input event which may contain an auth token
  * @returns {Object} - Context object with data access and other required properties
  */
-function createServiceContext() {
-  console.log('Creating service context with IAM role-based authentication');
-  console.log('Available environment variables:', Object.keys(process.env).filter((key) => !key.includes('TOKEN') && !key.includes('SECRET')).join(', '));
-  console.log('Service token available:', process.env.SPACECAT_SERVICE_TOKEN ? 'Yes' : 'No');
+function createServiceContext(event = {}) {
+  const { authToken } = event;
+  console.log(`Service context creation with auth token: ${authToken ? 'Token provided' : 'No token provided'}`);
 
-  const serviceContext = {
+  return {
     dataAccess,
     // Add necessary service credentials for API calls
     env: {
@@ -104,6 +104,12 @@ function createServiceContext() {
       SCRAPING_JOBS_QUEUE_URL: process.env.SCRAPING_JOBS_QUEUE_URL,
       AUDIT_JOBS_QUEUE_URL: process.env.AUDIT_JOBS_QUEUE_URL,
     },
+    // Include auth header for downstream requests if token is provided
+    pathInfo: authToken ? {
+      headers: {
+        authorization: authToken,
+      },
+    } : undefined,
     // Set up SQS client for message sending
     sqs: {
       sendMessage: async (queueUrl, messageBody) => {
@@ -140,9 +146,6 @@ function createServiceContext() {
       error: console.error,
     },
   };
-
-  console.log('Service context created successfully with IAM role-based authentication');
-  return serviceContext;
 }
 
 /**
@@ -287,12 +290,13 @@ async function handleWorkflowCommand(command, params, slackContext) {
     importTypes,
     auditTypes,
     message,
+    authToken,
   } = params;
 
   const { say } = slackContext;
 
   // Create a service context with all the necessary access and credentials
-  const serviceContext = createServiceContext();
+  const serviceContext = createServiceContext({ authToken });
 
   switch (command) {
     case 'notify': {
@@ -445,15 +449,22 @@ async function handleWorkflowCommand(command, params, slackContext) {
  * @param {string} [event.slackChannel] - Slack channel to send notifications to
  * @param {string} [event.command] - Command to execute (run-scrape, run-batch-audits, etc.)
  * @param {string} [event.message] - The message to send for notifications
+ * @param {string} [event.authToken] - Authorization token to use for API calls
  * @returns {Object} - Result of the workflow execution
  */
 export async function handler(event) {
   try {
-    console.log('Step Functions workflow handler invoked with event:', JSON.stringify(event, null, 2));
+    console.log('Step Functions workflow handler invoked with event:', JSON.stringify({
+      ...event,
+      authToken: event.authToken ? 'TOKEN_PROVIDED' : 'NO_TOKEN',
+    }, null, 2));
 
-    // Validate that this is a Step Functions invocation
-    // This is handled implicitly through IAM policies on the Lambda function
-    console.log('Authentication: IAM role-based (no tokens required)');
+    // Check for auth token
+    if (event.authToken) {
+      console.log('Authentication: Using provided auth token for downstream requests');
+    } else {
+      console.log('Authentication: No auth token provided, will attempt to use IAM role permissions');
+    }
 
     const {
       siteUrl,
@@ -463,6 +474,7 @@ export async function handler(event) {
       auditTypes = [],
       command,
       message,
+      authToken,
     } = event;
 
     // First create the Slack context for notifications
@@ -504,6 +516,7 @@ export async function handler(event) {
         importTypes,
         auditTypes,
         message,
+        authToken,
       }, slackContext);
     } catch (error) {
       console.error(`Error during workflow execution: ${error.message}`);

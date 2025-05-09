@@ -268,6 +268,10 @@ function OnboardCommand(context) {
 
       await say(`Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits} for site ${siteID}`);
 
+      log.info(`context: ${JSON.stringify(context)}`);
+      log.info(`context.pathInfo: ${JSON.stringify(context.pathInfo)}`);
+      log.info(`context.pathInfo.headers: ${JSON.stringify(context.pathInfo.headers)}`);
+      log.info(`context.pathInfo.headers.authorization: ${JSON.stringify(context.pathInfo.headers.authorization)}`);
       // Prepare and start step function workflow
       const workflowInput = {
         siteUrl: baseURLInput,
@@ -277,7 +281,11 @@ function OnboardCommand(context) {
         importTypes,
         auditTypes,
         timestamp: new Date().toISOString(),
+        // Include authentication token for downstream Lambda calls
+        authToken: context.pathInfo?.headers?.authorization || process.env.SPACECAT_SERVICE_TOKEN,
       };
+
+      log.info(`Including auth token in workflow input: ${workflowInput.authToken ? 'Auth token present' : 'No auth token available'}`);
 
       const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
       const startCommand = new StartExecutionCommand({
