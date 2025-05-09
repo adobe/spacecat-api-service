@@ -42,7 +42,7 @@ function PreflightController(ctx, log, env) {
   }
 
   const createPreflightJob = async (context) => {
-    const { data } = context;
+    const { data, sqs } = context;
 
     try {
       validateRequestData(data);
@@ -67,6 +67,13 @@ function PreflightController(ctx, log, env) {
           jobType: 'preflight',
           tags: ['preflight'],
         },
+      });
+
+      // Send message to SQS to trigger the audit worker
+      await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
+        jobId: job.getId(),
+        auditType: 'preflight',
+        pageUrl: data.pageUrl,
       });
 
       return ok({

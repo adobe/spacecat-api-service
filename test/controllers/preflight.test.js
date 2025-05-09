@@ -59,10 +59,21 @@ describe('Preflight Controller', () => {
     },
   };
 
+  const mockSqs = {
+    sendMessage: sandbox.stub().resolves(),
+  };
+
   let preflightController;
 
   beforeEach(() => {
-    preflightController = PreflightController({ dataAccess: mockDataAccess }, loggerStub, { test: 'env' });
+    preflightController = PreflightController({ dataAccess: mockDataAccess }, loggerStub, {
+      AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+    });
+
+    // Reset and recreate stubs
+    mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockJob);
+    mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(mockJob);
+    mockSqs.sendMessage = sandbox.stub().resolves();
   });
 
   afterEach(() => {
@@ -90,6 +101,10 @@ describe('Preflight Controller', () => {
         func: {
           version: 'v1',
         },
+        sqs: mockSqs,
+        env: {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+        },
       };
 
       const response = await preflightController.createPreflightJob(context);
@@ -113,6 +128,15 @@ describe('Preflight Controller', () => {
           tags: ['preflight'],
         },
       });
+
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          auditType: 'preflight',
+          pageUrl: 'https://example.com',
+        },
+      );
     });
 
     it('creates a preflight job successfully in CI environment', async () => {
@@ -122,6 +146,10 @@ describe('Preflight Controller', () => {
         },
         func: {
           version: 'ci123',
+        },
+        sqs: mockSqs,
+        env: {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
         },
       };
 
@@ -146,6 +174,15 @@ describe('Preflight Controller', () => {
           tags: ['preflight'],
         },
       });
+
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          auditType: 'preflight',
+          pageUrl: 'https://example.com',
+        },
+      );
     });
 
     it('returns 400 Bad Request if data is missing', async () => {
@@ -221,6 +258,31 @@ describe('Preflight Controller', () => {
       const result = await response.json();
       expect(result).to.deep.equal({
         message: 'Something went wrong',
+      });
+    });
+
+    it('handles SQS message sending errors', async () => {
+      mockSqs.sendMessage.rejects(new Error('SQS error'));
+
+      const context = {
+        data: {
+          pageUrl: 'https://example.com',
+        },
+        func: {
+          version: 'v1',
+        },
+        sqs: mockSqs,
+        env: {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(500);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'SQS error',
       });
     });
   });
