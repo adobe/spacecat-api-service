@@ -138,10 +138,12 @@ function DemoController(ctx) {
         .map((key) => exists(s3, bucketName, key)),
     );
     if (checks.some((exist) => !exist)) {
+      let message = 'Some/all of the screenshots requested does not exist.';
       if (forceCapture) {
         await takeScreenshots(context);
+        message += ' Initiated taking screenshots. Try again in a few secs.';
       }
-      return notFound('Some/all of the screenshots requested does not exist.');
+      return notFound(message);
     }
 
     const desktopOn = await generatePresignedUrl(s3, bucketName, desktopOnKey);
