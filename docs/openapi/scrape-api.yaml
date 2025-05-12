@@ -7,8 +7,8 @@ create-scrape-job:
       - ims_key: [ ]
     summary: Create a new async URL Scrape job
     description: |
-      ⚠️ **EXPERIMENTAL / PROTOTYPE** 
-      This endpoint allows you to submit a new async url scrape job. 
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+      This endpoint allows you to submit a new async url scrape job.
       The job is provided a list URLs to be scraped. The URLs are scraped in parallel.
       The maximum number of URLs that can be scraped in a single job is 10.
       The returned jobId can be used to poll for the status and the resultsof the job.
@@ -46,7 +46,7 @@ get-scrape-job-status:
       ⚠️ **EXPERIMENTAL / PROTOTYPE**
       This endpoint is used to retrieve the status and results of an async scrape job.
       The jobId must be provided in the path parameter.
-      If the job is completed, the result will be included in the response.      
+      If the job is completed, the result will be included in the response.
     operationId: getScrapeJobStatus
     responses:
       '200':
