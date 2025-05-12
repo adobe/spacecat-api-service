@@ -14,7 +14,7 @@ import {
   hasText, isNonEmptyObject, isValidUUID, isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import {
-  badRequest, internalServerError, notFound, ok,
+  badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 
 function PreflightController(ctx, log, env) {
@@ -92,7 +92,7 @@ function PreflightController(ctx, log, env) {
         ],
       });
 
-      return ok({
+      return accepted({
         jobId: job.getId(),
         status: job.getStatus(),
         createdAt: job.getCreatedAt(),

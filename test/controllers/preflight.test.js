@@ -118,7 +118,7 @@ describe('Preflight Controller', () => {
       };
 
       const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(200);
+      expect(response.status).to.equal(202);
 
       const result = await response.json();
       expect(result).to.deep.equal({
@@ -168,7 +168,7 @@ describe('Preflight Controller', () => {
       };
 
       const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(200);
+      expect(response.status).to.equal(202);
 
       const result = await response.json();
       expect(result).to.deep.equal({
