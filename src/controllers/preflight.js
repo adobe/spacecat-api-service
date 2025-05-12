@@ -61,12 +61,22 @@ function PreflightController(ctx, log, env) {
 
       log.info(`Creating preflight job for pageUrl: ${data.pageUrl}`);
 
+      // Find the site that matches the base URL
+      const url = new URL(data.pageUrl);
+      const baseURL = `${url.protocol}//${url.hostname}`;
+      const site = await dataAccess.Site.findByBaseURL(baseURL);
+      if (!site) {
+        throw new Error(`No site found for base URL: ${baseURL}`);
+      }
+
       // Create a new async job
       const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
         metadata: {
           payload: {
-            pageUrl: data.pageUrl,
+            urls: [
+              { url: data.pageUrl, siteId: site.getId() },
+            ],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -76,9 +86,9 @@ function PreflightController(ctx, log, env) {
       // Send message to SQS to trigger the audit worker
       await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
         jobId: job.getId(),
-        auditType: 'preflight',
+        type: 'preflight',
         urls: [
-          { url: data.pageUrl },
+          { url: data.pageUrl, siteId: site.getId() },
         ],
       });
 

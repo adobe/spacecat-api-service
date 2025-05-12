@@ -45,7 +45,9 @@ describe('Preflight Controller', () => {
     getError: () => null,
     getMetadata: () => ({
       payload: {
-        pageUrl: 'https://example.com',
+        urls: [
+          { url: 'https://example.com/test.html', siteId: 'test-site-123' },
+        ],
       },
       jobType: 'preflight',
       tags: ['preflight'],
@@ -56,6 +58,11 @@ describe('Preflight Controller', () => {
     AsyncJob: {
       create: sandbox.stub().resolves(mockJob),
       findById: sandbox.stub().resolves(mockJob),
+    },
+    Site: {
+      findByBaseURL: sandbox.stub().resolves({
+        getId: () => 'test-site-123',
+      }),
     },
   };
 
@@ -73,6 +80,9 @@ describe('Preflight Controller', () => {
     // Reset and recreate stubs
     mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockJob);
     mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(mockJob);
+    mockDataAccess.Site.findByBaseURL = sandbox.stub().resolves({
+      getId: () => 'test-site-123',
+    });
     mockSqs.sendMessage = sandbox.stub().resolves();
   });
 
@@ -96,7 +106,7 @@ describe('Preflight Controller', () => {
     it('creates a preflight job successfully in production environment', async () => {
       const context = {
         data: {
-          pageUrl: 'https://example.com',
+          pageUrl: 'https://example.com/test.html',
         },
         func: {
           version: 'v1',
@@ -122,7 +132,9 @@ describe('Preflight Controller', () => {
         status: 'IN_PROGRESS',
         metadata: {
           payload: {
-            pageUrl: 'https://example.com',
+            urls: [
+              { url: 'https://example.com/test.html', siteId: 'test-site-123' },
+            ],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -133,9 +145,9 @@ describe('Preflight Controller', () => {
         'https://sqs.test.amazonaws.com/audit-queue',
         {
           jobId,
-          auditType: 'preflight',
+          type: 'preflight',
           urls: [
-            { url: 'https://example.com' },
+            { url: 'https://example.com/test.html', siteId: 'test-site-123' },
           ],
         },
       );
@@ -144,7 +156,7 @@ describe('Preflight Controller', () => {
     it('creates a preflight job successfully in CI environment', async () => {
       const context = {
         data: {
-          pageUrl: 'https://example.com',
+          pageUrl: 'https://example.com/test.html',
         },
         func: {
           version: 'ci123',
@@ -170,7 +182,9 @@ describe('Preflight Controller', () => {
         status: 'IN_PROGRESS',
         metadata: {
           payload: {
-            pageUrl: 'https://example.com',
+            urls: [
+              { url: 'https://example.com/test.html', siteId: 'test-site-123' },
+            ],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -181,12 +195,52 @@ describe('Preflight Controller', () => {
         'https://sqs.test.amazonaws.com/audit-queue',
         {
           jobId,
-          auditType: 'preflight',
+          type: 'preflight',
           urls: [
-            { url: 'https://example.com' },
+            { url: 'https://example.com/test.html', siteId: 'test-site-123' },
           ],
         },
       );
+    });
+
+    it('extracts base URL correctly from full URL', async () => {
+      const context = {
+        data: {
+          pageUrl: 'https://example.com/path/to/page?query=123',
+        },
+        func: {
+          version: 'v1',
+        },
+        sqs: mockSqs,
+        env: {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+        },
+      };
+
+      await preflightController.createPreflightJob(context);
+
+      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+    });
+
+    it('handles errors during site lookup', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
+      const context = {
+        data: {
+          pageUrl: 'https://non-registered-site.com/test.html',
+        },
+        func: {
+          version: 'v1',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(500);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'No site found for base URL: https://non-registered-site.com',
+      });
     });
 
     it('returns 400 Bad Request if data is missing', async () => {
@@ -268,7 +322,7 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          pageUrl: 'https://example.com',
+          pageUrl: 'https://example.com/test.html',
         },
         func: {
           version: 'v1',
@@ -289,7 +343,7 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          pageUrl: 'https://example.com',
+          pageUrl: 'https://example.com/test.html',
         },
         func: {
           version: 'v1',
@@ -336,7 +390,9 @@ describe('Preflight Controller', () => {
         error: null,
         metadata: {
           payload: {
-            pageUrl: 'https://example.com',
+            urls: [
+              { url: 'https://example.com/test.html', siteId: 'test-site-123' },
+            ],
           },
           jobType: 'preflight',
           tags: ['preflight'],
