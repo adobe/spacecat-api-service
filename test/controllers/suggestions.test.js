@@ -130,6 +130,12 @@ describe('Suggestions Controller', () => {
       }
       return this;
     },
+    getUpdatedBy() {
+      return suggData.updatedBy;
+    },
+    setUpdatedBy(value) {
+      suggData.updatedBy = value;
+    },
     remove: removeStub,
   });
 
@@ -166,7 +172,7 @@ describe('Suggestions Controller', () => {
         authInfo: new AuthInfo()
           .withType('jwt')
           .withScopes([{ name: 'admin' }])
-          .withProfile({ is_admin: true })
+          .withProfile({ is_admin: true, email: 'test@test.com' })
           .withAuthenticated(true),
       },
     };
@@ -203,6 +209,8 @@ describe('Suggestions Controller', () => {
         kpiDeltas: {
           conversionRate: 0.05,
         },
+        updatedBy: 'test@test.com',
+        updatedAt: new Date(),
       },
       {
         id: SUGGESTION_IDS[1],
@@ -216,6 +224,8 @@ describe('Suggestions Controller', () => {
         kpiDeltas: {
           conversionRate: 0.02,
         },
+        updatedBy: 'test@test.com',
+        updatedAt: new Date(),
       },
       {
         id: SUGGESTION_IDS[2],
@@ -229,6 +239,8 @@ describe('Suggestions Controller', () => {
         kpiDeltas: {
           conversionRate: 0.02,
         },
+        updatedBy: 'test@test.com',
+        updatedAt: new Date(),
       },
 
     ];
@@ -780,7 +792,9 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
-      data: { rank, data, kpiDeltas },
+      data: {
+        rank, data, kpiDeltas, updatedBy: 'test@test.com', updatedAt: new Date(),
+      },
       ...context,
     });
 

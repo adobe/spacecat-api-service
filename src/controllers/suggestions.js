@@ -261,7 +261,7 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
-
+    const { authInfo: { profile } } = context.attributes;
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -316,6 +316,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
 
       if (hasUpdates) {
+        suggestion.setUpdatedAt(new Date());
+        suggestion.setUpdatedBy(profile.email);
         const updatedSuggestion = await suggestion.save();
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
