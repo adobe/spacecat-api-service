@@ -45,8 +45,9 @@ describe('Preflight Controller', () => {
     getError: () => null,
     getMetadata: () => ({
       payload: {
+        siteId: 'test-site-123',
         urls: [
-          { url: 'https://example.com/test.html', siteId: 'test-site-123' },
+          { url: 'https://example.com/test.html' },
         ],
       },
       jobType: 'preflight',
@@ -75,6 +76,7 @@ describe('Preflight Controller', () => {
   beforeEach(() => {
     preflightController = PreflightController({ dataAccess: mockDataAccess }, loggerStub, {
       AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+      AWS_ENV: 'prod',
     });
 
     // Reset and recreate stubs
@@ -108,13 +110,7 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'https://example.com/test.html',
         },
-        func: {
-          version: 'v1',
-        },
         sqs: mockSqs,
-        env: {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-        },
       };
 
       const response = await preflightController.createPreflightJob(context);
@@ -132,8 +128,9 @@ describe('Preflight Controller', () => {
         status: 'IN_PROGRESS',
         metadata: {
           payload: {
+            siteId: 'test-site-123',
             urls: [
-              { url: 'https://example.com/test.html', siteId: 'test-site-123' },
+              { url: 'https://example.com/test.html' },
             ],
           },
           jobType: 'preflight',
@@ -146,9 +143,6 @@ describe('Preflight Controller', () => {
         {
           jobId,
           type: 'preflight',
-          urls: [
-            { url: 'https://example.com/test.html', siteId: 'test-site-123' },
-          ],
         },
       );
     });
@@ -158,14 +152,13 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'https://example.com/test.html',
         },
-        func: {
-          version: 'ci123',
-        },
         sqs: mockSqs,
-        env: {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-        },
       };
+
+      preflightController = PreflightController({ dataAccess: mockDataAccess }, loggerStub, {
+        AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+        AWS_ENV: 'dev',
+      });
 
       const response = await preflightController.createPreflightJob(context);
       expect(response.status).to.equal(202);
@@ -182,8 +175,9 @@ describe('Preflight Controller', () => {
         status: 'IN_PROGRESS',
         metadata: {
           payload: {
+            siteId: 'test-site-123',
             urls: [
-              { url: 'https://example.com/test.html', siteId: 'test-site-123' },
+              { url: 'https://example.com/test.html' },
             ],
           },
           jobType: 'preflight',
@@ -196,9 +190,6 @@ describe('Preflight Controller', () => {
         {
           jobId,
           type: 'preflight',
-          urls: [
-            { url: 'https://example.com/test.html', siteId: 'test-site-123' },
-          ],
         },
       );
     });
@@ -208,13 +199,7 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'https://example.com/path/to/page?query=123',
         },
-        func: {
-          version: 'v1',
-        },
         sqs: mockSqs,
-        env: {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-        },
       };
 
       await preflightController.createPreflightJob(context);
@@ -228,9 +213,6 @@ describe('Preflight Controller', () => {
       const context = {
         data: {
           pageUrl: 'https://non-registered-site.com/test.html',
-        },
-        func: {
-          version: 'v1',
         },
       };
 
@@ -246,9 +228,6 @@ describe('Preflight Controller', () => {
     it('returns 400 Bad Request if data is missing', async () => {
       const context = {
         data: {},
-        func: {
-          version: 'v1',
-        },
       };
 
       const response = await preflightController.createPreflightJob(context);
@@ -265,9 +244,6 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: '',
         },
-        func: {
-          version: 'v1',
-        },
       };
 
       const response = await preflightController.createPreflightJob(context);
@@ -275,17 +251,14 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: missing pageUrl in request data',
+        message: 'Invalid request: missing or invalid pageUrl in request data',
       });
     });
 
-    it('returns 400 Bad Request for whitespace pageUrl', async () => {
+    it('returns 400 Bad Request if pageUrl has an invalid structure', async () => {
       const context = {
         data: {
-          pageUrl: ' ',
-        },
-        func: {
-          version: 'v1',
+          pageUrl: ['https://example.com/test.html'],
         },
       };
 
@@ -294,7 +267,7 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: missing pageUrl in request data',
+        message: 'Invalid request: missing or invalid pageUrl in request data',
       });
     });
 
@@ -303,9 +276,6 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'not-a-valid-url',
         },
-        func: {
-          version: 'v1',
-        },
       };
 
       const response = await preflightController.createPreflightJob(context);
@@ -313,7 +283,7 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: invalid pageUrl in request data',
+        message: 'Invalid request: missing or invalid pageUrl in request data',
       });
     });
 
@@ -323,9 +293,6 @@ describe('Preflight Controller', () => {
       const context = {
         data: {
           pageUrl: 'https://example.com/test.html',
-        },
-        func: {
-          version: 'v1',
         },
       };
 
@@ -345,13 +312,7 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'https://example.com/test.html',
         },
-        func: {
-          version: 'v1',
-        },
         sqs: mockSqs,
-        env: {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-        },
       };
 
       const response = await preflightController.createPreflightJob(context);
@@ -390,8 +351,9 @@ describe('Preflight Controller', () => {
         error: null,
         metadata: {
           payload: {
+            siteId: 'test-site-123',
             urls: [
-              { url: 'https://example.com/test.html', siteId: 'test-site-123' },
+              { url: 'https://example.com/test.html' },
             ],
           },
           jobType: 'preflight',

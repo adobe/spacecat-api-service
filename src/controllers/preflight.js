@@ -11,7 +11,7 @@
  */
 
 import {
-  hasText, isNonEmptyObject, isValidUUID, isValidUrl,
+  isNonEmptyObject, isValidUUID, isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok, accepted,
@@ -36,12 +36,8 @@ function PreflightController(ctx, log, env) {
       throw new Error('Invalid request: missing application/json data');
     }
 
-    if (!hasText(data.pageUrl?.trim())) {
-      throw new Error('Invalid request: missing pageUrl in request data');
-    }
-
-    if (!isValidUrl(data.pageUrl)) {
-      throw new Error('Invalid request: invalid pageUrl in request data');
+    if (typeof data.pageUrl !== 'string' || !isValidUrl(data.pageUrl)) {
+      throw new Error('Invalid request: missing or invalid pageUrl in request data');
     }
   }
 
@@ -56,8 +52,7 @@ function PreflightController(ctx, log, env) {
     }
 
     try {
-      const funcVersion = context.func?.version;
-      const isDev = /^ci\d*$/i.test(funcVersion);
+      const isDev = env.AWS_ENV === 'dev';
 
       log.info(`Creating preflight job for pageUrl: ${data.pageUrl}`);
 
@@ -74,8 +69,9 @@ function PreflightController(ctx, log, env) {
         status: 'IN_PROGRESS',
         metadata: {
           payload: {
+            siteId: site.getId(),
             urls: [
-              { url: data.pageUrl, siteId: site.getId() },
+              { url: data.pageUrl },
             ],
           },
           jobType: 'preflight',
@@ -87,9 +83,6 @@ function PreflightController(ctx, log, env) {
       await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
         jobId: job.getId(),
         type: 'preflight',
-        urls: [
-          { url: data.pageUrl, siteId: site.getId() },
-        ],
       });
 
       return accepted({
@@ -110,6 +103,7 @@ function PreflightController(ctx, log, env) {
     log.info(`Getting preflight job status for jobId: ${jobId}`);
 
     if (!isValidUUID(jobId)) {
+      log.error(`Invalid jobId: ${jobId}`);
       return badRequest('Invalid jobId');
     }
 
@@ -117,6 +111,7 @@ function PreflightController(ctx, log, env) {
       const job = await dataAccess.AsyncJob.findById(jobId);
 
       if (!job) {
+        log.error(`Job with ID ${jobId} not found`);
         return notFound(`Job with ID ${jobId} not found`);
       }
 
