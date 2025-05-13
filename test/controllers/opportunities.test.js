@@ -37,6 +37,12 @@ describe('Opportunities Controller', () => {
         .withProfile({ is_admin: true, email: 'test@test.com' })
         .withAuthenticated(true),
     },
+    log: {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+      debug: sandbox.stub(),
+    },
   };
 
   const opptys = [
@@ -194,6 +200,14 @@ describe('Opportunities Controller', () => {
       },
     };
 
+    // Add mock logger
+    const mockLogger = {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+      debug: sandbox.stub(),
+    };
+
     mockOpportunity = {
       allBySiteId: sandbox.stub().resolves([mockOpptyEntity]),
       allBySiteIdAndStatus: sandbox.stub().resolves([mockOpptyEntity]),
@@ -214,6 +228,7 @@ describe('Opportunities Controller', () => {
 
     mockContext = {
       dataAccess: mockOpportunityDataAccess,
+      log: mockLogger,
       attributes: {
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -487,6 +502,7 @@ describe('Opportunities Controller', () => {
       ...defaultAuthAttributes,
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'APPROVED' },
+      log: mockContext.log,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -869,6 +885,7 @@ describe('Opportunities Controller', () => {
           attributes: {
             authInfo: restrictedAuthInfo,
           },
+          log: defaultAuthAttributes.log,
         };
 
         const restrictedController = OpportunitiesController(restrictedContext);

@@ -198,6 +198,8 @@ function OpportunitiesController(ctx) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
+    const { log } = context;
+
     // validate parameters
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -267,7 +269,6 @@ function OpportunitiesController(ctx) {
         return ok(OpportunityDto.toJSON(updatedOppty));
       }
     } catch (e) {
-      const { log } = context;
       log.error(`Error updating opportunity ${opportunityId} for site ${siteId} by user ${profile.email}`, e);
       return handleDataAccessError(e, 'Error updating opportunity');
     }
