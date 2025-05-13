@@ -267,6 +267,8 @@ function OpportunitiesController(ctx) {
         return ok(OpportunityDto.toJSON(updatedOppty));
       }
     } catch (e) {
+      const { log } = context;
+      log.error(`Error updating opportunity ${opportunityId} for site ${siteId} by user ${profile.email}`, e);
       return handleDataAccessError(e, 'Error updating opportunity');
     }
     return badRequest('No updates provided');
