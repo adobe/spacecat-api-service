@@ -337,6 +337,7 @@ function SuggestionsController(ctx, sqs, env) {
   const patchSuggestionsStatus = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+    const { authInfo: { profile } } = context.attributes;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -404,6 +405,7 @@ function SuggestionsController(ctx, sqs, env) {
       try {
         if (suggestion.getStatus() !== status) {
           suggestion.setStatus(status);
+          suggestion.setUpdatedBy(profile.email);
         } else {
           return {
             index,
