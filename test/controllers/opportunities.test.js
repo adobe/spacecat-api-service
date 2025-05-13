@@ -89,6 +89,12 @@ describe('Opportunities Controller', () => {
     getGuidance() {
       return opptys[0].guidance;
     },
+    getUpdatedBy() {
+      return opptys[0].updatedBy;
+    },
+    setUpdatedBy(value) {
+      opptys[0].updatedBy = value;
+    },
     setGuidance(value) {
       opptys[0].guidance = value;
     },
