@@ -17,20 +17,42 @@ import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 
+/**
+ * Creates a preflight controller instance
+ * @param {Object} ctx - The context object containing dataAccess and sqs
+ * @param {Object} ctx.dataAccess - The data access layer for database operations
+ * @param {Object} ctx.sqs - The SQS client instance
+ * @param {Object} log - The logger instance
+ * @param {Object} env - The environment configuration object
+ * @param {string} env.AWS_ENV - The AWS environment
+ * @param {string} env.AUDIT_JOBS_QUEUE_URL - The SQS queue URL for audit jobs
+ * @returns {Object} The preflight controller instance
+ * @throws {Error} If context, dataAccess, sqs, or env is not provided
+ */
 function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess } = ctx;
+  const { dataAccess, sqs } = ctx;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
+  }
+
+  if (!isNonEmptyObject(sqs)) {
+    throw new Error('SQS client required');
   }
 
   if (!isNonEmptyObject(env)) {
     throw new Error('Environment object required');
   }
 
+  /**
+   * Validates the request data for preflight job creation
+   * @param {Object} data - The request data object
+   * @param {string} data.pageUrl - The URL of the page
+   * @throws {Error} If data is invalid or missing required fields
+   */
   function validateRequestData(data) {
     if (!isNonEmptyObject(data)) {
       throw new Error('Invalid request: missing application/json data');
@@ -41,8 +63,15 @@ function PreflightController(ctx, log, env) {
     }
   }
 
+  /**
+   * Creates a new preflight job
+   * @param {Object} context - The request context
+   * @param {Object} context.data - The request data
+   * @param {string} context.data.pageUrl - The URL of the page
+   * @returns {Promise<Object>} The HTTP response object
+   */
   const createPreflightJob = async (context) => {
-    const { data, sqs } = context;
+    const { data } = context;
 
     try {
       validateRequestData(data);
@@ -104,6 +133,13 @@ function PreflightController(ctx, log, env) {
     }
   };
 
+  /**
+   * Gets the status and result of a preflight job
+   * @param {Object} context - The request context
+   * @param {Object} context.params - The request parameters
+   * @param {string} context.params.jobId - The ID of the job to retrieve
+   * @returns {Promise<Object>} The HTTP response object
+   */
   const getPreflightJobStatusAndResult = async (context) => {
     const jobId = context.params?.jobId;
 

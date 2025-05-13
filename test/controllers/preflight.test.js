@@ -75,10 +75,14 @@ describe('Preflight Controller', () => {
   let preflightController;
 
   beforeEach(() => {
-    preflightController = PreflightController({ dataAccess: mockDataAccess }, loggerStub, {
-      AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-      AWS_ENV: 'prod',
-    });
+    preflightController = PreflightController(
+      { dataAccess: mockDataAccess, sqs: mockSqs },
+      loggerStub,
+      {
+        AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+        AWS_ENV: 'prod',
+      },
+    );
 
     // Reset and recreate stubs
     mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockJob);
@@ -101,8 +105,12 @@ describe('Preflight Controller', () => {
     expect(() => PreflightController({ dataAccess: null }, loggerStub, { test: 'env' })).to.throw('Data access required');
   });
 
+  it('throws an error if sqs is not an object', () => {
+    expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: null }, loggerStub, { test: 'env' })).to.throw('SQS client required');
+  });
+
   it('throws an error if env is not object', () => {
-    expect(() => PreflightController({ dataAccess: { test: 'property' } }, loggerStub, null)).to.throw('Environment object required');
+    expect(() => PreflightController({ dataAccess: { test: 'property' }, sqs: { test: 'property' } }, loggerStub, null)).to.throw('Environment object required');
   });
 
   describe('createPreflightJob', () => {
@@ -111,7 +119,6 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'https://example.com/test.html',
         },
-        sqs: mockSqs,
       };
 
       const response = await preflightController.createPreflightJob(context);
@@ -153,13 +160,16 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'https://example.com/test.html',
         },
-        sqs: mockSqs,
       };
 
-      preflightController = PreflightController({ dataAccess: mockDataAccess }, loggerStub, {
-        AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-        AWS_ENV: 'dev',
-      });
+      preflightController = PreflightController(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'dev',
+        },
+      );
 
       const response = await preflightController.createPreflightJob(context);
       expect(response.status).to.equal(202);
@@ -200,7 +210,6 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'https://example.com/path/to/page?query=123',
         },
-        sqs: mockSqs,
       };
 
       await preflightController.createPreflightJob(context);
@@ -313,7 +322,6 @@ describe('Preflight Controller', () => {
         data: {
           pageUrl: 'https://example.com/test.html',
         },
-        sqs: mockSqs,
       };
 
       const response = await preflightController.createPreflightJob(context);
