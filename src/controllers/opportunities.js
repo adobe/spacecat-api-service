@@ -197,6 +197,7 @@ function OpportunitiesController(ctx) {
   const patchOpportunity = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+    const { authInfo: { profile } } = context.attributes;
     // validate parameters
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -261,6 +262,7 @@ function OpportunitiesController(ctx) {
         opportunity.setTags(tags);
       }
       if (hasUpdates) {
+        opportunity.setUpdatedBy(profile.email);
         const updatedOppty = await opportunity.save(opportunity);
         return ok(OpportunityDto.toJSON(updatedOppty));
       }
