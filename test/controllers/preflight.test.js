@@ -53,6 +53,7 @@ describe('Preflight Controller', () => {
       jobType: 'preflight',
       tags: ['preflight'],
     }),
+    remove: sandbox.stub().resolves(),
   };
 
   const mockDataAccess = {
@@ -305,7 +306,7 @@ describe('Preflight Controller', () => {
       });
     });
 
-    it('handles SQS message sending errors', async () => {
+    it('handles SQS message sending errors and rolls back the job', async () => {
       mockSqs.sendMessage.rejects(new Error('SQS error'));
 
       const context = {
@@ -320,8 +321,11 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'SQS error',
+        message: 'Failed to send message to SQS: SQS error',
       });
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledOnce;
+      expect(mockJob.remove).to.have.been.calledOnce;
     });
   });
 

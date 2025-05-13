@@ -79,11 +79,18 @@ function PreflightController(ctx, log, env) {
         },
       });
 
-      // Send message to SQS to trigger the audit worker
-      await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
-        jobId: job.getId(),
-        type: 'preflight',
-      });
+      try {
+        // Send message to SQS to trigger the audit worker
+        await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
+          jobId: job.getId(),
+          type: 'preflight',
+        });
+      } catch (error) {
+        log.error(`Failed to send message to SQS: ${error.message}`);
+        // roll back the job
+        await job.remove();
+        throw new Error(`Failed to send message to SQS: ${error.message}`);
+      }
 
       return accepted({
         jobId: job.getId(),
