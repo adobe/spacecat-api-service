@@ -132,6 +132,21 @@ describe('Access Control Util', () => {
     expect(util.authInfo.getProfile().user_id).to.equal('anonymous');
   });
 
+  it('handles anonymous site detection endpoints', () => {
+    const slackContext = {
+      log: { info: logSpy },
+      pathInfo: {
+        method: 'POST',
+        suffix: '/hooks/site-detection/cdn/some-secret',
+      },
+    };
+
+    const util = AccessControlUtil.fromContext(slackContext);
+    expect(logSpy).to.have.been.calledWith('Anonymous endpoint, skipping authorization: POST /hooks/site-detection/cdn/***********');
+    expect(util.authInfo).to.exist;
+    expect(util.authInfo.getProfile().user_id).to.equal('anonymous');
+  });
+
   it('handles POST slack endpoints', () => {
     const slackContext = {
       log: { info: logSpy },
