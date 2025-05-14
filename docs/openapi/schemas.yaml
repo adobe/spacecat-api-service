@@ -2674,3 +2674,194 @@ CreateAsyncJobAcceptedResponse:
       type: string
       format: uri
       description: URL to poll for job status
+
+FixStatus:
+  description: |
+    Fix Status
+    - PENDING: the fix is pending to be deployed
+    - DEPLOYED: the fix was successfully applied
+    - PUBLISHED: the fix is live in production
+    - FAILED: failed to apply the fix
+    - ROLLED_BACK: the fix has been rolled_back
+  example: 'PENDING'
+  type: string
+  enum:
+    - 'PENDING'
+    - 'DEPLOYED'
+    - 'PUBLISHED'
+    - 'FAILED'
+    - 'ROLLED_BACK'
+
+
+Fix:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    suggestionId:
+      type: string
+      format: uuid
+    type:
+      $ref: '#/SuggestionType'
+    createdAt:
+      type: string
+      format: date-time
+    executedBy:
+      type: string
+    executedAt:
+      type: string
+      format: date-time
+    publishedAt:
+      type: string
+      format: date-time
+    changeDetails:
+      type: object
+      additionalProperties: true
+    status:
+      $ref: '#/FixStatus'
+
+
+FixList:
+  type: array
+  items:
+    $ref: '#/Fix'
+
+FixCreate:
+  type: object
+  required:
+    - type
+    - changeDetails
+  properties:
+    type:
+      $ref: '#/SuggestionType'
+    changeDetails:
+      type: object
+      additionalProperties: true
+    status:
+      $ref: '#/FixStatus'
+
+FixOperationSuccess:
+  type: object
+  description: Success response for a fix operation
+  properties:
+    index:
+      description: Index of this fix in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of success
+      type: integer
+    fix:
+      $ref: '#/Fix'
+  required:
+    - index
+    - statusCode
+    - fix
+
+FixUpdateFailure:
+  type: object
+  description: Fix update failure response
+  properties:
+    id:
+      description: UUID of this fix
+      $ref: '#/Id'
+    index:
+      description: Index of this fix in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of failure
+      type: integer
+    message:
+      description: Error message describing the failure
+      type: string
+
+FixCreateFailure:
+  type: object
+  description: Fix create failure response
+  properties:
+    index:
+      description: Index of this fix in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of failure
+      type: integer
+    message:
+      description: Error message describing the failure
+      type: string
+
+FixCreateList:
+  type: array
+  items:
+    $ref: '#/FixCreate'
+
+FixCreateListResponse:
+  type: object
+  description: Fix create list response
+  properties:
+    fixes:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/FixOperationSuccess'
+          - $ref: '#/FixCreateFailure'
+    metadata:
+      type: object
+      properties:
+        total:
+          description: Total number of fixes in the response
+          type: integer
+        success:
+          description: Number of fixes successfully created
+          type: integer
+        failure:
+          description: Number of fixes that failed to create
+          type: integer
+      required:
+        - total
+        - success
+        - failure
+  required:
+    - fixes
+    - metadata
+
+FixUpdate:
+  type: object
+  properties:
+    changeDetails:
+      type: object
+      additionalProperties: true
+    status:
+      $ref: '#/FixStatus'
+
+FixStatusUpdateListResponse:
+  type: object
+  description: Fixes status update response
+  properties:
+    fixes:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/FixOperationSuccess'
+          - $ref: '#/FixUpdateFailure'
+    metadata:
+      type: object
+      properties:
+        total:
+          description: Total number of fixes in the response
+          type: integer
+        success:
+          description: Number of fixes successfully updated
+          type: integer
+        failure:
+          description: Number of fixes that failed to update
+          type: integer
+      required:
+        - total
+        - success
+        - failure
+  required:
+    - fixes
+    - metadata

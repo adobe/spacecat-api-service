@@ -456,3 +456,239 @@ site-opportunity-suggestion:
     security:
       - ims_key: [ ]
 
+site-opportunity-fixes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  get:
+    operationId: getSiteOpportunityFixes
+    summary: |
+      Retrieve a list of all fixes for a specific opportunity
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: A list of fixes
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+  post:
+    operationId: createSiteOpportunityFixes
+    summary: |
+      Create and add a list of one or more fixes to an opportunity in one transaction
+    tags:
+      - opportunity-fixes
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/FixCreateList'
+    responses:
+      '207':
+        description: |
+          A list of fixes created and added to the opportunity,
+          or the status code and error message for the ones failed.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixCreateListResponse'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-fixes-by-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - name: status
+      in: path
+      required: true
+      schema:
+        type: string
+  get:
+    operationId: getSiteOpportunityFixesByStatus
+    summary: |
+      Retrieve fixes for a specific opportunity filtered by status
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: A list of fixes filtered by status
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-fix:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/fixId'
+  get:
+    operationId: getSiteOpportunityFix
+    summary: |
+      Retrieve details of a specific fix
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: Details of the fix
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Fix'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+  patch:
+    operationId: updateSiteOpportunityFix
+    summary: |
+      Update specific attributes of an existing fix
+    tags:
+      - opportunity-fixes
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/FixUpdate'
+    responses:
+      '200':
+        description: Fix updated
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Fix'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+  delete:
+    operationId: deleteSiteOpportunityFix
+    summary: |
+      Delete a fix
+    tags:
+      - opportunity-fixes
+    responses:
+      '204':
+        description: Fix deleted
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+
+site-opportunity-fix-suggestions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/fixId'
+  get:
+    operationId: getSiteOpportunityFixSuggestions
+    summary: |
+      Retrieve a list of all suggestions for a specific fix
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: A list of suggestions
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+
+
+site-opportunity-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  patch:
+    operationId: updateSiteOpportunityStatus
+    summary: |
+      Update the status of one or multiple fixes in one transaction
+    tags:
+      - opportunity-fixes
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SuggestionStatusUpdate'
+    responses:
+      '207':
+        description: |
+          A list of fixes updated,
+          or the status code and error message for the ones failed.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixStatusUpdateListResponse'
+    security:
+      - ims_key: [ ]
