@@ -88,7 +88,8 @@ function OnboardCommand(context) {
     profileName,
     slackContext,
   ) => {
-    const { say, channelId } = slackContext;
+    // const { say, channelId } = slackContext;
+    const { say } = slackContext;
     const sfnClient = new SFNClient();
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
@@ -263,15 +264,34 @@ function OnboardCommand(context) {
 
       await say(`Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits} for site ${siteID}`);
 
-      // Prepare and start step function workflow
+      // Get the site's top pages for scraping
+      const topPagesLimit = 50; // Default batch size for scraping
+      let sitePages = [];
+
+      try {
+        // Try to retrieve the latest site pages from the data store
+        const latestImport = await dataAccess.SiteImport.getLatestByTypeAndSiteId('content', siteID);
+        if (latestImport && latestImport.getLatestUrls()) {
+          sitePages = latestImport.getLatestUrls().slice(0, topPagesLimit);
+          log.info(`Retrieved ${sitePages.length} pages from latest content import for site ${siteID}`);
+        } else {
+          // If no import data available, at least include the base URL
+          sitePages = [baseURL];
+          log.info(`No content import found for site ${siteID}, using base URL only`);
+        }
+      } catch (error) {
+        log.warn(`Error retrieving site pages for scraping: ${error.message}. Using base URL only.`);
+        sitePages = [baseURL];
+      }
+
+      // Prepare and start step function workflow with the necessary parameters including URLs
       const workflowInput = {
-        siteUrl: baseURLInput,
+        siteUrl: baseURL,
         imsOrgId: imsOrgID,
-        profile: profileName,
-        slackChannel: channelId,
-        importTypes,
         auditTypes,
-        timestamp: new Date().toISOString(),
+        siteId: siteID,
+        scrapeUrls: sitePages,
+        organizationId,
       };
 
       const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
@@ -282,7 +302,8 @@ function OnboardCommand(context) {
       });
       const response = await sfnClient.send(startCommand);
       log.info(`Step Functions workflow started successfully. Execution ARN: ${response.executionArn}`);
-      await say(`:rocket:  Step Functions workflow started successfully to handle imports, scrapes, and audits for ${baseURL}. Execution ARN: ${response.executionArn}`);
+      await say(`:rocket: Step Functions workflow started to process ${baseURL}. This will handle scrapes and audits via direct SQS messages.`);
+      await say(`:information_source: Included ${sitePages.length} URLs for scraping in the workflow.`);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -406,7 +427,8 @@ function OnboardCommand(context) {
 
         const message = `
         *:spacecat: :satellite: Onboarding workflow started for ${reportLine.site}*
-        This workflow will automatically handle imports, scrapes, and audits in the background. After the workflow is complete, the imports and audits will be disabled.
+        This workflow will automatically handle imports, scrapes, and audits in the background.
+        :information_source: Note: You will need to manually disable imports and audits after the workflow completes.
         :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
         :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
         :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
