@@ -1,3 +1,10 @@
+## [1.107.11](https://github.com/adobe/spacecat-api-service/compare/v1.107.10...v1.107.11) (2025-05-14)
+
+
+### Bug Fixes
+
+* handle anonymous site detection endpoints in access control utils ([#910](https://github.com/adobe/spacecat-api-service/issues/910)) ([726cffd](https://github.com/adobe/spacecat-api-service/commit/726cffdb6b0e17bb9e36b47c9ff2fc7b4daa437c))
+
 ## [1.107.10](https://github.com/adobe/spacecat-api-service/compare/v1.107.9...v1.107.10) (2025-05-12)
 
 
