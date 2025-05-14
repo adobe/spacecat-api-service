@@ -46,7 +46,6 @@ function RunInternalReportCommand(context) {
    * @param {string[]} args - The arguments provided to the command.
    * @param {Object} slackContext - The Slack context object.
    */
-  // write tests for this - check run-import how it's done
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
     const config = await Configuration.findLatest();

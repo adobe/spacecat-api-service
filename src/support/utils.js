@@ -94,16 +94,6 @@ export const sendRunImportMessage = async (
   slackContext,
 });
 
-export const sendInternalReportRunMessage = async (
-  sqs,
-  queueUrl,
-  ReportType,
-  slackContext,
-) => sqs.sendMessage(queueUrl, {
-  type: ReportType,
-  slackContext,
-});
-
 export const sendAutofixMessage = async (
   sqs,
   queueUrl,
@@ -118,6 +108,16 @@ export const sendAutofixMessage = async (
   promiseToken,
 });
 /* c8 ignore end */
+
+export const sendInternalReportRunMessage = async (
+  sqs,
+  queueUrl,
+  ReportType,
+  slackContext,
+) => sqs.sendMessage(queueUrl, {
+  type: ReportType,
+  slackContext,
+});
 
 /**
  * Sends audit messages for each URL.
@@ -239,7 +239,6 @@ export const triggerInternalReportRun = async (
     threadTs: slackContext.threadTs,
   },
 );
-/* c8 ignore end */
 
 /**
  * Checks if a given URL corresponds to a Helix site.
