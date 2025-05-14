@@ -266,7 +266,6 @@ function OpportunitiesController(ctx) {
       if (hasUpdates) {
         // put a log to print all available method for the opportunity object
         log.info(`All the method available for oppty interface ${Object.getOwnPropertyNames(opportunity)}`);
-        opportunity.setUpdatedBy(profile.email);
         const updatedOppty = await opportunity.save(opportunity);
         return ok(OpportunityDto.toJSON(updatedOppty));
       }
