@@ -300,9 +300,8 @@ function OnboardCommand(context) {
       const auditJobs = auditTypes.map((type) => ({
         type,
         siteId: siteID,
-        auditContext: {
-          slackContext: slackContextForWorkflow,
-        },
+        slackContext: slackContextForWorkflow, // Move slackContext to top level
+        operation: 'audit', // Add operation field to match expected format
       }));
 
       // Create scrape batches array
@@ -311,6 +310,7 @@ function OnboardCommand(context) {
         jobId: siteID,
         urls: batch,
         slackContext: slackContextForWorkflow,
+        operation: 'scrape', // Add operation field to match expected format
       }));
 
       // Prepare and start step function workflow with the necessary parameters
