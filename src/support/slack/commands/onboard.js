@@ -265,34 +265,66 @@ function OnboardCommand(context) {
       await say(`Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits} for site ${siteID}`);
 
       // Get the site's top pages for scraping
-      const topPagesLimit = 50; // Default batch size for scraping
-      let sitePages = [];
+      let topPages = [];
 
       try {
         // Try to retrieve the latest site pages from the data store
-        const latestImport = await dataAccess.SiteImport.getLatestByTypeAndSiteId('content', siteID);
-        if (latestImport && latestImport.getLatestUrls()) {
-          sitePages = latestImport.getLatestUrls().slice(0, topPagesLimit);
-          log.info(`Retrieved ${sitePages.length} pages from latest content import for site ${siteID}`);
+        const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
+        topPages = result || [];
+
+        if (!isNonEmptyArray(topPages)) {
+          log.warn(`No top pages found for site ${baseURL}, using base URL only`);
+          topPages = [{ getUrl: () => baseURL }];
         } else {
-          // If no import data available, at least include the base URL
-          sitePages = [baseURL];
-          log.info(`No content import found for site ${siteID}, using base URL only`);
+          log.info(`Retrieved ${topPages.length} pages for site ${siteID} from ahrefs/global source`);
         }
       } catch (error) {
         log.warn(`Error retrieving site pages for scraping: ${error.message}. Using base URL only.`);
-        sitePages = [baseURL];
+        topPages = [{ getUrl: () => baseURL }];
       }
 
-      // Prepare and start step function workflow with the necessary parameters including URLs
+      // Format URLs into the expected structure and create batches
+      const urls = topPages.map((page) => ({ url: page.getUrl() }));
+      const urlBatches = [];
+      for (let i = 0; i < urls.length; i += 50) {
+        urlBatches.push(urls.slice(i, i + 50));
+      }
+
+      // Extract the necessary Slack context elements
+      const slackContextForWorkflow = {
+        channelId: slackContext.channelId,
+        threadTs: slackContext.threadTs,
+      };
+
+      // Create audit jobs array - matching the format used in triggerAuditForSite
+      const auditJobs = auditTypes.map((type) => ({
+        type,
+        siteId: siteID,
+        auditContext: {
+          slackContext: slackContextForWorkflow,
+        },
+      }));
+
+      // Create scrape batches array
+      const scrapeBatches = urlBatches.map((batch) => ({
+        processingType: profileName, // Use profile name as processing type
+        jobId: siteID,
+        urls: batch,
+        slackContext: slackContextForWorkflow,
+      }));
+
+      // Prepare and start step function workflow with the necessary parameters
       const workflowInput = {
         siteUrl: baseURL,
         imsOrgId: imsOrgID,
-        auditTypes,
-        siteId: siteID,
-        scrapeUrls: sitePages,
         organizationId,
+        scrapeBatches,
+        auditJobs,
       };
+
+      // Log the serialized input to verify it works correctly
+      const serializedInput = JSON.stringify(workflowInput);
+      log.info(`Serialized Step Functions input (${serializedInput.length} chars): ${serializedInput.substring(0, 500)}${serializedInput.length > 500 ? '...' : ''}`);
 
       const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
       const startCommand = new StartExecutionCommand({
@@ -303,7 +335,17 @@ function OnboardCommand(context) {
       const response = await sfnClient.send(startCommand);
       log.info(`Step Functions workflow started successfully. Execution ARN: ${response.executionArn}`);
       await say(`:rocket: Step Functions workflow started to process ${baseURL}. This will handle scrapes and audits via direct SQS messages.`);
-      await say(`:information_source: Included ${sitePages.length} URLs for scraping in the workflow.`);
+      await say(`:information_source: Included ${urls.length} URLs (in ${urlBatches.length} batches) for scraping in the workflow.`);
+
+      // Generate and send demo URL to Slack
+      try {
+        const demoUrl = `https://experience.adobe.com/?organizationId=${reportLine.spacecatOrgId}#/@aemrefdemoshared/sites-optimizer/sites/${reportLine.siteId}/home`;
+        const demoMessage = `:link: *Demo URL for ${reportLine.site}*: ${demoUrl}`;
+        await say(demoMessage);
+        log.info(`Sent demo URL to Slack: ${demoUrl}`);
+      } catch (error) {
+        log.warn(`Unable to generate demo URL: ${error.message}`);
+      }
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -441,6 +483,19 @@ function OnboardCommand(context) {
         `;
 
         await say(message);
+
+        // Generate and send demo URL to Slack
+        try {
+          const demoUrl = `https://experience.adobe.com/?organizationId=${reportLine.spacecatOrgId}#/@aemrefdemoshared/sites-optimizer/sites/${reportLine.siteId}/home`;
+          const demoMessage = `:link: *Demo URL for ${reportLine.site}*: ${demoUrl}`;
+          await say(demoMessage);
+          log.info(`Sent demo URL to Slack: ${demoUrl}`);
+          await say(':hourglass_flowing_sand: *Workflow started. This will handle scrapes and audits via direct SQS messages.');
+          await say(':hourglass_flowing_sand: *IMPORTANT: Need to wait for about an hour for demo url to be ready.*');
+          await say(':hourglass_flowing_sand: *IMPORTANT:  Disable imports and audits after the workflow completes using slack commands.*');
+        } catch (error) {
+          log.warn(`Unable to generate demo URL: ${error.message}`);
+        }
       }
     } catch (error) {
       log.error(error);
