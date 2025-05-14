@@ -300,7 +300,12 @@ function OnboardCommand(context) {
       const auditJobs = auditTypes.map((type) => ({
         type,
         siteId: siteID,
-        slackContext: slackContextForWorkflow, // Move slackContext to top level
+        auditContext: {
+          slackContext: {
+            channelId: slackContextForWorkflow.channelId,
+            threadTs: slackContextForWorkflow.threadTs,
+          },
+        },
         operation: 'audit', // Add operation field to match expected format
       }));
 
@@ -309,8 +314,11 @@ function OnboardCommand(context) {
         processingType: profileName, // Use profile name as processing type
         jobId: siteID,
         urls: batch,
-        slackContext: slackContextForWorkflow,
-        operation: 'scrape', // Add operation field to match expected format
+        slackContext: {
+          channelId: slackContextForWorkflow.channelId,
+          threadTs: slackContextForWorkflow.threadTs,
+        },
+        operation: 'scrape', // Keep the operation field
       }));
 
       // Prepare and start step function workflow with the necessary parameters
@@ -339,10 +347,19 @@ function OnboardCommand(context) {
 
       // Generate and send demo URL to Slack
       try {
-        const demoUrl = `https://experience.adobe.com/?organizationId=${reportLine.spacecatOrgId}#/@aemrefdemoshared/sites-optimizer/sites/${reportLine.siteId}/home`;
+        // Check if we're in dev/stage environment based on bot username or env variable
+        const isDevEnvironment = slackContext.botUsername === '@spacecat-dev' || env.IS_DEV_ENVIRONMENT === 'true';
+        const baseUrl = isDevEnvironment
+          ? 'https://experience-stage.adobe.com'
+          : 'https://experience.adobe.com';
+
+        const demoUrl = `${baseUrl}/?organizationId=${reportLine.spacecatOrgId}#/@aemrefdemoshared/sites-optimizer/sites/${reportLine.siteId}/home`;
         const demoMessage = `:link: *Demo URL for ${reportLine.site}*: ${demoUrl}`;
         await say(demoMessage);
         log.info(`Sent demo URL to Slack: ${demoUrl}`);
+        await say(':hourglass_flowing_sand: *Workflow started. This will handle scrapes and audits via direct SQS messages.');
+        await say(':hourglass_flowing_sand: *IMPORTANT: Need to wait for about an hour for demo url to be ready.*');
+        await say(':hourglass_flowing_sand: *IMPORTANT: Disable imports and audits after the workflow completes using slack commands.*');
       } catch (error) {
         log.warn(`Unable to generate demo URL: ${error.message}`);
       }
@@ -486,13 +503,19 @@ function OnboardCommand(context) {
 
         // Generate and send demo URL to Slack
         try {
-          const demoUrl = `https://experience.adobe.com/?organizationId=${reportLine.spacecatOrgId}#/@aemrefdemoshared/sites-optimizer/sites/${reportLine.siteId}/home`;
+          // Check if we're in dev/stage environment based on bot username or env variable
+          const isDevEnvironment = slackContext.botUsername === '@spacecat-dev' || env.IS_DEV_ENVIRONMENT === 'true';
+          const baseUrl = isDevEnvironment
+            ? 'https://experience-stage.adobe.com'
+            : 'https://experience.adobe.com';
+
+          const demoUrl = `${baseUrl}/?organizationId=${reportLine.spacecatOrgId}#/@aemrefdemoshared/sites-optimizer/sites/${reportLine.siteId}/home`;
           const demoMessage = `:link: *Demo URL for ${reportLine.site}*: ${demoUrl}`;
           await say(demoMessage);
           log.info(`Sent demo URL to Slack: ${demoUrl}`);
           await say(':hourglass_flowing_sand: *Workflow started. This will handle scrapes and audits via direct SQS messages.');
           await say(':hourglass_flowing_sand: *IMPORTANT: Need to wait for about an hour for demo url to be ready.*');
-          await say(':hourglass_flowing_sand: *IMPORTANT:  Disable imports and audits after the workflow completes using slack commands.*');
+          await say(':hourglass_flowing_sand: *IMPORTANT: Disable imports and audits after the workflow completes using slack commands.*');
         } catch (error) {
           log.warn(`Unable to generate demo URL: ${error.message}`);
         }
