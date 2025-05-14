@@ -18,7 +18,7 @@ import getSites from './commands/get-sites.js';
 import martechImpact from './commands/martech-impact.js';
 import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
-import runInternalReportCommand from './commands/run-internal-report.js';
+import RunInternalReportCommand from './commands/run-internal-report.js';
 import runScrape from './commands/run-scrape.js';
 import setLiveStatus from './commands/set-live-status.js';
 import getGoogleLink from './commands/create-google-link.js';
@@ -43,7 +43,7 @@ export default (context) => [
   martechImpact(context),
   runAudit(context),
   runImport(context),
-  runInternalReportCommand(context),
+  RunInternalReportCommand(context),
   runScrape(context),
   setLiveStatus(context),
   getGoogleLink(context),

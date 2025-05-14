@@ -25,10 +25,12 @@ const REPORTS = [
  * Run Internal Report command.
  *
  * @param {Object} context - The context object.
- * @return {runInternalReportCommand} The runInternalReportCommand object.
+ * @return {RunInternalReportCommand} The runInternalReportCommand object.
+ * @constructor
  */
-function runInternalReportCommand(context) {
+function RunInternalReportCommand(context) {
   const { log, Configuration } = context;
+  log.info('Run internal report command recognized');
 
   const baseCommand = BaseCommand({
     id: 'run-internal-report',
@@ -41,13 +43,13 @@ function runInternalReportCommand(context) {
   /**
    * Runs an internal report for the given type.
    *
-   * @param {string[]} args - The arguments provided to the command ([site]).
+   * @param {string[]} args - The arguments provided to the command.
    * @param {Object} slackContext - The Slack context object.
    */
   // write tests for this - check run-import how it's done
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
-
+    log.info('Handle execution should start');
     const config = await Configuration.findLatest();
 
     try {
@@ -72,6 +74,7 @@ function runInternalReportCommand(context) {
       );
 
       await say(`:adobe-run: Triggered report generation for: *${reportType}* for all sites`);
+      log.info('Triggered report');
     } catch (error) {
       log.error(`Error running internal report: ${error.message}`);
       await postErrorMessage(say, error);
@@ -86,4 +89,4 @@ function runInternalReportCommand(context) {
   };
 }
 
-export default runInternalReportCommand;
+export default RunInternalReportCommand;
