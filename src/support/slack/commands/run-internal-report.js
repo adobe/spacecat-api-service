@@ -31,7 +31,6 @@ const REPORTS = [
 function RunInternalReportCommand(context) {
   const { log, dataAccess } = context;
   const { Configuration } = dataAccess;
-  log.info('Run internal report command recognized');
 
   const baseCommand = BaseCommand({
     id: 'run-internal-report',
@@ -50,7 +49,6 @@ function RunInternalReportCommand(context) {
   // write tests for this - check run-import how it's done
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
-    log.info('Handle execution should start');
     const config = await Configuration.findLatest();
 
     try {
@@ -75,7 +73,6 @@ function RunInternalReportCommand(context) {
       );
 
       await say(`:adobe-run: Triggered report generation for: *${reportType}* for all sites`);
-      log.info('Triggered report');
     } catch (error) {
       log.error(`Error running internal report: ${error.message}`);
       await postErrorMessage(say, error);
