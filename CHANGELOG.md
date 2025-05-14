@@ -1,3 +1,10 @@
+# [1.108.0](https://github.com/adobe/spacecat-api-service/compare/v1.107.12...v1.108.0) (2025-05-14)
+
+
+### Features
+
+* implement preflight job creation and send SQS notification from preflight endpoint ([#902](https://github.com/adobe/spacecat-api-service/issues/902)) ([88b0c64](https://github.com/adobe/spacecat-api-service/commit/88b0c641e08463df4fc4f381138cc7b7758cf49c))
+
 ## [1.107.12](https://github.com/adobe/spacecat-api-service/compare/v1.107.11...v1.107.12) (2025-05-14)
 
 
