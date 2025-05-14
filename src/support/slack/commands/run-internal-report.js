@@ -29,7 +29,8 @@ const REPORTS = [
  * @constructor
  */
 function RunInternalReportCommand(context) {
-  const { log, Configuration } = context;
+  const { log, dataAccess } = context;
+  const { Configuration } = dataAccess;
   log.info('Run internal report command recognized');
 
   const baseCommand = BaseCommand({
