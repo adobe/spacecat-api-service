@@ -44,6 +44,7 @@ function runInternalReportCommand(context) {
    * @param {string[]} args - The arguments provided to the command ([site]).
    * @param {Object} slackContext - The Slack context object.
    */
+  // write tests for this - check run-import how it's done
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
 
@@ -56,7 +57,7 @@ function runInternalReportCommand(context) {
         return;
       }
 
-      if (reportType in REPORTS) {
+      if (!REPORTS.includes(reportType)) {
         await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: ${REPORTS.join(', ')}`);
         return;
       }
