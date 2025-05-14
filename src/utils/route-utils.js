@@ -94,7 +94,7 @@ export default function matchPath(httpMethod, incomingPath, routeDefinitions) {
 }
 
 export function sanitizePath(path) {
-  if (path.startsWith('/hooks')) {
+  if (path.includes('/hooks')) {
     const segments = path.split('/');
     segments[segments.length - 1] = segments[segments.length - 1].replace(/./g, '*');
     return segments.join('/');
