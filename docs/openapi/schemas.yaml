@@ -2677,10 +2677,41 @@ CreateAsyncJobAcceptedResponse:
 
 ScrapedContentResponse:
   type: array
+  description: Collection of scraped content files with metadata and pre-signed download URLs
   items:
-    type: string
-    format: uri
-    description: Pre-signed S3 URL to access the scraped content
+    type: object
+    properties:
+      key:
+        type: string
+        description: Full path of the file relative to the content type root directory
+      name:
+        type: string
+        description: Name of the file
+      size:
+        type:
+          - integer
+          - "null"
+        description: File size in bytes
+      lastModified:
+        type:
+          - string
+          - "null"
+        format: date-time
+        description: Timestamp of the last file modification
+      downloadUrl:
+        type:
+          - string
+          - "null"
+        format: uri
+        description: Secure pre-signed S3 URL for temporary file access
   example:
-    - "https://spacecat-bucket.s3.amazonaws.com/scrapes/123/content?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAXXXXXXXX%2F20240315%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20240315T200000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=XXXXX"
-    - "https://spacecat-bucket.s3.amazonaws.com/scrapes/124/content?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAXXXXXXXX%2F20240315%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20240315T200000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=XXXXX"
+    - key: "about-us/scrape.json"
+      name: "scrape.json"
+      size: 2048
+      lastModified: "2025-04-11T00:44:31Z"
+      downloadUrl: "https://spacecat-bucket.s3.amazonaws.com/scrapes/123/about-us/scrape.json?..."
+    - key: "about-us/screenshot-desktop-fullpage.png"
+      name: "screenshot-desktop-fullpage.png"
+      size: 123456
+      lastModified: "2025-04-11T00:44:31Z"
+      downloadUrl: "https://spacecat-bucket.s3.amazonaws.com/scrapes/123/about-us/screenshot-desktop-fullpage.png?..."
