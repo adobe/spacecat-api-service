@@ -121,7 +121,7 @@
     "husky": "9.1.7",
     "jszip": "3.10.1",
     "junit-report-builder": "5.1.1",
-    "lint-staged": "15.5.2",
+    "lint-staged": "16.0.0",
     "mocha": "11.2.2",
     "mocha-multi-reporters": "1.5.1",
     "mocha-suppress-logs": "0.5.1",
