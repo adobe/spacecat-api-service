@@ -330,7 +330,6 @@ function OnboardCommand(context) {
             threadTs: slackContext.threadTs,
           },
         },
-        // Do not include operation field - it's not in the standard format
       }));
 
       // Create scrape batches array
@@ -342,7 +341,6 @@ function OnboardCommand(context) {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
         },
-        operation: 'scrape', // Keep operation field since it's needed for the Step Functions workflow
       }));
 
       // Prepare and start step function workflow with the necessary parameters
