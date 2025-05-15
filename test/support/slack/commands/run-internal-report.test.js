@@ -83,14 +83,14 @@ describe('runInternalReportCommand', () => {
       const command = runInternalReportCommand(context);
       const args = ['usage-metrics'];
       await command.handleExecution(args, slackContext);
-      expect(slackContext.say).to.have.been.calledWith(':warning: reportType usage-metrics is not a valid internal report type. Valid types are: usage-metrics-internal, audit-site-overview-internal');
+      expect(slackContext.say).to.have.been.calledWith(':warning: reportType usage-metrics is not a valid internal report type. Valid types are: `usage-metrics-internal`, `audit-site-overview-internal`');
     });
 
     it('should return warning for report type "all" in slack', async () => {
       const command = runInternalReportCommand(context);
       const args = ['all'];
       await command.handleExecution(args, slackContext);
-      expect(slackContext.say).to.have.been.calledWith(':warning: reportType all not available. Valid types are: usage-metrics-internal, audit-site-overview-internal');
+      expect(slackContext.say).to.have.been.calledWith(':warning: reportType all not available. Valid types are: `usage-metrics-internal`, `audit-site-overview-internal`');
     });
 
     it('should catch error if something is wrong', async () => {

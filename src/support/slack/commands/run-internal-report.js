@@ -61,8 +61,10 @@ function runInternalReportCommand(context) {
         return;
       }
 
+      /* eslint-disable no-useless-escape */
       if (!REPORTS.includes(reportType)) {
         await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: ${REPORTS.join(', ')}`);
+        await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: \`${REPORTS.join('\`, \`')}\``);
         return;
       }
 
