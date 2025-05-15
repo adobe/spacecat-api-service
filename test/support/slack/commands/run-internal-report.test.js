@@ -1,0 +1,93 @@
+/*
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+/* eslint-env mocha */
+
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
+import sinon from 'sinon';
+
+import RunInternalReportCommand
+  from '../../../../src/support/slack/commands/run-internal-report.js';
+// import { postErrorMessage } from '../../../../src/utils/slack/base.js';
+
+use(sinonChai);
+
+describe('RunInternalReportCommand', () => {
+  let context;
+  let slackContext;
+  let dataAccessStub;
+  let sqsStub;
+
+  beforeEach(() => {
+    dataAccessStub = {
+      Configuration: { findLatest: sinon.stub() },
+    };
+    sqsStub = {
+      sendMessage: sinon.stub().resolves(),
+    };
+    context = {
+      dataAccess: dataAccessStub,
+      log: {
+        info: sinon.stub(),
+        error: sinon.stub(),
+      },
+      sqs: sqsStub,
+    };
+    slackContext = {
+      say: sinon.stub(),
+    };
+  });
+
+  describe('Initialization and BaseCommand Integration', () => {
+    it('should initialize correctly with base command properties', () => {
+      const command = RunInternalReportCommand(context);
+      expect(command.id).to.equal('run-internal-report');
+      expect(command.name).to.equal('Run Internal Report');
+      expect(command.description).to.equal('Run internal report for all sites.'); // Runs usage-metrics by default if no report type parameter is provided.
+    });
+  });
+
+  describe('Handle Execution Method', () => {
+    it('should execute with valid report type', async () => {
+      dataAccessStub.Configuration.findLatest.resolves({
+        getQueues: () => ({ reports: 'reports-queue' }),
+      });
+
+      const command = RunInternalReportCommand(context);
+      const args = ['usage-metrics-internal'];
+      await command.handleExecution(args, slackContext);
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('should send usage message when no report type is provided', async () => {
+      const command = RunInternalReportCommand(context);
+      const args = [];
+      await command.handleExecution(args, slackContext);
+      expect(slackContext.say).to.have.been.calledWith(command.usage());
+    });
+
+    it('should return warning for invalid report in slack', async () => {
+      const command = RunInternalReportCommand(context);
+      const args = ['usage-metrics'];
+      await command.handleExecution(args, slackContext);
+      expect(slackContext.say).to.have.been.calledWith(':warning: reportType usage-metrics is not a valid internal report type. Valid types are: usage-metrics-internal, audit-site-overview-internal');
+    });
+
+    it('should catch error if something is wrong', async () => {
+      const command = RunInternalReportCommand(context);
+      const args = ['usage-metrics-internal'];
+      await command.handleExecution(args, slackContext);
+      expect(context.log.error).to.have.been.calledWith('Error running internal report: Cannot read properties of undefined (reading \'getQueues\')');
+    });
+  });
+});

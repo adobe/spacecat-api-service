@@ -35,7 +35,7 @@ function RunInternalReportCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-internal-report',
     name: 'Run Internal Report',
-    description: 'Run internal report for all sites. Runs usage-metrics by default if no report type parameter is provided.', //  Runs all reports if report type is `all` <- add this maybe
+    description: 'Run internal report for all sites.', // Runs usage-metrics by default if no report type parameter is provided. //  Runs all reports if report type is `all` <- add this maybe
     phrases: PHRASES,
     usageText: `${PHRASES[0]} [reportType (optional)]`,
   });
