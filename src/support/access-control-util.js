@@ -14,12 +14,18 @@ import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { Site, Organization } from '@adobe/spacecat-shared-data-access';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { sanitizePath } from '../utils/route-utils.js';
 
 const ANONYMOUS_ENDPOINTS = [
-  'GET /slack/events',
-  'POST /slack/events',
+  /^GET \/slack\/events$/,
+  /^POST \/slack\/events$/,
+  /^POST \/hooks\/site-detection.+/,
 ];
 const SERVICE_CODE = 'dx_aem_perf';
+
+function isAnonymous(endpoint) {
+  return ANONYMOUS_ENDPOINTS.some((rgx) => rgx.test(endpoint));
+}
 
 export default class AccessControlUtil {
   static fromContext(context) {
@@ -35,8 +41,8 @@ export default class AccessControlUtil {
     this.authInfo = attributes?.authInfo;
 
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
-    if (ANONYMOUS_ENDPOINTS.includes(endpoint)) {
-      log.info(`Anonymous endpoint, skipping authorization: ${endpoint}`);
+    if (isAnonymous(endpoint)) {
+      log.info(`Anonymous endpoint, skipping authorization: ${sanitizePath(endpoint)}`);
       const profile = { user_id: 'anonymous' };
       this.authInfo = new AuthInfo()
         .withAuthenticated(true)
