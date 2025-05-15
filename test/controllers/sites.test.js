@@ -1296,4 +1296,123 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('id', SITE_IDS[0]);
     expect(updatedSite).to.have.property('name', 'new-name');
   });
+
+  describe('listScrapedContentFiles', () => {
+    let sitesControllerMock;
+    let mockS3;
+    let mockBuildS3Prefix;
+    let mockGeneratePresignedUrls;
+    let mockListObjectsV2Command;
+    let mockSend;
+    let testContext;
+    const testSiteId = SITE_IDS[0];
+    const testType = 'scrapes';
+    const testPath = 'foo/';
+    const testBucket = 'test-bucket';
+    const testFiles = [
+      {
+        Key: 'scrapes/siteid/foo/file1.txt',
+        Size: 123,
+        LastModified: new Date('2024-01-01T00:00:00Z'),
+      },
+      {
+        Key: 'scrapes/siteid/foo/file2.json',
+        Size: 456,
+        LastModified: new Date('2024-01-02T00:00:00Z'),
+      },
+    ];
+    const presignedFiles = [
+      {
+        name: 'file1.txt',
+        type: 'txt',
+        size: 123,
+        lastModified: new Date('2024-01-01T00:00:00Z'),
+        key: 'scrapes/siteid/foo/file1.txt',
+        downloadUrl: 'https://example.com/file1.txt',
+      },
+      {
+        name: 'file2.json',
+        type: 'json',
+        size: 456,
+        lastModified: new Date('2024-01-02T00:00:00Z'),
+        key: 'scrapes/siteid/foo/file2.json',
+        downloadUrl: 'https://example.com/file2.json',
+      },
+    ];
+
+    beforeEach(async () => {
+      mockBuildS3Prefix = sinon.stub().returns('scrapes/siteid/foo/');
+      mockGeneratePresignedUrls = sinon.stub().resolves(presignedFiles);
+      mockListObjectsV2Command = sinon.stub();
+      mockSend = sinon.stub().resolves({
+        Contents: testFiles,
+        NextContinuationToken: 'next-token',
+      });
+      mockS3 = {
+        s3Client: { send: mockSend },
+        ListObjectsV2Command: mockListObjectsV2Command,
+      };
+      testContext = {
+        ...context,
+        s3: mockS3,
+        env: { ...context.env, S3_SCRAPER_BUCKET: testBucket },
+        params: { siteId: testSiteId, type: testType },
+        query: { path: testPath },
+      };
+      // Patch findById to resolve a site object
+      mockDataAccess.Site.findById.resolves(sites[0]);
+      // Patch access control
+      sinon.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      // Patch buildS3Prefix and generatePresignedUrls via esmock
+      sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '../support/s3.js': { generatePresignedUrls: mockGeneratePresignedUrls },
+        '../../src/controllers/sites.js': { buildS3Prefix: mockBuildS3Prefix },
+      });
+    });
+
+    afterEach(() => {
+      sinon.restore();
+    });
+
+    it('returns files with presigned URLs and nextPageToken', async () => {
+      // Patch ListObjectsV2Command to just return params
+      mockS3.ListObjectsV2Command.callsFake((params) => params);
+      const controller = sitesControllerMock.default(testContext, loggerStub, testContext.env);
+      const response = await (await controller.listScrapedContentFiles(testContext)).json();
+      expect(mockBuildS3Prefix).to.have.been.calledWith(testType, testSiteId, testPath);
+      expect(mockSend).to.have.been.calledOnce;
+      expect(mockGeneratePresignedUrls).to.have.been.calledOnce;
+      expect(response).to.have.property('items').that.deep.equals(presignedFiles);
+      expect(response).to.have.property('nextPageToken', 'next-token');
+    });
+
+    it('returns bad request if siteId is missing', async () => {
+      const controller = sitesControllerMock.default(testContext, loggerStub, testContext.env);
+      const response = await controller.listScrapedContentFiles({
+        ...testContext,
+        params: { type: testType },
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request if type is invalid', async () => {
+      const controller = sitesControllerMock.default(testContext, loggerStub, testContext.env);
+      const response = await controller.listScrapedContentFiles({ ...testContext, params: { siteId: testSiteId, type: 'invalid' } });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message').that.includes('Type must be either');
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sinon.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const controller = sitesControllerMock.default(testContext, loggerStub, testContext.env);
+      const response = await controller.listScrapedContentFiles(testContext);
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
+    });
+  });
 });
