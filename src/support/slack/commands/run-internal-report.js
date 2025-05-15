@@ -50,19 +50,21 @@ function runInternalReportCommand(context) {
     const config = await Configuration.findLatest();
 
     try {
-      const [reportType] = args;
-      log.info(`reportType: ${reportType}`);
+      let [reportType] = args;
+
+      if (reportType === '') {
+        reportType = 'usage-metrics-internal';
+      }
+
       if (reportType === 'all') {
         await say(`:warning: reportType ${reportType} not available. Valid types are: ${REPORTS.join(', ')}`);
         return;
       }
 
-      if (!REPORTS.includes(reportType) && reportType !== '') {
+      if (!REPORTS.includes(reportType)) {
         await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: ${REPORTS.join(', ')}`);
         return;
       }
-
-      await say(`Triggering report generation for: *${reportType}* for all sites`);
 
       await triggerInternalReportRun(
         config,
@@ -71,7 +73,7 @@ function runInternalReportCommand(context) {
         context,
       );
 
-      await say(':adobe-run: Triggered report generation for all sites');
+      await say(`:adobe-run: Triggered report generation for: *${reportType}* for all sites`);
     } catch (error) {
       log.error(`Error running internal report: ${error.message}`);
       await postErrorMessage(say, error);
