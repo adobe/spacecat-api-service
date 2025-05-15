@@ -57,7 +57,7 @@ function runInternalReportCommand(context) {
         return;
       }
 
-      if (!REPORTS.includes(reportType) && reportType !== undefined) {
+      if (!REPORTS.includes(reportType) && reportType !== '') {
         await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: ${REPORTS.join(', ')}`);
         return;
       }
