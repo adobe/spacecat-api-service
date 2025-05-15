@@ -326,7 +326,6 @@ describe('Sites Controller', () => {
     const response = await sitesController.updateSite(
       {
         params: { siteId: SITE_IDS[0] },
-        data: {},
         ...defaultAuthAttributes,
       },
     );
