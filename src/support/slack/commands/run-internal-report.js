@@ -14,6 +14,7 @@ import BaseCommand from './base.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
 import { triggerInternalReportRun } from '../../utils.js';
 
+/* eslint-disable no-useless-escape */
 const PHRASES = ['run internal report'];
 const REPORTS = [
   'usage-metrics-internal',
@@ -57,13 +58,11 @@ function runInternalReportCommand(context) {
       }
 
       if (reportType === 'all') {
-        await say(`:warning: reportType ${reportType} not available. Valid types are: ${REPORTS.join(', ')}`);
+        await say(`:warning: reportType ${reportType} not available. Valid types are: \`${REPORTS.join('\`, \`')}\``);
         return;
       }
 
-      /* eslint-disable no-useless-escape */
       if (!REPORTS.includes(reportType)) {
-        await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: ${REPORTS.join(', ')}`);
         await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: \`${REPORTS.join('\`, \`')}\``);
         return;
       }
