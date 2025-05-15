@@ -287,6 +287,7 @@ function SitesController(ctx, log, env) {
    */
   const updateSite = async (context) => {
     const siteId = context.params?.siteId;
+    const { authInfo: { profile } } = context.attributes;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -351,6 +352,7 @@ function SitesController(ctx, log, env) {
     }
 
     if (updates) {
+      site.setUpdatedBy(profile.email);
       const updatedSite = await site.save();
       return ok(SiteDto.toJSON(updatedSite));
     }

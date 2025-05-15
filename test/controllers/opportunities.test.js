@@ -37,12 +37,6 @@ describe('Opportunities Controller', () => {
         .withProfile({ is_admin: true, email: 'test@test.com' })
         .withAuthenticated(true),
     },
-    log: {
-      info: sandbox.stub(),
-      warn: sandbox.stub(),
-      error: sandbox.stub(),
-      debug: sandbox.stub(),
-    },
   };
 
   const opptys = [

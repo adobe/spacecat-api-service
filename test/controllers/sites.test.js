@@ -43,6 +43,16 @@ describe('Sites Controller', () => {
 
   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
 
+  const defaultAuthAttributes = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true, email: 'test@test.com' })
+        .withAuthenticated(true),
+    },
+  };
+
   const sites = [
     {
       siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', deliveryConfig: {}, config: Config({}), hlxConfig: {},
@@ -66,6 +76,7 @@ describe('Sites Controller', () => {
                 organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
                 hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
                 deliveryConfig: { type: 'any', name: 'deliveryConfig', get: (value) => value },
+                updatedBy: { type: 'string', name: 'updatedBy', get: (value) => value },
               },
             },
           },
@@ -183,7 +194,7 @@ describe('Sites Controller', () => {
         authInfo: new AuthInfo()
           .withType('jwt')
           .withScopes([{ name: 'admin' }])
-          .withProfile({ is_admin: true })
+          .withProfile({ is_admin: true, email: 'test@test.com' })
           .withAuthenticated(true),
       },
     };
@@ -263,6 +274,7 @@ describe('Sites Controller', () => {
           field: true,
         },
       },
+      ...defaultAuthAttributes,
     });
 
     expect(site.save).to.have.been.calledOnce;
@@ -285,7 +297,7 @@ describe('Sites Controller', () => {
   it('returns bad request when updating a site if id not provided', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
-    const response = await sitesController.updateSite({ params: {} });
+    const response = await sitesController.updateSite({ params: {}, ...defaultAuthAttributes });
     const error = await response.json();
 
     expect(site.save).to.have.not.been.called;
@@ -298,7 +310,9 @@ describe('Sites Controller', () => {
     site.save = sandbox.spy(site.save);
     mockDataAccess.Site.findById.resolves(null);
 
-    const response = await sitesController.updateSite({ params: { siteId: SITE_IDS[0] } });
+    const response = await sitesController.updateSite(
+      { params: { siteId: SITE_IDS[0] }, ...defaultAuthAttributes },
+    );
     const error = await response.json();
 
     expect(site.save).to.have.not.been.called;
@@ -309,7 +323,13 @@ describe('Sites Controller', () => {
   it('returns bad request when updating a site without payload', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
-    const response = await sitesController.updateSite({ params: { siteId: SITE_IDS[0] } });
+    const response = await sitesController.updateSite(
+      {
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+        ...defaultAuthAttributes,
+      },
+    );
     const error = await response.json();
 
     expect(site.save).to.have.not.been.called;
@@ -323,6 +343,7 @@ describe('Sites Controller', () => {
     const response = await sitesController.updateSite({
       params: { siteId: SITE_IDS[0] },
       data: {},
+      ...defaultAuthAttributes,
     });
     const error = await response.json();
 
@@ -334,7 +355,9 @@ describe('Sites Controller', () => {
   it('returns bad request when updating a site for non belonging to the organization', async () => {
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
-    const response = await sitesController.updateSite({ params: { siteId: SITE_IDS[0] } });
+    const response = await sitesController.updateSite(
+      { params: { siteId: SITE_IDS[0] }, ...defaultAuthAttributes },
+    );
     const error = await response.json();
 
     expect(response.status).to.equal(403);
@@ -344,7 +367,9 @@ describe('Sites Controller', () => {
   it('removes a site', async () => {
     const site = sites[0];
     site.remove = sandbox.stub();
-    const response = await sitesController.removeSite({ params: { siteId: SITE_IDS[0] } });
+    const response = await sitesController.removeSite(
+      { params: { siteId: SITE_IDS[0] }, ...defaultAuthAttributes },
+    );
 
     expect(site.remove).to.have.been.calledOnce;
     expect(response.status).to.equal(204);
@@ -354,7 +379,9 @@ describe('Sites Controller', () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     const site = sites[0];
     site.remove = sandbox.stub();
-    const response = await sitesController.removeSite({ params: { siteId: SITE_IDS[0] } });
+    const response = await sitesController.removeSite(
+      { params: { siteId: SITE_IDS[0] }, ...defaultAuthAttributes },
+    );
 
     expect(site.remove).to.have.not.been.called;
     expect(response.status).to.equal(403);
@@ -1287,6 +1314,7 @@ describe('Sites Controller', () => {
       data: {
         name: 'new-name',
       },
+      ...defaultAuthAttributes,
     });
 
     expect(site.save).to.have.been.calledOnce;
