@@ -51,6 +51,7 @@ function runInternalReportCommand(context) {
 
     try {
       const [reportType] = args;
+      log.info(`reportType: ${reportType}`);
       if (reportType === 'all') {
         await say(`:warning: reportType ${reportType} not available. Valid types are: ${REPORTS.join(', ')}`);
         return;
