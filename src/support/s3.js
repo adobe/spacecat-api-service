@@ -40,3 +40,23 @@ export function s3ClientWrapper(fn) {
     return fn(request, context);
   };
 }
+
+/**
+ * Generate presigned URLs for an array of S3 files.
+ * @param {S3Client} s3
+ * @param {string} bucketName
+ * @param {Array} files - Array of file objects with .key
+ * @param {number} expiresIn - Expiry in seconds
+ * @returns {Promise<Array>} - Array of file objects with downloadUrl
+ */
+export async function generatePresignedUrls(s3, bucketName, files, expiresIn = 3600) {
+  const { s3Client } = s3;
+  return Promise.all(files.map(async (file) => {
+    const command = new GetObjectCommand({ Bucket: bucketName, Key: file.key });
+    const downloadUrl = await getSignedUrl(s3Client, command, { expiresIn });
+    return {
+      ...file,
+      downloadUrl,
+    };
+  }));
+}

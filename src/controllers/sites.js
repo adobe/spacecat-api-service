@@ -35,8 +35,9 @@ import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { wwwUrlResolver } from '../support/utils.js';
+import { wwwUrlResolver, buildS3Prefix } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { generatePresignedUrls } from '../support/s3.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -575,6 +576,63 @@ function SitesController(ctx, log, env) {
     return ok(metrics);
   };
 
+  const listScrapedContentFiles = async (context) => {
+    const { s3 } = context;
+    const { S3_SCRAPER_BUCKET: bucketName } = context.env;
+    const siteId = context.params?.siteId;
+    const type = context.params?.type;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!['scrapes', 'imports', 'accessibility'].includes(type)) {
+      return badRequest('Type must be either "scrapes" or "imports" or "accessibility"');
+    }
+
+    // Query params
+    const path = context.query?.path || '';
+    const rootOnly = context.query?.rootOnly === 'true';
+    const pageSize = parseInt(context.query?.pageSize, 10) || 100;
+    const pageToken = context.query?.pageToken;
+
+    // Build S3 prefix
+    const s3Prefix = buildS3Prefix(type, siteId, path);
+    // S3 params
+    const params = {
+      Bucket: bucketName,
+      Prefix: s3Prefix,
+      MaxKeys: pageSize,
+      ...(rootOnly ? { Delimiter: '/' } : {}),
+      ...(pageToken ? { ContinuationToken: pageToken } : {}),
+    };
+
+    const { s3Client, ListObjectsV2Command } = s3;
+    const listCommand = new ListObjectsV2Command(params);
+    const result = await s3Client.send(listCommand);
+
+    const files = (result.Contents || []).map((obj) => ({
+      name: obj.Key.replace(s3Prefix, ''),
+      type: obj.Key.split('.').pop(),
+      size: obj.Size,
+      lastModified: obj.LastModified,
+      key: obj.Key,
+    }));
+
+    // Presigned URLs
+    const presignedFiles = await generatePresignedUrls(
+      s3,
+      bucketName,
+      files,
+      60 * 60,
+    );
+    const nextPageToken = result.NextContinuationToken || null;
+
+    return ok({
+      items: presignedFiles,
+      nextPageToken,
+    });
+  };
+
   return {
     createSite,
     getAll,
@@ -597,6 +655,7 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
+    listScrapedContentFiles,
   };
 }
 

@@ -392,3 +392,15 @@ export async function getCSPromiseToken(context) {
     context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT,
   );
 }
+
+/**
+ * Build an S3 prefix for site content files.
+ * @param {string} type - The type of content (e.g., 'scrapes', 'imports', 'accessibility').
+ * @param {string} siteId - The site ID.
+ * @param {string} [path] - Optional sub-path.
+ * @returns {string} The S3 prefix string.
+ */
+export function buildS3Prefix(type, siteId, path = '') {
+  const normalized = path ? `${path.replace(/^\/+/g, '').replace(/\/+$/g, '')}/` : '';
+  return `${type}/${siteId}/${normalized}`;
+}
