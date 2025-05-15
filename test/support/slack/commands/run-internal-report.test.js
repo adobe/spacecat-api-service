@@ -16,13 +16,12 @@ import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
-import RunInternalReportCommand
+import runInternalReportCommand
   from '../../../../src/support/slack/commands/run-internal-report.js';
-// import { postErrorMessage } from '../../../../src/utils/slack/base.js';
 
 use(sinonChai);
 
-describe('RunInternalReportCommand', () => {
+describe('runInternalReportCommand', () => {
   let context;
   let slackContext;
   let dataAccessStub;
@@ -50,7 +49,7 @@ describe('RunInternalReportCommand', () => {
 
   describe('Initialization and BaseCommand Integration', () => {
     it('should initialize correctly with base command properties', () => {
-      const command = RunInternalReportCommand(context);
+      const command = runInternalReportCommand(context);
       expect(command.id).to.equal('run-internal-report');
       expect(command.name).to.equal('Run Internal Report');
       expect(command.description).to.equal('Run internal report for all sites.'); // Runs usage-metrics by default if no report type parameter is provided.
@@ -63,28 +62,28 @@ describe('RunInternalReportCommand', () => {
         getQueues: () => ({ reports: 'reports-queue' }),
       });
 
-      const command = RunInternalReportCommand(context);
+      const command = runInternalReportCommand(context);
       const args = ['usage-metrics-internal'];
       await command.handleExecution(args, slackContext);
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
     });
 
     it('should send usage message when no report type is provided', async () => {
-      const command = RunInternalReportCommand(context);
+      const command = runInternalReportCommand(context);
       const args = [];
       await command.handleExecution(args, slackContext);
       expect(slackContext.say).to.have.been.calledWith(command.usage());
     });
 
     it('should return warning for invalid report in slack', async () => {
-      const command = RunInternalReportCommand(context);
+      const command = runInternalReportCommand(context);
       const args = ['usage-metrics'];
       await command.handleExecution(args, slackContext);
       expect(slackContext.say).to.have.been.calledWith(':warning: reportType usage-metrics is not a valid internal report type. Valid types are: usage-metrics-internal, audit-site-overview-internal');
     });
 
     it('should catch error if something is wrong', async () => {
-      const command = RunInternalReportCommand(context);
+      const command = runInternalReportCommand(context);
       const args = ['usage-metrics-internal'];
       await command.handleExecution(args, slackContext);
       expect(context.log.error).to.have.been.calledWith('Error running internal report: Cannot read properties of undefined (reading \'getQueues\')');
