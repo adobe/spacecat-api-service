@@ -50,13 +50,13 @@ function runInternalReportCommand(context) {
     const config = await Configuration.findLatest();
 
     try {
-      const [reportType = 'usage-metrics-internal'] = args;
+      const [reportType] = args;
       if (reportType === 'all') {
         await say(`:warning: reportType ${reportType} not available. Valid types are: ${REPORTS.join(', ')}`);
         return;
       }
 
-      if (!REPORTS.includes(reportType)) {
+      if (!REPORTS.includes(reportType) && reportType !== undefined) {
         await say(`:warning: reportType ${reportType} is not a valid internal report type. Valid types are: ${REPORTS.join(', ')}`);
         return;
       }
@@ -65,7 +65,7 @@ function runInternalReportCommand(context) {
 
       await triggerInternalReportRun(
         config,
-        reportType,
+        reportType || 'usage-metrics-internal',
         slackContext,
         context,
       );
