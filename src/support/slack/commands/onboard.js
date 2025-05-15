@@ -55,6 +55,36 @@ function OnboardCommand(context) {
   } = context;
   const { Configuration, Site, Organization } = dataAccess;
 
+  /**
+   * Determines if the current environment is development/staging based on available context
+   * @param {Object} slackContext - The Slack context
+   * @returns {boolean} - Whether the environment is development/staging
+   */
+  const isDevEnvironment = (slackContext) => {
+    // Check env variables (most reliable)
+    if (env.IS_DEV_ENVIRONMENT === 'true') {
+      return true;
+    }
+
+    // Check team domain if available
+    if (slackContext.teamDomain) {
+      return slackContext.teamDomain.includes('-dev') || slackContext.teamDomain.includes('test');
+    }
+
+    // Check enterprise name if available
+    if (slackContext.enterpriseName) {
+      return slackContext.enterpriseName.includes('-dev') || slackContext.enterpriseName.includes('test');
+    }
+
+    // Check env.ENVIRONMENT if available
+    if (env.ENVIRONMENT) {
+      return env.ENVIRONMENT !== 'production' && env.ENVIRONMENT !== 'prod';
+    }
+
+    // Default to false if we can't determine
+    return false;
+  };
+
   const csvStringifier = createObjectCsvStringifier({
     header: [
       { id: 'site', title: 'Site URL' },
@@ -290,35 +320,29 @@ function OnboardCommand(context) {
         urlBatches.push(urls.slice(i, i + 50));
       }
 
-      // Extract the necessary Slack context elements
-      const slackContextForWorkflow = {
-        channelId: slackContext.channelId,
-        threadTs: slackContext.threadTs,
-      };
-
       // Create audit jobs array - matching the format used in triggerAuditForSite
       const auditJobs = auditTypes.map((type) => ({
         type,
         siteId: siteID,
         auditContext: {
           slackContext: {
-            channelId: slackContextForWorkflow.channelId,
-            threadTs: slackContextForWorkflow.threadTs,
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
           },
         },
-        operation: 'audit', // Add operation field to match expected format
+        // Do not include operation field - it's not in the standard format
       }));
 
       // Create scrape batches array
       const scrapeBatches = urlBatches.map((batch) => ({
-        processingType: profileName, // Use profile name as processing type
+        processingType: 'default', // Must use 'default' as in sentRunScraperMessage
         jobId: siteID,
         urls: batch,
         slackContext: {
-          channelId: slackContextForWorkflow.channelId,
-          threadTs: slackContextForWorkflow.threadTs,
+          channelId: slackContext.channelId,
+          threadTs: slackContext.threadTs,
         },
-        operation: 'scrape', // Keep the operation field
+        operation: 'scrape', // Keep operation field since it's needed for the Step Functions workflow
       }));
 
       // Prepare and start step function workflow with the necessary parameters
@@ -347,9 +371,8 @@ function OnboardCommand(context) {
 
       // Generate and send demo URL to Slack
       try {
-        // Check if we're in dev/stage environment based on bot username or env variable
-        const isDevEnvironment = slackContext.botUsername === '@spacecat-dev' || env.IS_DEV_ENVIRONMENT === 'true';
-        const baseUrl = isDevEnvironment
+        const useStageUrl = isDevEnvironment(slackContext);
+        const baseUrl = useStageUrl
           ? 'https://experience-stage.adobe.com'
           : 'https://experience.adobe.com';
 
@@ -503,9 +526,8 @@ function OnboardCommand(context) {
 
         // Generate and send demo URL to Slack
         try {
-          // Check if we're in dev/stage environment based on bot username or env variable
-          const isDevEnvironment = slackContext.botUsername === '@spacecat-dev' || env.IS_DEV_ENVIRONMENT === 'true';
-          const baseUrl = isDevEnvironment
+          const useStageUrl = isDevEnvironment(slackContext);
+          const baseUrl = useStageUrl
             ? 'https://experience-stage.adobe.com'
             : 'https://experience.adobe.com';
 
