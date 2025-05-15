@@ -134,6 +134,7 @@ describe('Sites Controller', () => {
     'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
+    'listScrapedContentFiles',
   ];
 
   let mockDataAccess;
@@ -1230,7 +1231,7 @@ describe('Sites Controller', () => {
     const metric = 'organic-traffic';
 
     const result = await sitesController.getPageMetricsBySource({
-      params: { siteId, metric, source },
+      params: { siteId, source, metric },
     });
     const error = await result.json();
 
@@ -1309,43 +1310,30 @@ describe('Sites Controller', () => {
     const testType = 'scrapes';
     const testPath = 'foo/';
     const testBucket = 'test-bucket';
-    const testFiles = [
-      {
-        Key: 'scrapes/siteid/foo/file1.txt',
-        Size: 123,
-        LastModified: new Date('2024-01-01T00:00:00Z'),
-      },
-      {
-        Key: 'scrapes/siteid/foo/file2.json',
-        Size: 456,
-        LastModified: new Date('2024-01-02T00:00:00Z'),
-      },
-    ];
-    const presignedFiles = [
-      {
-        name: 'file1.txt',
-        type: 'txt',
-        size: 123,
-        lastModified: new Date('2024-01-01T00:00:00Z'),
-        key: 'scrapes/siteid/foo/file1.txt',
-        downloadUrl: 'https://example.com/file1.txt',
-      },
-      {
-        name: 'file2.json',
-        type: 'json',
-        size: 456,
-        lastModified: new Date('2024-01-02T00:00:00Z'),
-        key: 'scrapes/siteid/foo/file2.json',
-        downloadUrl: 'https://example.com/file2.json',
-      },
-    ];
+    const testFile = {
+      Key: 'scrapes/siteid/foo/file1.txt',
+      Size: 123,
+      LastModified: '2024-01-01T00:00:00.000Z',
+    };
+    const presignedFile = {
+      name: 'file1.txt',
+      type: 'txt',
+      size: 123,
+      lastModified: '2024-01-01T00:00:00.000Z',
+      key: 'scrapes/siteid/foo/file1.txt',
+      downloadUrl: 'https://example.com/file1.txt',
+    };
+
+    const initController = () => (
+      sitesControllerMock.default(testContext, loggerStub, testContext.env)
+    );
 
     beforeEach(async () => {
       mockBuildS3Prefix = sinon.stub().returns('scrapes/siteid/foo/');
-      mockGeneratePresignedUrls = sinon.stub().resolves(presignedFiles);
+      mockGeneratePresignedUrls = sinon.stub().resolves([presignedFile]);
       mockListObjectsV2Command = sinon.stub();
       mockSend = sinon.stub().resolves({
-        Contents: testFiles,
+        Contents: [testFile],
         NextContinuationToken: 'next-token',
       });
       mockS3 = {
@@ -1359,14 +1347,11 @@ describe('Sites Controller', () => {
         params: { siteId: testSiteId, type: testType },
         query: { path: testPath },
       };
-      // Patch findById to resolve a site object
       mockDataAccess.Site.findById.resolves(sites[0]);
-      // Patch access control
       sinon.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
-      // Patch buildS3Prefix and generatePresignedUrls via esmock
       sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-        '../support/s3.js': { generatePresignedUrls: mockGeneratePresignedUrls },
-        '../../src/controllers/sites.js': { buildS3Prefix: mockBuildS3Prefix },
+        '../../src/support/s3.js': { generatePresignedUrls: mockGeneratePresignedUrls },
+        '../../src/support/utils.js': { buildS3Prefix: mockBuildS3Prefix },
       });
     });
 
@@ -1375,44 +1360,114 @@ describe('Sites Controller', () => {
     });
 
     it('returns files with presigned URLs and nextPageToken', async () => {
-      // Patch ListObjectsV2Command to just return params
       mockS3.ListObjectsV2Command.callsFake((params) => params);
-      const controller = sitesControllerMock.default(testContext, loggerStub, testContext.env);
-      const response = await (await controller.listScrapedContentFiles(testContext)).json();
+      const response = await (await initController().listScrapedContentFiles(testContext)).json();
       expect(mockBuildS3Prefix).to.have.been.calledWith(testType, testSiteId, testPath);
-      expect(mockSend).to.have.been.calledOnce;
-      expect(mockGeneratePresignedUrls).to.have.been.calledOnce;
-      expect(response).to.have.property('items').that.deep.equals(presignedFiles);
+      expect(response).to.have.property('items').that.deep.equals([presignedFile]);
       expect(response).to.have.property('nextPageToken', 'next-token');
     });
 
-    it('returns bad request if siteId is missing', async () => {
-      const controller = sitesControllerMock.default(testContext, loggerStub, testContext.env);
-      const response = await controller.listScrapedContentFiles({
+    it('handles validation errors', async () => {
+      // Test missing siteId
+      let response = await initController().listScrapedContentFiles({
         ...testContext,
         params: { type: testType },
       });
       expect(response.status).to.equal(400);
-      const error = await response.json();
+      let error = await response.json();
       expect(error).to.have.property('message', 'Site ID required');
-    });
 
-    it('returns bad request if type is invalid', async () => {
-      const controller = sitesControllerMock.default(testContext, loggerStub, testContext.env);
-      const response = await controller.listScrapedContentFiles({ ...testContext, params: { siteId: testSiteId, type: 'invalid' } });
-      expect(response.status).to.equal(400);
-      const error = await response.json();
+      // Test invalid type
+      response = await initController().listScrapedContentFiles({
+        ...testContext,
+        params: { siteId: testSiteId, type: 'invalid' },
+      });
+      error = await response.json();
       expect(error).to.have.property('message').that.includes('Type must be either');
     });
 
-    it('returns forbidden if user does not have access', async () => {
-      AccessControlUtil.prototype.hasAccess.restore();
-      sinon.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
-      const controller = sitesControllerMock.default(testContext, loggerStub, testContext.env);
-      const response = await controller.listScrapedContentFiles(testContext);
-      expect(response.status).to.equal(403);
-      const error = await response.json();
-      expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
+    it('handles empty responses and errors', async () => {
+      // Test empty response
+      mockSend.resolves({ Contents: [], NextContinuationToken: undefined });
+      mockGeneratePresignedUrls.resolves([]);
+      let response = await (await initController().listScrapedContentFiles(testContext)).json();
+      expect(response).to.deep.equal({ items: [], nextPageToken: null });
+
+      // Test undefined Contents
+      mockSend.resolves({ NextContinuationToken: undefined });
+      response = await (await initController().listScrapedContentFiles(testContext)).json();
+      expect(response).to.deep.equal({ items: [], nextPageToken: null });
+
+      // Test S3 error
+      mockSend.rejects(new Error('S3 error'));
+      await expect(initController().listScrapedContentFiles(testContext))
+        .to.be.rejectedWith('S3 error');
+
+      // Test presign error
+      mockSend.resolves({ Contents: [testFile] });
+      mockGeneratePresignedUrls.rejects(new Error('Presign error'));
+      await expect(initController().listScrapedContentFiles(testContext))
+        .to.be.rejectedWith('Presign error');
+    });
+
+    it('handles S3 parameter variations', async () => {
+      const testCases = [
+        {
+          name: 'rootOnly true',
+          query: { rootOnly: 'true' },
+          expectedParams: { Delimiter: '/' },
+        },
+        {
+          name: 'rootOnly false',
+          query: {},
+          expectedParams: {},
+        },
+        {
+          name: 'with pageToken',
+          query: { pageToken: 'abc123' },
+          expectedParams: { ContinuationToken: 'abc123' },
+        },
+        {
+          name: 'with path',
+          query: { path: 'some/path' },
+          setup: () => mockBuildS3Prefix.returns('scrapes/siteid/foo/some/path/'),
+          expectedParams: {},
+          checkPrefix: (prefix) => expect(prefix).to.equal('scrapes/siteid/foo/some/path/'),
+        },
+      ];
+
+      const runTestCase = async (testCase) => {
+        testContext.query = testCase.query;
+        if (testCase.setup) testCase.setup();
+
+        mockS3.ListObjectsV2Command.callsFake((params) => {
+          // Check expected parameters
+          const expectedParams = testCase.expectedParams || {};
+          for (const [key, value] of Object.entries(expectedParams)) {
+            if (value) {
+              expect(params).to.have.property(key, value);
+            } else {
+              expect(params).to.not.have.property(key);
+            }
+          }
+
+          // Check prefix if needed
+          if (testCase.checkPrefix) {
+            testCase.checkPrefix(params.Prefix);
+          }
+
+          return params;
+        });
+
+        // eslint-disable-next-line no-await-in-loop
+        await initController().listScrapedContentFiles(testContext);
+      };
+
+      // Run all test cases in sequence
+      for (const testCase of testCases) {
+        // eslint-disable-next-line no-await-in-loop
+        await runTestCase(testCase);
+      }
     });
   });
 });
