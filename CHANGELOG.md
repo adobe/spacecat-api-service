@@ -1,3 +1,10 @@
+# [1.109.0](https://github.com/adobe/spacecat-api-service/compare/v1.108.1...v1.109.0) (2025-05-15)
+
+
+### Features
+
+* Slack command for internal reports ([#901](https://github.com/adobe/spacecat-api-service/issues/901)) ([89951e2](https://github.com/adobe/spacecat-api-service/commit/89951e28b752ec5c602ab3ed9dcdcd053c278e44))
+
 ## [1.108.1](https://github.com/adobe/spacecat-api-service/compare/v1.108.0...v1.108.1) (2025-05-15)
 
 
