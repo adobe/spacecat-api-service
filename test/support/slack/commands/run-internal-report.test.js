@@ -74,7 +74,7 @@ describe('runInternalReportCommand', () => {
       });
 
       const command = runInternalReportCommand(context);
-      const args = [];
+      const args = [''];
       await command.handleExecution(args, slackContext);
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
     });
