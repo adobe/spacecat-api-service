@@ -68,7 +68,7 @@ function runInternalReportCommand(context) {
 
       await triggerInternalReportRun(
         config,
-        reportType || 'usage-metrics-internal',
+        reportType,
         slackContext,
         context,
       );
