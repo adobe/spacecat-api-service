@@ -52,7 +52,7 @@ describe('runInternalReportCommand', () => {
       const command = runInternalReportCommand(context);
       expect(command.id).to.equal('run-internal-report');
       expect(command.name).to.equal('Run Internal Report');
-      expect(command.description).to.equal('Run internal report for all sites.'); // Runs usage-metrics by default if no report type parameter is provided.
+      expect(command.description).to.equal('Run internal report for all sites. Runs usage-metrics-internal by default if no report type parameter is provided.');
     });
   });
 
@@ -68,11 +68,15 @@ describe('runInternalReportCommand', () => {
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
     });
 
-    it('should send usage message when no report type is provided', async () => {
+    it('should trigger a report with default if no report type is provided', async () => {
+      dataAccessStub.Configuration.findLatest.resolves({
+        getQueues: () => ({ reports: 'reports-queue' }),
+      });
+
       const command = runInternalReportCommand(context);
       const args = [];
       await command.handleExecution(args, slackContext);
-      expect(slackContext.say).to.have.been.calledWith(command.usage());
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
     });
 
     it('should return warning for invalid report in slack', async () => {
@@ -80,6 +84,13 @@ describe('runInternalReportCommand', () => {
       const args = ['usage-metrics'];
       await command.handleExecution(args, slackContext);
       expect(slackContext.say).to.have.been.calledWith(':warning: reportType usage-metrics is not a valid internal report type. Valid types are: usage-metrics-internal, audit-site-overview-internal');
+    });
+
+    it('should return warning for report type "all" in slack', async () => {
+      const command = runInternalReportCommand(context);
+      const args = ['all'];
+      await command.handleExecution(args, slackContext);
+      expect(slackContext.say).to.have.been.calledWith(':warning: reportType all not available. Valid types are: usage-metrics-internal, audit-site-overview-internal');
     });
 
     it('should catch error if something is wrong', async () => {
