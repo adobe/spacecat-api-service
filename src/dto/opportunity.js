@@ -51,5 +51,6 @@ export const OpportunityDto = {
     status: oppty.getStatus(),
     createdAt: oppty.getCreatedAt(),
     updatedAt: oppty.getUpdatedAt(),
+    updatedBy: oppty.getUpdatedBy(),
   }),
 };
