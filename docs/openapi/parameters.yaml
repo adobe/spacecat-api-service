@@ -150,3 +150,10 @@ suggestionId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+fixId:
+  name: fixId
+  description: The fix ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'

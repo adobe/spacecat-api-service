@@ -117,6 +117,17 @@ describe('getRouteHandlers', () => {
     getScreenshots: sinon.stub(),
   };
 
+  const mockFixesController = {
+    getAllForOpportunity: () => null,
+    getByStatus: () => null,
+    getByID: () => null,
+    getAllSuggestionsForFix: () => null,
+    createFixes: () => null,
+    patchFixesStatus: () => null,
+    patchFix: () => null,
+    removeFix: () => null,
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -136,6 +147,7 @@ describe('getRouteHandlers', () => {
       mockBrandsController,
       mockPreflightController,
       mockDemoController,
+      mockFixesController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -231,6 +243,14 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
+      'GET /sites/:siteId/opportunities/:opportunityId/fixes',
+      'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
+      'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
+      'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions',
+      'POST /sites/:siteId/opportunities/:opportunityId/fixes',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/status',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
+      'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
