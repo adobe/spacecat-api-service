@@ -71,7 +71,7 @@ function runInternalReportCommand(context) {
         context,
       );
 
-      await say(`:adobe-run: Triggered report generation for: *${reportType}* for all sites`);
+      await say(':adobe-run: Triggered report generation for all sites');
     } catch (error) {
       log.error(`Error running internal report: ${error.message}`);
       await postErrorMessage(say, error);
