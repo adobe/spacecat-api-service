@@ -25,10 +25,10 @@ const REPORTS = [
  * Run Internal Report command.
  *
  * @param {Object} context - The context object.
- * @return {RunInternalReportCommand} The runInternalReportCommand object.
+ * @return {runInternalReportCommand} The runInternalReportCommand object.
  * @constructor
  */
-function RunInternalReportCommand(context) {
+function runInternalReportCommand(context) {
   const { log, dataAccess } = context;
   const { Configuration } = dataAccess;
 
@@ -86,4 +86,4 @@ function RunInternalReportCommand(context) {
   };
 }
 
-export default RunInternalReportCommand;
+export default runInternalReportCommand;
