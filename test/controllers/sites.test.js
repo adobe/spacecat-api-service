@@ -1472,5 +1472,15 @@ describe('Sites Controller', () => {
         await runTestCase(testCase);
       }
     });
+
+    it('handles undefined context.params', async () => {
+      testContext.params = undefined;
+      const controller = initController();
+      const result = await controller.listScrapedContentFiles(testContext);
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Site ID required');
+    });
   });
 });

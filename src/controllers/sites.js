@@ -577,62 +577,77 @@ function SitesController(ctx, log, env) {
   };
 
   const listScrapedContentFiles = async (context) => {
-    const { s3 } = context;
-    const { S3_SCRAPER_BUCKET: bucketName } = context.env;
-    const siteId = context.params?.siteId;
-    const type = context.params?.type;
+    try {
+      const { s3 } = context;
+      const { S3_SCRAPER_BUCKET: bucketName } = context.env;
+      const { siteId, type } = context.params ?? {};
 
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
+      if (!isValidUUID(siteId)) {
+        return badRequest('Site ID required');
+      }
+      if (!['scrapes', 'imports', 'accessibility'].includes(type)) {
+        return badRequest('Type must be either "scrapes" or "imports" or "accessibility"');
+      }
+
+      // Query params
+      const path = context.data?.path || '';
+      const rootOnly = context.data?.rootOnly === 'true';
+      const pageSize = parseInt(context.data?.pageSize, 10) || 100;
+      const pageToken = context.data?.pageToken;
+
+      // Build S3 prefix and params
+      const s3Prefix = buildS3Prefix(type, siteId, path);
+      const params = {
+        Bucket: bucketName,
+        Prefix: s3Prefix,
+        MaxKeys: rootOnly ? 100 : pageSize,
+        ...(rootOnly ? { Delimiter: '/' } : {}),
+        ...(pageToken ? { ContinuationToken: decodeURIComponent(pageToken) } : {}),
+      };
+
+      // Execute S3 list command
+      const { s3Client, ListObjectsV2Command } = s3;
+      const listCommand = new ListObjectsV2Command(params);
+
+      const result = await s3Client.send(listCommand).catch((error) => {
+        log.error(`Failed to list S3 objects for site ${siteId}: ${error.message}`);
+        throw new Error('S3 error: Failed to list files');
+      });
+
+      if (!result?.Contents) {
+        return ok({ items: [], nextPageToken: null });
+      }
+
+      // Process files
+      const files = result.Contents.map((obj) => ({
+        name: obj.Key.replace(s3Prefix, ''),
+        type: obj.Key.split('.').pop(),
+        size: obj.Size,
+        lastModified: obj.LastModified,
+        key: obj.Key,
+      })).filter((file) => file.name);
+
+      // Generate presigned URLs
+      const presignedFiles = await generatePresignedUrls(
+        s3,
+        bucketName,
+        files,
+        60 * 60,
+      ).catch((error) => {
+        log.error(`Failed to generate presigned URLs for site ${siteId}: ${error.message}`);
+        throw new Error('Presign error');
+      });
+
+      return ok({
+        items: presignedFiles,
+        nextPageToken: result.NextContinuationToken
+          ? encodeURIComponent(result.NextContinuationToken)
+          : null,
+      });
+    } catch (error) {
+      log.error(`Error in listScrapedContentFiles for site ${context.params?.siteId}: ${error.message}`);
+      throw error;
     }
-    if (!['scrapes', 'imports', 'accessibility'].includes(type)) {
-      return badRequest('Type must be either "scrapes" or "imports" or "accessibility"');
-    }
-
-    // Query params
-    const path = context.data?.path || '';
-    const rootOnly = context.data?.rootOnly === 'true';
-    const pageSize = parseInt(context.data?.pageSize, 10) || 100;
-    const pageToken = context.data?.pageToken;
-
-    // Build S3 prefix
-    const s3Prefix = buildS3Prefix(type, siteId, path);
-    // S3 params
-    const params = {
-      Bucket: bucketName,
-      Prefix: s3Prefix,
-      MaxKeys: rootOnly ? 100 : pageSize, // when rootOnly we need more pagesize to get actual files
-      ...(rootOnly ? { Delimiter: '/' } : {}),
-      ...(pageToken ? { ContinuationToken: decodeURIComponent(pageToken) } : {}),
-    };
-
-    const { s3Client, ListObjectsV2Command } = s3;
-    const listCommand = new ListObjectsV2Command(params);
-    const result = await s3Client.send(listCommand);
-
-    const files = (result.Contents || []).map((obj) => ({
-      name: obj.Key.replace(s3Prefix, ''),
-      type: obj.Key.split('.').pop(),
-      size: obj.Size,
-      lastModified: obj.LastModified,
-      key: obj.Key,
-    }));
-
-    // Presigned URLs
-    const presignedFiles = await generatePresignedUrls(
-      s3,
-      bucketName,
-      files,
-      60 * 60,
-    );
-    const nextPageToken = result.NextContinuationToken
-      ? encodeURIComponent(result.NextContinuationToken)
-      : null;
-
-    return ok({
-      items: presignedFiles,
-      nextPageToken,
-    });
   };
 
   return {
