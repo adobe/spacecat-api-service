@@ -590,10 +590,10 @@ function SitesController(ctx, log, env) {
     }
 
     // Query params
-    const path = context.query?.path || '';
-    const rootOnly = context.query?.rootOnly === 'true';
-    const pageSize = parseInt(context.query?.pageSize, 10) || 100;
-    const pageToken = context.query?.pageToken;
+    const path = context.data?.path || '';
+    const rootOnly = context.data?.rootOnly === 'true';
+    const pageSize = parseInt(context.data?.pageSize, 10) || 100;
+    const pageToken = context.data?.pageToken;
 
     // Build S3 prefix
     const s3Prefix = buildS3Prefix(type, siteId, path);
@@ -601,9 +601,9 @@ function SitesController(ctx, log, env) {
     const params = {
       Bucket: bucketName,
       Prefix: s3Prefix,
-      MaxKeys: pageSize,
+      MaxKeys: rootOnly ? 100 : pageSize, // when rootOnly we need more pagesize to get actual files
       ...(rootOnly ? { Delimiter: '/' } : {}),
-      ...(pageToken ? { ContinuationToken: pageToken } : {}),
+      ...(pageToken ? { ContinuationToken: decodeURIComponent(pageToken) } : {}),
     };
 
     const { s3Client, ListObjectsV2Command } = s3;
@@ -625,7 +625,9 @@ function SitesController(ctx, log, env) {
       files,
       60 * 60,
     );
-    const nextPageToken = result.NextContinuationToken || null;
+    const nextPageToken = result.NextContinuationToken
+      ? encodeURIComponent(result.NextContinuationToken)
+      : null;
 
     return ok({
       items: presignedFiles,

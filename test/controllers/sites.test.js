@@ -1345,7 +1345,7 @@ describe('Sites Controller', () => {
         s3: mockS3,
         env: { ...context.env, S3_SCRAPER_BUCKET: testBucket },
         params: { siteId: testSiteId, type: testType },
-        query: { path: testPath },
+        data: { path: testPath },
       };
       mockDataAccess.Site.findById.resolves(sites[0]);
       sinon.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
@@ -1414,22 +1414,25 @@ describe('Sites Controller', () => {
       const testCases = [
         {
           name: 'rootOnly true',
-          query: { rootOnly: 'true' },
+          data: { rootOnly: 'true' },
           expectedParams: { Delimiter: '/' },
         },
         {
           name: 'rootOnly false',
-          query: {},
+          data: {},
           expectedParams: {},
+          checkParams: (params) => {
+            expect(params).to.not.have.property('Delimiter');
+          },
         },
         {
           name: 'with pageToken',
-          query: { pageToken: 'abc123' },
+          data: { pageToken: 'abc123' },
           expectedParams: { ContinuationToken: 'abc123' },
         },
         {
           name: 'with path',
-          query: { path: 'some/path' },
+          data: { path: 'some/path' },
           setup: () => mockBuildS3Prefix.returns('scrapes/siteid/foo/some/path/'),
           expectedParams: {},
           checkPrefix: (prefix) => expect(prefix).to.equal('scrapes/siteid/foo/some/path/'),
@@ -1437,18 +1440,18 @@ describe('Sites Controller', () => {
       ];
 
       const runTestCase = async (testCase) => {
-        testContext.query = testCase.query;
+        testContext.data = testCase.data;
         if (testCase.setup) testCase.setup();
 
         mockS3.ListObjectsV2Command.callsFake((params) => {
           // Check expected parameters
           const expectedParams = testCase.expectedParams || {};
           for (const [key, value] of Object.entries(expectedParams)) {
-            if (value) {
-              expect(params).to.have.property(key, value);
-            } else {
-              expect(params).to.not.have.property(key);
-            }
+            expect(params).to.have.property(key, value);
+          }
+
+          if (testCase.checkParams) {
+            testCase.checkParams(params);
           }
 
           // Check prefix if needed
