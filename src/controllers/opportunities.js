@@ -185,7 +185,7 @@ function OpportunitiesController(ctx) {
       const oppty = await Opportunity.create(context.data);
       return createResponse(OpportunityDto.toJSON(oppty), 201);
     } catch (e) {
-      return handleDataAccessError(e, 'Error creating opportunity');
+      return handleDataAccessError(e, `Error creating opportunity: ${e.message}`);
     }
   };
 
