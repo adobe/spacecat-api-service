@@ -10,7 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  GetObjectCommand,
+  PutObjectCommand,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
@@ -35,8 +40,29 @@ export function s3ClientWrapper(fn) {
         getSignedUrl,
         GetObjectCommand,
         PutObjectCommand,
+        ListObjectsV2Command,
       };
     }
     return fn(request, context);
   };
+}
+
+/**
+ * Generate presigned URLs for an array of S3 files.
+ * @param {S3Client} s3
+ * @param {string} bucketName
+ * @param {Array} files - Array of file objects with .key
+ * @param {number} expiresIn - Expiry in seconds
+ * @returns {Promise<Array>} - Array of file objects with downloadUrl
+ */
+export async function generatePresignedUrls(s3, bucketName, files, expiresIn = 3600) {
+  const { s3Client } = s3;
+  return Promise.all(files.map(async (file) => {
+    const command = new GetObjectCommand({ Bucket: bucketName, Key: file.key });
+    const downloadUrl = await getSignedUrl(s3Client, command, { expiresIn });
+    return {
+      ...file,
+      downloadUrl,
+    };
+  }));
 }
