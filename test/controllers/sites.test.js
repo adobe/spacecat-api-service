@@ -1302,7 +1302,6 @@ describe('Sites Controller', () => {
     let sitesControllerMock;
     let mockS3;
     let mockBuildS3Prefix;
-    let mockGeneratePresignedUrls;
     let mockListObjectsV2Command;
     let mockSend;
     let testContext;
@@ -1315,13 +1314,12 @@ describe('Sites Controller', () => {
       Size: 123,
       LastModified: '2024-01-01T00:00:00.000Z',
     };
-    const presignedFile = {
+    const file = {
       name: 'file1.txt',
       type: 'txt',
       size: 123,
       lastModified: '2024-01-01T00:00:00.000Z',
       key: 'scrapes/siteid/foo/file1.txt',
-      downloadUrl: 'https://example.com/file1.txt',
     };
 
     const initController = () => (
@@ -1330,7 +1328,6 @@ describe('Sites Controller', () => {
 
     beforeEach(async () => {
       mockBuildS3Prefix = sinon.stub().returns('scrapes/siteid/foo/');
-      mockGeneratePresignedUrls = sinon.stub().resolves([presignedFile]);
       mockListObjectsV2Command = sinon.stub();
       mockSend = sinon.stub().resolves({
         Contents: [testFile],
@@ -1350,7 +1347,6 @@ describe('Sites Controller', () => {
       mockDataAccess.Site.findById.resolves(sites[0]);
       sinon.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-        '../../src/support/s3.js': { generatePresignedUrls: mockGeneratePresignedUrls },
         '../../src/support/utils.js': { buildS3Prefix: mockBuildS3Prefix },
       });
     });
@@ -1363,7 +1359,7 @@ describe('Sites Controller', () => {
       mockS3.ListObjectsV2Command.callsFake((params) => params);
       const response = await (await initController().listScrapedContentFiles(testContext)).json();
       expect(mockBuildS3Prefix).to.have.been.calledWith(testType, testSiteId, testPath);
-      expect(response).to.have.property('items').that.deep.equals([presignedFile]);
+      expect(response).to.have.property('items').that.deep.equals([file]);
       expect(response).to.have.property('nextPageToken', 'next-token');
     });
 
@@ -1389,7 +1385,6 @@ describe('Sites Controller', () => {
     it('handles empty responses and errors', async () => {
       // Test empty response
       mockSend.resolves({ Contents: [], NextContinuationToken: undefined });
-      mockGeneratePresignedUrls.resolves([]);
       let response = await (await initController().listScrapedContentFiles(testContext)).json();
       expect(response).to.deep.equal({ items: [], nextPageToken: null });
 
@@ -1402,12 +1397,6 @@ describe('Sites Controller', () => {
       mockSend.rejects(new Error('S3 error'));
       await expect(initController().listScrapedContentFiles(testContext))
         .to.be.rejectedWith('S3 error');
-
-      // Test presign error
-      mockSend.resolves({ Contents: [testFile] });
-      mockGeneratePresignedUrls.rejects(new Error('Presign error'));
-      await expect(initController().listScrapedContentFiles(testContext))
-        .to.be.rejectedWith('Presign error');
     });
 
     it('handles S3 parameter variations', async () => {

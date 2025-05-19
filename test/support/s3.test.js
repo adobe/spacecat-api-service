@@ -15,7 +15,6 @@
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
-import esmock from 'esmock';
 
 import { s3ClientWrapper } from '../../src/support/s3.js';
 
@@ -76,59 +75,5 @@ describe('S3 client wrapper tests', () => {
     expect(exampleHandler.calledOnce).to.be.true;
     const secondParam = exampleHandler.getCall(0).args[1];
     expect(secondParam.s3.s3Client.test).to.equal('mocked-client');
-  });
-});
-
-describe('generatePresignedUrls', () => {
-  let s3Mock;
-  let getSignedUrlStub;
-  let GetObjectCommandStub;
-  let generatePresignedUrlsWithMock;
-
-  beforeEach(async () => {
-    getSignedUrlStub = sinon.stub();
-    GetObjectCommandStub = sinon.stub();
-    s3Mock = {
-      s3Client: {},
-      GetObjectCommand: GetObjectCommandStub,
-    };
-    generatePresignedUrlsWithMock = (await esmock('../../src/support/s3.js', {
-      '@aws-sdk/s3-request-presigner': { getSignedUrl: getSignedUrlStub },
-    })).generatePresignedUrls;
-  });
-
-  it('returns an empty array if files is empty', async () => {
-    const result = await generatePresignedUrlsWithMock(s3Mock, 'bucket', [], 100);
-    expect(result).to.deep.equal([]);
-  });
-
-  it('returns presigned urls for each file', async () => {
-    const files = [
-      { key: 'file1.txt', foo: 'bar' },
-      { key: 'file2.txt', foo: 'baz' },
-    ];
-    let callCount = 0;
-    s3Mock.GetObjectCommand = function getObjectCommandStub(params) {
-      callCount += 1;
-      return { ...params, id: callCount };
-    };
-    getSignedUrlStub.onCall(0).resolves('url1');
-    getSignedUrlStub.onCall(1).resolves('url2');
-    s3Mock.s3Client = {};
-    const result = await generatePresignedUrlsWithMock(s3Mock, 'bucket', files, 100);
-    expect(result).to.have.length(2);
-    expect(result[0]).to.include({ key: 'file1.txt', foo: 'bar', downloadUrl: 'url1' });
-    expect(result[1]).to.include({ key: 'file2.txt', foo: 'baz', downloadUrl: 'url2' });
-  });
-
-  it('throws if getSignedUrl throws', async () => {
-    const files = [{ key: 'file1.txt' }];
-    s3Mock.GetObjectCommand = function getObjectCommandStub(params) {
-      return params;
-    };
-    const error = new Error('fail');
-    getSignedUrlStub.rejects(error);
-    s3Mock.s3Client = {};
-    await expect(generatePresignedUrlsWithMock(s3Mock, 'bucket', files, 100)).to.be.rejectedWith('fail');
   });
 });

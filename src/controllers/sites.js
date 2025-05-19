@@ -37,7 +37,6 @@ import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
 import { wwwUrlResolver, buildS3Prefix } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { generatePresignedUrls } from '../support/s3.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -627,19 +626,8 @@ function SitesController(ctx, log, env) {
         key: obj.Key,
       })).filter((file) => file.name);
 
-      // Generate presigned URLs
-      const presignedFiles = await generatePresignedUrls(
-        s3,
-        bucketName,
-        files,
-        60 * 60,
-      ).catch((error) => {
-        log.error(`Failed to generate presigned URLs for site ${siteId}: ${error.message}`);
-        throw new Error('Presign error');
-      });
-
       return ok({
-        items: presignedFiles,
+        items: files,
         nextPageToken: result.NextContinuationToken
           ? encodeURIComponent(result.NextContinuationToken)
           : null,
