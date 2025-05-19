@@ -161,6 +161,8 @@ paths:
     $ref: './tools-api.yaml#/api-keys'
   /tools/api-keys/{apiKeyId}:
     $ref: './tools-api.yaml#/api-key-deletion'
+  /tools/files/{key}:
+    $ref: './tools-api.yaml#/file-download'
   /tools/import/jobs:
     $ref: './tools-api.yaml#/import'
   /tools/import/jobs/{jobId}:
