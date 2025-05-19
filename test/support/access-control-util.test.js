@@ -365,12 +365,6 @@ describe('Access Control Util', () => {
       const authInfo = new AuthInfo()
         .withType('ims')
         .withScopes([{ name: 'admin' }])
-        .withProfile({
-          tenants: [{
-            id: 'org-1',
-          }],
-          is_admin: true,
-        })
         .withAuthenticated(true);
 
       const contextForIMS = { attributes: { authInfo } };
