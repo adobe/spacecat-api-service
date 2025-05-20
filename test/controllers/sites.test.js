@@ -1363,6 +1363,22 @@ describe('Sites Controller', () => {
       expect(response).to.have.property('nextPageToken', 'next-token');
     });
 
+    it('returns 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const response = await initController().listScrapedContentFiles(testContext);
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error.message).to.equal('Site not found');
+    });
+
+    it('returns 403 when user has no access to site', async () => {
+      AccessControlUtil.prototype.hasAccess.resolves(false);
+      const response = await initController().listScrapedContentFiles(testContext);
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error.message).to.equal('Only users belonging to the organization can get scraped content files');
+    });
+
     it('handles validation errors', async () => {
       // Test missing siteId
       let response = await initController().listScrapedContentFiles({

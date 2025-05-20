@@ -584,6 +584,16 @@ function SitesController(ctx, log, env) {
       if (!isValidUUID(siteId)) {
         return badRequest('Site ID required');
       }
+
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization can get scraped content files');
+      }
+
       if (!['scrapes', 'imports', 'accessibility'].includes(type)) {
         return badRequest('Type must be either "scrapes" or "imports" or "accessibility"');
       }

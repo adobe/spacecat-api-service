@@ -60,6 +60,7 @@ import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
 import DemoController from './controllers/demo.js';
+import FileController from './controllers/file.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -110,6 +111,7 @@ async function run(request, context) {
       BrandsController(context, log, context.env),
       PreflightController(context, log, context.env),
       DemoController(context),
+      FileController(context),
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
