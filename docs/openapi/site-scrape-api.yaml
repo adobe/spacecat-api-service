@@ -44,7 +44,7 @@ scraped-content-type:
     operationId: listScrapedContent
     tags:
       - scrape
-    summary: List all files for a site and type with download URLs
+    summary: List all files for a site and type
     description: |
       Retrieves a paginated list of files for the specified site and handler type (scrapes or imports).
       The search can be filtered by path prefix and can include or exclude subdirectories.
@@ -58,11 +58,10 @@ scraped-content-type:
       - A unique key (full path relative to the content type root)
       - File name
       - File metadata (size and last modified timestamp)
-      - A pre-signed S3 URL for secure temporary file access
 
     responses:
       '200':
-        description: Successfully retrieved the list of files with their download URLs
+        description: Successfully retrieved the list of files
         content:
           application/json:
             schema:

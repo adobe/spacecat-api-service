@@ -67,6 +67,8 @@ paths:
     $ref: './configurations-sites-audits-api.yaml#/configurations-sites-audits-toggle'
   /event/fulfillment:
     $ref: './event-api.yaml#/process-fulfillment-events'
+  /files:
+    $ref: './file-api.yaml#/get-files'
   /hooks/site-detection/cdn/{hookSecret}:
     $ref: './hooks-api.yaml#/site-detection-cdn'
   /hooks/site-detection/rum/{hookSecret}:
