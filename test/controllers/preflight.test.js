@@ -46,9 +46,8 @@ describe('Preflight Controller', () => {
     getMetadata: () => ({
       payload: {
         siteId: 'test-site-123',
-        urls: [
-          { url: 'https://example.com/test.html' },
-        ],
+        urls: ['https://example.com/test.html'],
+        step: 'identify',
       },
       jobType: 'preflight',
       tags: ['preflight'],
@@ -117,7 +116,8 @@ describe('Preflight Controller', () => {
     it('creates a preflight job successfully in production environment', async () => {
       const context = {
         data: {
-          pageUrl: 'https://example.com/test.html',
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
         },
       };
 
@@ -137,9 +137,8 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: [
-              { url: 'https://example.com/test.html' },
-            ],
+            urls: ['https://example.com/test.html'],
+            step: 'identify',
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -158,7 +157,8 @@ describe('Preflight Controller', () => {
     it('creates a preflight job successfully in CI environment', async () => {
       const context = {
         data: {
-          pageUrl: 'https://example.com/test.html',
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
         },
       };
 
@@ -187,9 +187,8 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: [
-              { url: 'https://example.com/test.html' },
-            ],
+            urls: ['https://example.com/test.html'],
+            step: 'identify',
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -208,7 +207,8 @@ describe('Preflight Controller', () => {
     it('extracts base URL correctly from full URL', async () => {
       const context = {
         data: {
-          pageUrl: 'https://example.com/path/to/page?query=123',
+          urls: ['https://example.com/path/to/page?query=123'],
+          step: 'identify',
         },
       };
 
@@ -222,7 +222,8 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          pageUrl: 'https://non-registered-site.com/test.html',
+          urls: ['https://non-registered-site.com/test.html'],
+          step: 'identify',
         },
       };
 
@@ -249,10 +250,11 @@ describe('Preflight Controller', () => {
       });
     });
 
-    it('returns 400 Bad Request for empty pageUrl', async () => {
+    it('returns 400 Bad Request for empty urls array', async () => {
       const context = {
         data: {
-          pageUrl: '',
+          urls: [],
+          step: 'identify',
         },
       };
 
@@ -261,14 +263,15 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: missing or invalid pageUrl in request data',
+        message: 'Invalid request: urls must be a non-empty array',
       });
     });
 
-    it('returns 400 Bad Request if pageUrl has an invalid structure', async () => {
+    it('returns 400 Bad Request if urls is not an array', async () => {
       const context = {
         data: {
-          pageUrl: ['https://example.com/test.html'],
+          urls: 'https://example.com/test.html',
+          step: 'identify',
         },
       };
 
@@ -277,14 +280,15 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: missing or invalid pageUrl in request data',
+        message: 'Invalid request: urls must be a non-empty array',
       });
     });
 
     it('returns 400 Bad Request for invalid URL format', async () => {
       const context = {
         data: {
-          pageUrl: 'not-a-valid-url',
+          urls: ['not-a-valid-url'],
+          step: 'identify',
         },
       };
 
@@ -293,7 +297,24 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: missing or invalid pageUrl in request data',
+        message: 'Invalid request: all urls must be valid URLs',
+      });
+    });
+
+    it('returns 400 Bad Request for invalid step', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'invalid-step',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: step must be either identify or suggest',
       });
     });
 
@@ -302,7 +323,8 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          pageUrl: 'https://example.com/test.html',
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
         },
       };
 
@@ -320,7 +342,8 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          pageUrl: 'https://example.com/test.html',
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
         },
       };
 
@@ -364,9 +387,8 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: [
-              { url: 'https://example.com/test.html' },
-            ],
+            urls: ['https://example.com/test.html'],
+            step: 'identify',
           },
           jobType: 'preflight',
           tags: ['preflight'],
