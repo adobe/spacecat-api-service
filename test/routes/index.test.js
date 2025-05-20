@@ -117,6 +117,10 @@ describe('getRouteHandlers', () => {
     getScreenshots: sinon.stub(),
   };
 
+  const mockMcpController = {
+    handleRcp: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -136,6 +140,7 @@ describe('getRouteHandlers', () => {
       mockBrandsController,
       mockPreflightController,
       mockDemoController,
+      mockMcpController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -160,6 +165,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'GET /screenshots',
       'POST /screenshots',
+      'POST /mcp',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
