@@ -36,3 +36,4 @@ get-files:
           $ref: './responses.yaml#/500'
       security:
         - scoped_api_key: [ ] 
+        - cookie_auth: [ ]

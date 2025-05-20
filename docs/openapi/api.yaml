@@ -194,6 +194,11 @@ components:
       in: header
       name: x-api-key
       description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)"
+    cookie_auth:
+      type: apiKey
+      in: cookie
+      name: sessionToken
+      description: "Authentication using session cookie"
   schemas:
     $ref: './schemas.yaml'
   examples:
