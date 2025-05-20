@@ -318,6 +318,26 @@ describe('Preflight Controller', () => {
       });
     });
 
+    it('returns 400 Bad Request when URLs belong to different websites', async () => {
+      const context = {
+        data: {
+          urls: [
+            'https://example.com/page1.html',
+            'https://different-site.com/page2.html',
+          ],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: all urls must belong to the same website',
+      });
+    });
+
     it('handles errors during job creation', async () => {
       mockDataAccess.AsyncJob.create.rejects(new Error('Something went wrong'));
 

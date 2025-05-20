@@ -70,6 +70,13 @@ function PreflightController(ctx, log, env) {
       throw new Error('Invalid request: all urls must be valid URLs');
     }
 
+    // Check that all URLs belong to the same website
+    const firstUrl = new URL(data.urls[0]);
+    const firstHostname = firstUrl.hostname;
+    if (!data.urls.every((url) => new URL(url).hostname === firstHostname)) {
+      throw new Error('Invalid request: all urls must belong to the same website');
+    }
+
     if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data.step)) {
       throw new Error(`Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`);
     }
@@ -98,7 +105,6 @@ function PreflightController(ctx, log, env) {
 
       log.info(`Creating preflight job for ${data.urls.length} URLs with step: ${data.step}`);
 
-      // Find the site that matches the base URL of the first URL
       const url = new URL(data.urls[0]);
       const baseURL = `${url.protocol}//${url.hostname}`;
       const site = await dataAccess.Site.findByBaseURL(baseURL);
