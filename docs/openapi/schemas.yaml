@@ -2677,7 +2677,7 @@ CreateAsyncJobAcceptedResponse:
 
 ScrapedContentResponse:
   type: array
-  description: Collection of scraped content files with metadata and pre-signed download URLs
+  description: Collection of scraped content files with metadata
   items:
     type: object
     properties:
@@ -2698,20 +2698,12 @@ ScrapedContentResponse:
           - "null"
         format: date-time
         description: Timestamp of the last file modification
-      downloadUrl:
-        type:
-          - string
-          - "null"
-        format: uri
-        description: Secure pre-signed S3 URL for temporary file access
   example:
     - key: "about-us/scrape.json"
       name: "scrape.json"
       size: 2048
       lastModified: "2025-04-11T00:44:31Z"
-      downloadUrl: "https://spacecat-bucket.s3.amazonaws.com/scrapes/123/about-us/scrape.json?..."
     - key: "about-us/screenshot-desktop-fullpage.png"
       name: "screenshot-desktop-fullpage.png"
       size: 123456
       lastModified: "2025-04-11T00:44:31Z"
-      downloadUrl: "https://spacecat-bucket.s3.amazonaws.com/scrapes/123/about-us/screenshot-desktop-fullpage.png?..."
