@@ -12,7 +12,12 @@
 /* eslint-disable no-use-before-define */
 
 /**
- * @import { FixEntity, FixEntityCollection } from "@adobe/spacecat-shared-data-access"
+ * @import {
+ *   FixEntity,
+ *   FixEntityCollection,
+ *   OpportunityCollection,
+ *   SuggestionCollection
+ * } from "@adobe/spacecat-shared-data-access"
  */
 
 import {
@@ -38,8 +43,16 @@ export class FixesController {
   /** @type {FixEntityCollection} */
   #FixEntity;
 
+  /** @type {OpportunityCollection} */
+  #Opportunity;
+
+  /** @type {SuggestionCollection} */
+  #Suggestion;
+
   constructor(dataAccess) {
     this.#FixEntity = dataAccess.FixEntity;
+    this.#Opportunity = dataAccess.Opportunity;
+    this.#Suggestion = dataAccess.Suggestion;
 
     this.getAllForOpportunity = this.getAllForOpportunity.bind(this);
     this.getByStatus = this.getByStatus.bind(this);
@@ -67,10 +80,8 @@ export class FixesController {
 
     // Check whether the suggestion belongs to the opportunity,
     // and the opportunity belongs to the site.
-    if (fixEntities.length > 0) {
-      res = checkOwnership(fixEntities[0], opportunityId, siteId);
-      if (res) return res;
-    }
+    res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
+    if (res) return res;
 
     const fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);
@@ -92,10 +103,8 @@ export class FixesController {
     }
 
     const fixEntities = await this.#FixEntity.allByOpportunityIdAndStatus(opportunityId, status);
-    if (fixEntities.length > 0) {
-      res = checkOwnership(fixEntities[0], opportunityId, siteId);
-      if (res) return res;
-    }
+    res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
+    if (res) return res;
 
     return ok(fixEntities.map((fix) => FixDto.toJSON(fix)));
   }
@@ -114,7 +123,7 @@ export class FixesController {
 
     const fix = await this.#FixEntity.findById(fixId);
     if (!fix) return notFound('Fix not found');
-    res = checkOwnership(fix, opportunityId, siteId);
+    res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
     if (res) return res;
 
     return ok(FixDto.toJSON(fix));
@@ -134,7 +143,7 @@ export class FixesController {
 
     const fix = await this.#FixEntity.findById(fixId);
     if (!fix) return notFound('Fix not found');
-    res = checkOwnership(fix, opportunityId, siteId);
+    res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
     if (res) return res;
 
     const suggestions = await fix.getSuggestions();
@@ -201,7 +210,9 @@ export class FixesController {
     }
 
     const fixes = await Promise.all(
-      context.data.map((data, index) => this.#patchFixStatus(data.id, data.status, index)),
+      context.data.map(
+        (data, index) => this.#patchFixStatus(data.id, data.status, index, opportunityId, siteId),
+      ),
     );
     const succeeded = countSucceeded(fixes);
     return createResponse({
@@ -229,9 +240,17 @@ export class FixesController {
     }
 
     const fix = await this.#FixEntity.findById(uuid);
-    if (!fix) return notFound('Fix not found');
-    const res = checkOwnership(fix, opportunityId, siteId);
-    if (res) return res;
+    const res = fix
+      ? await checkOwnership(fix, opportunityId, siteId, this.#Opportunity)
+      : notFound('Fix not found');
+    if (res) {
+      return {
+        index,
+        uuid,
+        message: await res.json().then(({ message }) => message),
+        statusCode: res.status,
+      };
+    }
 
     try {
       if (fix.getStatus() === status) {
@@ -246,7 +265,9 @@ export class FixesController {
       };
     } catch (error) {
       const statusCode = error instanceof ValidationError ? 400 : 500;
-      return { index, message: error.message, statusCode };
+      return {
+        index, uuid, message: error.message, statusCode,
+      };
     }
   }
 
@@ -257,13 +278,13 @@ export class FixesController {
    * @returns {Promise<Response>} the updated fix data
    */
   async patchFix(context) {
-    const { sideId, opportunityId, fixId } = context.params ?? {};
-    let res = checkRequestParams(sideId, opportunityId, fixId);
+    const { siteId, opportunityId, fixId } = context.params ?? {};
+    let res = checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
     if (!fix) return notFound('Fix not found');
-    res = checkOwnership(fix, opportunityId, sideId);
+    res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
     if (res) return res;
 
     if (!context.data) {
@@ -274,13 +295,24 @@ export class FixesController {
       executedBy, executedAt, publishedAt, changeDetails, suggestionIds,
     } = context.data;
 
+    const Suggestion = this.#Suggestion;
     let hasUpdates = false;
     try {
       if (isArray(suggestionIds)) {
-        if (executedBy !== fix.getExecutedBy() && hasText(executedBy)) {
-          fix.setExecutedBy(executedBy);
-          hasUpdates = true;
+        const suggestions = await Promise.all(suggestionIds.map((id) => Suggestion.findById(id)));
+        if (suggestions.some((s) => !s || s.getOpportunityId() !== opportunityId)) {
+          return badRequest('Invalid suggestion IDs');
         }
+        for (const suggestion of suggestions) {
+          suggestion.setFixEntityId(fixId);
+        }
+        await Promise.all(suggestions.map((s) => s.save()));
+        hasUpdates = true;
+      }
+
+      if (executedBy !== fix.getExecutedBy() && hasText(executedBy)) {
+        fix.setExecutedBy(executedBy);
+        hasUpdates = true;
       }
 
       if (executedAt !== fix.getExecutedAt() && isIsoDate(executedAt)) {
@@ -323,7 +355,7 @@ export class FixesController {
 
     const fix = await this.#FixEntity.findById(fixId);
     if (!fix) return notFound('Fix not found');
-    res = checkOwnership(fix, opportunityId, siteId);
+    res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
     if (res) return res;
 
     try {
@@ -336,7 +368,7 @@ export class FixesController {
 }
 
 /**
- * Checks whether sideId and opportunityId are valid UUIDs.
+ * Checks whether siteId and opportunityId are valid UUIDs.
  * Supports optional fixId.
  * @param {any} siteId
  * @param {any} opportunityId
@@ -363,16 +395,17 @@ const UNSET = Symbol('UNSET');
 /**
  * Checks if the fix belongs to the opportunity and the opportunity belongs to the site.
  *
- * @param {FixEntity} fix
+ * @param {undefined | null | FixEntity} fix
  * @param {string} opportunityId
  * @param {string} siteId
+ * @param {OpportunityCollection} opportunities
  * @returns {Promise<null | Response>}
  */
-async function checkOwnership(fix, opportunityId, siteId) {
-  if (fix.getOpportunityId() !== opportunityId) {
+async function checkOwnership(fix, opportunityId, siteId, opportunities) {
+  if (fix && fix.getOpportunityId() !== opportunityId) {
     return notFound('Opportunity not found');
   }
-  const opportunity = await fix.getOpportunity();
+  const opportunity = await (fix ? fix.getOpportunity() : opportunities.findById(opportunityId));
   if (!opportunity || opportunity.getSiteId() !== siteId) {
     return notFound('Opportunity not found');
   }

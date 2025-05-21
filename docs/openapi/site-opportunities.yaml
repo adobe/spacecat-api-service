@@ -680,7 +680,7 @@ site-opportunity-status:
       content:
         application/json:
           schema:
-            $ref: './schemas.yaml#/SuggestionStatusUpdate'
+            $ref: './schemas.yaml#/FixStatusUpdate'
     responses:
       '207':
         description: |

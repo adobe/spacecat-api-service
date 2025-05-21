@@ -2699,7 +2699,7 @@ Fix:
     id:
       type: string
       format: uuid
-    suggestionId:
+    opportunityId:
       type: string
       format: uuid
     type:
@@ -2835,6 +2835,22 @@ FixUpdate:
       additionalProperties: true
     status:
       $ref: '#/FixStatus'
+
+FixStatusUpdate:
+  type: array
+  items:
+    type: object
+    properties:
+      id:
+        description: UUID of this fix
+        readOnly: false
+        $ref: '#/Id'
+      status:
+        description: Status of this fix; status reflects overall fix execution, flagged here for optimization
+        $ref: '#/SuggestionStatus'
+    required:
+      - id
+      - status
 
 FixStatusUpdateListResponse:
   type: object

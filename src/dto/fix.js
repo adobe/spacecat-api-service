@@ -36,7 +36,7 @@ export const FixDto = {
   toJSON(fix) {
     return {
       id: fix.getId(),
-      suggestionId: fix.getSuggestionId(),
+      opportunityId: fix.getOpportunityId(),
       type: fix.getType(),
       createdAt: fix.getCreatedAt(),
       executedBy: fix.getExecutedAt(),
