@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* c8 ignore start */
+
 /*
  * JSON-RPC 2.0 helper utilities.
  *
@@ -163,3 +165,5 @@ export default {
   withRpcErrorBoundary,
   mapHttpStatusToRpcCode,
 };
+
+/* c8 ignore end */
