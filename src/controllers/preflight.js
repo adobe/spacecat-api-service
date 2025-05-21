@@ -11,7 +11,7 @@
  */
 
 import {
-  isNonEmptyObject, isValidUUID, isValidUrl,
+  isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok, accepted,
@@ -62,7 +62,7 @@ function PreflightController(ctx, log, env) {
       throw new Error('Invalid request: missing application/json data');
     }
 
-    if (!Array.isArray(data.urls) || data.urls.length === 0) {
+    if (!isNonEmptyArray(data.urls)) {
       throw new Error('Invalid request: urls must be a non-empty array');
     }
 
