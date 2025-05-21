@@ -36,28 +36,64 @@ export function buildRegistry({ sitesController } = {}) {
     }),
   };
 
-  /* -------------------- getSite -------------------- */
-  const getSiteTool = sitesController ? {
+  /**
+   * Helper to create simple proxy tools that delegate to a SitesController
+   * method returning a Fetch Response.
+   *
+   * @param {object} options
+   * @param {string} options.description
+   * @param {z.ZodSchema} options.inputSchema
+   * @param {Function} options.fetchFn – async (args) => Response
+   * @param {Function} options.notFoundMessage – (args) => string
+   * @returns {object} tool definition
+   */
+  const createProxyTool = ({
+    description,
+    inputSchema,
+    fetchFn,
+    notFoundMessage,
+  }) => ({
+    description,
+    inputSchema,
+    handler: async (args) => withRpcErrorBoundary(async () => {
+      const response = await fetchFn(args);
+      const payload = await unwrapControllerResponse(response, {
+        notFoundMessage: notFoundMessage(args),
+        context: args,
+      });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+      };
+    }, args),
+  });
+
+  /* -------------------- getSite by UUID -------------------- */
+  const getSiteTool = sitesController ? createProxyTool({
     description: 'Returns site details for the given UUID.',
     inputSchema: z.object({
       siteId: z.string().uuid().describe('The UUID of the site to fetch'),
     }).strict(),
-    handler: async ({ siteId }) => withRpcErrorBoundary(async () => {
-      const response = await sitesController.getByID({ params: { siteId } });
-      const payload = await unwrapControllerResponse(response, {
-        notFoundMessage: `Site ${siteId} not found`,
-        context: { siteId },
-      });
+    fetchFn: ({ siteId }) => sitesController.getByID({ params: { siteId } }),
+    notFoundMessage: ({ siteId }) => `Site ${siteId} not found`,
+  }) : undefined;
 
-      return {
-        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
-      };
-    }, { siteId }),
-  } : undefined;
+  /* ------------- getSiteByBaseURL ---------------- */
+  const getSiteByBaseURLTool = sitesController ? createProxyTool({
+    description: 'Returns site details for the given base URL (plain URL, not base64-encoded).',
+    inputSchema: z.object({
+      baseURL: z.string().url().describe('The base URL of the site to fetch'),
+    }).strict(),
+    fetchFn: ({ baseURL }) => {
+      const encoded = Buffer.from(baseURL, 'utf-8').toString('base64');
+      return sitesController.getByBaseURL({ params: { baseURL: encoded } });
+    },
+    notFoundMessage: ({ baseURL }) => `Site with base URL ${baseURL} not found`,
+  }) : undefined;
 
   const tools = {
     echo: echoTool,
     ...(getSiteTool ? { getSite: getSiteTool } : {}),
+    ...(getSiteByBaseURLTool ? { getSiteByBaseURL: getSiteByBaseURLTool } : {}),
   };
 
   return {
