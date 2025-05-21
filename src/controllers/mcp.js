@@ -12,15 +12,22 @@
 
 /* c8 ignore start */
 
-import { createResponse, internalServerError, badRequest } from '@adobe/spacecat-shared-http-utils';
+import { createResponse } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { Buffer } from 'buffer';
 import { createMockResponse } from '../mcp/http-adapter.js';
 import { getSdkServer } from '../mcp/server.js';
+import { checkBodySize } from '../utils/validations.js';
+import { createJsonRpcErrorResponse, JSON_RPC_ERROR_CODES } from '../utils/jsonrpc.js';
 
-export default function McpController(ctx) {
-  if (!isNonEmptyObject(ctx)) throw new Error('Context required');
+export default function McpController(ctx, registry) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+
+  if (!isNonEmptyObject(registry)) {
+    throw new Error('MCP registry required');
+  }
 
   /* ===== helpers ===== */
   const send = (status, body) => createResponse(body, status);
@@ -30,15 +37,15 @@ export default function McpController(ctx) {
     try {
       const MAX_BODY_SIZE = 4 * 1024 * 1024; // 4 MB
 
-      if (typeof context.data === 'string' && Buffer.byteLength(context.data, 'utf8') > MAX_BODY_SIZE) {
-        return badRequest(`Request body exceeds ${MAX_BODY_SIZE} bytes limit`);
+      if (!checkBodySize(context.data, MAX_BODY_SIZE)) {
+        return createJsonRpcErrorResponse({
+          id: context?.data?.id ?? null,
+          code: JSON_RPC_ERROR_CODES.INVALID_PARAMS,
+          message: `Request body exceeds ${MAX_BODY_SIZE} bytes limit`,
+        });
       }
 
-      if (context.data instanceof Uint8Array && context.data.length > MAX_BODY_SIZE) {
-        return badRequest(`Request body exceeds ${MAX_BODY_SIZE} bytes limit`);
-      }
-
-      const server = await getSdkServer(context);
+      const server = await getSdkServer(registry);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
@@ -77,7 +84,11 @@ export default function McpController(ctx) {
 
       return send(nodeRes.status || 200, parsedBody);
     } catch (e) {
-      return internalServerError(e.message);
+      return createJsonRpcErrorResponse({
+        id: context?.data?.id ?? null,
+        code: JSON_RPC_ERROR_CODES.INTERNAL_ERROR,
+        message: e.message || 'Internal error',
+      });
     }
   };
 

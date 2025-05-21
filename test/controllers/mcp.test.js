@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import McpController from '../../src/controllers/mcp.js';
+import { buildRegistry } from '../../src/mcp/registry.js';
 
 use(sinonChai);
 
@@ -31,7 +32,8 @@ describe('MCP Controller', () => {
       dataAccess: {},
     };
 
-    mcpController = McpController(context);
+    const registry = buildRegistry();
+    mcpController = McpController(context, registry);
   });
 
   afterEach(() => {
@@ -76,5 +78,66 @@ describe('MCP Controller', () => {
     expect(body).to.have.property('result');
     const [first] = body.result.content;
     expect(first.text).to.equal('Hello World');
+  });
+
+  it('returns Invalid params error for unknown tool', async () => {
+    const payload = {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: {
+        name: 'doesNotExist',
+        arguments: {},
+      },
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+    const body = await resp.json();
+
+    expect(resp.status).to.equal(200);
+    expect(body.error.code).to.equal(-32602);
+    expect(body.id).to.equal(3);
+  });
+
+  it('returns Method not found error for unknown method', async () => {
+    const payload = {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/doesNotExist',
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+    const body = await resp.json();
+
+    expect(resp.status).to.equal(200);
+    expect(body).to.eql({
+      jsonrpc: '2.0',
+      id: 3,
+      error: {
+        code: -32601,
+        message: 'Method not found',
+      },
+    });
+  });
+
+  it('rejects payloads exceeding size limit', async () => {
+    // Create a payload slightly larger than 4 MB
+    const huge = 'x'.repeat(4 * 1024 * 1024 + 10);
+    context.data = huge;
+
+    const resp = await mcpController.handleRpc(context);
+    const body = await resp.json();
+
+    expect(resp.status).to.equal(200);
+    expect(body).to.eql({
+      jsonrpc: '2.0',
+      error: {
+        code: -32602,
+        message: 'Request body exceeds 4194304 bytes limit',
+      },
+      id: null,
+    });
   });
 });
