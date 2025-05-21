@@ -34,10 +34,6 @@ export async function getSdkServer(registry) {
   sdkServerInitPromise = (async () => {
     const { resources = {}, prompts = {}, tools = {} } = registry;
 
-    if (Object.keys(resources).length > 0) {
-      throw new Error('MCP resources wiring not yet implemented');
-    }
-
     if (Object.keys(prompts).length > 0) {
       throw new Error('MCP prompts wiring not yet implemented');
     }
@@ -58,6 +54,15 @@ export async function getSdkServer(registry) {
           annotations: def.annotations,
         },
         def.handler,
+      );
+    }
+
+    /* ----------  register resources  ---------- */
+    for (const [name, def] of Object.entries(resources)) {
+      server.resource(
+        name,
+        def.description,
+        def.inputSchema?.shape || def.inputSchema,
       );
     }
 

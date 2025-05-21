@@ -12,9 +12,9 @@
 
 /* c8 ignore start */
 
+import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { unwrapControllerResponse, withRpcErrorBoundary } from '../utils/jsonrpc.js';
-
 /**
  * Build the registry for the current request based on already-constructed
  * controllers.  Doing so avoids re-instantiating controllers inside tool
@@ -96,9 +96,19 @@ export function buildRegistry({ sitesController } = {}) {
     ...(getSiteByBaseURLTool ? { getSiteByBaseURL: getSiteByBaseURLTool } : {}),
   };
 
+  const resources = {
+    site: {
+      name: 'site',
+      template: new ResourceTemplate('sites://{siteId}', { list: undefined }),
+      async(_, { siteId }) {
+        return sitesController.getByID({ params: { siteId } });
+      },
+    },
+  };
+
   return {
     tools,
-    resources: {},
+    resources,
     prompts: {},
   };
 }
