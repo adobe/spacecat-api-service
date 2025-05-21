@@ -27,7 +27,7 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerImportRun } from '../../utils.js';
+import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -54,36 +54,6 @@ function OnboardCommand(context) {
     dataAccess, log, imsClient, env,
   } = context;
   const { Configuration, Site, Organization } = dataAccess;
-
-  /**
-   * Determines if the current environment is development/staging based on available context
-   * @param {Object} slackContext - The Slack context
-   * @returns {boolean} - Whether the environment is development/staging
-   */
-  const isDevEnvironment = (slackContext) => {
-    // Check env variables (most reliable)
-    if (env.IS_DEV_ENVIRONMENT === 'true') {
-      return true;
-    }
-
-    // Check team domain if available
-    if (slackContext.teamDomain) {
-      return slackContext.teamDomain.includes('-dev') || slackContext.teamDomain.includes('test');
-    }
-
-    // Check enterprise name if available
-    if (slackContext.enterpriseName) {
-      return slackContext.enterpriseName.includes('-dev') || slackContext.enterpriseName.includes('test');
-    }
-
-    // Check env.ENVIRONMENT if available
-    if (env.ENVIRONMENT) {
-      return env.ENVIRONMENT !== 'production' && env.ENVIRONMENT !== 'prod';
-    }
-
-    // Default to false if we can't determine
-    return false;
-  };
 
   const csvStringifier = createObjectCsvStringifier({
     header: [
@@ -118,7 +88,6 @@ function OnboardCommand(context) {
     profileName,
     slackContext,
   ) => {
-    // const { say, channelId } = slackContext;
     const { say } = slackContext;
     const sfnClient = new SFNClient();
 
@@ -268,19 +237,6 @@ function OnboardCommand(context) {
 
       log.info(`Site config succesfully saved for site ${siteID}`);
 
-      for (const importType of importTypes) {
-        /* eslint-disable no-await-in-loop */
-        await triggerImportRun(
-          configuration,
-          importType,
-          siteID,
-          profile.imports[importType].startDate,
-          profile.imports[importType].endDate,
-          slackContext,
-          context,
-        );
-      }
-
       log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
 
       const auditTypes = Object.keys(profile.audits);
@@ -294,62 +250,46 @@ function OnboardCommand(context) {
 
       await say(`Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits} for site ${siteID}`);
 
-      // Get the site's top pages for scraping
-      let topPages = [];
-
-      try {
-        // Try to retrieve the latest site pages from the data store
-        const result = await site.getSiteTopPagesBySourceAndGeo('ahrefs', 'global');
-        topPages = result || [];
-
-        if (!isNonEmptyArray(topPages)) {
-          log.warn(`No top pages found for site ${baseURL}, using base URL only`);
-          topPages = [{ getUrl: () => baseURL }];
-        } else {
-          log.info(`Retrieved ${topPages.length} pages for site ${siteID} from ahrefs/global source`);
-        }
-      } catch (error) {
-        log.warn(`Error retrieving site pages for scraping: ${error.message}. Using base URL only.`);
-        topPages = [{ getUrl: () => baseURL }];
+      // trigger audit runs
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        await triggerAuditForSite(
+          site,
+          auditType,
+          slackContext,
+          context,
+        );
       }
 
-      // Format URLs into the expected structure and create batches
-      const urls = topPages.map((page) => ({ url: page.getUrl() }));
-      const urlBatches = [];
-      for (let i = 0; i < urls.length; i += 50) {
-        urlBatches.push(urls.slice(i, i + 50));
-      }
-
-      // Create audit jobs array - matching the format used in triggerAuditForSite
-      const auditJobs = auditTypes.map((type) => ({
-        type,
+      // Audit status job
+      const auditStatusJob = {
+        type: 'audit-status',
         siteId: siteID,
         auditContext: {
+          organizationId,
+          experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
           slackContext: {
             channelId: slackContext.channelId,
             threadTs: slackContext.threadTs,
           },
         },
-      }));
+      };
 
-      // Create scrape batches array
-      const scrapeBatches = urlBatches.map((batch) => ({
-        processingType: 'default', // Must use 'default' as in sentRunScraperMessage
-        jobId: siteID,
-        urls: batch,
-        slackContext: {
-          channelId: slackContext.channelId,
-          threadTs: slackContext.threadTs,
-        },
-      }));
+      // Disable imports and audits job
+      const disableImportAndAuditJob = {
+        type: 'disable-import-audit',
+        siteId: siteID,
+      };
 
       // Prepare and start step function workflow with the necessary parameters
       const workflowInput = {
         siteUrl: baseURL,
         imsOrgId: imsOrgID,
         organizationId,
-        scrapeBatches,
-        auditJobs,
+        siteId: siteID,
+        slackContext,
+        auditStatusJob,
+        disableImportAndAuditJob,
       };
 
       // Log the serialized input to verify it works correctly
@@ -363,27 +303,8 @@ function OnboardCommand(context) {
         name: `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
       });
       const response = await sfnClient.send(startCommand);
-      log.info(`Step Functions workflow started successfully. Execution ARN: ${response.executionArn}`);
-      await say(`:rocket: Step Functions workflow started to process ${baseURL}. This will handle scrapes and audits via direct SQS messages.`);
-      await say(`:information_source: Included ${urls.length} URLs (in ${urlBatches.length} batches) for scraping in the workflow.`);
-
-      // Generate and send demo URL to Slack
-      try {
-        const useStageUrl = isDevEnvironment(slackContext);
-        const baseUrl = useStageUrl
-          ? 'https://experience-stage.adobe.com'
-          : 'https://experience.adobe.com';
-
-        const demoUrl = `${baseUrl}/?organizationId=${reportLine.spacecatOrgId}#/@aemrefdemoshared/sites-optimizer/sites/${reportLine.siteId}/home`;
-        const demoMessage = `:link: *Demo URL for ${reportLine.site}*: ${demoUrl}`;
-        await say(demoMessage);
-        log.info(`Sent demo URL to Slack: ${demoUrl}`);
-        await say(':hourglass_flowing_sand: *Workflow started. This will handle scrapes and audits via direct SQS messages.');
-        await say(':hourglass_flowing_sand: *IMPORTANT: Need to wait for about an hour for demo url to be ready.*');
-        await say(':hourglass_flowing_sand: *IMPORTANT: Disable imports and audits after the workflow completes using slack commands.*');
-      } catch (error) {
-        log.warn(`Unable to generate demo URL: ${error.message}`);
-      }
+      log.info(`Workflow started !. Response: ${response}`);
+      await say(`:hourglass_flowing_sand: Workflow started !. Response: ${response}`);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -507,8 +428,7 @@ function OnboardCommand(context) {
 
         const message = `
         *:spacecat: :satellite: Onboarding workflow started for ${reportLine.site}*
-        This workflow will automatically handle imports, scrapes, and audits in the background.
-        :information_source: Note: You will need to manually disable imports and audits after the workflow completes.
+        This workflow automatically handles imports, scrapes, and audits in the background.
         :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
         :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
         :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
@@ -521,24 +441,6 @@ function OnboardCommand(context) {
         `;
 
         await say(message);
-
-        // Generate and send demo URL to Slack
-        try {
-          const useStageUrl = isDevEnvironment(slackContext);
-          const baseUrl = useStageUrl
-            ? 'https://experience-stage.adobe.com'
-            : 'https://experience.adobe.com';
-
-          const demoUrl = `${baseUrl}/?organizationId=${reportLine.spacecatOrgId}#/@aemrefdemoshared/sites-optimizer/sites/${reportLine.siteId}/home`;
-          const demoMessage = `:link: *Demo URL for ${reportLine.site}*: ${demoUrl}`;
-          await say(demoMessage);
-          log.info(`Sent demo URL to Slack: ${demoUrl}`);
-          await say(':hourglass_flowing_sand: *Workflow started. This will handle scrapes and audits via direct SQS messages.');
-          await say(':hourglass_flowing_sand: *IMPORTANT: Need to wait for about an hour for demo url to be ready.*');
-          await say(':hourglass_flowing_sand: *IMPORTANT: Disable imports and audits after the workflow completes using slack commands.*');
-        } catch (error) {
-          log.warn(`Unable to generate demo URL: ${error.message}`);
-        }
       }
     } catch (error) {
       log.error(error);
