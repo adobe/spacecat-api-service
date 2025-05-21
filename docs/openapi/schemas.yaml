@@ -2675,6 +2675,40 @@ CreateAsyncJobAcceptedResponse:
       format: uri
       description: URL to poll for job status
 
+ScrapedContentResponse:
+  type: array
+  description: Collection of scraped content files with metadata
+  items:
+    type: object
+    properties:
+      key:
+        type: string
+        description: Full path of the file relative to the content type root directory
+      name:
+        type: string
+        description: Name of the file
+      size:
+        type:
+          - integer
+          - "null"
+        description: File size in bytes
+      lastModified:
+        type:
+          - string
+          - "null"
+        format: date-time
+        description: Timestamp of the last file modification
+  example:
+    - key: "about-us/scrape.json"
+      name: "scrape.json"
+      size: 2048
+      lastModified: "2025-04-11T00:44:31Z"
+    - key: "about-us/screenshot-desktop-fullpage.png"
+      name: "screenshot-desktop-fullpage.png"
+      size: 123456
+      lastModified: "2025-04-11T00:44:31Z"
+
+
 FixStatus:
   description: |
     Fix Status

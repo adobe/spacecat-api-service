@@ -150,6 +150,36 @@ suggestionId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+scrapeType:
+  name: scrapeType
+  description: The type of scrape (forms, site)
+  in: query
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'forms'
+      - 'site'
+screenshotType:
+  name: type
+  description: The type of screenshot to retrieve (fullpage or thumbnail)
+  in: query
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'fullpage'
+      - 'thumbnail'
+screenshotDevice:
+  name: device
+  description: The device to use for the screenshot
+  in: query
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'desktop'
+      - 'iphone 6'
 fixId:
   name: fixId
   description: The fix ID in uuid format
