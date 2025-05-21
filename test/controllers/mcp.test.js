@@ -59,6 +59,30 @@ describe('MCP Controller', () => {
     expect(names).to.include('echo');
   });
 
+  it('lists configured resources via JSON-RPC', async () => {
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/templates/list',
+      params: {},
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+    const { resourceTemplates } = body.result;
+    expect(resourceTemplates).to.be.an('array');
+
+    const siteResource = resourceTemplates.find((r) => r.name === 'site');
+    expect(siteResource).to.exist;
+    expect(siteResource).to.have.property('uriTemplate');
+    expect(siteResource.uriTemplate).to.equal('sites://{siteId}');
+    expect(siteResource).to.have.property('mimeType', 'application/json');
+  });
+
   it('executes echo tool', async () => {
     const payload = {
       jsonrpc: '2.0',

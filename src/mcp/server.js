@@ -61,8 +61,9 @@ export async function getSdkServer(registry) {
     for (const [name, def] of Object.entries(resources)) {
       server.resource(
         name,
-        def.description,
-        def.inputSchema?.shape || def.inputSchema,
+        def.template,
+        def.metadata,
+        def.provider,
       );
     }
 

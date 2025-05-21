@@ -67,6 +67,28 @@ export function buildRegistry({ sitesController } = {}) {
     }, args),
   });
 
+  const createProxyResourceTemplate = ({
+    name,
+    template,
+    metadata,
+    fetchFn,
+    notFoundMessage,
+  }) => ({
+    name,
+    template,
+    metadata,
+    handler: async (args) => withRpcErrorBoundary(async () => {
+      const response = await fetchFn(args);
+      const payload = await unwrapControllerResponse(response, {
+        notFoundMessage: notFoundMessage(args),
+        context: args,
+      });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+      };
+    }, args),
+  });
+
   /* -------------------- getSite by UUID -------------------- */
   const getSiteTool = sitesController ? createProxyTool({
     description: 'Returns site details for the given UUID.',
@@ -90,6 +112,17 @@ export function buildRegistry({ sitesController } = {}) {
     notFoundMessage: ({ baseURL }) => `Site with base URL ${baseURL} not found`,
   }) : undefined;
 
+  const getSiteResourceTemplate = createProxyResourceTemplate({
+    name: 'site',
+    template: new ResourceTemplate('sites://{siteId}', { list: undefined }),
+    metadata: {
+      description: 'Returns site details for the given UUID.',
+      mimeType: 'application/json',
+    },
+    fetchFn: ({ siteId }) => sitesController.getByID({ params: { siteId } }),
+    notFoundMessage: ({ siteId }) => `Site ${siteId} not found`,
+  });
+
   const tools = {
     echo: echoTool,
     ...(getSiteTool ? { getSite: getSiteTool } : {}),
@@ -97,13 +130,7 @@ export function buildRegistry({ sitesController } = {}) {
   };
 
   const resources = {
-    site: {
-      name: 'site',
-      template: new ResourceTemplate('sites://{siteId}', { list: undefined }),
-      async(_, { siteId }) {
-        return sitesController.getByID({ params: { siteId } });
-      },
-    },
+    ...(getSiteResourceTemplate ? { site: getSiteResourceTemplate } : {}),
   };
 
   return {
