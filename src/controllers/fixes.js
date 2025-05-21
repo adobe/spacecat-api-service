@@ -53,15 +53,6 @@ export class FixesController {
     this.#FixEntity = dataAccess.FixEntity;
     this.#Opportunity = dataAccess.Opportunity;
     this.#Suggestion = dataAccess.Suggestion;
-
-    this.getAllForOpportunity = this.getAllForOpportunity.bind(this);
-    this.getByStatus = this.getByStatus.bind(this);
-    this.getByID = this.getByID.bind(this);
-    this.getAllSuggestionsForFix = this.getAllSuggestionsForFix.bind(this);
-    this.createFixes = this.createFixes.bind(this);
-    this.patchFixesStatus = this.patchFixesStatus.bind(this);
-    this.patchFix = this.patchFix.bind(this);
-    this.removeFix = this.removeFix.bind(this);
   }
 
   /**

@@ -167,14 +167,14 @@ export default function getRouteHandlers(
     'POST /screenshots': demoController.takeScreenshots,
 
     // Fixes
-    'GET /sites/:siteId/opportunities/:opportunityId/fixes': fixesController.getAllForOpportunity,
-    'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': fixesController.getByStatus,
-    'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': fixesController.getByID,
-    'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': fixesController.getAllSuggestionsForFix,
-    'POST /sites/:siteId/opportunities/:opportunityId/fixes': fixesController.createFixes,
-    'PATCH /sites/:siteId/opportunities/:opportunityId/status': fixesController.patchFixesStatus,
-    'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': fixesController.patchFix,
-    'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': fixesController.removeFix,
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': (c) => fixesController.getAllSuggestionsForFix(c),
+    'POST /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.createFixes(c),
+    'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
+    'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
+    'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
   };
 
   // Initialization of static and dynamic routes
