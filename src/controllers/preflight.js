@@ -77,7 +77,7 @@ function PreflightController(ctx, log, env) {
       throw new Error('Invalid request: all urls must belong to the same website');
     }
 
-    if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data.step)) {
+    if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data.step.toLowerCase())) {
       throw new Error(`Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`);
     }
   }
@@ -102,8 +102,9 @@ function PreflightController(ctx, log, env) {
 
     try {
       const isDev = env.AWS_ENV === 'dev';
+      const step = data.step.toLowerCase();
 
-      log.info(`Creating preflight job for ${data.urls.length} URLs with step: ${data.step}`);
+      log.info(`Creating preflight job for ${data.urls.length} URLs with step: ${step}`);
 
       const url = new URL(data.urls[0]);
       const baseURL = `${url.protocol}//${url.hostname}`;
@@ -119,7 +120,7 @@ function PreflightController(ctx, log, env) {
           payload: {
             siteId: site.getId(),
             urls: data.urls,
-            step: data.step,
+            step,
           },
           jobType: 'preflight',
           tags: ['preflight'],
