@@ -265,8 +265,6 @@ function OpportunitiesController(ctx) {
       }
       if (hasUpdates) {
         opportunity.setUpdatedBy(profile.email);
-        log.info(`Updating opportunity by user which have ims as ${profile.email} and 
-          real profile is ${context.imsClient.getImsAdminProfile(profile.email)}`);
         const updatedOppty = await opportunity.save(opportunity);
         return ok(OpportunityDto.toJSON(updatedOppty));
       }

@@ -383,10 +383,6 @@ describe('Opportunities Controller', () => {
         tags: ['tag1', 'tag2', 'NEW'],
         updatedBy: 'test@test.com',
       },
-      log: mockContext.log,
-      imsClient: {
-        getImsAdminProfile: sandbox.stub().returns('test-admin-profile'),
-      },
     });
 
     // Validate updated values
@@ -501,9 +497,6 @@ describe('Opportunities Controller', () => {
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'APPROVED' },
       log: mockContext.log,
-      imsClient: {
-        getImsAdminProfile: sandbox.stub().returns('test-admin-profile'),
-      },
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
