@@ -75,7 +75,7 @@
     "@adobe/spacecat-shared-data-access": "https://gitpkg.vercel.app/adobe/spacecat-shared/packages/spacecat-shared-data-access?SITES-31570-1",
     "@adobe/spacecat-shared-gpt-client": "1.5.11",
     "@adobe/spacecat-shared-http-utils": "1.10.6",
-    "@adobe/spacecat-shared-ims-client": "1.7.5",
+    "@adobe/spacecat-shared-ims-client": "https://gitpkg.vercel.app/adobe/spacecat-shared/packages/spacecat-shared-ims-client?SITES-31570-1",
     "@adobe/spacecat-shared-rum-api-client": "2.24.2",
     "@adobe/spacecat-shared-slack-client": "1.5.14",
     "@adobe/spacecat-shared-utils": "1.37.4",

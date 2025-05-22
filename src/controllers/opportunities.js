@@ -185,7 +185,7 @@ function OpportunitiesController(ctx) {
       const oppty = await Opportunity.create(context.data);
       return createResponse(OpportunityDto.toJSON(oppty), 201);
     } catch (e) {
-      return handleDataAccessError(e, `Error creating opportunity: ${e.message}`);
+      return handleDataAccessError(e, 'Error creating opportunity');
     }
   };
 
@@ -265,6 +265,8 @@ function OpportunitiesController(ctx) {
       }
       if (hasUpdates) {
         opportunity.setUpdatedBy(profile.email);
+        log.info(`Updating opportunity by user which have ims as ${profile.email} and 
+          real profile is ${context.imsClient.getImsAdminProfile(profile.email)}`);
         const updatedOppty = await opportunity.save(opportunity);
         return ok(OpportunityDto.toJSON(updatedOppty));
       }
