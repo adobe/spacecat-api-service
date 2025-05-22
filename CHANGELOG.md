@@ -1,3 +1,10 @@
+# [1.111.0](https://github.com/adobe/spacecat-api-service/compare/v1.110.2...v1.111.0) (2025-05-22)
+
+
+### Features
+
+* [Preflight] Split identify and suggest flows ([#924](https://github.com/adobe/spacecat-api-service/issues/924)) ([68dfffa](https://github.com/adobe/spacecat-api-service/commit/68dfffa87977cdd4dc5cd2c9d4cb54933334815b))
+
 ## [1.110.2](https://github.com/adobe/spacecat-api-service/compare/v1.110.1...v1.110.2) (2025-05-21)
 
 
