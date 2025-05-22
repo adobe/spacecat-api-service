@@ -42,6 +42,7 @@ export const TOOL_ERROR_CODES = {
 // MIME types
 export const MIME_TYPES = {
   JSON: 'application/json',
+  TEXT: 'text/plain',
 };
 
 // Map controller HTTP status codes to JSON-RPC error codes
@@ -190,8 +191,8 @@ export const createProxyTool = ({
     });
     return {
       content: [{
-        type: MIME_TYPES.JSON,
-        data: payload,
+        type: MIME_TYPES.TEXT,
+        text: JSON.stringify(payload),
       }],
     };
   }, args),
@@ -228,10 +229,15 @@ export const createProxyResource = ({
       notFoundMessage: notFoundMessage(args),
       context: args,
     });
+
+    // Construct the full URI from the template and args
+    const uri = uriTemplate.replace(/\{(\w+)\}/g, (_, key) => args[key]);
+
     return {
       contents: [{
-        type: MIME_TYPES.JSON,
-        data: payload,
+        uri,
+        mimeType: MIME_TYPES.JSON,
+        text: JSON.stringify(payload),
       }],
     };
   }, args),
