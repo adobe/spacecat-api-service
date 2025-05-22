@@ -17,7 +17,7 @@ import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMockResponse } from '../mcp/http-adapter.js';
 import { getSdkServer, closeSdkServer } from '../mcp/server.js';
-import { checkBodySize } from '../utils/validations.js';
+import { checkBodySize, MAX_BODY_SIZE } from '../utils/validations.js';
 import { createJsonRpcErrorResponse, JSON_RPC_ERROR_CODES } from '../utils/jsonrpc.js';
 
 export default function McpController(ctx, registry) {
@@ -35,8 +35,6 @@ export default function McpController(ctx, registry) {
   /* ----- JSON-RPC endpoint ----- */
   const handleRpc = async (context) => {
     try {
-      const MAX_BODY_SIZE = 4 * 1024 * 1024; // 4 MB
-
       if (!checkBodySize(context.data, MAX_BODY_SIZE)) {
         return createJsonRpcErrorResponse({
           id: context?.data?.id ?? null,

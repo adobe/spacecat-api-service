@@ -84,7 +84,7 @@
     "@langchain/core": "0.3.56",
     "@langchain/langgraph": "0.2.72",
     "@langchain/openai": "0.5.10",
-    "@modelcontextprotocol/sdk": "^1.11.4",
+    "@modelcontextprotocol/sdk": "1.11.4",
     "@octokit/rest": "21.1.1",
     "@slack/bolt": "4.3.0",
     "@slack/web-api": "7.9.1",

@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+const MAX_BODY_SIZE = 4 * 1024 * 1024; // 4 MB
+
 /**
  * Validates if the URL is a valid GitHub repository URL.
  *
@@ -46,6 +48,7 @@ function checkBodySize(data, maxSize) {
 }
 
 export {
+  MAX_BODY_SIZE,
   validateRepoUrl,
   checkBodySize,
 };

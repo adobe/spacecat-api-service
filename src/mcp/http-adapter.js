@@ -12,6 +12,7 @@
 
 /* c8 ignore start */
 import { Buffer } from 'buffer';
+import { MAX_BODY_SIZE } from '../utils/validations.js';
 
 export function toNodeRequest(fetchRequest) {
   const headers = {};
@@ -36,8 +37,6 @@ export function createMockResponse() {
     resolveDone = resolve;
   });
 
-  const MAX_BUFFER_SIZE = 4 * 1024 * 1024; // 4 MB
-
   return {
     writeHead(status, h = {}) {
       if (this.headersSent) {
@@ -52,7 +51,7 @@ export function createMockResponse() {
       if (!data) return;
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
       totalLength += buf.length;
-      if (totalLength > MAX_BUFFER_SIZE) {
+      if (totalLength > MAX_BODY_SIZE) {
         throw new Error('Response body exceeds maximum allowed size (4 MB)');
       }
       chunks.push(buf);
@@ -68,7 +67,7 @@ export function createMockResponse() {
     emit() {},
     on() {},
     get body() {
-      return Buffer.concat(chunks, Math.min(totalLength, MAX_BUFFER_SIZE)).toString();
+      return Buffer.concat(chunks, Math.min(totalLength, MAX_BODY_SIZE)).toString();
     },
     get status() {
       return statusCode;
