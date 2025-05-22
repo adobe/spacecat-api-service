@@ -39,6 +39,11 @@ export const TOOL_ERROR_CODES = {
   FORBIDDEN: -32030,
 };
 
+// MIME types
+export const MIME_TYPES = {
+  JSON: 'application/json',
+};
+
 // Map controller HTTP status codes to JSON-RPC error codes
 export function mapHttpStatusToRpcCode(status) {
   if (status === 400) return JSON_RPC_ERROR_CODES.INVALID_PARAMS; // validation
@@ -89,7 +94,7 @@ export async function unwrapControllerResponse(
   }
 
   const ct = response.headers.get('content-type') || '';
-  return ct.includes('application/json') ? response.json() : response.text();
+  return ct.includes(MIME_TYPES.JSON) ? response.json() : response.text();
 }
 
 /**
@@ -184,7 +189,10 @@ export const createProxyTool = ({
       context: args,
     });
     return {
-      content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+      content: [{
+        type: MIME_TYPES.JSON,
+        data: payload,
+      }],
     };
   }, args),
 });
@@ -211,15 +219,21 @@ export const createProxyResource = ({
   name,
   metadata: {
     description,
-    mimeType: 'application/json',
+    mimeType: MIME_TYPES.JSON,
   },
   uriTemplate: new ResourceTemplate(uriTemplate, { list: undefined }),
   provider: async (_, args) => withRpcErrorBoundary(async () => {
     const response = await fetchFn(args);
-    return unwrapControllerResponse(response, {
+    const payload = await unwrapControllerResponse(response, {
       notFoundMessage: notFoundMessage(args),
       context: args,
     });
+    return {
+      contents: [{
+        type: MIME_TYPES.JSON,
+        data: payload,
+      }],
+    };
   }, args),
 });
 
@@ -232,6 +246,7 @@ export default {
   mapHttpStatusToRpcCode,
   createProxyTool,
   createProxyResource,
+  MIME_TYPES,
 };
 
 /* c8 ignore end */

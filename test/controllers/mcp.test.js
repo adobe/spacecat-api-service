@@ -116,7 +116,8 @@ describe('MCP Controller', () => {
     expect(resp.status).to.equal(200);
     const body = await resp.json();
     expect(body).to.have.property('result');
-    expect(body.result).to.deep.include({
+    const [first] = body.result.contents;
+    expect(first.data).to.deep.include({
       id: 'siteId',
       name: 'siteName',
       description: 'siteDescription',
