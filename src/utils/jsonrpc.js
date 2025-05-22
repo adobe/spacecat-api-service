@@ -191,7 +191,7 @@ export const createProxyTool = ({
     });
     return {
       content: [{
-        type: MIME_TYPES.TEXT,
+        type: 'text',
         text: JSON.stringify(payload),
       }],
     };
