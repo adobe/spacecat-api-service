@@ -119,24 +119,6 @@ export async function withRpcErrorBoundary(fn, context = {}) {
 }
 
 /**
- * Maps error codes to HTTP status when caller explicitly requests it.
- * By default JSON-RPC error responses will use HTTP 200, because the
- * transport succeeded and only the RPC layer reported an error.
- *
- * @param {number} code – JSON-RPC error code.
- * @returns {number}
- */
-function mapErrorCodeToStatus(code) {
-  if (code === JSON_RPC_ERROR_CODES.METHOD_NOT_FOUND) return 404;
-  if ([
-    JSON_RPC_ERROR_CODES.PARSE_ERROR,
-    JSON_RPC_ERROR_CODES.INVALID_REQUEST,
-    JSON_RPC_ERROR_CODES.INVALID_PARAMS,
-  ].includes(code)) return 400;
-  return 500;
-}
-
-/**
  * Build a JSON-RPC 2.0 compliant error `Response`.
  *
  * @param {object} options
@@ -236,7 +218,7 @@ export const createProxyResource = ({
     return {
       contents: [{
         uri,
-        mimeType: MIME_TYPES.TEXT,
+        mimeType: MIME_TYPES.JSON,
         text: JSON.stringify(payload),
       }],
     };
@@ -244,12 +226,7 @@ export const createProxyResource = ({
 });
 
 export default {
-  createJsonRpcErrorResponse,
-  mapErrorCodeToStatus,
   TOOL_ERROR_CODES,
-  unwrapControllerResponse,
-  withRpcErrorBoundary,
-  mapHttpStatusToRpcCode,
   createProxyTool,
   createProxyResource,
   MIME_TYPES,

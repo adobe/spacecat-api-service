@@ -24,7 +24,9 @@ export function createSiteResources(sitesController) {
       name: 'site',
       description: 'Returns site details for the given UUID.',
       uriTemplate: 'spacecat-data://sites/{siteId}',
-      fetchFn: ({ siteId }) => sitesController.getByID({ params: { siteId } }),
+      fetchFn: ({ siteId }) => sitesController.getByID({
+        params: { siteId },
+      }),
       notFoundMessage: ({ siteId }) => `Site ${siteId} not found`,
     }),
     siteByBaseURL: createProxyResource({
