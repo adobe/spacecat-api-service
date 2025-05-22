@@ -23,14 +23,14 @@ export function createSiteResources(sitesController) {
     site: createProxyResource({
       name: 'site',
       description: 'Returns site details for the given UUID.',
-      uriTemplate: 'sites://{siteId}',
+      uriTemplate: 'spacecat-data://sites/{siteId}',
       fetchFn: ({ siteId }) => sitesController.getByID({ params: { siteId } }),
       notFoundMessage: ({ siteId }) => `Site ${siteId} not found`,
     }),
     siteByBaseURL: createProxyResource({
       name: 'siteByBaseURL',
       description: 'Returns site details for the given base URL (plain URL, not base64-encoded).',
-      uriTemplate: 'sites://baseurl/{baseURL}',
+      uriTemplate: 'spacecat-data://sites/by-base-url/{baseURL}',
       fetchFn: ({ baseURL }) => {
         const encoded = Buffer.from(baseURL, 'utf-8').toString('base64');
         return sitesController.getByBaseURL({ params: { baseURL: encoded } });
