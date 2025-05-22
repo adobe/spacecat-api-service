@@ -12,9 +12,10 @@
 
 /* c8 ignore start */
 
-import utilTools from './registry/tools/utils.js';
-import { createSiteTools } from './registry/tools/sites.js';
+// import { createSiteTools } from './registry/tools/sites.js';
+import { createAuditResources } from './registry/resources/audits.js';
 import { createSiteResources } from './registry/resources/sites.js';
+import utilTools from './registry/tools/utils.js';
 
 /**
  * Build the registry for the current request based on already-constructed
@@ -25,13 +26,17 @@ import { createSiteResources } from './registry/resources/sites.js';
  * @param {object} deps.sitesController – instance of the Sites controller.
  * @returns {{ tools: Record<string,object>, resources: object, prompts: object }}
  */
-export default function buildRegistry({ sitesController } = {}) {
+export default function buildRegistry({
+  auditsController,
+  sitesController,
+} = {}) {
   const tools = {
     ...utilTools,
-    ...createSiteTools(sitesController),
+    // ...createSiteTools(sitesController),
   };
 
   const resources = {
+    ...createAuditResources(auditsController),
     ...createSiteResources(sitesController),
   };
 

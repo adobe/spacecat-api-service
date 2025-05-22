@@ -113,7 +113,10 @@ async function run(request, context) {
     const demoController = DemoController(context);
 
     /* ---------- build MCP registry & controller ---------- */
-    const mcpRegistry = buildRegistry({ sitesController });
+    const mcpRegistry = buildRegistry({
+      auditsController,
+      sitesController,
+    });
     const mcpController = McpController(context, mcpRegistry);
 
     const routeHandlers = getRouteHandlers(

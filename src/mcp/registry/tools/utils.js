@@ -56,6 +56,38 @@ export default {
       }
     },
   },
+  encodeBase64: {
+    annotations: {
+      title: 'Encode Base64',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    description: 'Encodes a string to base64',
+    inputSchema: z.object({
+      text: z.string().describe('The text to encode'),
+    }).strict(),
+    handler: async ({ text }) => ({
+      content: [{ type: 'text', text: Buffer.from(text).toString('base64') }],
+    }),
+  },
+  decodeBase64: {
+    annotations: {
+      title: 'Decode Base64',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    description: 'Decodes a base64 string to a string',
+    inputSchema: z.object({
+      text: z.string().describe('The base64 text to decode'),
+    }).strict(),
+    handler: async ({ text }) => ({
+      content: [{ type: 'text', text: Buffer.from(text, 'base64').toString('utf-8') }],
+    }),
+  },
   echo: {
     annotations: {
       title: 'Echo',

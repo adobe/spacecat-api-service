@@ -26,6 +26,7 @@ describe('MCP Controller', () => {
   const sandbox = sinon.createSandbox();
   let context;
   let mcpController;
+  let auditsController;
   let sitesController;
 
   beforeEach(() => {
@@ -34,21 +35,42 @@ describe('MCP Controller', () => {
       dataAccess: {},
     };
 
+    auditsController = {
+      getLatestForSite: sandbox.stub().resolves(ok({
+        siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14',
+        auditedAt: '2024-01-20T12:00:00Z',
+        expiresAt: '2024-07-20T12:00:00Z',
+        auditType: 'cwv',
+        isError: false,
+        deliveryType: 'aem_edge',
+        fullAuditRef: 'https://some-audit-system/full-report/1234',
+        auditResult: {
+          someProperty: 'someValue',
+        },
+        previousAuditResult: {
+          someProperty: 'somePreviousValue',
+        },
+      })),
+    };
+
     sitesController = {
       getByID: sandbox.stub().resolves(ok({
-        id: 'siteId',
+        siteId: 'siteId',
         name: 'siteName',
         description: 'siteDescription',
         baseURL: 'https://example.com',
       })),
       getByBaseURL: sandbox.stub().resolves(ok({
-        id: 'siteId',
+        siteId: 'siteId',
         name: 'siteName',
         description: 'siteDescription',
         baseURL: 'https://example.com',
       })),
     };
-    const registry = buildRegistry({ sitesController });
+    const registry = buildRegistry({
+      auditsController,
+      sitesController,
+    });
     mcpController = McpController(context, registry);
   });
 
@@ -118,7 +140,7 @@ describe('MCP Controller', () => {
     expect(body).to.have.property('result');
     const [first] = body.result.contents;
     expect(JSON.parse(first.text)).to.deep.include({
-      id: 'siteId',
+      siteId: 'siteId',
       name: 'siteName',
       description: 'siteDescription',
       baseURL: 'https://example.com',
@@ -146,7 +168,7 @@ describe('MCP Controller', () => {
     const [first] = body.result.contents;
     expect(first).to.have.property('uri', `spacecat-data://sites/by-base-url/${baseURLBase64}`);
     expect(JSON.parse(first.text)).to.deep.include({
-      id: 'siteId',
+      siteId: 'siteId',
       name: 'siteName',
       description: 'siteDescription',
       baseURL: 'https://example.com',
