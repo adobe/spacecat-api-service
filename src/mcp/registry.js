@@ -15,6 +15,8 @@
 // import { createSiteTools } from './registry/tools/sites.js';
 import { createAuditResources } from './registry/resources/audits.js';
 import { createSiteResources } from './registry/resources/sites.js';
+import { createSiteTools } from './registry/tools/sites.js';
+import { createAuditTools } from './registry/tools/audits.js';
 import utilTools from './registry/tools/utils.js';
 
 /**
@@ -32,7 +34,8 @@ export default function buildRegistry({
 } = {}) {
   const tools = {
     ...utilTools,
-    // ...createSiteTools(sitesController),
+    ...createAuditTools(auditsController),
+    ...createSiteTools(sitesController),
   };
 
   const resources = {

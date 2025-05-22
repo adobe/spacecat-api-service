@@ -175,6 +175,43 @@ describe('MCP Controller', () => {
     });
   });
 
+  it('retrieves latest audit by audit type and site ID', async () => {
+    const siteId = 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14';
+    const auditType = 'cwv';
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/read',
+      params: {
+        uri: `spacecat-data://audits/latest/${auditType}/${siteId}`,
+      },
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+    const [first] = body.result.contents;
+    expect(first).to.have.property('uri', `spacecat-data://audits/latest/${auditType}/${siteId}`);
+    expect(JSON.parse(first.text)).to.deep.include({
+      siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14',
+      auditedAt: '2024-01-20T12:00:00Z',
+      expiresAt: '2024-07-20T12:00:00Z',
+      auditType: 'cwv',
+      isError: false,
+      deliveryType: 'aem_edge',
+      fullAuditRef: 'https://some-audit-system/full-report/1234',
+      auditResult: {
+        someProperty: 'someValue',
+      },
+      previousAuditResult: {
+        someProperty: 'somePreviousValue',
+      },
+    });
+  });
+
   it('executes echo tool', async () => {
     const payload = {
       jsonrpc: '2.0',
