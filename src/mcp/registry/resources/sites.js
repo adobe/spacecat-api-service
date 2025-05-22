@@ -38,6 +38,15 @@ export function createSiteResources(sitesController) {
       }),
       notFoundMessage: ({ baseURLBase64 }) => `Site with base URL ${baseURLBase64} not found`,
     }),
+    siteMetricsBySource: createProxyResource({
+      name: 'siteMetricsBySource',
+      description: 'Returns site metrics for the given site ID, metric, and source.',
+      uriTemplate: 'spacecat-data://sites/{siteId}/metrics/{metric}/{source}',
+      fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource({
+        params: { siteId, metric, source },
+      }),
+      notFoundMessage: ({ siteId, metric, source }) => `Metrics for site ${siteId}, metric ${metric}, and source ${source} not found`,
+    }),
   };
 }
 

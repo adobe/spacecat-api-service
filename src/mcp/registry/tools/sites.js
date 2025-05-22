@@ -57,9 +57,24 @@ export function createSiteTools(sitesController) {
     notFoundMessage: ({ baseURL }) => `Site with base URL ${baseURL} not found`,
   });
 
+  /* ------------- getSiteMetricsBySource ---------------- */
+  const getSiteMetricsBySourceTool = createProxyTool({
+    name: 'getSiteMetricsBySource',
+    description: 'Returns site metrics for the given site ID, metric, and source.',
+    inputSchema: {
+      siteId: z.string().uuid().describe('The ID of the site'),
+      metric: z.enum(['organic-keywords', 'organic-traffic', 'all-traffic']).describe('The metric to retrieve. For ahrefs source: organic-keywords, organic-traffic. For rum source: all-traffic'),
+      source: z.enum(['ahrefs', 'rum']).describe('The source of the metrics. Supported sources: ahrefs, rum'),
+    },
+    fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource({
+      params: { siteId, metric, source },
+    }),
+    notFoundMessage: ({ siteId, metric, source }) => `Metrics for site ${siteId}, metric ${metric}, and source ${source} not found`,
+  });
   return {
     getSite: getSiteTool,
     getSiteByBaseURL: getSiteByBaseURLTool,
+    getSiteMetricsBySource: getSiteMetricsBySourceTool,
   };
 }
 

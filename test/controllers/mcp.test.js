@@ -66,6 +66,19 @@ describe('MCP Controller', () => {
         description: 'siteDescription',
         baseURL: 'https://example.com',
       })),
+      getSiteMetricsBySource: sandbox.stub().resolves(ok([{
+        siteId: '123',
+        source: 'ahrefs',
+        time: '2023-03-12T00:00:00Z',
+        metric: 'organic-traffic',
+        value: 100,
+      }, {
+        siteId: '123',
+        source: 'ahrefs',
+        time: '2023-03-13T00:00:00Z',
+        metric: 'organic-traffic',
+        value: 200,
+      }])),
     };
     const registry = buildRegistry({
       auditsController,
@@ -210,6 +223,42 @@ describe('MCP Controller', () => {
         someProperty: 'somePreviousValue',
       },
     });
+  });
+
+  it('retrieves site metrics by source', async () => {
+    const siteId = 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14';
+    const metric = 'organic-traffic';
+    const source = 'ahrefs';
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/read',
+      params: {
+        uri: `spacecat-data://sites/${siteId}/metrics/${metric}/${source}`,
+      },
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+    const [first] = body.result.contents;
+    expect(first).to.have.property('uri', `spacecat-data://sites/${siteId}/metrics/${metric}/${source}`);
+    expect(JSON.parse(first.text)).to.deep.equal([{
+      siteId: '123',
+      source: 'ahrefs',
+      time: '2023-03-12T00:00:00Z',
+      metric: 'organic-traffic',
+      value: 100,
+    }, {
+      siteId: '123',
+      source: 'ahrefs',
+      time: '2023-03-13T00:00:00Z',
+      metric: 'organic-traffic',
+      value: 200,
+    }]);
   });
 
   it('executes echo tool', async () => {
