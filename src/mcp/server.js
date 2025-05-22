@@ -12,6 +12,7 @@
 
 /* c8 ignore start */
 
+import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 /*  A singleton SDK server – reused across requests (cold-start friendly). */
@@ -32,40 +33,19 @@ export async function getSdkServer(registry) {
   }
 
   sdkServerInitPromise = (async () => {
-    const { resources = {}, prompts = {}, tools = {} } = registry;
+    const { prompts = {} } = registry;
 
-    if (Object.keys(prompts).length > 0) {
+    if (isNonEmptyObject(prompts)) {
       throw new Error('MCP prompts wiring not yet implemented');
     }
 
     const server = new McpServer({
-      name: 'SpaceCat-API',
+      name: 'SpaceCat-MCP',
       version: '1.0.0',
     });
 
-    /* ----------  register tools  ---------- */
-    for (const [name, def] of Object.entries(tools)) {
-      server.registerTool(
-        name,
-        {
-          description: def.description,
-          inputSchema: def.inputSchema?.shape || def.inputSchema,
-          outputSchema: def.outputSchema ? def.outputSchema.shape : undefined,
-          annotations: def.annotations,
-        },
-        def.handler,
-      );
-    }
-
-    /* ----------  register resources  ---------- */
-    for (const [name, def] of Object.entries(resources)) {
-      server.resource(
-        name,
-        def.uriTemplate,
-        def.metadata,
-        def.provider,
-      );
-    }
+    // Register all tools and resources with the server
+    registry.registerWithServer(server);
 
     sdkServer = server;
     sdkServerInitPromise = null;

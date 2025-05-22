@@ -12,7 +12,7 @@
 
 /* c8 ignore start */
 
-import { echoTool } from './registry/tools/utils.js';
+import utilTools from './registry/tools/utils.js';
 import { createSiteTools } from './registry/tools/sites.js';
 import { createSiteResources } from './registry/resources/sites.js';
 
@@ -27,7 +27,7 @@ import { createSiteResources } from './registry/resources/sites.js';
  */
 export default function buildRegistry({ sitesController } = {}) {
   const tools = {
-    echo: echoTool,
+    ...utilTools,
     ...createSiteTools(sitesController),
   };
 
@@ -39,6 +39,35 @@ export default function buildRegistry({ sitesController } = {}) {
     tools,
     resources,
     prompts: {},
+    /**
+     * Register all tools and resources with an MCP server instance.
+     * @param {McpServer} server – the MCP server instance to register with.
+     */
+    registerWithServer(server) {
+      /* ----------  register tools  ---------- */
+      for (const [name, def] of Object.entries(this.tools)) {
+        server.registerTool(
+          name,
+          {
+            description: def.description,
+            inputSchema: def.inputSchema ? def.inputSchema.shape : undefined,
+            outputSchema: def.outputSchema ? def.outputSchema.shape : undefined,
+            annotations: def.annotations,
+          },
+          def.handler,
+        );
+      }
+
+      /* ----------  register resources  ---------- */
+      for (const [name, def] of Object.entries(this.resources)) {
+        server.resource(
+          name,
+          def.uriTemplate,
+          def.metadata,
+          def.provider,
+        );
+      }
+    },
   };
 }
 

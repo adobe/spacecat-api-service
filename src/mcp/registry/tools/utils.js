@@ -14,48 +14,63 @@
 
 import { z } from 'zod';
 
-export const echoTool = {
-  description: 'Echoes back the input string',
-  inputSchema: z.object({
-    message: z.string().describe('Message to echo back'),
-  }).strict(),
-  handler: async ({ message }) => ({
-    content: [{ type: 'text', text: String(message) }],
-  }),
-};
+export default {
+  characterCount: {
+    annotations: {
+      title: 'Character Count',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    description: 'Counts the number of characters, words, and sentences in a given text. Useful for comparing lengths of initial and recommended texts.',
+    inputSchema: z.object({
+      text: z.string().describe('The text to analyze'),
+    }).strict(),
+    handler: async ({ text }) => {
+      if (!text) {
+        return {
+          content: [{ type: 'text', text: 'Error: Text is required' }],
+        };
+      }
 
-export const characterCountTool = {
-  description: 'Counts the number of characters, words, and sentences in a given text. Useful for comparing lengths of initial and recommended texts.',
-  inputSchema: z.object({
-    text: z.string().describe('The text to analyze'),
-  }).strict(),
-  handler: async ({ text }) => {
-    if (!text) {
-      return {
-        content: [{ type: 'text', text: 'Error: Text is required' }],
-      };
-    }
+      try {
+        const charCount = text.length;
+        const wordCount = text.split(/\s+/).filter(Boolean).length;
 
-    try {
-      const charCount = text.length;
-      const wordCount = text.split(/\s+/).filter(Boolean).length;
+        // Count sentences by splitting on period, exclamation mark, or question mark
+        // followed by a space or end of string
+        const sentences = text.split(/[.!?]+(?:\s+|$)/).filter(Boolean);
+        const sentenceCount = sentences.length;
 
-      // Count sentences by splitting on period, exclamation mark, or question mark
-      // followed by a space or end of string
-      const sentences = text.split(/[.!?]+(?:\s+|$)/).filter(Boolean);
-      const sentenceCount = sentences.length;
-
-      return {
-        content: [{
-          type: 'text',
-          text: `Text '${text}' has: ${charCount} characters, ${wordCount} words, and ${sentenceCount} sentences`,
-        }],
-      };
-    } catch (error) {
-      return {
-        content: [{ type: 'text', text: `Error counting text elements: ${error.message}` }],
-      };
-    }
+        return {
+          content: [{
+            type: 'text',
+            text: `Text '${text}' has: ${charCount} characters, ${wordCount} words, and ${sentenceCount} sentences`,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: `Error counting text elements: ${error.message}` }],
+        };
+      }
+    },
+  },
+  echo: {
+    annotations: {
+      title: 'Echo',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    description: 'Echoes back the input string',
+    inputSchema: z.object({
+      message: z.string().describe('Message to echo back'),
+    }).strict(),
+    handler: async ({ message }) => ({
+      content: [{ type: 'text', text: String(message) }],
+    }),
   },
 };
 

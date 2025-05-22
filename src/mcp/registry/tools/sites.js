@@ -22,6 +22,13 @@ export function createSiteTools(sitesController) {
 
   /* -------------------- getSite by UUID -------------------- */
   const getSiteTool = createProxyTool({
+    annotations: {
+      title: 'Get Site by ID',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     description: 'Returns site details for the given UUID.',
     inputSchema: z.object({
       siteId: z.string().uuid().describe('The UUID of the site to fetch'),
@@ -32,6 +39,13 @@ export function createSiteTools(sitesController) {
 
   /* ------------- getSiteByBaseURL ---------------- */
   const getSiteByBaseURLTool = createProxyTool({
+    annotations: {
+      title: 'Get Site by Base URL',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     description: 'Returns site details for the given base URL (plain URL, not base64-encoded).',
     inputSchema: z.object({
       baseURL: z.string().url().describe('The base URL of the site to fetch'),
