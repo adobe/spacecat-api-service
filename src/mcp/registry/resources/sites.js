@@ -14,7 +14,7 @@
 
 import { createProxyResource } from '../../../utils/jsonrpc.js';
 
-export function createSiteResources(sitesController) {
+export function createSiteResources(sitesController, context) {
   if (!sitesController) {
     return {};
   }
@@ -42,9 +42,10 @@ export function createSiteResources(sitesController) {
       name: 'siteMetricsBySource',
       description: 'Returns site metrics for the given site ID, metric, and source. The following sources are supported: "ahrefs" and "rum". For the "ahrefs" source, the following metrics are supported: "organic-keywords" and "organic-traffic". For the "rum" source, the following metrics are supported: "all-traffic".',
       uriTemplate: 'spacecat-data://sites/{siteId}/metrics/{metric}/{source}',
-      fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource({
-        params: { siteId, metric, source },
-      }),
+      fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource(
+        { params: { siteId, metric, source } },
+        context,
+      ),
       notFoundMessage: ({ siteId, metric, source }) => `Metrics for site ${siteId}, metric ${metric}, and source ${source} not found`,
     }),
   };

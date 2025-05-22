@@ -24,22 +24,25 @@ import utilTools from './registry/tools/utils.js';
  * handlers and allows unit tests to supply stubs easily.
  *
  * @param {object} deps – bag of dependencies.
+ * @param {object} deps.auditsController – instance of the Audits controller.
  * @param {object} deps.sitesController – instance of the Sites controller.
+ * @param {object} deps.context – the context object.
  * @returns {{ tools: Record<string,object>, resources: object, prompts: object }}
  */
 export default function buildRegistry({
   auditsController,
   sitesController,
+  context,
 } = {}) {
   const tools = {
     ...utilTools,
     ...createAuditTools(auditsController),
-    ...createSiteTools(sitesController),
+    ...createSiteTools(sitesController, context),
   };
 
   const resources = {
     ...createAuditResources(auditsController),
-    ...createSiteResources(sitesController),
+    ...createSiteResources(sitesController, context),
   };
 
   return {

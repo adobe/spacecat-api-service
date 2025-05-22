@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { createProxyTool } from '../../../utils/jsonrpc.js';
 
-export function createSiteTools(sitesController) {
+export function createSiteTools(sitesController, context) {
   if (!sitesController) {
     return {};
   }
@@ -66,9 +66,10 @@ export function createSiteTools(sitesController) {
       metric: z.enum(['organic-keywords', 'organic-traffic', 'all-traffic']).describe('The metric to retrieve. For ahrefs source: organic-keywords, organic-traffic. For rum source: all-traffic'),
       source: z.enum(['ahrefs', 'rum']).describe('The source of the metrics. Supported sources: ahrefs, rum'),
     }).strict(),
-    fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource({
-      params: { siteId, metric, source },
-    }),
+    fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource(
+      { params: { siteId, metric, source } },
+      context,
+    ),
     notFoundMessage: ({ siteId, metric, source }) => `Metrics for site ${siteId}, metric ${metric}, and source ${source} not found`,
   });
   return {

@@ -83,6 +83,7 @@ describe('MCP Controller', () => {
     const registry = buildRegistry({
       auditsController,
       sitesController,
+      context,
     });
     mcpController = McpController(context, registry);
   });
