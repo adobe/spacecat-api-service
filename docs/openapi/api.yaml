@@ -140,9 +140,9 @@ paths:
   /sites/{siteId}/key-events/{keyEventId}:
     $ref: './key-event-api.yaml#/key-event'
   /sites/{siteId}/scraped-content/{type}:
-    $ref: './site-scrape-api.yaml#/scraped-content-type'
+    $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
-    $ref: './file-api.yaml#/get-files'
+     $ref: './scrape-api.yaml#/get-files'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
