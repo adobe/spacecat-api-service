@@ -263,7 +263,7 @@ function OnboardCommand(context) {
 
       // Audit status job
       const auditStatusJob = {
-        type: 'audit-status',
+        type: 'audit-status-processor',
         siteId: siteID,
         auditContext: {
           organizationId,
