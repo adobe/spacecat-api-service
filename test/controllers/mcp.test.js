@@ -16,6 +16,7 @@ import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
+import { ok } from '@adobe/spacecat-shared-http-utils';
 import McpController from '../../src/controllers/mcp.js';
 import buildRegistry from '../../src/mcp/registry.js';
 
@@ -25,6 +26,7 @@ describe('MCP Controller', () => {
   const sandbox = sinon.createSandbox();
   let context;
   let mcpController;
+  let sitesController;
 
   beforeEach(() => {
     context = {
@@ -32,19 +34,19 @@ describe('MCP Controller', () => {
       dataAccess: {},
     };
 
-    const sitesController = {
-      getByID: sandbox.stub().resolves({
+    sitesController = {
+      getByID: sandbox.stub().resolves(ok({
         id: 'siteId',
         name: 'siteName',
         description: 'siteDescription',
         baseURL: 'https://example.com',
-      }),
-      getByBaseURL: sandbox.stub().resolves({
+      })),
+      getByBaseURL: sandbox.stub().resolves(ok({
         id: 'siteId',
         name: 'siteName',
         description: 'siteDescription',
         baseURL: 'https://example.com',
-      }),
+      })),
     };
     const registry = buildRegistry({ sitesController });
     mcpController = McpController(context, registry);
@@ -95,6 +97,31 @@ describe('MCP Controller', () => {
     expect(siteResource).to.have.property('uriTemplate');
     expect(siteResource.uriTemplate).to.equal('sites://{siteId}');
     expect(siteResource).to.have.property('mimeType', 'application/json');
+  });
+
+  it('retrieves site resource by UUID', async () => {
+    const siteId = '123e4567-e89b-12d3-a456-426614174000';
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/read',
+      params: {
+        uri: `sites://${siteId}`,
+      },
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+    expect(body.result).to.deep.include({
+      id: 'siteId',
+      name: 'siteName',
+      description: 'siteDescription',
+      baseURL: 'https://example.com',
+    });
   });
 
   it('executes echo tool', async () => {

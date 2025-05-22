@@ -19,6 +19,7 @@
  */
 
 import { createResponse } from '@adobe/spacecat-shared-http-utils';
+import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 // --- JSON-RPC 2.0 pre-defined error codes (spec §5.1) ---
 export const JSON_RPC_ERROR_CODES = {
@@ -188,6 +189,40 @@ export const createProxyTool = ({
   }, args),
 });
 
+/**
+ * Helper to create proxy resources that delegate to a controller
+ * method returning a Fetch Response.
+ *
+ * @param {object} options
+ * @param {string} options.name - Resource name
+ * @param {string} options.description - Resource description
+ * @param {string} options.uriTemplate - Resource URI template
+ * @param {Function} options.fetchFn - async (args) => Response
+ * @param {Function} options.notFoundMessage - (args) => string
+ * @returns {object} resource definition
+ */
+export const createProxyResource = ({
+  name,
+  description,
+  uriTemplate,
+  fetchFn,
+  notFoundMessage,
+}) => ({
+  name,
+  metadata: {
+    description,
+    mimeType: 'application/json',
+  },
+  uriTemplate: new ResourceTemplate(uriTemplate, { list: undefined }),
+  provider: async (_, args) => withRpcErrorBoundary(async () => {
+    const response = await fetchFn(args);
+    return unwrapControllerResponse(response, {
+      notFoundMessage: notFoundMessage(args),
+      context: args,
+    });
+  }, args),
+});
+
 export default {
   createJsonRpcErrorResponse,
   mapErrorCodeToStatus,
@@ -195,6 +230,8 @@ export default {
   unwrapControllerResponse,
   withRpcErrorBoundary,
   mapHttpStatusToRpcCode,
+  createProxyTool,
+  createProxyResource,
 };
 
 /* c8 ignore end */

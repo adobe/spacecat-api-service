@@ -12,7 +12,7 @@
 
 /* c8 ignore start */
 
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { createProxyResource } from '../../../utils/jsonrpc.js';
 
 export function createSiteResources(sitesController) {
   if (!sitesController) {
@@ -20,15 +20,13 @@ export function createSiteResources(sitesController) {
   }
 
   return {
-    site: {
+    site: createProxyResource({
       name: 'site',
-      metadata: {
-        description: 'Returns site details for the given UUID.',
-        mimeType: 'application/json',
-      },
-      uriTemplate: new ResourceTemplate('sites://{siteId}', { list: undefined }),
-      provider: async (_, { siteId }) => sitesController.getByID({ params: { siteId } }),
-    },
+      description: 'Returns site details for the given UUID.',
+      uriTemplate: 'sites://{siteId}',
+      fetchFn: ({ siteId }) => sitesController.getByID({ params: { siteId } }),
+      notFoundMessage: ({ siteId }) => `Site ${siteId} not found`,
+    }),
   };
 }
 
