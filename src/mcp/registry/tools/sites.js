@@ -67,8 +67,7 @@ export function createSiteTools(sitesController, context) {
       source: z.enum(['ahrefs', 'rum']).describe('The source of the metrics. Supported sources: ahrefs, rum'),
     }).strict(),
     fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource(
-      { params: { siteId, metric, source } },
-      context,
+      { ...context, params: { siteId, metric, source } },
     ),
     notFoundMessage: ({ siteId, metric, source }) => `Metrics for site ${siteId}, metric ${metric}, and source ${source} not found`,
   });
