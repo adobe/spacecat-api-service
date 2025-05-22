@@ -77,7 +77,7 @@ function PreflightController(ctx, log, env) {
       throw new Error('Invalid request: all urls must belong to the same website');
     }
 
-    if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data.step.toLowerCase())) {
+    if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data?.step?.toLowerCase())) {
       throw new Error(`Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`);
     }
   }
