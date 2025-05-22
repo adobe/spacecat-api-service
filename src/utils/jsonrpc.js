@@ -42,7 +42,6 @@ export const TOOL_ERROR_CODES = {
 // MIME types
 export const MIME_TYPES = {
   JSON: 'application/json',
-  TEXT: 'text/plain',
 };
 
 // Map controller HTTP status codes to JSON-RPC error codes
@@ -191,7 +190,7 @@ export const createProxyTool = ({
     });
     return {
       content: [{
-        type: MIME_TYPES.TEXT,
+        type: MIME_TYPES.JSON,
         text: JSON.stringify(payload),
       }],
     };
