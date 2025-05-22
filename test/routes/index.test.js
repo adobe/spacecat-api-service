@@ -117,6 +117,10 @@ describe('getRouteHandlers', () => {
     getScreenshots: sinon.stub(),
   };
 
+  const mockMcpController = {
+    handleRcp: sinon.stub(),
+  };
+
   const mockScrapeController = {
     getFileByKey: sinon.stub(),
     listScrapedContentFiles: sinon.stub(),
@@ -142,6 +146,7 @@ describe('getRouteHandlers', () => {
       mockPreflightController,
       mockDemoController,
       mockScrapeController,
+      mockMcpController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -166,6 +171,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'GET /screenshots',
       'POST /screenshots',
+      'POST /mcp',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);

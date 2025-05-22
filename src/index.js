@@ -61,6 +61,8 @@ import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
 import DemoController from './controllers/demo.js';
 import ScrapeController from './controllers/scrape.js';
+import McpController from './controllers/mcp.js';
+import buildRegistry from './mcp/registry.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -93,32 +95,60 @@ async function run(request, context) {
   const t0 = Date.now();
 
   try {
+    /* ---------- instantiate controllers once per request ---------- */
+    const auditsController = AuditsController(context);
+    const configurationController = ConfigurationController(context);
+    const hooksController = HooksController(context);
+    const organizationsController = OrganizationsController(context, context.env);
+    const sitesController = SitesController(context, log, context.env);
+    const experimentsController = ExperimentsController(context);
+    const slackController = SlackController(SlackApp);
+    const fulfillmentController = FulfillmentController(context);
+    const importController = ImportController(context);
+    const apiKeyController = ApiKeyController(context);
+    const sitesAuditsToggleController = SitesAuditsToggleController(context);
+    const opportunitiesController = OpportunitiesController(context);
+    const suggestionsController = SuggestionsController(context, context.sqs, context.env);
+    const brandsController = BrandsController(context, log, context.env);
+    const preflightController = PreflightController(context, log, context.env);
+    const demoController = DemoController(context);
+    const scrapeController = ScrapeController(context);
+
+    /* ---------- build MCP registry & controller ---------- */
+    const mcpRegistry = buildRegistry({
+      auditsController,
+      sitesController,
+      context,
+    });
+    const mcpController = McpController(context, mcpRegistry);
+
     const routeHandlers = getRouteHandlers(
-      AuditsController(context),
-      ConfigurationController(context),
-      HooksController(context),
-      OrganizationsController(context, context.env),
-      SitesController(context, log, context.env),
-      ExperimentsController(context),
-      SlackController(SlackApp),
+      auditsController,
+      configurationController,
+      hooksController,
+      organizationsController,
+      sitesController,
+      experimentsController,
+      slackController,
       trigger,
-      FulfillmentController(context),
-      ImportController(context),
-      ApiKeyController(context),
-      SitesAuditsToggleController(context),
-      OpportunitiesController(context),
-      SuggestionsController(context, context.sqs, context.env),
-      BrandsController(context, log, context.env),
-      PreflightController(context, log, context.env),
-      DemoController(context),
-      ScrapeController(context),
+      fulfillmentController,
+      importController,
+      apiKeyController,
+      sitesAuditsToggleController,
+      opportunitiesController,
+      suggestionsController,
+      brandsController,
+      preflightController,
+      demoController,
+      scrapeController,
+      mcpController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
 
     if (routeMatch) {
       const { handler, params } = routeMatch;
-      //
+
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }

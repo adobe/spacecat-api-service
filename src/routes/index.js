@@ -60,6 +60,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} preflightController - The preflight controller.
  * @param {Object} demoController - The demo controller.
  * @param {Object} scrapeController - The scrape controller.
+ * @param {Object} mcpController - The MCP controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -81,6 +82,7 @@ export default function getRouteHandlers(
   preflightController,
   demoController,
   scrapeController,
+  mcpController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -162,6 +164,7 @@ export default function getRouteHandlers(
     'POST /screenshots': demoController.takeScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
+    'POST /mcp': mcpController.handleRpc,
   };
 
   // Initialization of static and dynamic routes
