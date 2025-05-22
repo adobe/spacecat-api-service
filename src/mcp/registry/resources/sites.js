@@ -29,13 +29,12 @@ export function createSiteResources(sitesController) {
     }),
     siteByBaseURL: createProxyResource({
       name: 'siteByBaseURL',
-      description: 'Returns site details for the given base URL (plain URL, not base64-encoded).',
-      uriTemplate: 'spacecat-data://sites/by-base-url/{baseURL}',
-      fetchFn: ({ baseURL }) => {
-        const encoded = Buffer.from(baseURL, 'utf-8').toString('base64');
-        return sitesController.getByBaseURL({ params: { baseURL: encoded } });
-      },
-      notFoundMessage: ({ baseURL }) => `Site with base URL ${baseURL} not found`,
+      description: 'Returns site details for the given base URL (base64-encoded).',
+      uriTemplate: 'spacecat-data://sites/by-base-url/{baseURLBase64}',
+      fetchFn: ({ baseURLBase64 }) => sitesController.getByBaseURL({
+        params: { baseURL: baseURLBase64 },
+      }),
+      notFoundMessage: ({ baseURLBase64 }) => `Site with base URL ${baseURLBase64} not found`,
     }),
   };
 }

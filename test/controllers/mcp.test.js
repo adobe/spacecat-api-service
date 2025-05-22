@@ -125,6 +125,34 @@ describe('MCP Controller', () => {
     });
   });
 
+  it('retrieves site resource by base URL', async () => {
+    const baseURL = 'https://example,.com';
+    const baseURLBase64 = Buffer.from(baseURL).toString('base64');
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/read',
+      params: {
+        uri: `spacecat-data://sites/by-base-url/${baseURLBase64}`,
+      },
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+    const [first] = body.result.contents;
+    expect(first).to.have.property('uri', `spacecat-data://sites/by-base-url/${baseURLBase64}`);
+    expect(JSON.parse(first.text)).to.deep.include({
+      id: 'siteId',
+      name: 'siteName',
+      description: 'siteDescription',
+      baseURL: 'https://example.com',
+    });
+  });
+
   it('executes echo tool', async () => {
     const payload = {
       jsonrpc: '2.0',
