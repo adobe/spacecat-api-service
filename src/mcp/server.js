@@ -55,4 +55,13 @@ export async function getSdkServer(registry) {
   return sdkServerInitPromise;
 }
 
+export async function closeSdkServer() {
+  if (sdkServer) {
+    // Clean up any resources held by the server
+    await sdkServer.disconnect();
+    sdkServer = null;
+    sdkServerInitPromise = null;
+  }
+}
+
 /* c8 ignore end */

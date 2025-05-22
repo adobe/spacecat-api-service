@@ -16,7 +16,7 @@ import { createResponse } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMockResponse } from '../mcp/http-adapter.js';
-import { getSdkServer } from '../mcp/server.js';
+import { getSdkServer, closeSdkServer } from '../mcp/server.js';
 import { checkBodySize } from '../utils/validations.js';
 import { createJsonRpcErrorResponse, JSON_RPC_ERROR_CODES } from '../utils/jsonrpc.js';
 
@@ -92,7 +92,7 @@ export default function McpController(ctx, registry) {
     }
   };
 
-  return { handleRpc };
+  return { handleRpc, close: closeSdkServer };
 }
 
 /* c8 ignore end */
