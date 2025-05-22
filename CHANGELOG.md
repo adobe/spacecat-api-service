@@ -1,3 +1,10 @@
+# [1.112.0](https://github.com/adobe/spacecat-api-service/compare/v1.111.0...v1.112.0) (2025-05-22)
+
+
+### Features
+
+* get files by key from s3 ([#921](https://github.com/adobe/spacecat-api-service/issues/921)) ([342b4c5](https://github.com/adobe/spacecat-api-service/commit/342b4c54feceb0f72ae4abccbc47e161c44e9f59))
+
 # [1.111.0](https://github.com/adobe/spacecat-api-service/compare/v1.110.2...v1.111.0) (2025-05-22)
 
 
