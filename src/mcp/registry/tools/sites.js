@@ -60,12 +60,12 @@ export function createSiteTools(sitesController) {
   /* ------------- getSiteMetricsBySource ---------------- */
   const getSiteMetricsBySourceTool = createProxyTool({
     name: 'getSiteMetricsBySource',
-    description: 'Returns site metrics for the given site ID, metric, and source.',
-    inputSchema: {
+    description: 'Returns site metrics for the given site ID, metric, and source. The following sources are supported: "ahrefs" and "rum". For the "ahrefs" source, the following metrics are supported: "organic-keywords" and "organic-traffic". For the "rum" source, the following metrics are supported: "all-traffic".',
+    inputSchema: z.object({
       siteId: z.string().uuid().describe('The ID of the site'),
       metric: z.enum(['organic-keywords', 'organic-traffic', 'all-traffic']).describe('The metric to retrieve. For ahrefs source: organic-keywords, organic-traffic. For rum source: all-traffic'),
       source: z.enum(['ahrefs', 'rum']).describe('The source of the metrics. Supported sources: ahrefs, rum'),
-    },
+    }).strict(),
     fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource({
       params: { siteId, metric, source },
     }),

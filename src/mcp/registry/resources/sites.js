@@ -40,7 +40,7 @@ export function createSiteResources(sitesController) {
     }),
     siteMetricsBySource: createProxyResource({
       name: 'siteMetricsBySource',
-      description: 'Returns site metrics for the given site ID, metric, and source.',
+      description: 'Returns site metrics for the given site ID, metric, and source. The following sources are supported: "ahrefs" and "rum". For the "ahrefs" source, the following metrics are supported: "organic-keywords" and "organic-traffic". For the "rum" source, the following metrics are supported: "all-traffic".',
       uriTemplate: 'spacecat-data://sites/{siteId}/metrics/{metric}/{source}',
       fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource({
         params: { siteId, metric, source },

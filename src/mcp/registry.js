@@ -12,7 +12,6 @@
 
 /* c8 ignore start */
 
-// import { createSiteTools } from './registry/tools/sites.js';
 import { createAuditResources } from './registry/resources/audits.js';
 import { createSiteResources } from './registry/resources/sites.js';
 import { createSiteTools } from './registry/tools/sites.js';
