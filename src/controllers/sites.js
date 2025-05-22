@@ -35,7 +35,7 @@ import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { wwwUrlResolver, buildS3Prefix } from '../support/utils.js';
+import { wwwUrlResolver } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
@@ -575,79 +575,6 @@ function SitesController(ctx, log, env) {
     return ok(metrics);
   };
 
-  const listScrapedContentFiles = async (context) => {
-    try {
-      const { s3 } = context;
-      const { S3_SCRAPER_BUCKET: bucketName } = context.env;
-      const { siteId, type } = context.params ?? {};
-
-      if (!isValidUUID(siteId)) {
-        return badRequest('Site ID required');
-      }
-
-      const site = await Site.findById(siteId);
-      if (!site) {
-        return notFound('Site not found');
-      }
-
-      if (!await accessControlUtil.hasAccess(site)) {
-        return forbidden('Only users belonging to the organization can get scraped content files');
-      }
-
-      if (!['scrapes', 'imports', 'accessibility'].includes(type)) {
-        return badRequest('Type must be either "scrapes" or "imports" or "accessibility"');
-      }
-
-      // Query params
-      const path = context.data?.path || '';
-      const rootOnly = context.data?.rootOnly === 'true';
-      const pageSize = parseInt(context.data?.pageSize, 10) || 100;
-      const pageToken = context.data?.pageToken;
-
-      // Build S3 prefix and params
-      const s3Prefix = buildS3Prefix(type, siteId, path);
-      const params = {
-        Bucket: bucketName,
-        Prefix: s3Prefix,
-        MaxKeys: rootOnly ? 100 : pageSize,
-        ...(rootOnly ? { Delimiter: '/' } : {}),
-        ...(pageToken ? { ContinuationToken: decodeURIComponent(pageToken) } : {}),
-      };
-
-      // Execute S3 list command
-      const { s3Client, ListObjectsV2Command } = s3;
-      const listCommand = new ListObjectsV2Command(params);
-
-      const result = await s3Client.send(listCommand).catch((error) => {
-        log.error(`Failed to list S3 objects for site ${siteId}: ${error.message}`);
-        throw new Error('S3 error: Failed to list files');
-      });
-
-      if (!result?.Contents) {
-        return ok({ items: [], nextPageToken: null });
-      }
-
-      // Process files
-      const files = result.Contents.map((obj) => ({
-        name: obj.Key.replace(s3Prefix, ''),
-        type: obj.Key.split('.').pop(),
-        size: obj.Size,
-        lastModified: obj.LastModified,
-        key: obj.Key,
-      })).filter((file) => file.name);
-
-      return ok({
-        items: files,
-        nextPageToken: result.NextContinuationToken
-          ? encodeURIComponent(result.NextContinuationToken)
-          : null,
-      });
-    } catch (error) {
-      log.error(`Error in listScrapedContentFiles for site ${context.params?.siteId}: ${error.message}`);
-      throw error;
-    }
-  };
-
   return {
     createSite,
     getAll,
@@ -670,7 +597,6 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
-    listScrapedContentFiles,
   };
 }
 
