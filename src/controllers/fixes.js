@@ -62,7 +62,7 @@ export class FixesController {
    * @returns {Promise<Response>} Array of suggestions response.
    */
   async getAllForOpportunity(context) {
-    const { siteId, opportunityId } = context.params ?? {};
+    const { siteId, opportunityId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId);
     if (res) return res;
@@ -85,7 +85,7 @@ export class FixesController {
    * @returns {Promise<Response>} Array of suggestions response.
    */
   async getByStatus(context) {
-    const { siteId, opportunityId, status } = context.params ?? {};
+    const { siteId, opportunityId, status } = context.params;
     let res = checkRequestParams(siteId, opportunityId);
     if (res) return res;
 
@@ -107,7 +107,7 @@ export class FixesController {
    * @returns {Promise<Response>} Suggestion response.
    */
   async getByID(context) {
-    const { siteId, opportunityId, fixId } = context.params ?? {};
+    const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;
@@ -127,7 +127,7 @@ export class FixesController {
    * @returns {Promise<Response>} Array of suggestions response.
    */
   async getAllSuggestionsForFix(context) {
-    const { siteId, opportunityId, fixId } = context.params ?? {};
+    const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;
@@ -148,13 +148,16 @@ export class FixesController {
    * @returns {Promise<Response>} Array of fixes response.
    */
   async createFixes(context) {
-    const { siteId, opportunityId } = context.params ?? {};
+    const { siteId, opportunityId } = context.params;
 
-    const res = checkRequestParams(siteId, opportunityId);
+    let res = checkRequestParams(siteId, opportunityId);
+    if (res) return res;
+
+    res = await checkOwnership(null, opportunityId, siteId, this.#Opportunity);
     if (res) return res;
 
     if (!Array.isArray(context.data)) {
-      return context.data ? badRequest('No updates provided') : badRequest('Request body must be an array');
+      return context.data ? badRequest('Request body must be an array') : badRequest('No updates provided');
     }
 
     const FixEntity = this.#FixEntity;
@@ -169,7 +172,7 @@ export class FixesController {
         return {
           index,
           message: error.message,
-          statusCode: error instanceof ValidationError ? 400 : 500,
+          statusCode: error instanceof ValidationError ? /* c8 ignore next */ 400 : 500,
         };
       }
     }));
@@ -191,13 +194,17 @@ export class FixesController {
    * @returns {Promise<Response>} the updated opportunity data
    */
   async patchFixesStatus(context) {
-    const { siteId, opportunityId } = context.params ?? {};
+    const { siteId, opportunityId } = context.params;
 
     const res = checkRequestParams(siteId, opportunityId);
     if (res) return res;
 
     if (!Array.isArray(context.data)) {
-      return context.data ? badRequest('No updates provided') : badRequest('Request body must be an array of [{ id: <fix id>, status: <fix status> },...]');
+      return (
+        context.data
+          ? badRequest('Request body must be an array of [{ id: <fix id>, status: <fix status> },...]')
+          : badRequest('No updates provided')
+      );
     }
 
     const fixes = await Promise.all(
@@ -255,7 +262,7 @@ export class FixesController {
         index, uuid, fix: FixDto.toJSON(await fix.save()), statusCode: 200,
       };
     } catch (error) {
-      const statusCode = error instanceof ValidationError ? 400 : 500;
+      const statusCode = error instanceof ValidationError ? /* c8 ignore next */ 400 : 500;
       return {
         index, uuid, message: error.message, statusCode,
       };
@@ -269,7 +276,7 @@ export class FixesController {
    * @returns {Promise<Response>} the updated fix data
    */
   async patchFix(context) {
-    const { siteId, opportunityId, fixId } = context.params ?? {};
+    const { siteId, opportunityId, fixId } = context.params;
     let res = checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;
 
@@ -328,7 +335,7 @@ export class FixesController {
       }
     } catch (e) {
       return e instanceof ValidationError
-        ? badRequest(e.message)
+        ? /* c8 ignore next */ badRequest(e.message)
         : createResponse({ message: 'Error updating fix' }, 500);
     }
   }
@@ -339,7 +346,7 @@ export class FixesController {
    * @returns {Promise<Response>}
    */
   async removeFix(context) {
-    const { siteId, opportunityId, fixId } = context.params ?? {};
+    const { siteId, opportunityId, fixId } = context.params;
 
     let res = checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;

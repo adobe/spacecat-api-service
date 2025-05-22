@@ -311,11 +311,9 @@ describe('Fixes Controller', () => {
 
   describe('get suggestions belonging to a fix', () => {
     const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
-    beforeEach(() => {
+    beforeEach(async () => {
       requestContext.params.fixId = fixId;
-    });
 
-    it('can get all suggestions for a fix', async () => {
       fixEntityCollection.findById
         .withArgs(fixId)
         .resolves(await fixEntityCollection.create({
@@ -323,6 +321,9 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
         }));
+    });
+
+    it('can get all suggestions for a fix', async () => {
       const suggestions = await Promise.all([
         suggestionCollection.create({ opportunityId }),
         suggestionCollection.create({ opportunityId }),
@@ -353,7 +354,7 @@ describe('Fixes Controller', () => {
 
       const response = await fixesController.getAllSuggestionsForFix(requestContext);
       expect(response).includes({ status: 404 });
-      expect(await response.json()).deep.equals({ message: 'Fix not found' });
+      expect(await response.json()).deep.equals({ message: 'Opportunity not found' });
     });
 
     it('responds 400 if the site ID parameter is not a uuid', async () => {
@@ -457,6 +458,14 @@ describe('Fixes Controller', () => {
       requestContext.data = { type: 'CONTENT_UPDATE', opportunityId };
       const response = await fixesController.createFixes(requestContext);
       expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Request body must be an array' });
+    });
+
+    it('responds 400 if there is no request body', async () => {
+      requestContext.data = '';
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'No updates provided' });
     });
 
     it('responds 404 if the opportunity does not belong to the given site', async () => {
@@ -464,21 +473,23 @@ describe('Fixes Controller', () => {
         go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
       }));
 
-      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+      const response = await fixesController.createFixes(requestContext);
       expect(response).includes({ status: 404 });
-      expect(await response.json()).deep.equals({ message: 'Fix not found' });
+      expect(await response.json()).deep.equals({ message: 'Opportunity not found' });
     });
 
     it('responds 400 if the site ID parameter is not a uuid', async () => {
       requestContext.params.siteId = 'not-a-uuid';
-      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+      const response = await fixesController.createFixes(requestContext);
       expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Site ID required' });
     });
 
     it('responds 400 if the opportunity ID parameter is not a uuid', async () => {
       requestContext.params.opportunityId = 'not-a-uuid';
-      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+      const response = await fixesController.createFixes(requestContext);
       expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Opportunity ID required' });
     });
   });
 
@@ -651,6 +662,14 @@ describe('Fixes Controller', () => {
       requestContext.data = { id: 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5', status: 'PUBLISHED' };
       const response = await fixesController.patchFixesStatus(requestContext);
       expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Request body must be an array of [{ id: <fix id>, status: <fix status> },...]' });
+    });
+
+    it('responds 400 if the request body is empty', async () => {
+      requestContext.data = '';
+      const response = await fixesController.patchFixesStatus(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'No updates provided' });
     });
 
     it('responds 400 if the site ID parameter is not a uuid', async () => {
@@ -817,6 +836,15 @@ describe('Fixes Controller', () => {
       const response = await fixesController.patchFix(requestContext);
       expect(response).includes({ status: 400 });
     });
+
+    it('responds 400 if the fix does not belong to the given opportunity', async () => {
+      requestContext.params.opportunityId = 'abb6f435-d7c2-46bb-8665-cf1d5df1e9c4';
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({
+        message: 'Opportunity not found',
+      });
+    });
   });
 
   describe('fix removal', () => {
@@ -848,21 +876,33 @@ describe('Fixes Controller', () => {
     });
 
     it('responds 404 if the fix does not exist', async () => {
-      requestContext.params.fixId = 'abb6f435-d7c2-46bb-8665-cf1d5df1e9c4';
-      const response = await fixesController.patchFix(requestContext);
+      requestContext.params.fixId = '09e6e14d-75db-4ab5-944d-12de6492a6e4';
+      const response = await fixesController.removeFix(requestContext);
       expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Fix not found' });
     });
 
     it('responds 400 if the site ID parameter is not a uuid', async () => {
       requestContext.params.siteId = 'not-a-uuid';
-      const response = await fixesController.patchFix(requestContext);
+      const response = await fixesController.removeFix(requestContext);
       expect(response).includes({ status: 400 });
     });
 
     it('responds 400 if the opportunity ID parameter is not a uuid', async () => {
       requestContext.params.opportunityId = 'not-a-uuid';
-      const response = await fixesController.patchFix(requestContext);
+      const response = await fixesController.removeFix(requestContext);
       expect(response).includes({ status: 400 });
+    });
+
+    it('responds 404 if the fix does not belong to the given opportunity', async () => {
+      requestContext.params.fixId = fixEntityId;
+      requestContext.params.opportunityId = '09e6e14d-75db-4ab5-944d-12de6492a6e4';
+
+      const response = await fixesController.removeFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({
+        message: 'Opportunity not found',
+      });
     });
 
     it('responds 500 if the fix cannot be removed', async () => {
