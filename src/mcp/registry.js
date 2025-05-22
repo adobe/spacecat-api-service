@@ -12,9 +12,10 @@
 
 /* c8 ignore start */
 
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import { unwrapControllerResponse, withRpcErrorBoundary } from '../utils/jsonrpc.js';
+import { echoTool } from './registry/tools/utils.js';
+import { createSiteTools } from './registry/tools/sites.js';
+import { createSiteResources } from './registry/resources/sites.js';
+
 /**
  * Build the registry for the current request based on already-constructed
  * controllers.  Doing so avoids re-instantiating controllers inside tool
@@ -24,113 +25,14 @@ import { unwrapControllerResponse, withRpcErrorBoundary } from '../utils/jsonrpc
  * @param {object} deps.sitesController – instance of the Sites controller.
  * @returns {{ tools: Record<string,object>, resources: object, prompts: object }}
  */
-export function buildRegistry({ sitesController } = {}) {
-  /* --------------------- echo ---------------------- */
-  const echoTool = {
-    description: 'Echoes back the input string',
-    inputSchema: z.object({
-      message: z.string().describe('Message to echo back'),
-    }).strict(),
-    handler: async ({ message }) => ({
-      content: [{ type: 'text', text: String(message) }],
-    }),
-  };
-
-  /**
-   * Helper to create simple proxy tools that delegate to a SitesController
-   * method returning a Fetch Response.
-   *
-   * @param {object} options
-   * @param {string} options.description
-   * @param {z.ZodSchema} options.inputSchema
-   * @param {Function} options.fetchFn – async (args) => Response
-   * @param {Function} options.notFoundMessage – (args) => string
-   * @returns {object} tool definition
-   */
-  const createProxyTool = ({
-    description,
-    inputSchema,
-    fetchFn,
-    notFoundMessage,
-  }) => ({
-    description,
-    inputSchema,
-    handler: async (args) => withRpcErrorBoundary(async () => {
-      const response = await fetchFn(args);
-      const payload = await unwrapControllerResponse(response, {
-        notFoundMessage: notFoundMessage(args),
-        context: args,
-      });
-      return {
-        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
-      };
-    }, args),
-  });
-
-  const createProxyResourceTemplate = ({
-    name,
-    template,
-    metadata,
-    fetchFn,
-    notFoundMessage,
-  }) => ({
-    name,
-    template,
-    metadata,
-    handler: async (args) => withRpcErrorBoundary(async () => {
-      const response = await fetchFn(args);
-      const payload = await unwrapControllerResponse(response, {
-        notFoundMessage: notFoundMessage(args),
-        context: args,
-      });
-      return {
-        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
-      };
-    }, args),
-  });
-
-  /* -------------------- getSite by UUID -------------------- */
-  const getSiteTool = sitesController ? createProxyTool({
-    description: 'Returns site details for the given UUID.',
-    inputSchema: z.object({
-      siteId: z.string().uuid().describe('The UUID of the site to fetch'),
-    }).strict(),
-    fetchFn: ({ siteId }) => sitesController.getByID({ params: { siteId } }),
-    notFoundMessage: ({ siteId }) => `Site ${siteId} not found`,
-  }) : undefined;
-
-  /* ------------- getSiteByBaseURL ---------------- */
-  const getSiteByBaseURLTool = sitesController ? createProxyTool({
-    description: 'Returns site details for the given base URL (plain URL, not base64-encoded).',
-    inputSchema: z.object({
-      baseURL: z.string().url().describe('The base URL of the site to fetch'),
-    }).strict(),
-    fetchFn: ({ baseURL }) => {
-      const encoded = Buffer.from(baseURL, 'utf-8').toString('base64');
-      return sitesController.getByBaseURL({ params: { baseURL: encoded } });
-    },
-    notFoundMessage: ({ baseURL }) => `Site with base URL ${baseURL} not found`,
-  }) : undefined;
-
-  const getSiteResourceTemplate = createProxyResourceTemplate({
-    name: 'site',
-    template: new ResourceTemplate('sites://{siteId}', { list: undefined }),
-    metadata: {
-      description: 'Returns site details for the given UUID.',
-      mimeType: 'application/json',
-    },
-    fetchFn: ({ siteId }) => sitesController.getByID({ params: { siteId } }),
-    notFoundMessage: ({ siteId }) => `Site ${siteId} not found`,
-  });
-
+export default function buildRegistry({ sitesController } = {}) {
   const tools = {
     echo: echoTool,
-    ...(getSiteTool ? { getSite: getSiteTool } : {}),
-    ...(getSiteByBaseURLTool ? { getSiteByBaseURL: getSiteByBaseURLTool } : {}),
+    ...createSiteTools(sitesController),
   };
 
   const resources = {
-    ...(getSiteResourceTemplate ? { site: getSiteResourceTemplate } : {}),
+    ...createSiteResources(sitesController),
   };
 
   return {
@@ -139,7 +41,5 @@ export function buildRegistry({ sitesController } = {}) {
     prompts: {},
   };
 }
-
-export default { buildRegistry };
 
 /* c8 ignore end */

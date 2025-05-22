@@ -157,6 +157,37 @@ export function createJsonRpcErrorResponse({
   return createResponse(body, status);
 }
 
+/**
+ * Helper to create simple proxy tools that delegate to a SitesController
+ * method returning a Fetch Response.
+ *
+ * @param {object} options
+ * @param {string} options.description
+ * @param {z.ZodSchema} options.inputSchema
+ * @param {Function} options.fetchFn – async (args) => Response
+ * @param {Function} options.notFoundMessage – (args) => string
+ * @returns {object} tool definition
+ */
+export const createProxyTool = ({
+  description,
+  inputSchema,
+  fetchFn,
+  notFoundMessage,
+}) => ({
+  description,
+  inputSchema,
+  handler: async (args) => withRpcErrorBoundary(async () => {
+    const response = await fetchFn(args);
+    const payload = await unwrapControllerResponse(response, {
+      notFoundMessage: notFoundMessage(args),
+      context: args,
+    });
+    return {
+      content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+    };
+  }, args),
+});
+
 export default {
   createJsonRpcErrorResponse,
   mapErrorCodeToStatus,

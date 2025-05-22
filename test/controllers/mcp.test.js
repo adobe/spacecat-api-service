@@ -17,7 +17,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import McpController from '../../src/controllers/mcp.js';
-import { buildRegistry } from '../../src/mcp/registry.js';
+import buildRegistry from '../../src/mcp/registry.js';
 
 use(sinonChai);
 
@@ -32,7 +32,21 @@ describe('MCP Controller', () => {
       dataAccess: {},
     };
 
-    const registry = buildRegistry();
+    const sitesController = {
+      getByID: sandbox.stub().resolves({
+        id: 'siteId',
+        name: 'siteName',
+        description: 'siteDescription',
+        baseURL: 'https://example.com',
+      }),
+      getByBaseURL: sandbox.stub().resolves({
+        id: 'siteId',
+        name: 'siteName',
+        description: 'siteDescription',
+        baseURL: 'https://example.com',
+      }),
+    };
+    const registry = buildRegistry({ sitesController });
     mcpController = McpController(context, registry);
   });
 

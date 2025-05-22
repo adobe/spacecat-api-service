@@ -61,7 +61,7 @@ export async function getSdkServer(registry) {
     for (const [name, def] of Object.entries(resources)) {
       server.resource(
         name,
-        def.template,
+        def.uriTemplate,
         def.metadata,
         def.provider,
       );

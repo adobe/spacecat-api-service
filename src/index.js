@@ -61,7 +61,7 @@ import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
 import DemoController from './controllers/demo.js';
 import McpController from './controllers/mcp.js';
-import { buildRegistry } from './mcp/registry.js';
+import buildRegistry from './mcp/registry.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
