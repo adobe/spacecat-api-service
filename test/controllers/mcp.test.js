@@ -95,7 +95,7 @@ describe('MCP Controller', () => {
     const siteResource = resourceTemplates.find((r) => r.name === 'site');
     expect(siteResource).to.exist;
     expect(siteResource).to.have.property('uriTemplate');
-    expect(siteResource.uriTemplate).to.equal('sites://{siteId}');
+    expect(siteResource.uriTemplate).to.equal('spacecat-data://sites/{siteId}');
     expect(siteResource).to.have.property('mimeType', 'application/json');
   });
 
@@ -106,7 +106,7 @@ describe('MCP Controller', () => {
       id: 1,
       method: 'resources/read',
       params: {
-        uri: `sites://${siteId}`,
+        uri: `spacecat-data://sites/${siteId}`,
       },
     };
 
