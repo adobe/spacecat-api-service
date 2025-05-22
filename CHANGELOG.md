@@ -1,3 +1,10 @@
+# [1.114.0](https://github.com/adobe/spacecat-api-service/compare/v1.113.0...v1.114.0) (2025-05-22)
+
+
+### Features
+
+* mcp prototype server ([#923](https://github.com/adobe/spacecat-api-service/issues/923)) ([6a2c924](https://github.com/adobe/spacecat-api-service/commit/6a2c924744a4f9d31905d91e9f3be24b85def175))
+
 # [1.113.0](https://github.com/adobe/spacecat-api-service/compare/v1.112.0...v1.113.0) (2025-05-22)
 
 
