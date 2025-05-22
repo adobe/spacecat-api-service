@@ -19,12 +19,20 @@ preflight-jobs:
           schema:
             type: object
             properties:
-              pageUrl:
+              urls:
+                type: array
+                items:
+                  type: string
+                  format: uri
+                description: Array of URLs to be processed by the job
+                minItems: 1
+              step:
                 type: string
-                format: uri
-                description: The URL to be processed by the job
+                enum: [identify, suggest]
+                description: The audit step to be performed
             required:
-              - pageUrl
+              - urls
+              - step
     responses:
       '202':
         description: Job accepted
@@ -33,7 +41,7 @@ preflight-jobs:
             schema:
               $ref: './schemas.yaml#/CreateAsyncJobAcceptedResponse'
       '400':
-        description: Invalid request (missing pageUrl or other required fields)
+        description: Invalid request (missing urls array, step field, or other required fields)
 
 preflight-job-status:
   parameters:

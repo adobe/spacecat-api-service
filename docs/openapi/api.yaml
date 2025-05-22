@@ -67,8 +67,6 @@ paths:
     $ref: './configurations-sites-audits-api.yaml#/configurations-sites-audits-toggle'
   /event/fulfillment:
     $ref: './event-api.yaml#/process-fulfillment-events'
-  /files:
-    $ref: './file-api.yaml#/get-files'
   /hooks/site-detection/cdn/{hookSecret}:
     $ref: './hooks-api.yaml#/site-detection-cdn'
   /hooks/site-detection/rum/{hookSecret}:
@@ -142,7 +140,9 @@ paths:
   /sites/{siteId}/key-events/{keyEventId}:
     $ref: './key-event-api.yaml#/key-event'
   /sites/{siteId}/scraped-content/{type}:
-    $ref: './site-scrape-api.yaml#/scraped-content-type'
+    $ref: './scrape-api.yaml#/get-scraped-content-list'
+  /sites/{siteId}/files:
+     $ref: './scrape-api.yaml#/get-files'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
@@ -194,6 +194,11 @@ components:
       in: header
       name: x-api-key
       description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)"
+    cookie_auth:
+      type: apiKey
+      in: cookie
+      name: sessionToken
+      description: "Authentication using session cookie"
   schemas:
     $ref: './schemas.yaml'
   examples:

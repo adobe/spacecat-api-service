@@ -60,6 +60,7 @@ import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
 import DemoController from './controllers/demo.js';
+import ScrapeController from './controllers/scrape.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
 
@@ -111,6 +112,7 @@ async function run(request, context) {
     const brandsController = BrandsController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
+    const scrapeController = ScrapeController(context);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
@@ -137,6 +139,7 @@ async function run(request, context) {
       brandsController,
       preflightController,
       demoController,
+      scrapeController,
       mcpController,
     );
 
