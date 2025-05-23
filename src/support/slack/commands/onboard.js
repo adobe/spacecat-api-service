@@ -275,6 +275,20 @@ function OnboardCommand(context) {
         },
       };
 
+      // API input structure
+      const apiInput = {
+        type: 'api-audit-status', // Specific type for audit status API operation
+        siteId: siteID,
+        apiContext: {
+          organizationId,
+          experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      };
+
       // Disable imports and audits job
       const disableImportAndAuditJob = {
         type: 'disable-import-audit',
@@ -289,6 +303,7 @@ function OnboardCommand(context) {
         siteId: siteID,
         slackContext,
         auditStatusJob,
+        apiInput,
         disableImportAndAuditJob,
       };
 

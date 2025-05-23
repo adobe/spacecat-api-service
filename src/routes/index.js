@@ -58,6 +58,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} suggestionsController - The suggestions controller.
  * @param {Object} brandsController - The brands controller.
  * @param {Object} preflightController - The preflight controller.
+ * @param {Object} auditStatusController - The audit status controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -77,6 +78,7 @@ export default function getRouteHandlers(
   suggestionsController,
   brandsController,
   preflightController,
+  auditStatusController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -154,6 +156,7 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/:jobId/progress': importController.getImportJobProgress,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
+    'GET /sites/:siteId/audit-status': auditStatusController.getStatus,
   };
 
   // Initialization of static and dynamic routes
