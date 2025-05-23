@@ -23,6 +23,7 @@
 import {
   badRequest,
   createResponse,
+  forbidden,
   noContent,
   notFound,
   ok,
@@ -31,12 +32,22 @@ import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import {
   hasText, isArray, isIsoDate, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
 
 /**
- * @typedef {Object} Context
+ * @typedef {Object} DataAccess
+ * @property {FixEntityCollection} FixEntity
+ * @property {OpportunityCollection} Opportunity
+ * @property {SuggestionCollection} Suggestion
+ *
+ * @typedef {Object} LambdaContext
+ * @property {DataAccess} dataAccess
+ *
+ * @typedef {Object} RequestContext
  * @property {Object.<string, undefined | null | boolean | number | string>} [params]
+ * @property {any} [data]
  */
 
 export class FixesController {
@@ -49,22 +60,31 @@ export class FixesController {
   /** @type {SuggestionCollection} */
   #Suggestion;
 
-  constructor(dataAccess) {
+  /** @type {AccessControlUtil} */
+  #accessControl;
+
+  /**
+   * @param {LambdaContext} ctx
+   * @param {AccessControlUtil} [accessControl]
+   */
+  constructor(ctx, accessControl = new AccessControlUtil(ctx)) {
+    const { dataAccess } = ctx;
     this.#FixEntity = dataAccess.FixEntity;
     this.#Opportunity = dataAccess.Opportunity;
     this.#Suggestion = dataAccess.Suggestion;
+    this.#accessControl = accessControl;
   }
 
   /**
    * Gets all suggestions for a given site and opportunity.
    *
-   * @param {Context} context - request context
+   * @param {RequestContext} context - request context
    * @returns {Promise<Response>} Array of suggestions response.
    */
   async getAllForOpportunity(context) {
     const { siteId, opportunityId } = context.params;
 
-    let res = checkRequestParams(siteId, opportunityId);
+    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId);
     if (res) return res;
 
     const fixEntities = await this.#FixEntity.allByOpportunityId(opportunityId);
@@ -81,12 +101,12 @@ export class FixesController {
   /**
    * Gets all suggestions for a given site, opportunity and status.
    *
-   * @param {Context} context - request context
+   * @param {RequestContext} context - request context
    * @returns {Promise<Response>} Array of suggestions response.
    */
   async getByStatus(context) {
     const { siteId, opportunityId, status } = context.params;
-    let res = checkRequestParams(siteId, opportunityId);
+    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId);
     if (res) return res;
 
     if (!hasText(status)) {
@@ -103,13 +123,13 @@ export class FixesController {
   /**
    * Get a suggestion given a site, opportunity and suggestion ID
    *
-   * @param {Context} context - request context
+   * @param {RequestContext} context - request context
    * @returns {Promise<Response>} Suggestion response.
    */
   async getByID(context) {
     const { siteId, opportunityId, fixId } = context.params;
 
-    let res = checkRequestParams(siteId, opportunityId, fixId);
+    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -123,13 +143,13 @@ export class FixesController {
   /**
    * Gets all suggestions for a given fix.
    *
-   * @param {Context} context - request context
+   * @param {RequestContext} context - request context
    * @returns {Promise<Response>} Array of suggestions response.
    */
   async getAllSuggestionsForFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
 
-    let res = checkRequestParams(siteId, opportunityId, fixId);
+    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -144,13 +164,13 @@ export class FixesController {
   /**
    * Creates one or more fixes for a given site and opportunity.
    *
-   * @param {Context} context - request context
+   * @param {RequestContext} context - request context
    * @returns {Promise<Response>} Array of fixes response.
    */
   async createFixes(context) {
     const { siteId, opportunityId } = context.params;
 
-    let res = checkRequestParams(siteId, opportunityId);
+    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId);
     if (res) return res;
 
     res = await checkOwnership(null, opportunityId, siteId, this.#Opportunity);
@@ -190,13 +210,13 @@ export class FixesController {
   /**
    * Update the status of one or multiple fixes in one transaction
    *
-   * @param {Context} context - request context
+   * @param {RequestContext} context - request context
    * @returns {Promise<Response>} the updated opportunity data
    */
   async patchFixesStatus(context) {
     const { siteId, opportunityId } = context.params;
 
-    const res = checkRequestParams(siteId, opportunityId);
+    const res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId);
     if (res) return res;
 
     if (!Array.isArray(context.data)) {
@@ -272,12 +292,12 @@ export class FixesController {
   /**
    * Updates data for a fix.
    *
-   * @param {Context} context - request context
+   * @param {RequestContext} context - request context
    * @returns {Promise<Response>} the updated fix data
    */
   async patchFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
-    let res = checkRequestParams(siteId, opportunityId, fixId);
+    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -342,13 +362,13 @@ export class FixesController {
 
   /**
    * Removes a fix
-   * @param {Context} context - request context
+   * @param {RequestContext} context - request context
    * @returns {Promise<Response>}
    */
   async removeFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
 
-    let res = checkRequestParams(siteId, opportunityId, fixId);
+    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId, fixId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -362,6 +382,16 @@ export class FixesController {
     } catch (e) {
       return createResponse({ message: `Error removing fix: ${e.message}` }, 500);
     }
+  }
+
+  /**
+   * Checks if the user has admin access.
+   * @returns {Response | null} forbidden response or null.
+   */
+  #checkAccess() {
+    return this.#accessControl.hasAdminAccess()
+      ? null
+      : forbidden('Only admins may access fix entities.');
   }
 }
 

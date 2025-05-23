@@ -24,6 +24,7 @@ import * as electrodb from 'electrodb';
 import * as crypto from 'crypto';
 
 import { FixEntity, Suggestion } from '@adobe/spacecat-shared-data-access';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 import { FixesController } from '../../src/controllers/fixes.js';
 import { FixDto } from '../../src/dto/fix.js';
 import { SuggestionDto } from '../../src/dto/suggestion.js';
@@ -36,6 +37,8 @@ use(sinonChai);
  *   FixEntityCollection,
  *   SuggestionCollection
  * } from '@adobe/spacecat-shared-data-access'
+ *
+ * @import type { RequestContext } from '../../src/controllers/fixes.js'
  */
 
 describe('Fixes Controller', () => {
@@ -45,11 +48,15 @@ describe('Fixes Controller', () => {
   const electroService = new electrodb.Service(EntityRegistry.getEntities());
 
   const sandbox = sinon.createSandbox();
+  /** @type {AccessControlUtil} */
+  let accessControlUtil;
+  /** @type {FixesController} */
   let fixesController;
   /** @type {FixEntityCollection} */
   let fixEntityCollection;
   /** @type {SuggestionCollection} */
   let suggestionCollection;
+  /** @type {RequestContext} */
   let requestContext;
   let opportunityGetStub;
 
@@ -78,7 +85,9 @@ describe('Fixes Controller', () => {
     sandbox.stub(suggestionCollection, 'allByIndexKeys');
     sandbox.stub(suggestionCollection, 'findById');
 
-    fixesController = new FixesController(dataAccess);
+    accessControlUtil = sandbox.createStubInstance(AccessControlUtil);
+    accessControlUtil.hasAdminAccess.returns(true);
+    fixesController = new FixesController({ dataAccess }, accessControlUtil);
     requestContext = {
       params: { siteId, opportunityId },
     };
@@ -89,6 +98,15 @@ describe('Fixes Controller', () => {
   });
 
   describe('Fixes for an opportunity', () => {
+    it('responds 403 if the request does not have admin authorization', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const response = await fixesController.getAllForOpportunity(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only admins may access fix entities.',
+      });
+    });
+
     it('can get all fixes for an opportunity', async () => {
       const fixEntities = await Promise.all([
         fixEntityCollection.create({
@@ -159,6 +177,15 @@ describe('Fixes Controller', () => {
   describe('getting fixes by status', () => {
     beforeEach(() => {
       requestContext.params.status = 'PENDING';
+    });
+
+    it('responds 403 if the request does not have admin authorization', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const response = await fixesController.getByStatus(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only admins may access fix entities.',
+      });
     });
 
     it('can get all fixes for an opportunity by status', async () => {
@@ -237,6 +264,15 @@ describe('Fixes Controller', () => {
     const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
     beforeEach(() => {
       requestContext.params.fixId = fixId;
+    });
+
+    it('responds 403 if the request does not have admin authorization', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const response = await fixesController.getByID(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only admins may access fix entities.',
+      });
     });
 
     it('can get a fix by ID', async () => {
@@ -323,6 +359,15 @@ describe('Fixes Controller', () => {
         }));
     });
 
+    it('responds 403 if the request does not have admin authorization', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const response = await fixesController.getAllSuggestionsForFix(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only admins may access fix entities.',
+      });
+    });
+
     it('can get all suggestions for a fix', async () => {
       const suggestions = await Promise.all([
         suggestionCollection.create({ opportunityId }),
@@ -373,6 +418,15 @@ describe('Fixes Controller', () => {
   describe('create fixes', () => {
     beforeEach(() => {
       requestContext.data = null;
+    });
+
+    it('responds 403 if the request does not have admin authorization', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only admins may access fix entities.',
+      });
     });
 
     it('can create a single fix', async () => {
@@ -506,6 +560,15 @@ describe('Fixes Controller', () => {
       fixEntityCollection.findById.withArgs(fixEntityId).resolves(fix);
       return fix;
     }
+
+    it('responds 403 if the request does not have admin authorization', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const response = await fixesController.patchFixesStatus(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only admins may access fix entities.',
+      });
+    });
 
     it('can patch the status of one fix', async () => {
       const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
@@ -728,6 +791,7 @@ describe('Fixes Controller', () => {
         }
       }
     }
+
     beforeEach(async () => {
       suggestionsByFix = new Map();
       fixBySuggestion = new Map();
@@ -743,6 +807,15 @@ describe('Fixes Controller', () => {
       sandbox.stub(fix.patcher, 'save');
       fixEntityCollection.findById.withArgs(fixEntityId).resolves(fix);
       requestContext.params.fixId = fixEntityId;
+    });
+
+    it('responds 403 if the request does not have admin authorization', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only admins may access fix entities.',
+      });
     });
 
     it('can patch a fix', async () => {
@@ -865,6 +938,15 @@ describe('Fixes Controller', () => {
 
       removeStub = sandbox.stub(electroService.entities.fixEntity, 'remove')
         .callsFake(() => ({ go: async () => null }));
+    });
+
+    it('responds 403 if the request does not have admin authorization', async () => {
+      accessControlUtil.hasAdminAccess.returns(false);
+      const response = await fixesController.removeFix(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only admins may access fix entities.',
+      });
     });
 
     it('can remove a fix', async () => {
