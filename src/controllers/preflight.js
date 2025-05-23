@@ -11,11 +11,14 @@
  */
 
 import {
-  isNonEmptyObject, isValidUUID, isValidUrl,
+  isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
+
+export const AUDIT_STEP_IDENTIFY = 'identify';
+export const AUDIT_STEP_SUGGEST = 'suggest';
 
 /**
  * Creates a preflight controller instance
@@ -50,7 +53,8 @@ function PreflightController(ctx, log, env) {
   /**
    * Validates the request data for preflight job creation
    * @param {Object} data - The request data object
-   * @param {string} data.pageUrl - The URL of the page
+   * @param {string[]} data.urls - Array of URLs to process
+   * @param {string} data.step - The audit step (AUDIT_STEP_IDENTIFY or AUDIT_STEP_SUGGEST)
    * @throws {Error} If data is invalid or missing required fields
    */
   function validateRequestData(data) {
@@ -58,8 +62,23 @@ function PreflightController(ctx, log, env) {
       throw new Error('Invalid request: missing application/json data');
     }
 
-    if (typeof data.pageUrl !== 'string' || !isValidUrl(data.pageUrl)) {
-      throw new Error('Invalid request: missing or invalid pageUrl in request data');
+    if (!isNonEmptyArray(data.urls)) {
+      throw new Error('Invalid request: urls must be a non-empty array');
+    }
+
+    if (!data.urls.every((url) => typeof url === 'string' && isValidUrl(url))) {
+      throw new Error('Invalid request: all urls must be valid URLs');
+    }
+
+    // Check that all URLs belong to the same website
+    const firstUrl = new URL(data.urls[0]);
+    const firstHostname = firstUrl.hostname;
+    if (!data.urls.every((url) => new URL(url).hostname === firstHostname)) {
+      throw new Error('Invalid request: all urls must belong to the same website');
+    }
+
+    if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data?.step?.toLowerCase())) {
+      throw new Error(`Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`);
     }
   }
 
@@ -67,7 +86,8 @@ function PreflightController(ctx, log, env) {
    * Creates a new preflight job
    * @param {Object} context - The request context
    * @param {Object} context.data - The request data
-   * @param {string} context.data.pageUrl - The URL of the page
+   * @param {string[]} context.data.urls - Array of URLs to process
+   * @param {string} context.data.step - The audit step
    * @returns {Promise<Object>} The HTTP response object
    */
   const createPreflightJob = async (context) => {
@@ -82,11 +102,11 @@ function PreflightController(ctx, log, env) {
 
     try {
       const isDev = env.AWS_ENV === 'dev';
+      const step = data.step.toLowerCase();
 
-      log.info(`Creating preflight job for pageUrl: ${data.pageUrl}`);
+      log.info(`Creating preflight job for ${data.urls.length} URLs with step: ${step}`);
 
-      // Find the site that matches the base URL
-      const url = new URL(data.pageUrl);
+      const url = new URL(data.urls[0]);
       const baseURL = `${url.protocol}//${url.hostname}`;
       const site = await dataAccess.Site.findByBaseURL(baseURL);
       if (!site) {
@@ -99,9 +119,8 @@ function PreflightController(ctx, log, env) {
         metadata: {
           payload: {
             siteId: site.getId(),
-            urls: [
-              { url: data.pageUrl },
-            ],
+            urls: data.urls,
+            step,
           },
           jobType: 'preflight',
           tags: ['preflight'],

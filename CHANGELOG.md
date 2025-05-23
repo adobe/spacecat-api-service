@@ -1,3 +1,38 @@
+## [1.114.1](https://github.com/adobe/spacecat-api-service/compare/v1.114.0...v1.114.1) (2025-05-22)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.19.4 ([#927](https://github.com/adobe/spacecat-api-service/issues/927)) ([e0d5bb0](https://github.com/adobe/spacecat-api-service/commit/e0d5bb0487b923c4a837b6ea2d2e77aa131a1c7b))
+
+# [1.114.0](https://github.com/adobe/spacecat-api-service/compare/v1.113.0...v1.114.0) (2025-05-22)
+
+
+### Features
+
+* mcp prototype server ([#923](https://github.com/adobe/spacecat-api-service/issues/923)) ([6a2c924](https://github.com/adobe/spacecat-api-service/commit/6a2c924744a4f9d31905d91e9f3be24b85def175))
+
+# [1.113.0](https://github.com/adobe/spacecat-api-service/compare/v1.112.0...v1.113.0) (2025-05-22)
+
+
+### Features
+
+* [Preflight] Split identify and suggest flows - a small fix ([#926](https://github.com/adobe/spacecat-api-service/issues/926)) ([c763e09](https://github.com/adobe/spacecat-api-service/commit/c763e09c30a5e64654f160cae56c182ed523d58a))
+
+# [1.112.0](https://github.com/adobe/spacecat-api-service/compare/v1.111.0...v1.112.0) (2025-05-22)
+
+
+### Features
+
+* get files by key from s3 ([#921](https://github.com/adobe/spacecat-api-service/issues/921)) ([342b4c5](https://github.com/adobe/spacecat-api-service/commit/342b4c54feceb0f72ae4abccbc47e161c44e9f59))
+
+# [1.111.0](https://github.com/adobe/spacecat-api-service/compare/v1.110.2...v1.111.0) (2025-05-22)
+
+
+### Features
+
+* [Preflight] Split identify and suggest flows ([#924](https://github.com/adobe/spacecat-api-service/issues/924)) ([68dfffa](https://github.com/adobe/spacecat-api-service/commit/68dfffa87977cdd4dc5cd2c9d4cb54933334815b))
+
 ## [1.110.2](https://github.com/adobe/spacecat-api-service/compare/v1.110.1...v1.110.2) (2025-05-21)
 
 

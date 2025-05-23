@@ -2639,12 +2639,20 @@ AsyncJob:
     metadata:
       type: object
       required:
-        - pageUrl
+        - urls
+        - step
       properties:
-        pageUrl:
+        urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Array of URLs to be processed by the job
+          minItems: 1
+        step:
           type: string
-          format: uri
-          description: The URL to be processed by the job
+          enum: [identify, suggest]
+          description: The audit step to be performed
         submittedBy:
           type: string
         tags:
