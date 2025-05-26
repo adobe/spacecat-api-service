@@ -1,3 +1,10 @@
+# [1.115.0](https://github.com/adobe/spacecat-api-service/compare/v1.114.5...v1.115.0) (2025-05-26)
+
+
+### Features
+
+* updatedBy field in suggestion entity ([#906](https://github.com/adobe/spacecat-api-service/issues/906)) ([bb02432](https://github.com/adobe/spacecat-api-service/commit/bb024329d5d9d7d5c6787e7258b4c9921bb4ca83))
+
 ## [1.114.5](https://github.com/adobe/spacecat-api-service/compare/v1.114.4...v1.114.5) (2025-05-26)
 
 
