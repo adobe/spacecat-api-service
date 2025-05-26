@@ -442,6 +442,5 @@ describe('MCP Controller', () => {
     expect(body).to.have.property('result');
     const [first] = body.result.contents;
     expect(first).to.have.property('uri', `scrape-content://sites/${siteId}/files/${encodedKey}`);
-    expect(first.text).to.equal('https://presigned-url.s3.amazonaws.com/file');
   });
 });

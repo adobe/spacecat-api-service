@@ -221,19 +221,16 @@ export const createProxyResource = ({
       context: args,
     });
 
-    // Determine MIME type based on payload type
-    const mimeType = typeof payload === 'string' ? MIME_TYPES.TEXT : MIME_TYPES.JSON;
-    const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
     const uri = uriTemplate.replace(/\{(\w+)\}/g, (_, key) => args[key]);
 
     return {
       contents: [{
         uri,
-        mimeType,
-        text,
+        mimeType: MIME_TYPES.JSON,
+        text: JSON.stringify(payload),
       }],
     };
-  }, { args }),
+  }, args),
 });
 
 export default {
