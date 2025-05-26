@@ -22,17 +22,52 @@ export function createScrapeContentResources(scrapeController, context) {
   return {
     scrapeContentFilesList: createProxyResource({
       name: 'scrape-content-list',
-      description: 'Lists all scraped content files stored in S3 for a specific site and handler type. Handler types include "scrapes" (default web scraping), "imports" and "accessibility". This resource helps you discover what scraped content is available before retrieving specific files.',
+      description: `
+        <use_case>
+          Use this resource to discover and list all scraped content files available for a specific site. 
+          Returns metadata about files including names, storage keys, sizes, and modification dates.
+          Perfect for exploring what content has been scraped before retrieving specific files.
+          Supports pagination and filtering by path for large datasets.
+        </use_case>
+        
+        <important_notes>
+          1. If you have a URL instead of siteId, first use getSiteByBaseURL to get the site details
+          2. Always use this resource first to explore available content before retrieving files
+          3. Supports different content types: "scrapes" (web pages), "imports" (bulk data), and "accessibility" (a11y audits)
+          4. For filtering by path or pagination, use the listScrapedContentFiles tool instead
+          5. The returned storage keys are required for retrieving actual file content
+          6. File metadata includes size information to help decide retrieval strategy
+        </important_notes>
+      `,
       uriTemplate: 'scrape-content://sites/{siteId}/scraped-content/{type}',
-      fetchFn: ({ siteId, type }) => scrapeController.listScrapedContentFiles({
+      fetchFn: ({
+        siteId, type, path, rootOnly, pageSize, pageToken,
+      }) => scrapeController.listScrapedContentFiles({
         ...context,
         params: { siteId, type },
+        data: {
+          path, rootOnly, pageSize, pageToken,
+        },
       }),
       notFoundMessage: ({ siteId }) => `Scrape for site ${siteId} not found`,
     }),
     scrapeContentFileByKey: createProxyResource({
       name: 'scrape-content-file',
-      description: 'Retrieves a specific scraped content file from S3 using its storage key. Use this after getting the file list from scrape-content-list to access the actual content of a particular scraped file. The key parameter should be obtained from the file listing.',
+      description: `
+        <use_case>
+          Use this resource to retrieve the actual content of a specific scraped file using its storage key.
+          Returns either the file content directly or a presigned URL for large files.
+          Perfect for accessing scraped web pages, imported data, or accessibility audit results.
+        </use_case>
+        
+        <important_notes>
+          1. Complete workflow: URL → getSiteByBaseURL → scrape-content-list → scrape-content-file
+          2. The storage key must be obtained from scrape-content-list first
+          3. Keys are automatically URL-decoded to handle encoded characters
+          4. Use the exact key returned from the file listing without modification
+          5. For specific page content, look for keys that match the URL path you're interested in
+        </important_notes>
+      `,
       uriTemplate: 'scrape-content://sites/{siteId}/files/{key}',
       fetchFn: ({ siteId, key }) => {
         const decodedKey = decodeURIComponent(key);
