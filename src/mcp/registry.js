@@ -14,6 +14,7 @@
 
 import { createAuditResources } from './registry/resources/audits.js';
 import { createSiteResources } from './registry/resources/sites.js';
+import { createScrapeContentResources } from './registry/resources/scrape-content.js';
 import { createSiteTools } from './registry/tools/sites.js';
 import { createAuditTools } from './registry/tools/audits.js';
 import utilTools from './registry/tools/utils.js';
@@ -26,12 +27,14 @@ import utilTools from './registry/tools/utils.js';
  * @param {object} deps – bag of dependencies.
  * @param {object} deps.auditsController – instance of the Audits controller.
  * @param {object} deps.sitesController – instance of the Sites controller.
+ * @param {object} deps.scrapeController – instance of the Scrape controller.
  * @param {object} deps.context – the context object.
  * @returns {{ tools: Record<string,object>, resources: object, prompts: object }}
  */
 export default function buildRegistry({
   auditsController,
   sitesController,
+  scrapeController,
   context,
 } = {}) {
   const tools = {
@@ -43,6 +46,7 @@ export default function buildRegistry({
   const resources = {
     ...createAuditResources(auditsController),
     ...createSiteResources(sitesController, context),
+    ...createScrapeContentResources(scrapeController, context),
   };
 
   return {

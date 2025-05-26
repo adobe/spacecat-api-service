@@ -76,6 +76,15 @@ export async function unwrapControllerResponse(
     throw err;
   }
 
+  // Handle 302 Found responses (redirects) as successful
+  if (response.status === 302) {
+    const location = response.headers.get('location');
+    if (location) {
+      return location;
+    }
+    // If no location header, fall through to error handling
+  }
+
   if (!response.ok) {
     let message = notFoundMessage;
     // controllers typically send { message } JSON bodies; fall back to text
@@ -212,17 +221,19 @@ export const createProxyResource = ({
       context: args,
     });
 
-    // Construct the full URI from the template and args
+    // Determine MIME type based on payload type
+    const mimeType = typeof payload === 'string' ? MIME_TYPES.TEXT : MIME_TYPES.JSON;
+    const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
     const uri = uriTemplate.replace(/\{(\w+)\}/g, (_, key) => args[key]);
 
     return {
       contents: [{
         uri,
-        mimeType: MIME_TYPES.JSON,
-        text: JSON.stringify(payload),
+        mimeType,
+        text,
       }],
     };
-  }, args),
+  }, { args }),
 });
 
 export default {

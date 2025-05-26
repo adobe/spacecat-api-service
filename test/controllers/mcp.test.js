@@ -28,6 +28,7 @@ describe('MCP Controller', () => {
   let mcpController;
   let auditsController;
   let sitesController;
+  let scrapeController;
 
   beforeEach(() => {
     context = {
@@ -80,9 +81,43 @@ describe('MCP Controller', () => {
         value: 200,
       }])),
     };
+
+    scrapeController = {
+      listScrapedContentFiles: sandbox.stub().resolves(ok({
+        items: [
+          {
+            name: 'page1.json',
+            type: 'json',
+            key: 'sites/test-site/scrapes/2024/01/20/page1.json',
+            lastModified: '2024-01-20T12:00:00Z',
+            size: 1024,
+          },
+          {
+            name: 'page2.json',
+            type: 'json',
+            key: 'sites/test-site/scrapes/2024/01/20/page2.json',
+            lastModified: '2024-01-20T12:30:00Z',
+            size: 2048,
+          },
+        ],
+        nextPageToken: null,
+      })),
+      getFileByKey: sandbox.stub().resolves({
+        ok: false,
+        status: 302,
+        headers: {
+          get: (name) => {
+            if (name === 'location') return 'https://presigned-url.s3.amazonaws.com/file';
+            return null;
+          },
+        },
+      }),
+    };
+
     const registry = buildRegistry({
       auditsController,
       sitesController,
+      scrapeController,
       context,
     });
     mcpController = McpController(context, registry);
@@ -342,5 +377,71 @@ describe('MCP Controller', () => {
       },
       id: null,
     });
+  });
+
+  it('lists scraped content files by site ID and handler type', async () => {
+    const siteId = 'test-site';
+    const type = 'scrapes';
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/read',
+      params: {
+        uri: `scrape-content://sites/${siteId}/scraped-content/${type}`,
+      },
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+    const [first] = body.result.contents;
+    expect(first).to.have.property('uri', `scrape-content://sites/${siteId}/scraped-content/${type}`);
+
+    const parsedContent = JSON.parse(first.text);
+    expect(parsedContent).to.have.property('items');
+    expect(parsedContent.items).to.be.an('array');
+    expect(parsedContent.items).to.have.length(2);
+    expect(parsedContent.items[0]).to.deep.include({
+      name: 'page1.json',
+      type: 'json',
+      key: 'sites/test-site/scrapes/2024/01/20/page1.json',
+      lastModified: '2024-01-20T12:00:00Z',
+      size: 1024,
+    });
+    expect(parsedContent.items[1]).to.deep.include({
+      name: 'page2.json',
+      type: 'json',
+      key: 'sites/test-site/scrapes/2024/01/20/page2.json',
+      lastModified: '2024-01-20T12:30:00Z',
+      size: 2048,
+    });
+    expect(parsedContent).to.have.property('nextPageToken', null);
+  });
+
+  it('retrieves scraped content file by key', async () => {
+    const siteId = 'test-site';
+    const key = 'sites/test-site/scrapes/2024/01/20/page1.json';
+    const encodedKey = encodeURIComponent(key);
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/read',
+      params: {
+        uri: `scrape-content://sites/${siteId}/files/${encodedKey}`,
+      },
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+    const [first] = body.result.contents;
+    expect(first).to.have.property('uri', `scrape-content://sites/${siteId}/files/${encodedKey}`);
+    expect(first.text).to.equal('https://presigned-url.s3.amazonaws.com/file');
   });
 });
