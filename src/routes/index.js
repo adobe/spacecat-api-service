@@ -95,6 +95,7 @@ export default function getRouteHandlers(
     'GET /configurations/:version': configurationController.getByVersion,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
+    'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
     'GET /organizations': organizationsController.getAll,

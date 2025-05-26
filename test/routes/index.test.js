@@ -245,6 +245,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
       'GET /sites/:siteId/scraped-content/:type',
       'GET /sites/:siteId/files',
+      'POST /event/fulfillment/:eventType',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
