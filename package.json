@@ -14,6 +14,7 @@
     "test-postdeploy": "mocha -g 'Post-Deploy' --spec=test/**/*.test.js",
     "test-e2e": "mocha --timeout 30s --spec=test/**/*.e2e.js",
     "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
     "logs": "aws logs tail /aws/lambda/spacecat-services--api-service",
     "semantic-release": "semantic-release",
     "semantic-release-dry": "semantic-release --dry-run --no-ci --branches $CI_BRANCH",
