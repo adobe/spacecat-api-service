@@ -1256,7 +1256,7 @@ describe('Sites Controller', () => {
     const metric = 'organic-traffic';
 
     const result = await sitesController.getPageMetricsBySource({
-      params: { siteId, metric, source },
+      params: { siteId, source, metric },
     });
     const error = await result.json();
 

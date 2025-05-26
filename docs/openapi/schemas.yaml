@@ -2639,12 +2639,20 @@ AsyncJob:
     metadata:
       type: object
       required:
-        - pageUrl
+        - urls
+        - step
       properties:
-        pageUrl:
+        urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Array of URLs to be processed by the job
+          minItems: 1
+        step:
           type: string
-          format: uri
-          description: The URL to be processed by the job
+          enum: [identify, suggest]
+          description: The audit step to be performed
         submittedBy:
           type: string
         tags:
@@ -2674,3 +2682,36 @@ CreateAsyncJobAcceptedResponse:
       type: string
       format: uri
       description: URL to poll for job status
+
+ScrapedContentResponse:
+  type: array
+  description: Collection of scraped content files with metadata
+  items:
+    type: object
+    properties:
+      key:
+        type: string
+        description: Full path of the file relative to the content type root directory
+      name:
+        type: string
+        description: Name of the file
+      size:
+        type:
+          - integer
+          - "null"
+        description: File size in bytes
+      lastModified:
+        type:
+          - string
+          - "null"
+        format: date-time
+        description: Timestamp of the last file modification
+  example:
+    - key: "about-us/scrape.json"
+      name: "scrape.json"
+      size: 2048
+      lastModified: "2025-04-11T00:44:31Z"
+    - key: "about-us/screenshot-desktop-fullpage.png"
+      name: "screenshot-desktop-fullpage.png"
+      size: 123456
+      lastModified: "2025-04-11T00:44:31Z"

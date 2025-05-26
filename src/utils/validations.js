@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+const MAX_BODY_SIZE = 4 * 1024 * 1024; // 4 MB
+
 /**
  * Validates if the URL is a valid GitHub repository URL.
  *
@@ -20,6 +22,33 @@ function validateRepoUrl(repoUrl) {
   return /^https:\/\/github\.com\/[\w-]+\/[\w-]+(\.git)?$/.test(repoUrl);
 }
 
+/**
+ * Checks if the provided body fits within the given size budget.
+ * Supports strings, Uint8Array (Buffer) and arbitrary JSON-serialisable values.
+ *
+ * @param {any} data – request body to measure.
+ * @param {number} maxSize – maximum allowed size in bytes.
+ * @returns {boolean} true when size <= maxSize.
+ */
+function checkBodySize(data, maxSize) {
+  if (data instanceof Uint8Array) {
+    return data.length <= maxSize;
+  }
+
+  if (typeof data === 'string') {
+    return Buffer.byteLength(data, 'utf8') <= maxSize;
+  }
+
+  if (data !== null && data !== undefined) {
+    const jsonStr = JSON.stringify(data);
+    return Buffer.byteLength(jsonStr, 'utf8') <= maxSize;
+  }
+
+  return true;
+}
+
 export {
+  MAX_BODY_SIZE,
   validateRepoUrl,
+  checkBodySize,
 };
