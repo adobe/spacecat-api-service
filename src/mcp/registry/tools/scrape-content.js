@@ -50,7 +50,7 @@ export function createScrapeContentTools(scrapeController, context) {
     `,
     inputSchema: z.object({
       siteId: z.string().uuid().describe('The UUID of the site to fetch scraped content for'),
-      type: z.string().describe('The handler type for scraped content (e.g., "scrapes", "imports", "accessibility")'),
+      type: z.string().describe('The handler type for scraped content (possible options:"scrapes", "imports", "accessibility")'),
       path: z.string().optional().describe('Filter files by path prefix (e.g., "/products" to find product pages)'),
       rootOnly: z.string().optional().describe('Set to "true" to list only top-level directories instead of all files'),
       pageSize: z.string().optional().describe('Number of items per page (default: 100, max when rootOnly=true: 100)'),
