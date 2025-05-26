@@ -352,7 +352,7 @@ function SitesController(ctx, log, env) {
     }
 
     if (updates) {
-      site.setUpdatedBy(profile.email);
+      site.setUpdatedBy(profile.email || 'system');
       const updatedSite = await site.save();
       return ok(SiteDto.toJSON(updatedSite));
     }

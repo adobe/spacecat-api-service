@@ -316,7 +316,7 @@ function SuggestionsController(ctx, sqs, env) {
       }
 
       if (hasUpdates) {
-        suggestion.setUpdatedBy(profile.email);
+        suggestion.setUpdatedBy(profile.email || 'system');
         const updatedSuggestion = await suggestion.save();
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }

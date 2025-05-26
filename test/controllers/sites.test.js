@@ -53,6 +53,16 @@ describe('Sites Controller', () => {
     },
   };
 
+  const apikeyAuthAttributes = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('apikey')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ name: 'api-key' })
+        .withAuthenticated(true),
+    },
+  };
+
   const sites = [
     {
       siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', deliveryConfig: {}, config: Config({}), hlxConfig: {},
@@ -285,6 +295,48 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('baseURL', 'https://site1.com');
     expect(updatedSite).to.have.property('deliveryType', 'other');
     expect(updatedSite).to.have.property('gitHubURL', 'https://github.com/blah/bluh');
+    expect(updatedSite.hlxConfig).to.deep.equal({ field: true });
+    expect(updatedSite.deliveryConfig).to.deep.equal({
+      programId: '12652',
+      environmentId: '16854',
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+      siteId: '1234',
+    });
+  });
+
+  it('updates a site with api key', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
+        isLive: false,
+        deliveryType: 'other',
+        deliveryConfig: {
+          programId: '12652',
+          environmentId: '16854',
+          authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+          siteId: '1234',
+        },
+        gitHubURL: 'https://github.com/blah/bluh',
+        config: {},
+        hlxConfig: {
+          field: true,
+        },
+      },
+      ...apikeyAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('baseURL', 'https://site1.com');
+    expect(updatedSite).to.have.property('deliveryType', 'other');
+    expect(updatedSite).to.have.property('gitHubURL', 'https://github.com/blah/bluh');
+    expect(updatedSite).to.have.property('updatedBy', 'system');
     expect(updatedSite.hlxConfig).to.deep.equal({ field: true });
     expect(updatedSite.deliveryConfig).to.deep.equal({
       programId: '12652',

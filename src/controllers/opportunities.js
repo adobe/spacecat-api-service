@@ -263,7 +263,7 @@ function OpportunitiesController(ctx) {
         opportunity.setTags(tags);
       }
       if (hasUpdates) {
-        opportunity.setUpdatedBy(profile.email);
+        opportunity.setUpdatedBy(profile.email || 'system');
         const updatedOppty = await opportunity.save(opportunity);
         return ok(OpportunityDto.toJSON(updatedOppty));
       }

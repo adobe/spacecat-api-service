@@ -39,6 +39,15 @@ describe('Opportunities Controller', () => {
     },
   };
 
+  const apikeyAuthAttributes = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('apikey')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ name: 'api-key' }),
+    },
+  };
+
   const opptys = [
     {
       id: OPPORTUNITY_ID,
@@ -396,6 +405,42 @@ describe('Opportunities Controller', () => {
     expect(updatedOppty).to.have.property('id', OPPORTUNITY_ID);
     expect(updatedOppty).to.have.property('auditId', 'Audit ID NEW');
     expect(updatedOppty).to.have.property('status', 'APPROVED');
+  });
+
+  it('updates an opportunity with api key', async () => {
+    const response = await opportunitiesController.patchOpportunity({
+      ...apikeyAuthAttributes,
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: {
+        auditId: 'Audit ID NEW',
+        title: 'Test Opportunity NEW',
+        description: 'This is a test opportunity NEW',
+        runbook: 'http://runbook.url/new',
+        guidance: { tip: 'Follow these steps. NEW' },
+        type: 'SEO NEW',
+        status: 'APPROVED',
+        data: {
+          additionalInfo: 'info NEW',
+        },
+        tags: ['tag1', 'tag2', 'NEW'],
+      },
+    });
+
+    // Validate updated values
+    expect(mockOpptyEntity.getAuditId()).to.be.equals('Audit ID NEW');
+    expect(mockOpptyEntity.getStatus()).to.be.equals('APPROVED');
+
+    expect(response.status).to.equal(200);
+
+    const updatedOppty = await response.json();
+    expect(updatedOppty).to.have.property('siteId', SITE_ID);
+    expect(updatedOppty).to.have.property('id', OPPORTUNITY_ID);
+    expect(updatedOppty).to.have.property('auditId', 'Audit ID NEW');
+    expect(updatedOppty).to.have.property('status', 'APPROVED');
+    expect(updatedOppty).to.have.property('updatedBy', 'system');
   });
 
   it('returns bad request when creating an opportunity if site not provided', async () => {
