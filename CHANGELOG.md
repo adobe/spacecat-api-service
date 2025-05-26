@@ -1,3 +1,10 @@
+# [1.116.0](https://github.com/adobe/spacecat-api-service/compare/v1.115.0...v1.116.0) (2025-05-26)
+
+
+### Features
+
+* add scraper mcp tools support ([#932](https://github.com/adobe/spacecat-api-service/issues/932)) ([e5a0ea6](https://github.com/adobe/spacecat-api-service/commit/e5a0ea63acc005ebe70634c5494f33223da89011))
+
 # [1.115.0](https://github.com/adobe/spacecat-api-service/compare/v1.114.5...v1.115.0) (2025-05-26)
 
 
