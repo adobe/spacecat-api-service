@@ -1,3 +1,10 @@
+## [1.116.2](https://github.com/adobe/spacecat-api-service/compare/v1.116.1...v1.116.2) (2025-05-27)
+
+
+### Bug Fixes
+
+* MCP descriptions, remove echo tool ([#935](https://github.com/adobe/spacecat-api-service/issues/935)) ([cec4eae](https://github.com/adobe/spacecat-api-service/commit/cec4eaeec6b498adabb0896e7376cc843b8ee105))
+
 ## [1.116.1](https://github.com/adobe/spacecat-api-service/compare/v1.116.0...v1.116.1) (2025-05-26)
 
 
