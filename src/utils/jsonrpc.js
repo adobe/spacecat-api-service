@@ -76,6 +76,15 @@ export async function unwrapControllerResponse(
     throw err;
   }
 
+  // Handle 302 Found responses (redirects) as successful
+  if (response.status === 302) {
+    const location = response.headers.get('location');
+    if (location) {
+      return location;
+    }
+    // If no location header, fall through to error handling
+  }
+
   if (!response.ok) {
     let message = notFoundMessage;
     // controllers typically send { message } JSON bodies; fall back to text
@@ -212,7 +221,6 @@ export const createProxyResource = ({
       context: args,
     });
 
-    // Construct the full URI from the template and args
     const uri = uriTemplate.replace(/\{(\w+)\}/g, (_, key) => args[key]);
 
     return {

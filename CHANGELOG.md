@@ -1,3 +1,24 @@
+## [1.116.2](https://github.com/adobe/spacecat-api-service/compare/v1.116.1...v1.116.2) (2025-05-27)
+
+
+### Bug Fixes
+
+* MCP descriptions, remove echo tool ([#935](https://github.com/adobe/spacecat-api-service/issues/935)) ([cec4eae](https://github.com/adobe/spacecat-api-service/commit/cec4eaeec6b498adabb0896e7376cc843b8ee105))
+
+## [1.116.1](https://github.com/adobe/spacecat-api-service/compare/v1.116.0...v1.116.1) (2025-05-26)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#933](https://github.com/adobe/spacecat-api-service/issues/933)) ([d51387a](https://github.com/adobe/spacecat-api-service/commit/d51387ad783daa93b3d014b54a4e44305218e718))
+
+# [1.116.0](https://github.com/adobe/spacecat-api-service/compare/v1.115.0...v1.116.0) (2025-05-26)
+
+
+### Features
+
+* add scraper mcp tools support ([#932](https://github.com/adobe/spacecat-api-service/issues/932)) ([e5a0ea6](https://github.com/adobe/spacecat-api-service/commit/e5a0ea63acc005ebe70634c5494f33223da89011))
+
 # [1.115.0](https://github.com/adobe/spacecat-api-service/compare/v1.114.5...v1.115.0) (2025-05-26)
 
 
