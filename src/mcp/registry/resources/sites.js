@@ -22,7 +22,13 @@ export function createSiteResources(sitesController, context) {
   return {
     site: createProxyResource({
       name: 'site',
-      description: 'Returns site details for the given UUID.',
+      description: '\n'
+        + '<use_case>Use this resource template to obtain the details of a site you know its ID of.</use_case>\n'
+        + '<important_notes>'
+        + '1. You may need a tool to obtain site information by its base URL if you don\'t have the ID; or ask the user for it.\n'
+        + '2. The site ID must be a valid UUID.\n'
+        + '</important_notes>\n'
+        + '',
       uriTemplate: 'spacecat-data://sites/{siteId}',
       fetchFn: ({ siteId }) => sitesController.getByID({
         params: { siteId },
@@ -31,7 +37,13 @@ export function createSiteResources(sitesController, context) {
     }),
     siteByBaseURL: createProxyResource({
       name: 'siteByBaseURL',
-      description: 'Returns site details for the given base URL (base64-encoded).',
+      description: '\n'
+        + '<use_case>Use this resource template to obtain the details of a site you know its base URL of.</use_case>\n'
+        + '<important_notes>'
+        + '1. The base URL must be a valid URL, and it must be base64-encoded before being used. You can use the base64 encoding tool for a known base URL.\n'
+        + '2. You may need to ask the user for the base URL.\n'
+        + '</important_notes>\n'
+        + '',
       uriTemplate: 'spacecat-data://sites/by-base-url/{baseURLBase64}',
       fetchFn: ({ baseURLBase64 }) => sitesController.getByBaseURL({
         params: { baseURL: baseURLBase64 },
@@ -40,7 +52,13 @@ export function createSiteResources(sitesController, context) {
     }),
     siteMetricsBySource: createProxyResource({
       name: 'siteMetricsBySource',
-      description: 'Returns site metrics for the given site ID, metric, and source. The following sources are supported: "ahrefs" and "rum". For the "ahrefs" source, the following metrics are supported: "organic-keywords" and "organic-traffic". For the "rum" source, the following metrics are supported: "all-traffic".',
+      description: '\n'
+        + '<use_case>Use this resource template to obtain the metrics of a site by its ID, metric type, and source.</use_case>\n'
+        + '<important_notes>'
+        + '1. You may need a tool or resource template to obtain site information that yields the site\'s ID.\n'
+        + '2. The metric must be one of the supported metrics, and the source must be a valid source identifier.\n'
+        + '</important_notes>\n'
+        + '',
       uriTemplate: 'spacecat-data://sites/{siteId}/metrics/{metric}/{source}',
       fetchFn: ({ siteId, metric, source }) => sitesController.getSiteMetricsBySource(
         { ...context, params: { siteId, metric, source } },

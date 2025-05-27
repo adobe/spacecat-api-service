@@ -23,7 +23,13 @@ export default {
       idempotentHint: true,
       openWorldHint: false,
     },
-    description: 'Counts the number of characters, words, and sentences in a given text. Useful for comparing lengths of initial and recommended texts.',
+    description: ''
+      + '<use_case>Use this tool to count the number of characters, words and sententences in a given text.</use_case>\n'
+      + '<important_notes>'
+      + '1. This tool counts all characters, including spaces and punctuation.\n'
+      + '2. Words are counted as sequences of characters separated by spaces.\n'
+      + '3. Sentences are counted by splitting the text on periods, exclamation marks, or question marks followed by a space or end of string.\n'
+      + '</important_notes>\n',
     inputSchema: z.object({
       text: z.string().describe('The text to analyze'),
     }).strict(),
@@ -64,7 +70,12 @@ export default {
       idempotentHint: true,
       openWorldHint: false,
     },
-    description: 'Encodes a string to base64',
+    description: ''
+      + '<use_case>Use this tool to encode a string to base64 format.</use_case>\n'
+      + '<important_notes>'
+      + '1. The input text will be encoded to base64 format.\n'
+      + '2. The output will be a base64-encoded string that can be decoded back to the original text using the decode tool.\n'
+      + '</important_notes>\n',
     inputSchema: z.object({
       text: z.string().describe('The text to encode'),
     }).strict(),
@@ -80,28 +91,17 @@ export default {
       idempotentHint: true,
       openWorldHint: false,
     },
-    description: 'Decodes a base64 string to a string',
+    description: ''
+      + '<use_case>Use this tool to decode a base64-encoded string back to its original text.</use_case>\n'
+      + '<important_notes>'
+      + '1. The input text must be a valid base64-encoded string.\n'
+      + '2. The output will be the original text before it was encoded to base64.\n'
+      + '</important_notes>\n',
     inputSchema: z.object({
       text: z.string().describe('The base64 text to decode'),
     }).strict(),
     handler: async ({ text }) => ({
       content: [{ type: 'text', text: Buffer.from(text, 'base64').toString('utf-8') }],
-    }),
-  },
-  echo: {
-    annotations: {
-      title: 'Echo',
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-    description: 'Echoes back the input string',
-    inputSchema: z.object({
-      message: z.string().describe('Message to echo back'),
-    }).strict(),
-    handler: async ({ message }) => ({
-      content: [{ type: 'text', text: String(message) }],
     }),
   },
 };
