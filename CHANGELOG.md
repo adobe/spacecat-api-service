@@ -1,3 +1,10 @@
+## [1.116.4](https://github.com/adobe/spacecat-api-service/compare/v1.116.3...v1.116.4) (2025-05-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @octokit/rest to v22 ([#934](https://github.com/adobe/spacecat-api-service/issues/934)) ([b52f2f1](https://github.com/adobe/spacecat-api-service/commit/b52f2f17cba2ea32e486633533350b2fd3a6bc34))
+
 ## [1.116.3](https://github.com/adobe/spacecat-api-service/compare/v1.116.2...v1.116.3) (2025-05-27)
 
 
