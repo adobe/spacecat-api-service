@@ -143,7 +143,7 @@ describe('MCP Controller', () => {
     expect(body).to.have.property('result');
     const { tools } = body.result;
     const names = tools.map((t) => t.name);
-    expect(names).to.include('echo');
+    expect(names).to.include('encodeBase64');
   });
 
   it('lists configured resources via JSON-RPC', async () => {
@@ -297,14 +297,14 @@ describe('MCP Controller', () => {
     }]);
   });
 
-  it('executes echo tool', async () => {
+  it('executes encodeBase64 tool', async () => {
     const payload = {
       jsonrpc: '2.0',
       id: 2,
       method: 'tools/call',
       params: {
-        name: 'echo',
-        arguments: { message: 'Hello World' },
+        name: 'encodeBase64',
+        arguments: { text: 'Hello World' },
       },
     };
 
@@ -315,7 +315,7 @@ describe('MCP Controller', () => {
     const body = await resp.json();
     expect(body).to.have.property('result');
     const [first] = body.result.content;
-    expect(first.text).to.equal('Hello World');
+    expect(first.text).to.equal('SGVsbG8gV29ybGQ=');
   });
 
   it('returns Invalid params error for unknown tool', async () => {
