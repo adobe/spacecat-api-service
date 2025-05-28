@@ -16,6 +16,7 @@
  *   FixEntity,
  *   FixEntityCollection,
  *   OpportunityCollection,
+ *   SiteCollection,
  *   SuggestionCollection
  * } from "@adobe/spacecat-shared-data-access"
  */
@@ -57,6 +58,9 @@ export class FixesController {
   /** @type {OpportunityCollection} */
   #Opportunity;
 
+  /** @type {SiteCollection} */
+  #Site;
+
   /** @type {SuggestionCollection} */
   #Suggestion;
 
@@ -71,6 +75,7 @@ export class FixesController {
     const { dataAccess } = ctx;
     this.#FixEntity = dataAccess.FixEntity;
     this.#Opportunity = dataAccess.Opportunity;
+    this.#Site = dataAccess.Site;
     this.#Suggestion = dataAccess.Suggestion;
     this.#accessControl = accessControl;
   }
@@ -84,7 +89,7 @@ export class FixesController {
   async getAllForOpportunity(context) {
     const { siteId, opportunityId } = context.params;
 
-    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId);
+    let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
     const fixEntities = await this.#FixEntity.allByOpportunityId(opportunityId);
@@ -106,7 +111,7 @@ export class FixesController {
    */
   async getByStatus(context) {
     const { siteId, opportunityId, status } = context.params;
-    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId);
+    let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
     if (!hasText(status)) {
@@ -129,7 +134,7 @@ export class FixesController {
   async getByID(context) {
     const { siteId, opportunityId, fixId } = context.params;
 
-    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId, fixId);
+    let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -149,7 +154,7 @@ export class FixesController {
   async getAllSuggestionsForFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
 
-    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId, fixId);
+    let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -170,7 +175,7 @@ export class FixesController {
   async createFixes(context) {
     const { siteId, opportunityId } = context.params;
 
-    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId);
+    let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
     res = await checkOwnership(null, opportunityId, siteId, this.#Opportunity);
@@ -216,7 +221,7 @@ export class FixesController {
   async patchFixesStatus(context) {
     const { siteId, opportunityId } = context.params;
 
-    const res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId);
+    const res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
     if (!Array.isArray(context.data)) {
@@ -297,7 +302,7 @@ export class FixesController {
    */
   async patchFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
-    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId, fixId);
+    let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -368,7 +373,7 @@ export class FixesController {
   async removeFix(context) {
     const { siteId, opportunityId, fixId } = context.params;
 
-    let res = this.#checkAccess() ?? checkRequestParams(siteId, opportunityId, fixId);
+    let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
     const fix = await this.#FixEntity.findById(fixId);
@@ -386,12 +391,20 @@ export class FixesController {
 
   /**
    * Checks if the user has admin access.
+   * @param {string} siteId
    * @returns {Response | null} forbidden response or null.
    */
-  #checkAccess() {
-    return this.#accessControl.hasAdminAccess()
+  async #checkAccess(siteId) {
+    const site = await this.#Site.findById(siteId);
+    /* c8 ignore start */
+    if (!site) {
+      return notFound('Site not found');
+    }
+    /* c8 ignore end */
+
+    return await this.#accessControl.hasAccess(site)
       ? null
-      : forbidden('Only admins may access fix entities.');
+      : forbidden('Only users belonging to the organization may access fix entities.');
   }
 }
 
