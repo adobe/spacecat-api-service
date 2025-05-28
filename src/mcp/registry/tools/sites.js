@@ -29,7 +29,13 @@ export function createSiteTools(sitesController, context) {
       idempotentHint: true,
       openWorldHint: false,
     },
-    description: 'Returns site details for the given UUID.',
+    description: '\n'
+      + '<use_case>Use this tool to obtain the details of a site you know its ID of.</use_case>\n'
+      + '<important_notes>'
+      + '1. You may need a tool to obtain site information by its base URL if you don\'t have the ID; or ask the user for it.\n'
+      + '2. The site ID must be a valid UUID.\n'
+      + '</important_notes>\n'
+      + '',
     inputSchema: z.object({
       siteId: z.string().uuid().describe('The UUID of the site to fetch'),
     }).strict(),
@@ -46,7 +52,13 @@ export function createSiteTools(sitesController, context) {
       idempotentHint: true,
       openWorldHint: false,
     },
-    description: 'Returns site details for the given base URL (plain URL, not base64-encoded).',
+    description: '\n'
+      + '<use_case>Use this tool to obtain the details of a site you know its base URL of.</use_case>\n'
+      + '<important_notes>'
+      + '1. The base URL must be a valid URL, and it must be base64-encoded before being used. You can use the base64 encoding tool for a known base URL.\n'
+      + '2. You may need to ask the user for the base URL.\n'
+      + '</important_notes>\n'
+      + '',
     inputSchema: z.object({
       baseURL: z.string().url().describe('The base URL of the site to fetch'),
     }).strict(),
@@ -60,7 +72,13 @@ export function createSiteTools(sitesController, context) {
   /* ------------- getSiteMetricsBySource ---------------- */
   const getSiteMetricsBySourceTool = createProxyTool({
     name: 'getSiteMetricsBySource',
-    description: 'Returns site metrics for the given site ID, metric, and source. The following sources are supported: "ahrefs" and "rum". For the "ahrefs" source, the following metrics are supported: "organic-keywords" and "organic-traffic". For the "rum" source, the following metrics are supported: "all-traffic".',
+    description: '\n'
+      + '<use_case>Use this tool to obtain the metrics of a site by its ID, metric type, and source.</use_case>\n'
+      + '<important_notes>'
+      + '1. You may need a tool or resource template to obtain site information that yields the site\'s ID.\n'
+      + '2. The metric must be one of the supported metrics, and the source must be a valid source identifier.\n'
+      + '</important_notes>\n'
+      + '',
     inputSchema: z.object({
       siteId: z.string().uuid().describe('The ID of the site'),
       metric: z.enum(['organic-keywords', 'organic-traffic', 'all-traffic']).describe('The metric to retrieve. For ahrefs source: organic-keywords, organic-traffic. For rum source: all-traffic'),
