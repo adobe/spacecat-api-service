@@ -47,7 +47,7 @@ function OnboardCommand(context) {
     name: 'Onboard Site(s)',
     description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
+    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile] [Optional: workflowWaitTime]`,
   });
 
   const {
@@ -78,6 +78,7 @@ function OnboardCommand(context) {
    * @param {string} imsOrgID - The IMS Org ID.
    * @param {object} configuration - The configuration object.
    * @param {string} profileName - The profile name.
+   * @param {number} workflowWaitTime - Optional wait time in seconds.
    * @param {Object} slackContext - Slack context.
    * @returns {Promise<Object>} - A report line containing execution details.
    */
@@ -86,12 +87,15 @@ function OnboardCommand(context) {
     imsOrgID,
     configuration,
     profileName,
+    workflowWaitTime,
     slackContext,
   ) => {
     const { say } = slackContext;
     const sfnClient = new SFNClient();
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
+
+    log.info(`Slack context: ${JSON.stringify(slackContext)}`);
 
     const reportLine = {
       site: baseURL,
@@ -162,8 +166,10 @@ function OnboardCommand(context) {
 
         const siteOrgId = site.getOrganizationId();
         if (siteOrgId !== organizationId) {
-          site.setOrganizationId(organizationId);
-          log.info(`Site ${baseURL} organization ID updated to ${organizationId}`);
+          log.info(`:warning: :alert: Site ${baseURL} organization ID mismatch. Run below slack command to update site organization to ${organizationId}`);
+          log.info(`:fire: @spacecat set imsorg ${baseURL} ${organizationId}`);
+          // site.setOrganizationId(organizationId);
+          // log.info(`Site ${baseURL} organization ID updated to ${organizationId}`);
         }
       } else {
         log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
@@ -253,12 +259,18 @@ function OnboardCommand(context) {
       // trigger audit runs
       for (const auditType of auditTypes) {
         /* eslint-disable no-await-in-loop */
-        await triggerAuditForSite(
-          site,
-          auditType,
-          slackContext,
-          context,
-        );
+        if (!configuration.isHandlerEnabledForSite(auditType, site)) {
+          await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
+        } else {
+          log.info(`Triggering multi step audit processing for site ${siteID} with audit type ${auditType}`);
+          await say(`:hourglass_flowing_sand: Triggering multi step audit processing for site ${siteID} with audit type ${auditType}`);
+          await triggerAuditForSite(
+            site,
+            auditType,
+            slackContext,
+            context,
+          );
+        }
       }
 
       // Audit status job
@@ -268,6 +280,22 @@ function OnboardCommand(context) {
         auditContext: {
           organizationId,
           experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
+          auditTypes,
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      };
+
+      // Disable imports and audits job
+      const disableImportAndAuditJob = {
+        type: 'disable-import-audit-processor',
+        siteId: siteID,
+        auditContext: {
+          organizationId,
+          importTypes,
+          auditTypes,
           slackContext: {
             channelId: slackContext.channelId,
             threadTs: slackContext.threadTs,
@@ -283,6 +311,8 @@ function OnboardCommand(context) {
         siteId: siteID,
         slackContext,
         auditStatusJob,
+        disableImportAndAuditJob,
+        workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
       };
 
       // Log the serialized input to verify it works correctly
@@ -295,9 +325,7 @@ function OnboardCommand(context) {
         input: JSON.stringify(workflowInput),
         name: `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
       });
-      const response = await sfnClient.send(startCommand);
-      log.info(`Workflow started !. Response: ${response}`);
-      await say(`:hourglass_flowing_sand: Workflow started !. Response: ${response}`);
+      await sfnClient.send(startCommand);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -340,7 +368,7 @@ function OnboardCommand(context) {
           return;
         }
 
-        const profileName = args[0] || 'default';
+        const profileName = args.length > 0 ? args[0] : 'default';
 
         await say(`:gear: Processing CSV file with profile *${profileName}*...`);
 
@@ -368,6 +396,7 @@ function OnboardCommand(context) {
             imsOrgID,
             configuration,
             profileName,
+            env.WORKFLOW_WAIT_TIME_IN_SECONDS, // Use environment default wait time in batch mode
             slackContext,
           );
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
@@ -402,7 +431,9 @@ function OnboardCommand(context) {
           return;
         }
 
-        const [baseURLInput, imsOrgID, profileName = 'default'] = args;
+        const [baseURLInput, imsOrgID, profileName = 'default', workflowWaitTime] = args;
+        const parsedWaitTime = workflowWaitTime ? parseInt(workflowWaitTime, 10) : undefined;
+
         const configuration = await Configuration.findLatest();
 
         const reportLine = await onboardSingleSite(
@@ -410,6 +441,7 @@ function OnboardCommand(context) {
           imsOrgID,
           configuration,
           profileName,
+          parsedWaitTime,
           slackContext,
         );
 
@@ -420,14 +452,15 @@ function OnboardCommand(context) {
         }
 
         const message = `
-        *:spacecat: :satellite: Onboarding workflow started for ${reportLine.site}*
-        This workflow automatically handles imports, scrapes, and audits in the background.
+        *:spacecat: :satellite: Onboarding started for ${reportLine.site}*
+        This workflow automatically handles imports, scrapes, and audits for the site.
         :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
         :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
         :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
         :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
         :question: *Already existing:* ${reportLine.existingSite}
         :gear: *Profile:* ${reportLine.profile}
+        :hourglass_flowing_sand: *Wait Time:* ${parsedWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS} seconds (${parsedWaitTime === env.WORKFLOW_WAIT_TIME_IN_SECONDS ? 'default' : 'custom'})
         :clipboard: *Audits:* ${reportLine.audits || 'None'}
         :inbox_tray: *Imports:* ${reportLine.imports || 'None'}
         ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : ':hourglass_flowing_sand: *Status:* In-Progress'}
