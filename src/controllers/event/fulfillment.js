@@ -107,8 +107,8 @@ function FulfillmentController(context) {
    */
   async function processFulfillmentEvents(requestContext) {
     try {
-      const eventType = requestContext.params?.eventType || FULFILLMENT_EVENT_TYPES.EDGE_DELIVERY_SERVICES;
-      
+      const eventType = requestContext.params?.eventType
+        || FULFILLMENT_EVENT_TYPES.EDGE_DELIVERY_SERVICES;
       // Validate eventType
       if (!Object.values(FULFILLMENT_EVENT_TYPES).includes(eventType)) {
         log.error(`Invalid event type: ${eventType}`);
