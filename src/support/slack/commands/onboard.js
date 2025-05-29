@@ -453,7 +453,7 @@ function OnboardCommand(context) {
 
         const message = `
         *:spacecat: :satellite: Onboarding started for ${reportLine.site}*
-        This workflow automatically handles imports, scrapes, and audits for the site.
+        Onboarding workflow automatically handles imports, scrapes, and audits for the site.
         :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
         :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
         :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
