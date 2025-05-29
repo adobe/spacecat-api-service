@@ -277,6 +277,7 @@ function OnboardCommand(context) {
       const auditStatusJob = {
         type: 'audit-status-processor',
         siteId: siteID,
+        siteUrl: baseURL,
         auditContext: {
           organizationId,
           experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
@@ -287,11 +288,11 @@ function OnboardCommand(context) {
           },
         },
       };
-
       // Disable imports and audits job
       const disableImportAndAuditJob = {
         type: 'disable-import-audit-processor',
         siteId: siteID,
+        siteUrl: baseURL,
         auditContext: {
           organizationId,
           importTypes,
