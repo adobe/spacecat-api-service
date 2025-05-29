@@ -29,7 +29,13 @@ export function createAuditTools(auditsController) {
       idempotentHint: true,
       openWorldHint: false,
     },
-    description: 'Returns audit details for the given site ID and audit type.',
+    description: '\n'
+      + '<use_case>Use this tool to obtain the latest audit results of a given audit type for a site you know its ID of.</use_case>\n'
+      + '<important_notes>'
+      + '1. You may need another tool to obtain site information that yields the site\'s ID.\n'
+      + '2. The audit type must be one of the supported types. Ask the user to provide it.\n'
+      + '</important_notes>\n'
+      + '',
     inputSchema: z.object({
       auditType: z.string().describe('The type of the audit to fetch'),
       siteId: z.string().uuid().describe('The UUID of the site to fetch'),

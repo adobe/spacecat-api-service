@@ -130,6 +130,12 @@ describe('Suggestions Controller', () => {
       }
       return this;
     },
+    getUpdatedBy() {
+      return suggData.updatedBy;
+    },
+    setUpdatedBy(value) {
+      suggData.updatedBy = value;
+    },
     remove: removeStub,
   });
 
@@ -158,6 +164,7 @@ describe('Suggestions Controller', () => {
   let removeStub;
   let suggs;
   let context;
+  let apikeyAuthAttributes;
 
   beforeEach(() => {
     context = {
@@ -166,7 +173,16 @@ describe('Suggestions Controller', () => {
         authInfo: new AuthInfo()
           .withType('jwt')
           .withScopes([{ name: 'admin' }])
-          .withProfile({ is_admin: true })
+          .withProfile({ is_admin: true, email: 'test@test.com' })
+          .withAuthenticated(true),
+      },
+    };
+    apikeyAuthAttributes = {
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('apikey')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ name: 'api-key' })
           .withAuthenticated(true),
       },
     };
@@ -203,6 +219,8 @@ describe('Suggestions Controller', () => {
         kpiDeltas: {
           conversionRate: 0.05,
         },
+        updatedBy: 'test@test.com',
+        updatedAt: new Date(),
       },
       {
         id: SUGGESTION_IDS[1],
@@ -216,6 +234,8 @@ describe('Suggestions Controller', () => {
         kpiDeltas: {
           conversionRate: 0.02,
         },
+        updatedBy: 'test@test.com',
+        updatedAt: new Date(),
       },
       {
         id: SUGGESTION_IDS[2],
@@ -229,6 +249,8 @@ describe('Suggestions Controller', () => {
         kpiDeltas: {
           conversionRate: 0.02,
         },
+        updatedBy: 'test@test.com',
+        updatedAt: new Date(),
       },
 
     ];
@@ -780,7 +802,9 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
         suggestionId: SUGGESTION_IDS[0],
       },
-      data: { rank, data, kpiDeltas },
+      data: {
+        rank, data, kpiDeltas, updatedBy: 'test@test.com', updatedAt: new Date(),
+      },
       ...context,
     });
 
@@ -790,6 +814,29 @@ describe('Suggestions Controller', () => {
     expect(updatedSuggestion).to.have.property('opportunityId', OPPORTUNITY_ID);
     expect(updatedSuggestion).to.have.property('id', SUGGESTION_IDS[0]);
     expect(updatedSuggestion).to.have.property('rank', 2);
+  });
+
+  it('patches a suggestion with api key', async () => {
+    const { rank, data, kpiDeltas } = suggs[1];
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        rank, data, kpiDeltas, updatedBy: 'test@test.com', updatedAt: new Date(),
+      },
+      ...apikeyAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+
+    const updatedSuggestion = await response.json();
+    expect(updatedSuggestion).to.have.property('opportunityId', OPPORTUNITY_ID);
+    expect(updatedSuggestion).to.have.property('id', SUGGESTION_IDS[0]);
+    expect(updatedSuggestion).to.have.property('rank', 2);
+    expect(updatedSuggestion).to.have.property('updatedBy', 'system');
   });
 
   it('patches a suggestion for non existing site', async () => {
