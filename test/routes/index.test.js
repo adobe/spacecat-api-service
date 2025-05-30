@@ -118,7 +118,8 @@ describe('getRouteHandlers', () => {
   };
 
   const mockMcpController = {
-    handleRcp: sinon.stub(),
+    handleRpc: sinon.stub(),
+    handleSseRequest: sinon.stub(),
   };
 
   const mockScrapeController = {
@@ -183,6 +184,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'GET /screenshots',
       'POST /screenshots',
+      'GET /mcp',
       'POST /mcp',
     );
 
@@ -200,6 +202,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['GET /screenshots']).to.equal(mockDemoController.getScreenshots);
+    expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
+    expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
