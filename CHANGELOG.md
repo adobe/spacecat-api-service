@@ -1,3 +1,17 @@
+## [1.117.1](https://github.com/adobe/spacecat-api-service/compare/v1.117.0...v1.117.1) (2025-05-30)
+
+
+### Bug Fixes
+
+* sse related errors by not allowing get method ([#944](https://github.com/adobe/spacecat-api-service/issues/944)) ([68f36ac](https://github.com/adobe/spacecat-api-service/commit/68f36aca2f43f1caa1f64acc5936987083956d22))
+
+# [1.117.0](https://github.com/adobe/spacecat-api-service/compare/v1.116.6...v1.117.0) (2025-05-30)
+
+
+### Features
+
+* Fixes controller ([#850](https://github.com/adobe/spacecat-api-service/issues/850)) ([cb4f02c](https://github.com/adobe/spacecat-api-service/commit/cb4f02c6cebf72cc7e5eb00d17ccaf4ee5bfd6b3))
+
 ## [1.116.6](https://github.com/adobe/spacecat-api-service/compare/v1.116.5...v1.116.6) (2025-05-27)
 
 

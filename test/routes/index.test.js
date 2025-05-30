@@ -118,12 +118,24 @@ describe('getRouteHandlers', () => {
   };
 
   const mockMcpController = {
-    handleRcp: sinon.stub(),
+    handleRpc: sinon.stub(),
+    handleSseRequest: sinon.stub(),
   };
 
   const mockScrapeController = {
     getFileByKey: sinon.stub(),
     listScrapedContentFiles: sinon.stub(),
+  };
+
+  const mockFixesController = {
+    getAllForOpportunity: () => null,
+    getByStatus: () => null,
+    getByID: () => null,
+    getAllSuggestionsForFix: () => null,
+    createFixes: () => null,
+    patchFixesStatus: () => null,
+    patchFix: () => null,
+    removeFix: () => null,
   };
 
   it('segregates static and dynamic routes', () => {
@@ -147,6 +159,7 @@ describe('getRouteHandlers', () => {
       mockDemoController,
       mockScrapeController,
       mockMcpController,
+      mockFixesController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -171,6 +184,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'GET /screenshots',
       'POST /screenshots',
+      'GET /mcp',
       'POST /mcp',
     );
 
@@ -188,6 +202,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['GET /screenshots']).to.equal(mockDemoController.getScreenshots);
+    expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
+    expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
@@ -246,6 +262,14 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/scraped-content/:type',
       'GET /sites/:siteId/files',
       'POST /event/fulfillment/:eventType',
+      'GET /sites/:siteId/opportunities/:opportunityId/fixes',
+      'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
+      'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
+      'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions',
+      'POST /sites/:siteId/opportunities/:opportunityId/fixes',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/status',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
+      'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

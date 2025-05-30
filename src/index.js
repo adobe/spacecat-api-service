@@ -51,6 +51,7 @@ import trigger from './controllers/trigger.js';
 import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
+import { FixesController } from './controllers/fixes.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
@@ -113,6 +114,7 @@ async function run(request, context) {
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
     const scrapeController = ScrapeController(context);
+    const fixesController = new FixesController(context);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
@@ -143,6 +145,7 @@ async function run(request, context) {
       demoController,
       scrapeController,
       mcpController,
+      fixesController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
