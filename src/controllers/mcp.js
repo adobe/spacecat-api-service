@@ -90,7 +90,14 @@ export default function McpController(ctx, registry) {
     }
   };
 
-  return { handleRpc, close: closeSdkServer };
+  /* ----- GET endpoint for SSE (returns 405 Method Not Allowed) ----- */
+  // https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#listening-for-messages-from-the-server
+  const handleSseRequest = async () => send(405, {
+    error: 'Method Not Allowed',
+    message: 'SSE streaming is not supported by this MCP server. Use POST requests instead.',
+  });
+
+  return { handleRpc, handleSseRequest, close: closeSdkServer };
 }
 
 /* c8 ignore end */
