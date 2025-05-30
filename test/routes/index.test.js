@@ -126,6 +126,10 @@ describe('getRouteHandlers', () => {
     listScrapedContentFiles: sinon.stub(),
   };
 
+  const mockEntityController = {
+    getLastUpdatedBy: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -147,6 +151,7 @@ describe('getRouteHandlers', () => {
       mockDemoController,
       mockScrapeController,
       mockMcpController,
+      mockEntityController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -172,6 +177,7 @@ describe('getRouteHandlers', () => {
       'GET /screenshots',
       'POST /screenshots',
       'POST /mcp',
+      'POST /entity/lastupdatedby',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);

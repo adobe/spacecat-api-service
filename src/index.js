@@ -63,6 +63,7 @@ import DemoController from './controllers/demo.js';
 import ScrapeController from './controllers/scrape.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
+import EntityController from './controllers/entity.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -113,7 +114,7 @@ async function run(request, context) {
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
     const scrapeController = ScrapeController(context);
-
+    const entityController = EntityController(context);
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
       auditsController,
@@ -143,6 +144,7 @@ async function run(request, context) {
       demoController,
       scrapeController,
       mcpController,
+      entityController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
