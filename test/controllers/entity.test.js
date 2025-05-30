@@ -36,7 +36,7 @@ describe('Entity Controller', () => {
     };
 
     mockDataAccess = {
-      BaseCollection: {
+      Opportunity: {
         findById: sandbox.stub(),
       },
     };
@@ -71,7 +71,7 @@ describe('Entity Controller', () => {
     });
 
     it('returns not found when entity does not exist', async () => {
-      mockDataAccess.BaseCollection.findById.resolves(null);
+      mockDataAccess.Opportunity.findById.resolves(null);
 
       const response = await entityController.getLastUpdatedBy({
         data: { entityId: validUUID },
@@ -80,11 +80,11 @@ describe('Entity Controller', () => {
       expect(response.status).to.equal(404);
       const error = await response.json();
       expect(error.message).to.equal(`Entity not found: ${validUUID}`);
-      expect(mockDataAccess.BaseCollection.findById.calledWith(validUUID)).to.be.true;
+      expect(mockDataAccess.Opportunity.findById.calledWith(validUUID)).to.be.true;
     });
 
     it('returns not found when no update history exists', async () => {
-      mockDataAccess.BaseCollection.findById.resolves(mockEntity);
+      mockDataAccess.Opportunity.findById.resolves(mockEntity);
       mockEntity.getUpdatedBy.returns(null);
 
       const response = await entityController.getLastUpdatedBy({
@@ -97,7 +97,7 @@ describe('Entity Controller', () => {
     });
 
     it('returns non-email updatedBy value directly', async () => {
-      mockDataAccess.BaseCollection.findById.resolves(mockEntity);
+      mockDataAccess.Opportunity.findById.resolves(mockEntity);
       mockEntity.getUpdatedBy.returns(nonEmailUpdatedBy);
 
       const response = await entityController.getLastUpdatedBy({
@@ -111,7 +111,7 @@ describe('Entity Controller', () => {
     });
 
     it('returns email from IMS profile when updatedBy is an email', async () => {
-      mockDataAccess.BaseCollection.findById.resolves(mockEntity);
+      mockDataAccess.Opportunity.findById.resolves(mockEntity);
       mockEntity.getUpdatedBy.returns(emailUpdatedBy);
       context.imsClient.getImsAdminProfile.resolves({
         email: 'resolved@example.com',
@@ -128,7 +128,7 @@ describe('Entity Controller', () => {
     });
 
     it('returns original updatedBy email when IMS profile lookup fails', async () => {
-      mockDataAccess.BaseCollection.findById.resolves(mockEntity);
+      mockDataAccess.Opportunity.findById.resolves(mockEntity);
       mockEntity.getUpdatedBy.returns(emailUpdatedBy);
       context.imsClient.getImsAdminProfile.rejects(new Error('IMS API error'));
 

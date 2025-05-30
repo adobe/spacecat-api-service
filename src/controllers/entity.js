@@ -31,7 +31,7 @@ function EntityController(context) {
     dataAccess, log, imsClient,
   } = context;
 
-  const { BaseCollection } = dataAccess;
+  const { Opportunity } = dataAccess;
 
   /**
    * Gets the last updated by information for an entity.
@@ -46,7 +46,7 @@ function EntityController(context) {
       return badRequest('Valid entity ID required');
     }
 
-    const entity = await BaseCollection.findById(entityId);
+    const entity = await Opportunity.findById(entityId);
     if (!entity) {
       return notFound(`Entity not found: ${entityId}`);
     }
