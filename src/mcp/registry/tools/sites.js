@@ -55,7 +55,7 @@ export function createSiteTools(sitesController, context) {
     description: '\n'
       + '<use_case>Use this tool to obtain the details of a site you know its base URL of.</use_case>\n'
       + '<important_notes>'
-      + '1. The base URL must be a valid URL, and it must be base64-encoded before being used. You can use the base64 encoding tool for a known base URL.\n'
+      + '1. The base URL must be a valid URL (e.g., https://example.com). The tool will handle encoding internally.\n'
       + '2. You may need to ask the user for the base URL.\n'
       + '</important_notes>\n'
       + '',
