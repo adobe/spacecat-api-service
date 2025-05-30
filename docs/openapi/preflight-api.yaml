@@ -19,35 +19,29 @@ preflight-jobs:
           schema:
             type: object
             properties:
-              pageUrl:
+              urls:
+                type: array
+                items:
+                  type: string
+                  format: uri
+                description: Array of URLs to be processed by the job
+                minItems: 1
+              step:
                 type: string
-                format: uri
-                description: The URL to be processed by the job
+                enum: [identify, suggest]
+                description: The audit step to be performed
             required:
-              - pageUrl
+              - urls
+              - step
     responses:
       '202':
         description: Job accepted
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                jobId:
-                  type: string
-                  format: uuid
-                status:
-                  type: string
-                  enum: [ IN_PROGRESS, COMPLETED, FAILED ]
-                createdAt:
-                  type: string
-                  format: date-time
-                pollUrl:
-                  type: string
-                  format: uri
-                  description: URL to poll for job status
+              $ref: './schemas.yaml#/CreateAsyncJobAcceptedResponse'
       '400':
-        description: Invalid request (missing pageUrl or other required fields)
+        description: Invalid request (missing urls array, step field, or other required fields)
 
 preflight-job-status:
   parameters:
@@ -61,7 +55,7 @@ preflight-job-status:
     summary: Get preflight job status and result
     description: |
       ⚠️ **EXPERIMENTAL / PROTOTYPE**
-      This endpoint is useful for retrieving the status of a preflight async job.
+      This endpoint is used to retrieve the status and results of a preflight async job.
       The jobId must be provided in the path parameter.
       If the job is completed, the result will be included in the response.
       If the job is still in progress, a 202 response will be returned.

@@ -28,6 +28,26 @@ describe('Opportunities Controller', () => {
   const OPPORTUNITY_ID = '3f1c3ab1-9ad0-4231-ac87-8159acf52cb6';
   const SITE_ID = 'b9395f92-1c2f-4904-a8f0-e45f30098f9e';
 
+  // Add common auth attributes
+  const defaultAuthAttributes = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true, email: 'test@test.com' })
+        .withAuthenticated(true),
+    },
+  };
+
+  const apikeyAuthAttributes = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('apikey')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ name: 'api-key' }),
+    },
+  };
+
   const opptys = [
     {
       id: OPPORTUNITY_ID,
@@ -88,6 +108,12 @@ describe('Opportunities Controller', () => {
     },
     getGuidance() {
       return opptys[0].guidance;
+    },
+    getUpdatedBy() {
+      return opptys[0].updatedBy;
+    },
+    setUpdatedBy(value) {
+      opptys[0].updatedBy = value;
     },
     setGuidance(value) {
       opptys[0].guidance = value;
@@ -177,6 +203,14 @@ describe('Opportunities Controller', () => {
       },
     };
 
+    // Add mock logger
+    const mockLogger = {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+      debug: sandbox.stub(),
+    };
+
     mockOpportunity = {
       allBySiteId: sandbox.stub().resolves([mockOpptyEntity]),
       allBySiteIdAndStatus: sandbox.stub().resolves([mockOpptyEntity]),
@@ -197,6 +231,7 @@ describe('Opportunities Controller', () => {
 
     mockContext = {
       dataAccess: mockOpportunityDataAccess,
+      log: mockLogger,
       attributes: {
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -338,6 +373,43 @@ describe('Opportunities Controller', () => {
 
   it('updates an opportunity', async () => {
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: {
+        auditId: 'Audit ID NEW',
+        title: 'Test Opportunity NEW',
+        description: 'This is a test opportunity NEW',
+        runbook: 'http://runbook.url/new',
+        guidance: { tip: 'Follow these steps. NEW' },
+        type: 'SEO NEW',
+        status: 'APPROVED',
+        data: {
+          additionalInfo: 'info NEW',
+        },
+        tags: ['tag1', 'tag2', 'NEW'],
+        updatedBy: 'test@test.com',
+      },
+    });
+
+    // Validate updated values
+    expect(mockOpptyEntity.getAuditId()).to.be.equals('Audit ID NEW');
+    expect(mockOpptyEntity.getStatus()).to.be.equals('APPROVED');
+
+    expect(response.status).to.equal(200);
+
+    const updatedOppty = await response.json();
+    expect(updatedOppty).to.have.property('siteId', SITE_ID);
+    expect(updatedOppty).to.have.property('id', OPPORTUNITY_ID);
+    expect(updatedOppty).to.have.property('auditId', 'Audit ID NEW');
+    expect(updatedOppty).to.have.property('status', 'APPROVED');
+  });
+
+  it('updates an opportunity with api key', async () => {
+    const response = await opportunitiesController.patchOpportunity({
+      ...apikeyAuthAttributes,
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -368,6 +440,7 @@ describe('Opportunities Controller', () => {
     expect(updatedOppty).to.have.property('id', OPPORTUNITY_ID);
     expect(updatedOppty).to.have.property('auditId', 'Audit ID NEW');
     expect(updatedOppty).to.have.property('status', 'APPROVED');
+    expect(updatedOppty).to.have.property('updatedBy', 'system');
   });
 
   it('returns bad request when creating an opportunity if site not provided', async () => {
@@ -401,24 +474,33 @@ describe('Opportunities Controller', () => {
   });
 
   it('returns bad request when updating an opportunity if site not provided', async () => {
-    // eslint-disable-next-line max-len
-    const response = await opportunitiesController.patchOpportunity({ params: {}, data: opptys[0] });
+    const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: {},
+      data: opptys[0],
+    });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Site ID required');
   });
 
   it('returns bad request when updating an opportunity if no opportunity id is provided', async () => {
-    // eslint-disable-next-line max-len
-    const response = await opportunitiesController.patchOpportunity({ params: { siteId: SITE_ID }, data: {} });
+    const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID },
+      data: {},
+    });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity ID required');
   });
 
   it('returns bad request when updating an opportunity if no data is provided', async () => {
-    // eslint-disable-next-line max-len
-    const response = await opportunitiesController.patchOpportunity({ params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID }, data: {} });
+    const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'No updates provided');
@@ -427,6 +509,7 @@ describe('Opportunities Controller', () => {
   it('returns not found when updating an opportunity if opportunity is not found', async () => {
     mockOpportunity.findById.resolves(null);
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'APPROVED' },
     });
@@ -438,6 +521,7 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when updating an opportunity without sending any request body', async () => {
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -454,8 +538,10 @@ describe('Opportunities Controller', () => {
       throw new ValidationError('Validation error');
     };
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'APPROVED' },
+      log: mockContext.log,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -464,6 +550,7 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when updating an opportunity if no updates are passed', async () => {
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'NEW' },
     });
@@ -790,6 +877,7 @@ describe('Opportunities Controller', () => {
         mockSite.findById.resolves(null);
 
         const response = await opportunitiesController.patchOpportunity({
+          ...defaultAuthAttributes,
           params: {
             siteId: SITE_ID,
             opportunityId: OPPORTUNITY_ID,
@@ -836,6 +924,7 @@ describe('Opportunities Controller', () => {
           attributes: {
             authInfo: restrictedAuthInfo,
           },
+          log: defaultAuthAttributes.log,
         };
 
         const restrictedController = OpportunitiesController(restrictedContext);
@@ -848,6 +937,7 @@ describe('Opportunities Controller', () => {
             title: 'Updated Test Opportunity',
             description: 'Updated Test Description',
           },
+          ...defaultAuthAttributes,
         });
 
         expect(response.status).to.equal(403);
