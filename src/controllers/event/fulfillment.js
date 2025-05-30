@@ -109,14 +109,14 @@ function FulfillmentController(context) {
     try {
       const eventType = requestContext.params?.eventType
         || FULFILLMENT_EVENT_TYPES.EDGE_DELIVERY_SERVICES;
+
+      log.info(`Processing fulfillment events for event type: ${eventType}`);
+
       // Validate eventType
       if (!Object.values(FULFILLMENT_EVENT_TYPES).includes(eventType)) {
         log.error(`Invalid event type: ${eventType}`);
-        return new Response('', {
-          status: 400,
-          headers: {
-            'x-error': 'Bad Request - Invalid event type',
-          },
+        return createResponse('', 400, {
+          'x-error': 'Bad Request - Invalid event type',
         });
       }
 
