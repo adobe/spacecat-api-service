@@ -170,6 +170,7 @@ export default function getRouteHandlers(
     'POST /screenshots': demoController.takeScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
+    'GET /mcp': mcpController.handleSseRequest,
     'POST /mcp': mcpController.handleRpc,
 
     // Fixes
