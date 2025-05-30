@@ -1,3 +1,10 @@
+## [1.117.2](https://github.com/adobe/spacecat-api-service/compare/v1.117.1...v1.117.2) (2025-05-30)
+
+
+### Bug Fixes
+
+* update description for getSiteByBaseURLTool ([#943](https://github.com/adobe/spacecat-api-service/issues/943)) ([765b65a](https://github.com/adobe/spacecat-api-service/commit/765b65a9f3fa5c5a42eebb7af1fb4b4825f5c928))
+
 ## [1.117.1](https://github.com/adobe/spacecat-api-service/compare/v1.117.0...v1.117.1) (2025-05-30)
 
 
