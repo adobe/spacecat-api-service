@@ -115,7 +115,7 @@ function FulfillmentController(context) {
       // Validate eventType
       if (!Object.values(FULFILLMENT_EVENT_TYPES).includes(eventType)) {
         log.error(`Invalid event type: ${eventType}`);
-        return createResponse('', 400, {
+        return createResponse({ message: 'Bad Request - Invalid event type' }, 400, {
           'x-error': 'Bad Request - Invalid event type',
         });
       }
