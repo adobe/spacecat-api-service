@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* eslint-disable no-use-before-define */
+
 // todo: prototype - untested
 /* c8 ignore start */
 
@@ -29,7 +31,15 @@ import {
 } from '../../../utils/slack/base.js';
 import { isValidDateInterval } from '../../../utils/date-utils.js';
 
+/**
+ *  @import {
+ *    type Site, SiteCollection
+ * } from "@adobe/spacecat-shared-data-access/src/models/site/index.js"
+ */
+
 const PHRASES = ['run import'];
+
+const SUPPORTS_PAGE_URLS = ['organic-keywords', 'organic-keywords-nonbranded'];
 
 /**
  * Factory function to create the RunImportCommand object.
@@ -56,7 +66,8 @@ function RunImportCommand(context) {
   /**
    * Triggers an import run for the given site.
    * @param {string} importType - The type of import to run.
-   * @param {string} baseURL - The base URL of the site.
+   * @param {string} pageOrBaseURL - The base URL of a site,
+   *                                 or a full page URL if the import type supports it.
    * @param {string} startDate - The start date for the import run.
    * @param {string} endDate - The end date for the import run.
    * @param {Object} config - The configuration object.`
@@ -65,7 +76,7 @@ function RunImportCommand(context) {
    */
   const runImportForSite = async (
     importType,
-    baseURL,
+    pageOrBaseURL,
     startDate,
     endDate,
     config,
@@ -73,9 +84,20 @@ function RunImportCommand(context) {
   ) => {
     const { say } = slackContext;
 
-    const site = await Site.findByBaseURL(baseURL);
+    // If an import type supports full page URLs, finding the site gets a bit more involved:
+    // Simply searching by the protocol + top level domain might not suffice,
+    // in cases where the site uses a path prefix.
+    // Searching for protocol + TLD first will yield incorrect results in cases
+    // where there are multiple sites per domain, e.g.
+    // - https://adobe.com
+    // - https://adobe.com/express
+    // For these cases, we have to shorten the path segment by segment and try to find the site.
+    const site = SUPPORTS_PAGE_URLS.includes(importType)
+      ? await findSiteForURL(Site, pageOrBaseURL)
+      : await Site.findByBaseURL(pageOrBaseURL);
+
     if (!isNonEmptyObject(site)) {
-      await postSiteNotFoundMessage(say, baseURL);
+      await postSiteNotFoundMessage(say, pageOrBaseURL);
       return;
     }
 
@@ -114,20 +136,20 @@ function RunImportCommand(context) {
 
     try {
       const [importType, baseURLInput, start, end] = args;
-      const baseURL = extractURLFromSlackInput(baseURLInput);
-      const hasValidBaseURL = isValidUrl(baseURL);
+      const pageOrBaseURL = extractURLFromSlackInput(baseURLInput);
+      const hasValidURL = isValidUrl(pageOrBaseURL);
       const hasFiles = isNonEmptyArray(files);
 
       const [startDate, endDate] = hasFiles
         ? [baseURLInput, start]
         : [start, end];
 
-      if (!hasText(importType) || (!hasValidBaseURL && !hasFiles)) {
+      if (!hasText(importType) || (!hasValidURL && !hasFiles)) {
         await say(baseCommand.usage());
         return;
       }
 
-      if (hasValidBaseURL && hasFiles) {
+      if (hasValidURL && hasFiles) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
@@ -165,25 +187,25 @@ function RunImportCommand(context) {
 
         await Promise.all(
           csvData.map(async (row) => {
-            const [csvBaseURL] = row;
-            if (isValidUrl(csvBaseURL)) {
+            const [csvURL] = row;
+            if (isValidUrl(csvURL)) {
               await runImportForSite(
                 importType,
-                csvBaseURL,
+                csvURL,
                 startDate,
                 endDate,
                 config,
                 slackContext,
               );
             } else {
-              await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
+              await say(`:warning: Invalid URL found in CSV file: ${csvURL}`);
             }
           }),
         );
-      } else if (hasValidBaseURL) {
-        await runImportForSite(importType, baseURL, startDate, endDate, config, slackContext);
+      } else if (hasValidURL) {
+        await runImportForSite(importType, pageOrBaseURL, startDate, endDate, config, slackContext);
 
-        const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}\n`;
+        const message = `:adobe-run: Triggered import run of type ${importType} for site \`${pageOrBaseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}\n`;
         // message += 'Stand by for results. I will post them here when they are ready.';
 
         await say(message);
@@ -200,6 +222,27 @@ function RunImportCommand(context) {
     ...baseCommand,
     handleExecution,
   };
+}
+
+/**
+ * Finds a site for the given URL by finding a site with the longest prefix match for the URL.
+ *
+ * @param {SiteCollection} Site
+ * @param {string} pageOrBaseURL - The URL to find the site for.
+ * @returns {Promise<null | Site>} A promise that resolves to the found Site object.
+ */
+async function findSiteForURL(Site, pageOrBaseURL) {
+  const url = new URL(pageOrBaseURL);
+  url.search = url.hash = ''; // eslint-disable-line no-multi-assign
+  let site = null;
+  let previousPathname = null;
+  while (!site && previousPathname !== url.pathname) {
+    site = await Site.findByBaseURL(String(url)); // eslint-disable-line no-await-in-loop
+    previousPathname = url.pathname;
+    url.pathname = previousPathname.replace(/[/]$|[^/]+$/, '');
+  }
+
+  return Site.findByBaseURL(`${url.protocol}//${url.host}`);
 }
 
 export default RunImportCommand;
