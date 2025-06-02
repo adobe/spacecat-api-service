@@ -77,7 +77,7 @@ function RunImportCommand(context) {
   ) => {
     const { say } = slackContext;
 
-    const site = Site.findByBaseURL(baseURL);
+    const site = await Site.findByBaseURL(baseURL);
     if (!isNonEmptyObject(site)) {
       await postSiteNotFoundMessage(say, baseURL);
       return;
