@@ -109,6 +109,7 @@ function RunImportCommand(context) {
       endDate,
       slackContext,
       context,
+      site.getBaseURL() !== pageOrBaseURL ? pageOrBaseURL : undefined,
     );
   };
 
