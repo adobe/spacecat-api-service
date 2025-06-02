@@ -189,6 +189,9 @@ function RunImportCommand(context) {
           }),
         );
       } else if (hasValidBaseURL) {
+        const pageURL = supportsPageURLs && isValidUrl(pageURLInput)
+          ? pageURLInput
+          : undefined;
         await runImportForSite(
           importType,
           baseURL,
@@ -196,10 +199,10 @@ function RunImportCommand(context) {
           endDate,
           config,
           slackContext,
-          supportsPageURLs && isValidUrl(pageURLInput) ? pageURLInput : undefined,
+          pageURL,
         );
 
-        const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}\n`;
+        const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}${pageURL ? ` for page ${pageURL}` : ''}\n`;
         // message += 'Stand by for results. I will post them here when they are ready.';
 
         await say(message);
