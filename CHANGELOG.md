@@ -1,3 +1,10 @@
+# [1.118.0](https://github.com/adobe/spacecat-api-service/compare/v1.117.5...v1.118.0) (2025-06-03)
+
+
+### Features
+
+* nonbranded organic keywords and keywords for individual pages ([#950](https://github.com/adobe/spacecat-api-service/issues/950)) ([fda2d0b](https://github.com/adobe/spacecat-api-service/commit/fda2d0b9a2a3fd7a64ffc5107265cb54f2cf0f6d))
+
 ## [1.117.5](https://github.com/adobe/spacecat-api-service/compare/v1.117.4...v1.117.5) (2025-06-01)
 
 
