@@ -510,6 +510,20 @@ function SuggestionsController(ctx, sqs, env) {
         }
       }
     });
+
+    // Group valid suggestions by URL
+    const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+      const data = suggestion.getData();
+      const url = data?.url || data?.pageUrl || data?.url_from;
+      if (!url) return acc;
+
+      if (!acc[url]) {
+        acc[url] = [];
+      }
+      acc[url].push(suggestion);
+      return acc;
+    }, {});
+
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
         failedSuggestions.push({
@@ -558,14 +572,20 @@ function SuggestionsController(ctx, sqs, env) {
     };
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
-    await sendAutofixMessage(
-      sqs,
-      queueUrl,
-      opportunityId,
-      siteId,
-      succeededSuggestions.map((s) => s.getId()),
-      promiseTokenResponse,
+
+    // Send messages for all URL groups in parallel
+    await Promise.all(
+      Object.entries(suggestionsByUrl).map(([url, urlSuggestions]) => sendAutofixMessage(
+        sqs,
+        queueUrl,
+        siteId,
+        opportunityId,
+        url,
+        urlSuggestions.map((s) => s.getId()),
+        promiseTokenResponse,
+      )),
     );
+
     return createResponse(response, 207);
   };
 

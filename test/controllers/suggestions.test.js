@@ -215,6 +215,7 @@ describe('Suggestions Controller', () => {
         rank: 1,
         data: {
           info: 'sample data',
+          url: 'https://example.com',
         },
         kpiDeltas: {
           conversionRate: 0.05,
@@ -229,6 +230,7 @@ describe('Suggestions Controller', () => {
         status: 'APPROVED',
         rank: 2,
         data: {
+          url_from: 'https://example.com/old-link',
           info: 'broken back link data',
         },
         kpiDeltas: {
@@ -244,6 +246,7 @@ describe('Suggestions Controller', () => {
         status: 'NEW',
         rank: 2,
         data: {
+          url_from: 'https://example.com/old-link',
           info: 'broken back link data',
         },
         kpiDeltas: {
