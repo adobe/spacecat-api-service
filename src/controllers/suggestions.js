@@ -573,7 +573,6 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
-    // Send messages for all URL groups in parallel
     await Promise.all(
       Object.entries(suggestionsByUrl).map(([url, urlSuggestions]) => sendAutofixMessage(
         sqs,
