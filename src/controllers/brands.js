@@ -14,37 +14,44 @@ import {
   badRequest,
   notFound,
   ok,
-  createResponse,
+  createResponse, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
-  isObject,
+  isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode } from '../support/utils.js';
+import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 const HEADER_ERROR = 'x-error';
 
 /**
  * BrandsController. Provides methods to read brands and brand guidelines.
- * @param {DataAccess} dataAccess - Data access.
+ * @param {object} ctx - Context of the request.
  * @param {Object} env - Environment object.
  * @returns {object} Brands controller.
  * @constructor
  */
-function BrandsController(dataAccess, log, env) {
-  if (!isObject(dataAccess)) {
+function BrandsController(ctx, log, env) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
-  if (!isObject(env)) {
+  if (!isNonEmptyObject(env)) {
     throw new Error('Environment object required');
   }
   const { Organization, Site } = dataAccess;
+
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   function createErrorResponse(error) {
     return createResponse({ message: error.message }, error.status, {
@@ -52,21 +59,6 @@ function BrandsController(dataAccess, log, env) {
     });
   }
 
-  /**
-   * Get the IMS user token from the context.
-   * @param {object} context - The context of the request.
-   * @returns {string} imsUserToken - The IMS User access token.
-   * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
-   */
-  function getImsUserToken(context) {
-    const { pathInfo: { headers } } = context;
-    const { authorization: authorizationHeader } = headers;
-    const BEARER_PREFIX = 'Bearer ';
-    if (!hasText(authorizationHeader) || !authorizationHeader.startsWith(BEARER_PREFIX)) {
-      throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
-    }
-    return authorizationHeader;
-  }
   /**
    * Gets all brands for an organization.
    * @returns {Promise<Response>} Array of brands.
@@ -83,10 +75,15 @@ function BrandsController(dataAccess, log, env) {
       if (!organization) {
         return notFound(`Organization not found: ${organizationId}`);
       }
+
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only users belonging to the organization can view its brands');
+      }
+
       const imsOrgId = organization.getImsOrgId();
       const imsUserToken = getImsUserToken(context);
       const brandClient = BrandClient.createFrom(context);
-      const brands = await brandClient.getBrandsForOrganization(imsOrgId, imsUserToken);
+      const brands = await brandClient.getBrandsForOrganization(imsOrgId, `Bearer ${imsUserToken}`);
       log.info(`Found ${brands.length} brands for organization: ${organizationId}`);
       return ok(brands);
     } catch (error) {
@@ -135,6 +132,10 @@ function BrandsController(dataAccess, log, env) {
       if (!site) {
         return notFound(`Site not found: ${siteId}`);
       }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization of the site can view its brand guidelines');
+      }
+
       const brandId = site.getConfig()?.getBrandConfig()?.brandId;
       log.info(`Brand ID mapping for site: ${siteId} is ${brandId}`);
       if (!hasText(brandId)) {

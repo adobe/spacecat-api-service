@@ -17,12 +17,16 @@ import {
   noContent,
   notFound,
   ok,
+  forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
   isBoolean,
   isObject,
-  getStoredMetrics, isValidUUID, deepEqual,
+  getStoredMetrics,
+  isValidUUID,
+  deepEqual,
+  isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 
@@ -32,10 +36,11 @@ import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
 import { wwwUrlResolver } from '../support/utils.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
- * @param {DataAccess} dataAccess - Data access.
+ * @param {object} ctx - Context of the request.
  * @returns {object} Sites controller.
  * @constructor
  */
@@ -45,12 +50,18 @@ const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 
-function SitesController(dataAccess, log, env) {
-  if (!isObject(dataAccess)) {
+function SitesController(ctx, log, env) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess } = ctx;
+  if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
   const { Audit, KeyEvent, Site } = dataAccess;
+
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Creates a site. The site ID is generated automatically.
@@ -58,6 +69,9 @@ function SitesController(dataAccess, log, env) {
    * @return {Promise<Response>} Site response.
    */
   const createSite = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can create new sites');
+    }
     const site = await Site.create({
       organizationId: env.DEFAULT_ORGANIZATION_ID,
       ...context.data,
@@ -70,6 +84,9 @@ function SitesController(dataAccess, log, env) {
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAll = async () => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
     const all = await Site.all({}, { fetchAllPages: true });
     const sites = all.map((site) => SiteDto.toJSON(site));
     return ok(sites);
@@ -81,6 +98,9 @@ function SitesController(dataAccess, log, env) {
    * @returns {Promise<Response>} Array of sites response.
    */
   const getAllByDeliveryType = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
     const deliveryType = context.params?.deliveryType;
 
     if (!hasText(deliveryType)) {
@@ -102,6 +122,9 @@ function SitesController(dataAccess, log, env) {
    * @return {Promise<Response>} Array of sites response.
    */
   const getAllWithLatestAudit = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
     const auditType = context.params?.auditType;
     const ascending = context.params?.ascending;
 
@@ -125,6 +148,9 @@ function SitesController(dataAccess, log, env) {
    * @returns {Promise<Response>} XLS file.
    */
   const getAllAsXLS = async () => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
     const sites = await Site.all();
     return ok(SiteDto.toXLS(sites));
   };
@@ -134,6 +160,9 @@ function SitesController(dataAccess, log, env) {
    * @returns {Promise<Response>} CSV file.
    */
   const getAllAsCSV = async () => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
     const sites = await Site.all();
     return ok(SiteDto.toCSV(sites));
   };
@@ -153,6 +182,15 @@ function SitesController(dataAccess, log, env) {
 
     if (!hasText(auditedAt)) {
       return badRequest('Audited at required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its audits');
     }
 
     const audit = await Audit.findBySiteIdAndAuditTypeAndAuditedAt(siteId, auditType, auditedAt);
@@ -181,6 +219,10 @@ function SitesController(dataAccess, log, env) {
       return notFound('Site not found');
     }
 
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
+
     return ok(SiteDto.toJSON(site));
   };
 
@@ -205,6 +247,10 @@ function SitesController(dataAccess, log, env) {
       return notFound('Site not found');
     }
 
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
+
     return ok(SiteDto.toJSON(site));
   };
 
@@ -214,6 +260,9 @@ function SitesController(dataAccess, log, env) {
    * @return {Promise<Response>} Delete response.
    */
   const removeSite = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can remove sites');
+    }
     const siteId = context.params?.siteId;
 
     if (!isValidUUID(siteId)) {
@@ -238,6 +287,7 @@ function SitesController(dataAccess, log, env) {
    */
   const updateSite = async (context) => {
     const siteId = context.params?.siteId;
+    const { authInfo: { profile } } = context.attributes;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -246,6 +296,10 @@ function SitesController(dataAccess, log, env) {
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can update its sites');
     }
 
     const requestBody = context.data;
@@ -298,6 +352,7 @@ function SitesController(dataAccess, log, env) {
     }
 
     if (updates) {
+      site.setUpdatedBy(profile.email || 'system');
       const updatedSite = await site.save();
       return ok(SiteDto.toJSON(updatedSite));
     }
@@ -313,6 +368,15 @@ function SitesController(dataAccess, log, env) {
   const createKeyEvent = async (context) => {
     const { siteId } = context.params;
     const { name, type, time } = context.data;
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can create key events');
+    }
 
     const keyEvent = await KeyEvent.create({
       siteId,
@@ -342,6 +406,10 @@ function SitesController(dataAccess, log, env) {
       return notFound('Site not found');
     }
 
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its key events');
+    }
+
     const keyEvents = await site.getKeyEvents();
 
     return ok(keyEvents.map((keyEvent) => KeyEventDto.toJSON(keyEvent)));
@@ -353,6 +421,9 @@ function SitesController(dataAccess, log, env) {
    * @return {Promise<Response>} Delete response.
    */
   const removeKeyEvent = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can remove key events');
+    }
     const { keyEventId } = context.params;
 
     if (!hasText(keyEventId)) {
@@ -392,6 +463,10 @@ function SitesController(dataAccess, log, env) {
       return notFound('Site not found');
     }
 
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its metrics');
+    }
+
     const metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
     return ok(metrics);
@@ -407,6 +482,10 @@ function SitesController(dataAccess, log, env) {
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its metrics');
     }
 
     const rumAPIClient = RUMAPIClient.createFrom(context);
@@ -486,6 +565,10 @@ function SitesController(dataAccess, log, env) {
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its metrics');
     }
 
     let metrics = await getStoredMetrics({ siteId, metric, source }, context);

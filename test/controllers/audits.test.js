@@ -12,9 +12,15 @@
 
 /* eslint-env mocha */
 
-import { Audit, LatestAudit } from '@adobe/spacecat-shared-data-access';
+import {
+  Audit, LatestAudit, Site, Organization,
+} from '@adobe/spacecat-shared-data-access';
+import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
+import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import AuditSchema from '@adobe/spacecat-shared-data-access/src/models/audit/audit.schema.js';
 import LatestAuditSchema from '@adobe/spacecat-shared-data-access/src/models/latest-audit/latest-audit.schema.js';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -125,9 +131,101 @@ describe('Audits Controller', () => {
     getHandlers: sandbox.stub().returns(handlers),
   };
 
-  let mockDataAccess;
+  const authContextAdmin = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true })
+        .withAuthenticated(true)
+      ,
+    },
+  };
 
+  const authContextUser = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true),
+    },
+  };
+
+  let mockDataAccess;
   let auditsController;
+
+  const siteId = SITE_ID;
+  const mockOrganization = new Organization({
+    entities: {
+      organization: {
+        model: {
+          indexes: {},
+          schema: {
+            attributes: {
+              name: { type: 'string', name: 'name', get: (value) => value },
+              imsOrgId: { type: 'string', name: 'imsOrgId', get: (value) => value },
+            },
+          },
+        },
+      },
+    },
+  }, {
+    log: console,
+    getCollection: stub().returns({
+      schema: OrganizationSchema,
+      findById: stub(),
+      byOrganizationId: stub(),
+    }),
+  }, OrganizationSchema, {
+    organizationId: 'org-id',
+    name: 'Test Org',
+    imsOrgId: 'org-id@AdobeOrg',
+  });
+  const mockSite = new Site(
+    {
+      entities: {
+        site: {
+          model: {
+            indexes: {},
+            schema: {
+              attributes: {
+                name: { type: 'string', name: 'name', get: (value) => value },
+                config: { type: 'any', name: 'config', get: (value) => Config(value) },
+                deliveryType: { type: 'string', name: 'deliveryType', get: (value) => value },
+                gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
+                isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
+                organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
+                hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
+                deliveryConfig: { type: 'any', name: 'deliveryConfig', get: (value) => value },
+              },
+            },
+          },
+          patch: sinon.stub().returns({
+            composite: () => ({ go: () => {} }),
+            set: () => {},
+          }),
+        },
+      },
+      getOrganization: sinon.stub().resolves(mockOrganization),
+    },
+    {
+      log: console,
+      getCollection: stub().returns({
+        schema: SiteSchema,
+        findById: stub(),
+      }),
+    },
+    SiteSchema,
+    {
+      siteId: SITE_ID,
+      baseURL: 'https://example.com',
+      deliveryType: 'aem_edge',
+      organizationId: 'org-id',
+    },
+    console,
+  );
+  sinon.stub(mockSite, 'getOrganization').resolves(mockOrganization);
 
   beforeEach(() => {
     mockDataAccess = {
@@ -146,13 +244,20 @@ describe('Audits Controller', () => {
       Site: {
         findById: sandbox.stub(),
       },
+      Organization: {
+        findById: sandbox.stub(),
+      },
       getLatestAudits: sandbox.stub(),
       getLatestAuditsForSite: sandbox.stub(),
       getLatestAuditForSite: sandbox.stub(),
       patchAuditForSite: sandbox.stub(),
     };
+    const ctx = {
+      dataAccess: mockDataAccess,
+      ...authContextAdmin,
+    };
 
-    auditsController = AuditsController(mockDataAccess);
+    auditsController = AuditsController(ctx);
   });
 
   afterEach(() => {
@@ -171,14 +276,21 @@ describe('Audits Controller', () => {
     });
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => AuditsController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => AuditsController()).to.throw('Data access required');
+    expect(() => AuditsController({ dataAccess: {} })).to.throw('Data access required');
   });
 
   describe('getAllForSite', () => {
+    beforeEach(() => {
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: () => ({}),
+      });
+    });
     it('retrieves all audits for a site', async () => {
-      const siteId = SITE_ID;
-
       mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
 
       const result = await auditsController.getAllForSite({ params: { siteId } });
@@ -189,7 +301,6 @@ describe('Audits Controller', () => {
     });
 
     it('retrieves all audits of a type for a site', async () => {
-      const siteId = SITE_ID;
       const auditType = 'lhs-mobile';
 
       mockDataAccess.Audit.allBySiteIdAndAuditType.resolves([mockAudits[0]]);
@@ -202,8 +313,6 @@ describe('Audits Controller', () => {
     });
 
     it('retrieves all audits ascending for a site', async () => {
-      const siteId = SITE_ID;
-
       mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
 
       const result = await auditsController.getAllForSite(
@@ -219,6 +328,26 @@ describe('Audits Controller', () => {
       const result = await auditsController.getAllForSite({ params: {} });
 
       expect(result.status).to.equal(400);
+    });
+
+    it('handles missing site', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await auditsController.getAllForSite({ params: { siteId } });
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
+      const result = await controller.getAllForSite({ params: { siteId } });
+      expect(result.status).to.equal(403);
     });
   });
 
@@ -254,13 +383,28 @@ describe('Audits Controller', () => {
 
       expect(result.status).to.equal(400);
     });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      const auditType = 'security';
+
+      mockDataAccess.LatestAudit.allByAuditType.resolves(mockLatestAudits);
+
+      const result = await controller.getAllLatest({ params: { auditType } });
+      expect(result.status).to.equal(403);
+    });
   });
 
   describe('getAllLatestForSite', () => {
     it('retrieves all latest audits for a site', async () => {
-      const siteId = SITE_ID;
-
       mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: () => ({}),
+      });
 
       const result = await auditsController.getAllLatestForSite({ params: { siteId } });
       const audits = await result.json();
@@ -274,15 +418,37 @@ describe('Audits Controller', () => {
 
       expect(result.status).to.equal(400);
     });
+
+    it('handles missing site', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await auditsController.getAllLatestForSite({ params: { siteId } });
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
+      const result = await controller.getAllLatestForSite({ params: { siteId } });
+      expect(result.status).to.equal(403);
+    });
   });
 
   describe('getLatestForSite', () => {
     it('retrieves the latest audit for a site', async () => {
-      const siteId = SITE_ID;
       const auditType = 'security';
       const expectedAudit = AuditDto.toJSON(mockLatestAudits[0]);
 
       mockDataAccess.LatestAudit.allBySiteIdAndAuditType.resolves([mockLatestAudits[0]]);
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: () => ({}),
+      });
 
       const result = await auditsController.getLatestForSite({ params: { siteId, auditType } });
       const audit = await result.json();
@@ -306,10 +472,35 @@ describe('Audits Controller', () => {
 
     it('handles audit not found', async () => {
       mockDataAccess.getLatestAuditForSite.resolves(null);
+      mockDataAccess.Site.findById.resolves({
+        getOrganization: sinon.stub().resolves({
+          getImsOrgId: sinon.stub().resolves('org-id'),
+        }),
+      });
 
       const result = await auditsController.getLatestForSite({ params: { siteId: SITE_ID, auditType: 'lhs-mobile' } });
 
       expect(result.status).to.equal(404);
+    });
+
+    it('handles missing site', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await auditsController.getLatestForSite({ params: { siteId, auditType: 'lhs-mobile' } });
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.LatestAudit.allBySiteIdAndAuditType.resolves(mockLatestAudits);
+      const result = await controller.getLatestForSite({ params: { siteId, auditType: 'lhs-mobile' } });
+      expect(result.status).to.equal(403);
     });
   });
 
@@ -339,8 +530,23 @@ describe('Audits Controller', () => {
       expect(result.status).to.equal(400);
     });
 
+    it('returns forbidden if user does not have access to the site', async () => {
+      const controller = AuditsController({
+        dataAccess: mockDataAccess,
+        ...authContextUser,
+      });
+
+      const auditType = 'broken-backlinks';
+
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const result = await controller.patchAuditForSite(
+        { params: { siteId, auditType }, data: {} },
+      );
+      expect(result.status).to.equal(403);
+    });
+
     it('returns bad request if no updates are provided', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
 
       const context = {
@@ -356,7 +562,6 @@ describe('Audits Controller', () => {
     });
 
     it('returns bad request if excludedURLs is not an array', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = 'http://valid-url.com';
 
@@ -373,7 +578,6 @@ describe('Audits Controller', () => {
     });
 
     it('returns bad request if excludedURLs contains invalid URLs', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = ['invalid-url', 'http://valid-url.com'];
 
@@ -390,7 +594,6 @@ describe('Audits Controller', () => {
     });
 
     it('updates excluded URLs when excludedURLs is empty', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = [];
 
@@ -409,6 +612,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: {} }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getImports: () => [],
         getHandlers: () => (({ [auditType]: {} })),
         getFetchConfig: () => {},
@@ -424,7 +628,6 @@ describe('Audits Controller', () => {
     });
 
     it('updates excluded URLs when excludedURLs is undefined', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = ['https://foo.com', 'https://bar.com'];
 
@@ -444,6 +647,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
@@ -459,7 +663,6 @@ describe('Audits Controller', () => {
     });
 
     it('updates excluded URLs when excludedURLs has items', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = ['https://example.com/page1', 'https://example.com/page2'];
 
@@ -480,6 +683,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
@@ -499,7 +703,6 @@ describe('Audits Controller', () => {
     });
 
     it('handles duplicates in excludedURLs', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const excludedURLs = ['https://example.com/page1', 'https://example.com/page1'];
 
@@ -519,6 +722,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
@@ -537,11 +741,11 @@ describe('Audits Controller', () => {
     });
 
     it('returns not found if site is not found', async () => {
-      const siteId = 'e46adb57-9dde-4e43-9aa8-598c52347c41'; // Non-existent site ID
+      const siteIdNotExisting = 'e46adb57-9dde-4e43-9aa8-598c52347c41'; // Non-existent site ID
       const auditType = 'broken-backlinks';
 
       const context = {
-        params: { siteId, auditType },
+        params: { siteId: siteIdNotExisting, auditType },
         data: { excludedURLs: [] },
       };
 
@@ -555,7 +759,6 @@ describe('Audits Controller', () => {
     });
 
     it('returns not found if audit type is not found', async () => {
-      const siteId = SITE_ID;
       const auditType = 'nonexistent-audit-type';
 
       const context = {
@@ -575,7 +778,6 @@ describe('Audits Controller', () => {
     });
 
     it('merges manual overwrites correctly', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -599,6 +801,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
@@ -617,7 +820,6 @@ describe('Audits Controller', () => {
     });
 
     it('does not merge manual overwrites if manualOverwrites is empty', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [];
 
@@ -639,6 +841,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getFetchConfig: () => {},
@@ -654,7 +857,6 @@ describe('Audits Controller', () => {
     });
 
     it('validates URLs in manual overwrites', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -679,6 +881,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
       });
@@ -691,7 +894,6 @@ describe('Audits Controller', () => {
     });
 
     it('validates manual overwrites as objects', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -716,6 +918,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
       });
@@ -728,7 +931,6 @@ describe('Audits Controller', () => {
     });
 
     it('returns badRequest when manualOverwrites contains an empty object', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -753,6 +955,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
       });
 
@@ -764,7 +967,6 @@ describe('Audits Controller', () => {
     });
 
     it('returns badRequest when manualOverwrites contains an object with missing brokenTargetURL or targetURL', async () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
       const manualOverwrites = [
         { brokenTargetURL: 'https://example.com/page1', targetURL: 'https://example.com/page1-new' },
@@ -790,6 +992,7 @@ describe('Audits Controller', () => {
         ...handlerTypeConfig,
         getHandlerConfig: (type) => ({ [type]: handlerTypeConfig }),
         getSlackConfig: () => {},
+        getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
       });
 
@@ -801,7 +1004,6 @@ describe('Audits Controller', () => {
     });
 
     describe('process groupedURLs parameter', () => {
-      const siteId = SITE_ID;
       const auditType = 'broken-backlinks';
 
       let siteConfig;
@@ -812,6 +1014,7 @@ describe('Audits Controller', () => {
           getGroupedURLs: sandbox.stub(),
           updateGroupedURLs: sandbox.stub(),
           getSlackConfig: () => {},
+          getContentAiConfig: () => {},
           getHandlers: () => {},
           getImports: () => {},
           getFetchConfig: () => {},

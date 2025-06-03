@@ -154,6 +154,15 @@ Config:
     handlers:
       description: Optional. The Alert configuration
       $ref: '#/HandlerConfig'
+    contentAiConfig:
+      description: Optional. The ContentAi configuration
+      $ref: '#/ContentAiConfig'
+ContentAiConfig:
+  type: object
+  properties:
+    index:
+      description: Optional. The index name for website in the content AI service
+      type: string
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -203,6 +212,8 @@ Organization:
             slack:
               - '@user5'
               - '@user6'
+      contentAiConfig:
+          index: 'example-index-name'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 OrganizationList:
@@ -242,6 +253,8 @@ OrganizationCreate:
             slack:
               - '@user5'
               - '@user6'
+      contentAiConfig:
+        index: 'example-index-name'
 OrganizationUpdate:
   type: object
   properties:
@@ -261,17 +274,19 @@ OrganizationUpdate:
       slack:
         channel: '#example-channel'
         workspace: 'example-workspace'
-        handlers:
-          '404':
-            mentions:
-              slack:
-                - '@user3'
-                - '@user4'
-          'cwv':
-            mentions:
-              slack:
-                - '@user5'
-                - '@user6'
+      handlers:
+        '404':
+          mentions:
+            slack:
+              - '@user3'
+              - '@user4'
+        'cwv':
+          mentions:
+            slack:
+              - '@user5'
+              - '@user6'
+      contentAiConfig:
+        index: 'example-index-name'
 Site:
   type: object
   properties:
@@ -355,6 +370,8 @@ Site:
                 pattern:
                   description: Pattern representing the URL path structure to group
                   type: string
+      contentAiConfig:
+        index: 'example-index-name'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -1706,15 +1723,11 @@ ScrapeRequest:
       description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
       type: array
       items:
-        type: object
-        properties:
-          url:
-            description: The URL to scrape
-            $ref: '#/URL'
+        $ref: '#/URL'
       example:
         urls:
-          - url: 'https://example.com/en/page1'
-          - url: 'https://example.com/fr/page2'
+          - 'https://example.com/en/page1'
+          - 'https://example.com/fr/page2'
 ScrapeResponse:
   type: object
   properties:
@@ -1725,6 +1738,7 @@ ScrapeResponse:
       description: The status of the scrape job
       type: string
       enum:
+        - 'IN_PROGRESS'
         - 'COMPLETE'
         - 'FAILED'
     startTime:
@@ -1744,9 +1758,7 @@ ScrapeResponse:
       type: integer
     results:
       description: The scrape results
-      type: array
-      items:
-        $ref: '#/ScrapeResult'
+      $ref: '#/ScrapeResult'
   example:
     id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
     status: 'COMPLETE'
@@ -2588,3 +2600,326 @@ BrandGuidelines:
             "text": "Always use sentence case"
           }
         ]
+AsyncJob:
+  type: object
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    startedAt:
+      type: string
+      format: date-time
+    endedAt:
+      type: string
+      format: date-time
+    recordExpiresAt:
+      type: integer
+      format: int64
+      description: Unix epoch seconds for TTL
+    result:
+      type: object
+    error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+    metadata:
+      type: object
+      required:
+        - urls
+        - step
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Array of URLs to be processed by the job
+          minItems: 1
+        step:
+          type: string
+          enum: [identify, suggest]
+          description: The audit step to be performed
+        submittedBy:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+  required:
+    - jobId
+    - status
+    - createdAt
+    - updatedAt
+    - startedAt
+    - metadata
+
+CreateAsyncJobAcceptedResponse:
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [ IN_PROGRESS, COMPLETED, FAILED ]
+    createdAt:
+      type: string
+      format: date-time
+    pollUrl:
+      type: string
+      format: uri
+      description: URL to poll for job status
+
+ScrapedContentResponse:
+  type: array
+  description: Collection of scraped content files with metadata
+  items:
+    type: object
+    properties:
+      key:
+        type: string
+        description: Full path of the file relative to the content type root directory
+      name:
+        type: string
+        description: Name of the file
+      size:
+        type:
+          - integer
+          - "null"
+        description: File size in bytes
+      lastModified:
+        type:
+          - string
+          - "null"
+        format: date-time
+        description: Timestamp of the last file modification
+  example:
+    - key: "about-us/scrape.json"
+      name: "scrape.json"
+      size: 2048
+      lastModified: "2025-04-11T00:44:31Z"
+    - key: "about-us/screenshot-desktop-fullpage.png"
+      name: "screenshot-desktop-fullpage.png"
+      size: 123456
+      lastModified: "2025-04-11T00:44:31Z"
+
+
+FixStatus:
+  description: |
+    Fix Status
+    - PENDING: the fix is pending to be deployed
+    - DEPLOYED: the fix was successfully applied
+    - PUBLISHED: the fix is live in production
+    - FAILED: failed to apply the fix
+    - ROLLED_BACK: the fix has been rolled_back
+  example: 'PENDING'
+  type: string
+  enum:
+    - 'PENDING'
+    - 'DEPLOYED'
+    - 'PUBLISHED'
+    - 'FAILED'
+    - 'ROLLED_BACK'
+
+
+Fix:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    opportunityId:
+      type: string
+      format: uuid
+    type:
+      $ref: '#/SuggestionType'
+    createdAt:
+      type: string
+      format: date-time
+    executedBy:
+      type: string
+    executedAt:
+      type: string
+      format: date-time
+    publishedAt:
+      type: string
+      format: date-time
+    changeDetails:
+      type: object
+      additionalProperties: true
+    status:
+      $ref: '#/FixStatus'
+
+
+FixList:
+  type: array
+  items:
+    $ref: '#/Fix'
+
+FixCreate:
+  type: object
+  required:
+    - type
+    - changeDetails
+  properties:
+    type:
+      $ref: '#/SuggestionType'
+    changeDetails:
+      type: object
+      additionalProperties: true
+    status:
+      $ref: '#/FixStatus'
+
+FixOperationSuccess:
+  type: object
+  description: Success response for a fix operation
+  properties:
+    index:
+      description: Index of this fix in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of success
+      type: integer
+    fix:
+      $ref: '#/Fix'
+  required:
+    - index
+    - statusCode
+    - fix
+
+FixUpdateFailure:
+  type: object
+  description: Fix update failure response
+  properties:
+    id:
+      description: UUID of this fix
+      $ref: '#/Id'
+    index:
+      description: Index of this fix in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of failure
+      type: integer
+    message:
+      description: Error message describing the failure
+      type: string
+
+FixCreateFailure:
+  type: object
+  description: Fix create failure response
+  properties:
+    index:
+      description: Index of this fix in the list from the request body, starting from 0
+      type: integer
+      minimum: 0
+    statusCode:
+      description: HTTP status code indicating the type of failure
+      type: integer
+    message:
+      description: Error message describing the failure
+      type: string
+
+FixCreateList:
+  type: array
+  items:
+    $ref: '#/FixCreate'
+
+FixCreateListResponse:
+  type: object
+  description: Fix create list response
+  properties:
+    fixes:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/FixOperationSuccess'
+          - $ref: '#/FixCreateFailure'
+    metadata:
+      type: object
+      properties:
+        total:
+          description: Total number of fixes in the response
+          type: integer
+        success:
+          description: Number of fixes successfully created
+          type: integer
+        failure:
+          description: Number of fixes that failed to create
+          type: integer
+      required:
+        - total
+        - success
+        - failure
+  required:
+    - fixes
+    - metadata
+
+FixUpdate:
+  type: object
+  properties:
+    changeDetails:
+      type: object
+      additionalProperties: true
+    status:
+      $ref: '#/FixStatus'
+
+FixStatusUpdate:
+  type: array
+  items:
+    type: object
+    properties:
+      id:
+        description: UUID of this fix
+        readOnly: false
+        $ref: '#/Id'
+      status:
+        description: Status of this fix; status reflects overall fix execution, flagged here for optimization
+        $ref: '#/SuggestionStatus'
+    required:
+      - id
+      - status
+
+FixStatusUpdateListResponse:
+  type: object
+  description: Fixes status update response
+  properties:
+    fixes:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/FixOperationSuccess'
+          - $ref: '#/FixUpdateFailure'
+    metadata:
+      type: object
+      properties:
+        total:
+          description: Total number of fixes in the response
+          type: integer
+        success:
+          description: Number of fixes successfully updated
+          type: integer
+        failure:
+          description: Number of fixes that failed to update
+          type: integer
+      required:
+        - total
+        - success
+        - failure
+  required:
+    - fixes
+    - metadata

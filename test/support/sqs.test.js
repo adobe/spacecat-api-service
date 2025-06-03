@@ -11,6 +11,7 @@
  */
 
 /* eslint-env mocha */
+/* eslint-disable no-use-before-define */
 
 import wrap from '@adobe/helix-shared-wrap';
 import sinon from 'sinon';
@@ -19,7 +20,8 @@ import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import nock from 'nock';
 import crypto from 'crypto';
-import sqsWrapper from '../../src/support/sqs.js';
+import { SendMessageCommand, GetQueueUrlCommand, PurgeQueueCommand } from '@aws-sdk/client-sqs';
+import sqsWrapper, { SQS } from '../../src/support/sqs.js';
 
 use(sinonChai);
 use(chaiAsPromised);
@@ -28,12 +30,14 @@ const sandbox = sinon.createSandbox();
 
 describe('sqs', () => {
   let context;
+  const AWS_REGION = 'us-east-1';
+  const QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue';
 
   beforeEach('setup', () => {
     context = {
       log: console,
       runtime: {
-        region: 'us-east-1',
+        region: AWS_REGION,
       },
     };
   });
@@ -49,7 +53,7 @@ describe('sqs', () => {
     context.sqs = instance;
 
     await wrap(async (req, ctx) => {
-      await ctx.sqs.sendMessage('queue', 'message');
+      await ctx.sqs.sendMessage(QUEUE_URL, 'message');
     }).with(sqsWrapper)({}, context);
 
     expect(instance.sendMessage).to.have.been.calledOnce;
@@ -68,7 +72,7 @@ describe('sqs', () => {
       .reply(400, errorResponse);
 
     const action = wrap(async (req, ctx) => {
-      await ctx.sqs.sendMessage('queue-url', { key: 'value' });
+      await ctx.sqs.sendMessage(QUEUE_URL, { key: 'value' });
     }).with(sqsWrapper);
 
     await expect(action({}, context)).to.be.rejectedWith(errorResponse.message);
@@ -100,7 +104,6 @@ describe('sqs', () => {
   });
 
   it('purging queue is successful', async () => {
-    const queueUrl = 'https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue';
     const logSpy = sandbox.spy(context.log, 'info');
 
     nock('https://sqs.us-east-1.amazonaws.com')
@@ -108,23 +111,22 @@ describe('sqs', () => {
       .reply(200, {});
 
     await wrap(async (req, ctx) => {
-      await ctx.sqs.purgeQueue(queueUrl);
+      await ctx.sqs.purgeQueue(QUEUE_URL);
     }).with(sqsWrapper)({}, context);
 
-    expect(logSpy).to.have.been.calledWith(`Success, queue purged. QueueUrl: ${queueUrl}`);
+    expect(logSpy).to.have.been.calledWith(`Success, queue purged. QueueUrl: ${QUEUE_URL}`);
   });
 
   it('initialize and use a new sqs if not initialized before', async () => {
     const messageId = 'message-id';
     const message = { key: 'value' };
-    const queueUrl = 'queue-url';
     const logSpy = sandbox.spy(context.log, 'info');
 
     nock('https://sqs.us-east-1.amazonaws.com')
       .post('/')
       .reply(200, (_, body) => {
         const { MessageBody, QueueUrl } = JSON.parse(body);
-        expect(QueueUrl).to.equal(queueUrl);
+        expect(QueueUrl).to.equal(QUEUE_URL);
         expect(JSON.parse(MessageBody).key).to.equal(message.key);
         return {
           MessageId: 'message-id',
@@ -133,9 +135,57 @@ describe('sqs', () => {
       });
 
     await wrap(async (req, ctx) => {
-      await ctx.sqs.sendMessage(queueUrl, message);
+      await ctx.sqs.sendMessage(QUEUE_URL, message);
     }).with(sqsWrapper)({}, context);
 
     expect(logSpy).to.have.been.calledWith(`Success, message sent. MessageID:  ${messageId}`);
   });
+
+  describe('Named queues', () => {
+    let sqs;
+    let sendStub;
+
+    beforeEach(() => {
+      sqs = new SQS(AWS_REGION, console);
+      sendStub = sinon.stub(sqs.sqsClient, 'send')
+        .callsFake(console.warn.bind(null, 'Unexpected Command')) // eslint-disable-line no-console -- useful for debugging tests
+        .withArgs(matchCmd(new GetQueueUrlCommand({ QueueName: 'the-queue-name' })))
+        .resolves({ QueueUrl: QUEUE_URL });
+    });
+
+    it('supports sending to named queues', async () => {
+      // @ts-ignore
+      const expectedCmd = matchCmd(new SendMessageCommand({ QueueUrl: QUEUE_URL }));
+      sendStub
+        .withArgs(expectedCmd)
+        .resolves({ MessageId: 'arbitrary' });
+      await sqs.sendMessage('the-queue-name', { value: 1234 });
+      expect(sqs.sqsClient.send).to.have.been.calledWith(expectedCmd);
+    });
+
+    it('supports purging named queues', async () => {
+      const expectedCmd = matchCmd(new PurgeQueueCommand({ QueueUrl: QUEUE_URL }));
+      sendStub
+        .withArgs(expectedCmd)
+        .resolves();
+      await sqs.purgeQueue('the-queue-name');
+      expect(sqs.sqsClient.send).to.have.been.calledWith(expectedCmd);
+    });
+
+    it('errors if AWS does not return a queue URL', async () => {
+      sendStub
+        .withArgs(matchCmd(new GetQueueUrlCommand({ QueueName: 'queue-that-does-not-exist' })))
+        .resolves({ QueueUrl: undefined });
+
+      await expect(sqs.sendMessage('queue-that-does-not-exist', { value: 1234 }))
+        .to.be.rejectedWith('Unknown queue name: queue-that-does-not-exist');
+    });
+  });
 });
+
+/**
+ * @param {{input: any}} cmd
+ */
+function matchCmd({ constructor, input }) {
+  return sinon.match.instanceOf(constructor).and(sinon.match({ input: sinon.match(input) }));
+}

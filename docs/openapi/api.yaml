@@ -55,6 +55,8 @@ paths:
     $ref: './auth-api.yaml#/google-auth'
   /auth/google/{siteId}/status:
     $ref: './auth-api.yaml#/google-auth-status'
+  /auth/login:
+    $ref: './auth-api.yaml#/login'
   /configurations:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
@@ -83,8 +85,14 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /preflight/jobs:
+    $ref: './preflight-api.yaml#/preflight-jobs'
+  /preflight/jobs/{jobId}:
+    $ref: './preflight-api.yaml#/preflight-job-status'
   /scrape:
-    $ref: './scrape-api.yaml#/scrape'
+    $ref: './scrape-api.yaml#/create-scrape-job'
+  /scrape/jobs/{jobId}:
+    $ref: './scrape-api.yaml#/get-scrape-job-status'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:
@@ -131,6 +139,10 @@ paths:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
     $ref: './key-event-api.yaml#/key-event'
+  /sites/{siteId}/scraped-content/{type}:
+    $ref: './scrape-api.yaml#/get-scraped-content-list'
+  /sites/{siteId}/files:
+     $ref: './scrape-api.yaml#/get-files'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
@@ -143,6 +155,16 @@ paths:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes:
+    $ref: './site-opportunities.yaml#/site-opportunity-fixes'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
+    $ref: './site-opportunities.yaml#/site-opportunity-fixes-by-status'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}:
+    $ref: './site-opportunities.yaml#/site-opportunity-fix'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}/suggestions:
+    $ref: './site-opportunities.yaml#/site-opportunity-fix-suggestions'
+  /sites/{siteId}/opportunities/{opportunityId}/status:
+    $ref: './site-opportunities.yaml#/site-opportunity-status'
   /slack/channels/invite-by-user-id:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
@@ -182,6 +204,11 @@ components:
       in: header
       name: x-api-key
       description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)"
+    cookie_auth:
+      type: apiKey
+      in: cookie
+      name: sessionToken
+      description: "Authentication using session cookie"
   schemas:
     $ref: './schemas.yaml'
   examples:

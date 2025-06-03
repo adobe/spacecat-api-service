@@ -12,6 +12,7 @@
 import {
   badRequest,
   createResponse,
+  forbidden,
   noContent,
   notFound,
   ok,
@@ -24,18 +25,25 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
+import { ValidationError, Suggestion as SuggestionModel, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
-import { sendAutofixMessage } from '../support/utils.js';
+import { sendAutofixMessage, getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import AccessControlUtil from '../support/access-control-util.js';
 
 /**
  * Suggestions controller.
- * @param {DataAccess} dataAccess - Data access.
+ * @param {object} ctx - Context of the request.
  * @param {SQS} sqs - SQS client.
+ * @param env
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(dataAccess, sqs, env) {
+function SuggestionsController(ctx, sqs, env) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+
+  const { dataAccess } = ctx;
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -52,6 +60,8 @@ function SuggestionsController(dataAccess, sqs, env) {
     throw new Error('Data access required');
   }
 
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
   /**
    * Gets all suggestions for a given site and opportunity
    * @param {Object} context of the request
@@ -67,6 +77,15 @@ function SuggestionsController(dataAccess, sqs, env) {
 
     if (!isValidUUID(opptyId)) {
       return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
     }
 
     const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
@@ -98,6 +117,15 @@ function SuggestionsController(dataAccess, sqs, env) {
     }
     if (!hasText(status)) {
       return badRequest('Status is required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
     }
 
     const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
@@ -132,6 +160,15 @@ function SuggestionsController(dataAccess, sqs, env) {
 
     if (!isValidUUID(suggestionId)) {
       return badRequest('Suggestion ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
     }
 
     const suggestion = await Suggestion.findById(suggestionId);
@@ -169,6 +206,15 @@ function SuggestionsController(dataAccess, sqs, env) {
 
     if (!isArray(context.data)) {
       return badRequest('Request body must be an array');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
     }
 
     const suggestionPromises = context.data.map(async (suggData, index) => {
@@ -215,7 +261,7 @@ function SuggestionsController(dataAccess, sqs, env) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
-
+    const { authInfo: { profile } } = context.attributes;
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -226,6 +272,15 @@ function SuggestionsController(dataAccess, sqs, env) {
 
     if (!isValidUUID(suggestionId)) {
       return badRequest('Suggestion ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
     }
 
     const suggestion = await Suggestion.findById(suggestionId);
@@ -261,6 +316,7 @@ function SuggestionsController(dataAccess, sqs, env) {
       }
 
       if (hasUpdates) {
+        suggestion.setUpdatedBy(profile.email || 'system');
         const updatedSuggestion = await suggestion.save();
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
@@ -281,6 +337,7 @@ function SuggestionsController(dataAccess, sqs, env) {
   const patchSuggestionsStatus = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+    const { authInfo: { profile } } = context.attributes;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -288,6 +345,15 @@ function SuggestionsController(dataAccess, sqs, env) {
 
     if (!isValidUUID(opportunityId)) {
       return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
     }
 
     // validate request body
@@ -339,6 +405,7 @@ function SuggestionsController(dataAccess, sqs, env) {
       try {
         if (suggestion.getStatus() !== status) {
           suggestion.setStatus(status);
+          suggestion.setUpdatedBy(profile.email);
         } else {
           return {
             index,
@@ -411,6 +478,11 @@ function SuggestionsController(dataAccess, sqs, env) {
     if (!site) {
       return notFound('Site not found');
     }
+
+    if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+      return forbidden('User does not belong to the organization or does not have sufficient permissions');
+    }
+
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
@@ -455,6 +527,19 @@ function SuggestionsController(dataAccess, sqs, env) {
         SuggestionModel.STATUSES.IN_PROGRESS,
       );
     }
+
+    let promiseTokenResponse;
+    if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+      try {
+        promiseTokenResponse = await getCSPromiseToken(context);
+      } catch (e) {
+        if (e instanceof ErrorWithStatusCode) {
+          return badRequest(e.message);
+        }
+        return createResponse({ message: 'Error getting promise token' }, 500);
+      }
+    }
+
     const response = {
       suggestions: [
         ...succeededSuggestions.map((suggestion) => ({
@@ -479,6 +564,7 @@ function SuggestionsController(dataAccess, sqs, env) {
       opportunityId,
       siteId,
       succeededSuggestions.map((s) => s.getId()),
+      promiseTokenResponse,
     );
     return createResponse(response, 207);
   };
@@ -498,6 +584,15 @@ function SuggestionsController(dataAccess, sqs, env) {
 
     if (!isValidUUID(suggestionId)) {
       return badRequest('Suggestion ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
