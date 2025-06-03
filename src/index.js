@@ -25,6 +25,7 @@ import {
   LegacyApiKeyHandler,
   ScopedApiKeyHandler,
   AdobeImsHandler,
+  JwtHandler,
 } from '@adobe/spacecat-shared-http-utils';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
@@ -50,6 +51,7 @@ import trigger from './controllers/trigger.js';
 import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
+import { FixesController } from './controllers/fixes.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
@@ -58,6 +60,10 @@ import OpportunitiesController from './controllers/opportunities.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
+import DemoController from './controllers/demo.js';
+import ScrapeController from './controllers/scrape.js';
+import McpController from './controllers/mcp.js';
+import buildRegistry from './mcp/registry.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -81,7 +87,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -90,30 +96,63 @@ async function run(request, context) {
   const t0 = Date.now();
 
   try {
+    /* ---------- instantiate controllers once per request ---------- */
+    const auditsController = AuditsController(context);
+    const configurationController = ConfigurationController(context);
+    const hooksController = HooksController(context);
+    const organizationsController = OrganizationsController(context, context.env);
+    const sitesController = SitesController(context, log, context.env);
+    const experimentsController = ExperimentsController(context);
+    const slackController = SlackController(SlackApp);
+    const fulfillmentController = FulfillmentController(context);
+    const importController = ImportController(context);
+    const apiKeyController = ApiKeyController(context);
+    const sitesAuditsToggleController = SitesAuditsToggleController(context);
+    const opportunitiesController = OpportunitiesController(context);
+    const suggestionsController = SuggestionsController(context, context.sqs, context.env);
+    const brandsController = BrandsController(context, log, context.env);
+    const preflightController = PreflightController(context, log, context.env);
+    const demoController = DemoController(context);
+    const scrapeController = ScrapeController(context);
+    const fixesController = new FixesController(context);
+
+    /* ---------- build MCP registry & controller ---------- */
+    const mcpRegistry = buildRegistry({
+      auditsController,
+      sitesController,
+      scrapeController,
+      context,
+    });
+    const mcpController = McpController(context, mcpRegistry);
+
     const routeHandlers = getRouteHandlers(
-      AuditsController(context.dataAccess),
-      ConfigurationController(context.dataAccess),
-      HooksController(context),
-      OrganizationsController(context.dataAccess, context.env),
-      SitesController(context.dataAccess, log, context.env),
-      ExperimentsController(context.dataAccess),
-      SlackController(SlackApp),
+      auditsController,
+      configurationController,
+      hooksController,
+      organizationsController,
+      sitesController,
+      experimentsController,
+      slackController,
       trigger,
-      FulfillmentController(context),
-      ImportController(context),
-      ApiKeyController(context),
-      SitesAuditsToggleController(context.dataAccess),
-      OpportunitiesController(context.dataAccess),
-      SuggestionsController(context.dataAccess, context.sqs, context.env),
-      BrandsController(context.dataAccess, log, context.env),
-      PreflightController(context.dataAccess, log, context.env),
+      fulfillmentController,
+      importController,
+      apiKeyController,
+      sitesAuditsToggleController,
+      opportunitiesController,
+      suggestionsController,
+      brandsController,
+      preflightController,
+      demoController,
+      scrapeController,
+      mcpController,
+      fixesController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
 
     if (routeMatch) {
       const { handler, params } = routeMatch;
-      //
+
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
@@ -138,7 +177,9 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
-  .with(authWrapper, { authHandlers: [LegacyApiKeyHandler, ScopedApiKeyHandler, AdobeImsHandler] })
+  .with(authWrapper, {
+    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+  })
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)

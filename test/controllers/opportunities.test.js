@@ -16,7 +16,8 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
-import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { ValidationError, Site } from '@adobe/spacecat-shared-data-access';
 import OpportunitiesController from '../../src/controllers/opportunities.js';
 
 use(chaiAsPromised);
@@ -26,6 +27,26 @@ describe('Opportunities Controller', () => {
 
   const OPPORTUNITY_ID = '3f1c3ab1-9ad0-4231-ac87-8159acf52cb6';
   const SITE_ID = 'b9395f92-1c2f-4904-a8f0-e45f30098f9e';
+
+  // Add common auth attributes
+  const defaultAuthAttributes = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true, email: 'test@test.com' })
+        .withAuthenticated(true),
+    },
+  };
+
+  const apikeyAuthAttributes = {
+    attributes: {
+      authInfo: new AuthInfo()
+        .withType('apikey')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ name: 'api-key' }),
+    },
+  };
 
   const opptys = [
     {
@@ -87,6 +108,12 @@ describe('Opportunities Controller', () => {
     },
     getGuidance() {
       return opptys[0].guidance;
+    },
+    getUpdatedBy() {
+      return opptys[0].updatedBy;
+    },
+    setUpdatedBy(value) {
+      opptys[0].updatedBy = value;
     },
     setGuidance(value) {
       opptys[0].guidance = value;
@@ -155,6 +182,8 @@ describe('Opportunities Controller', () => {
   let mockOpportunityDataAccess;
   let mockOpportunity;
   let opportunitiesController;
+  let mockSite;
+  let mockContext;
 
   beforeEach(() => {
     opptys[0] = {
@@ -174,6 +203,14 @@ describe('Opportunities Controller', () => {
       },
     };
 
+    // Add mock logger
+    const mockLogger = {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+      debug: sandbox.stub(),
+    };
+
     mockOpportunity = {
       allBySiteId: sandbox.stub().resolves([mockOpptyEntity]),
       allBySiteIdAndStatus: sandbox.stub().resolves([mockOpptyEntity]),
@@ -181,11 +218,30 @@ describe('Opportunities Controller', () => {
       create: sandbox.stub().resolves(mockOpptyEntity),
     };
 
-    mockOpportunityDataAccess = {
-      Opportunity: mockOpportunity,
+    mockSite = {
+      findById: sandbox.stub().resolves({
+        id: SITE_ID,
+      }),
     };
 
-    opportunitiesController = OpportunitiesController(mockOpportunityDataAccess);
+    mockOpportunityDataAccess = {
+      Opportunity: mockOpportunity,
+      Site: mockSite,
+    };
+
+    mockContext = {
+      dataAccess: mockOpportunityDataAccess,
+      log: mockLogger,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+    };
+
+    opportunitiesController = OpportunitiesController(mockContext);
   });
 
   afterEach(() => {
@@ -204,12 +260,16 @@ describe('Opportunities Controller', () => {
     });
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => OpportunitiesController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => OpportunitiesController()).to.throw('Data access required');
+    expect(() => OpportunitiesController({ dataAccess: {} })).to.throw('Data access required');
   });
 
   it('throws an error if data access cannot be destructured to Opportunity', () => {
-    expect(() => OpportunitiesController({ test: {} })).to.throw('Opportunity Collection not available');
+    expect(() => OpportunitiesController({ dataAccess: { Site: {} } })).to.throw('Opportunity Collection not available');
   });
 
   it('gets all opportunities for a site', async () => {
@@ -313,6 +373,43 @@ describe('Opportunities Controller', () => {
 
   it('updates an opportunity', async () => {
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: {
+        auditId: 'Audit ID NEW',
+        title: 'Test Opportunity NEW',
+        description: 'This is a test opportunity NEW',
+        runbook: 'http://runbook.url/new',
+        guidance: { tip: 'Follow these steps. NEW' },
+        type: 'SEO NEW',
+        status: 'APPROVED',
+        data: {
+          additionalInfo: 'info NEW',
+        },
+        tags: ['tag1', 'tag2', 'NEW'],
+        updatedBy: 'test@test.com',
+      },
+    });
+
+    // Validate updated values
+    expect(mockOpptyEntity.getAuditId()).to.be.equals('Audit ID NEW');
+    expect(mockOpptyEntity.getStatus()).to.be.equals('APPROVED');
+
+    expect(response.status).to.equal(200);
+
+    const updatedOppty = await response.json();
+    expect(updatedOppty).to.have.property('siteId', SITE_ID);
+    expect(updatedOppty).to.have.property('id', OPPORTUNITY_ID);
+    expect(updatedOppty).to.have.property('auditId', 'Audit ID NEW');
+    expect(updatedOppty).to.have.property('status', 'APPROVED');
+  });
+
+  it('updates an opportunity with api key', async () => {
+    const response = await opportunitiesController.patchOpportunity({
+      ...apikeyAuthAttributes,
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -343,6 +440,7 @@ describe('Opportunities Controller', () => {
     expect(updatedOppty).to.have.property('id', OPPORTUNITY_ID);
     expect(updatedOppty).to.have.property('auditId', 'Audit ID NEW');
     expect(updatedOppty).to.have.property('status', 'APPROVED');
+    expect(updatedOppty).to.have.property('updatedBy', 'system');
   });
 
   it('returns bad request when creating an opportunity if site not provided', async () => {
@@ -376,24 +474,33 @@ describe('Opportunities Controller', () => {
   });
 
   it('returns bad request when updating an opportunity if site not provided', async () => {
-    // eslint-disable-next-line max-len
-    const response = await opportunitiesController.patchOpportunity({ params: {}, data: opptys[0] });
+    const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: {},
+      data: opptys[0],
+    });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Site ID required');
   });
 
   it('returns bad request when updating an opportunity if no opportunity id is provided', async () => {
-    // eslint-disable-next-line max-len
-    const response = await opportunitiesController.patchOpportunity({ params: { siteId: SITE_ID }, data: {} });
+    const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID },
+      data: {},
+    });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity ID required');
   });
 
   it('returns bad request when updating an opportunity if no data is provided', async () => {
-    // eslint-disable-next-line max-len
-    const response = await opportunitiesController.patchOpportunity({ params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID }, data: {} });
+    const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'No updates provided');
@@ -402,6 +509,7 @@ describe('Opportunities Controller', () => {
   it('returns not found when updating an opportunity if opportunity is not found', async () => {
     mockOpportunity.findById.resolves(null);
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'APPROVED' },
     });
@@ -413,6 +521,7 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when updating an opportunity without sending any request body', async () => {
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -429,8 +538,10 @@ describe('Opportunities Controller', () => {
       throw new ValidationError('Validation error');
     };
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'APPROVED' },
+      log: mockContext.log,
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
@@ -439,6 +550,7 @@ describe('Opportunities Controller', () => {
 
   it('returns bad request when updating an opportunity if no updates are passed', async () => {
     const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: { status: 'NEW' },
     });
@@ -494,5 +606,410 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(500);
     const error = await response.json();
     expect(error).to.have.property('message', 'Error removing opportunity');
+  });
+
+  describe('Access Control', () => {
+    it('returns not found when site does not exist', async () => {
+      // Mock Site.findById to return null
+      mockSite.findById.resolves(null);
+
+      const response = await opportunitiesController.getAllForSite({
+        params: {
+          siteId: SITE_ID,
+        },
+      });
+
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+      expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+    });
+
+    it('returns forbidden when user does not have access to the organization', async () => {
+      // Mock Site with Organization
+      const mockOrg = {
+        getImsOrgId: () => 'test-org-id',
+      };
+
+      const mockSiteWithOrg = {
+        id: SITE_ID,
+        getOrganization: async () => mockOrg,
+      };
+      Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+      mockSite.findById.resolves(mockSiteWithOrg);
+
+      // Create context with non-admin user without org access
+      const restrictedAuthInfo = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true);
+
+      // Set organizations claim directly
+      restrictedAuthInfo.claims = {
+        organizations: [],
+      };
+
+      const restrictedContext = {
+        dataAccess: mockOpportunityDataAccess,
+        attributes: {
+          authInfo: restrictedAuthInfo,
+        },
+      };
+
+      const restrictedController = OpportunitiesController(restrictedContext);
+      const response = await restrictedController.getAllForSite({
+        params: {
+          siteId: SITE_ID,
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only users belonging to the organization of the site can view its opportunities');
+      expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+    });
+
+    describe('getByStatus access control', () => {
+      it('returns not found when site does not exist for getByStatus', async () => {
+        // Mock Site.findById to return null
+        mockSite.findById.resolves(null);
+
+        const response = await opportunitiesController.getByStatus({
+          params: {
+            siteId: SITE_ID,
+            status: 'NEW',
+          },
+        });
+
+        expect(response.status).to.equal(404);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Site not found');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+
+      it('returns forbidden when user does not have access to the organization for getByStatus', async () => {
+        // Mock Site with Organization
+        const mockOrg = {
+          getImsOrgId: () => 'test-org-id',
+        };
+
+        const mockSiteWithOrg = {
+          id: SITE_ID,
+          getOrganization: async () => mockOrg,
+        };
+        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSite.findById.resolves(mockSiteWithOrg);
+
+        // Create context with non-admin user without org access
+        const restrictedAuthInfo = new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'user' }])
+          .withProfile({ is_admin: false })
+          .withAuthenticated(true);
+
+        // Set organizations claim directly
+        restrictedAuthInfo.claims = {
+          organizations: [],
+        };
+
+        const restrictedContext = {
+          dataAccess: mockOpportunityDataAccess,
+          attributes: {
+            authInfo: restrictedAuthInfo,
+          },
+        };
+
+        const restrictedController = OpportunitiesController(restrictedContext);
+        const response = await restrictedController.getByStatus({
+          params: {
+            siteId: SITE_ID,
+            status: 'NEW',
+          },
+        });
+
+        expect(response.status).to.equal(403);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Only users belonging to the organization of the site can view its opportunities');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+    });
+
+    describe('getByID access control', () => {
+      it('returns not found when site does not exist for getByID', async () => {
+        // Mock Site.findById to return null
+        mockSite.findById.resolves(null);
+
+        const response = await opportunitiesController.getByID({
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+        });
+
+        expect(response.status).to.equal(404);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Site not found');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+
+      it('returns forbidden when user does not have access to the organization for getByID', async () => {
+        // Mock Site with Organization
+        const mockOrg = {
+          getImsOrgId: () => 'test-org-id',
+        };
+
+        const mockSiteWithOrg = {
+          id: SITE_ID,
+          getOrganization: async () => mockOrg,
+        };
+        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSite.findById.resolves(mockSiteWithOrg);
+
+        // Create context with non-admin user without org access
+        const restrictedAuthInfo = new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'user' }])
+          .withProfile({ is_admin: false })
+          .withAuthenticated(true);
+
+        // Set organizations claim directly
+        restrictedAuthInfo.claims = {
+          organizations: [],
+        };
+
+        const restrictedContext = {
+          dataAccess: mockOpportunityDataAccess,
+          attributes: {
+            authInfo: restrictedAuthInfo,
+          },
+        };
+
+        const restrictedController = OpportunitiesController(restrictedContext);
+        const response = await restrictedController.getByID({
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+        });
+
+        expect(response.status).to.equal(403);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Only users belonging to the organization of the site can view its opportunities');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+    });
+
+    describe('createOpportunity access control', () => {
+      it('returns not found when site does not exist for createOpportunity', async () => {
+        // Mock Site.findById to return null
+        mockSite.findById.resolves(null);
+
+        const response = await opportunitiesController.createOpportunity({
+          params: {
+            siteId: SITE_ID,
+          },
+          data: {
+            title: 'Test Opportunity',
+            description: 'Test Description',
+          },
+        });
+
+        expect(response.status).to.equal(404);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Site not found');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+
+      it('returns forbidden when user does not have access to the organization for createOpportunity', async () => {
+        // Mock Site with Organization
+        const mockOrg = {
+          getImsOrgId: () => 'test-org-id',
+        };
+
+        const mockSiteWithOrg = {
+          id: SITE_ID,
+          getOrganization: async () => mockOrg,
+        };
+        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSite.findById.resolves(mockSiteWithOrg);
+
+        // Create context with non-admin user without org access
+        const restrictedAuthInfo = new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'user' }])
+          .withProfile({ is_admin: false })
+          .withAuthenticated(true);
+
+        // Set organizations claim directly
+        restrictedAuthInfo.claims = {
+          organizations: [],
+        };
+
+        const restrictedContext = {
+          dataAccess: mockOpportunityDataAccess,
+          attributes: {
+            authInfo: restrictedAuthInfo,
+          },
+        };
+
+        const restrictedController = OpportunitiesController(restrictedContext);
+        const response = await restrictedController.createOpportunity({
+          params: {
+            siteId: SITE_ID,
+          },
+          data: {
+            title: 'Test Opportunity',
+            description: 'Test Description',
+          },
+        });
+
+        expect(response.status).to.equal(403);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Only users belonging to the organization of the site can create its opportunities');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+    });
+
+    describe('patchOpportunity access control', () => {
+      it('returns not found when site does not exist for patchOpportunity', async () => {
+        // Mock Site.findById to return null
+        mockSite.findById.resolves(null);
+
+        const response = await opportunitiesController.patchOpportunity({
+          ...defaultAuthAttributes,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            title: 'Updated Test Opportunity',
+            description: 'Updated Test Description',
+          },
+        });
+
+        expect(response.status).to.equal(404);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Site not found');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+
+      it('returns forbidden when user does not have access to the organization for patchOpportunity', async () => {
+        // Mock Site with Organization
+        const mockOrg = {
+          getImsOrgId: () => 'test-org-id',
+        };
+
+        const mockSiteWithOrg = {
+          id: SITE_ID,
+          getOrganization: async () => mockOrg,
+        };
+        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSite.findById.resolves(mockSiteWithOrg);
+
+        // Create context with non-admin user without org access
+        const restrictedAuthInfo = new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'user' }])
+          .withProfile({ is_admin: false })
+          .withAuthenticated(true);
+
+        // Set organizations claim directly
+        restrictedAuthInfo.claims = {
+          organizations: [],
+        };
+
+        const restrictedContext = {
+          dataAccess: mockOpportunityDataAccess,
+          attributes: {
+            authInfo: restrictedAuthInfo,
+          },
+          log: defaultAuthAttributes.log,
+        };
+
+        const restrictedController = OpportunitiesController(restrictedContext);
+        const response = await restrictedController.patchOpportunity({
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            title: 'Updated Test Opportunity',
+            description: 'Updated Test Description',
+          },
+          ...defaultAuthAttributes,
+        });
+
+        expect(response.status).to.equal(403);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Only users belonging to the organization of the site can edit its opportunities');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+    });
+
+    describe('removeOpportunity access control', () => {
+      it('returns not found when site does not exist for removeOpportunity', async () => {
+        // Mock Site.findById to return null
+        mockSite.findById.resolves(null);
+
+        const response = await opportunitiesController.removeOpportunity({
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+        });
+
+        expect(response.status).to.equal(404);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Site not found');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+
+      it('returns forbidden when user does not have access to the organization for removeOpportunity', async () => {
+        // Mock Site with Organization
+        const mockOrg = {
+          getImsOrgId: () => 'test-org-id',
+        };
+
+        const mockSiteWithOrg = {
+          id: SITE_ID,
+          getOrganization: async () => mockOrg,
+        };
+        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSite.findById.resolves(mockSiteWithOrg);
+
+        // Create context with non-admin user without org access
+        const restrictedAuthInfo = new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'user' }])
+          .withProfile({ is_admin: false })
+          .withAuthenticated(true);
+
+        // Set organizations claim directly
+        restrictedAuthInfo.claims = {
+          organizations: [],
+        };
+
+        const restrictedContext = {
+          dataAccess: mockOpportunityDataAccess,
+          attributes: {
+            authInfo: restrictedAuthInfo,
+          },
+        };
+
+        const restrictedController = OpportunitiesController(restrictedContext);
+        const response = await restrictedController.removeOpportunity({
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+        });
+
+        expect(response.status).to.equal(403);
+        const error = await response.json();
+        expect(error).to.have.property('message', 'Only users belonging to the organization of the site can remove its opportunities');
+        expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
+      });
+    });
   });
 });

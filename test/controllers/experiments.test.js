@@ -12,8 +12,9 @@
 
 /* eslint-env mocha */
 
-import { Experiment } from '@adobe/spacecat-shared-data-access';
+import { Experiment, Site } from '@adobe/spacecat-shared-data-access';
 import ExperimentSchema from '@adobe/spacecat-shared-data-access/src/models/experiment/experiment.schema.js';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -135,18 +136,32 @@ describe('Experiments Controller', () => {
       all: sandbox.stub().resolves(mockExperiments),
       allBySiteId: sandbox.stub().resolves(mockExperiments),
     },
+    Site: {
+      findById: sandbox.stub().resolves({
+        siteId,
+      }),
+    },
   };
 
   let experimentsController;
   let context;
 
   beforeEach(() => {
-    experimentsController = ExperimentsController(mockDataAccess);
     context = {
       params: {
         siteId,
       },
+      dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
     };
+
+    experimentsController = ExperimentsController(context);
   });
 
   afterEach(() => {
@@ -165,8 +180,12 @@ describe('Experiments Controller', () => {
     });
   });
 
+  it('throws an error if context is not an object', () => {
+    expect(() => ExperimentsController()).to.throw('Context required');
+  });
+
   it('throws an error if data access is not an object', () => {
-    expect(() => ExperimentsController()).to.throw('Data access required');
+    expect(() => ExperimentsController({ dataAccess: {} })).to.throw('Data access required');
   });
 
   describe('getExperiments', () => {
@@ -184,6 +203,66 @@ describe('Experiments Controller', () => {
       expect(experimentsResult).to.deep.equal(mockExperiments.map(
         (experiment) => ExperimentDto.toJSON(experiment),
       ));
+    });
+
+    it('returns bad request when site is not found', async () => {
+      // Mock Site.findById to return null
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await experimentsController.getExperiments({
+        params: {
+          siteId,
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+      expect(mockDataAccess.Site.findById).to.have.been.calledWith(siteId);
+    });
+
+    it('returns forbidden when user does not have access to the organization', async () => {
+      // Mock Site with Organization
+      const mockOrg = {
+        getImsOrgId: () => 'test-org-id',
+      };
+
+      const mockSite = {
+        siteId,
+        getOrganization: async () => mockOrg,
+      };
+      Object.setPrototypeOf(mockSite, Site.prototype);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      // Create context with non-admin user without org access
+      const restrictedAuthInfo = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true);
+
+      // Set organizations claim directly
+      restrictedAuthInfo.claims = {
+        organizations: [],
+      };
+
+      const restrictedContext = {
+        params: {
+          siteId,
+        },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: restrictedAuthInfo,
+        },
+      };
+
+      const restrictedController = ExperimentsController(restrictedContext);
+      const response = await restrictedController.getExperiments(restrictedContext);
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only users belonging to the organization of the site can view its experiments');
+      expect(mockDataAccess.Site.findById).to.have.been.calledWith(siteId);
     });
   });
 });

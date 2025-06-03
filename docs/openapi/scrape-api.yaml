@@ -1,30 +1,182 @@
-scrape:
+create-scrape-job:
   post:
     tags:
       - scrape
-    summary: Scrape a set of URLs
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+    summary: Create a new async URL Scrape job
     description: |
-      Warning: prototype endpoint. 
-      This endpoint allows you to scrape a set of URLs. The URLs are scraped in parallel and the results are returned in the same order as the input.
-      The maximum number of URLs that can be scraped in a single request is 10.
-    operationId: scrape
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+      This endpoint allows you to submit a new async url scrape job.
+      The job is provided a list URLs to be scraped. The URLs are scraped in parallel.
+      The maximum number of URLs that can be scraped in a single job is 10.
+      The returned jobId can be used to poll for the status and the resultsof the job.
+    operationId: createScrapeJob
     requestBody:
       content:
         application/json:
           schema:
             $ref: './schemas.yaml#/ScrapeRequest'
     responses:
-      '200':
-        description: A list of scrape results
+      '202':
+        description: Job accepted
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/ScrapeResponse'
+              $ref: './schemas.yaml#/CreateAsyncJobAcceptedResponse'
       '400':
         $ref: './responses.yaml#/400-max-scrape-urls-exceeded'
       '401':
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+
+get-scrape-job-status:
+  parameters:
+    - $ref: './parameters.yaml#/jobId'
+  get:
+    tags:
+      - scrape
     security:
       - api_key: [ ]
+      - ims_key: [ ]
+    summary: Get scrape job status and result
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+      This endpoint is used to retrieve the status and results of an async scrape job.
+      The jobId must be provided in the path parameter.
+      If the job is completed, the result will be included in the response.
+    operationId: getScrapeJobStatus
+    responses:
+      '200':
+        description: Job status and (if available) result
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ScrapeResponse'
+      '404':
+        description: Job not found
+
+get-scraped-content-list:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: type
+      in: path
+      required: true
+      description: The handler type of content to list (either 'scrapes' or 'imports').
+      schema:
+        type: string
+        enum:
+          - scrapes
+          - imports
+    - name: path
+      in: query
+      required: false
+      description: |
+        Optional path prefix to filter the recursive file search (e.g., 'about-us/' or 'docx/').
+        If not specified, the search begins from the root directory of the specified type.
+      schema:
+        type: string
+    - name: rootOnly
+      in: query
+      required: false
+      description: |
+        When set to true, returns only files directly under the specified prefix, excluding subdirectories.
+        When false or omitted, includes all files recursively within subdirectories.
+      schema:
+        type: boolean
+        default: false
+    - name: pageSize
+      in: query
+      required: false
+      description: Number of items to return per page. Default is 100, maximum is 1000.
+      schema:
+        type: integer
+        default: 100
+    - name: pageToken
+      in: query
+      required: false
+      description: Pagination token obtained from the previous response's nextPageToken field.
+      schema:
+        type: string
+  get:
+    operationId: listScrapedContent
+    tags:
+      - scrape
+    summary: List all files for a site and type
+    description: |
+      Retrieves a paginated list of files for the specified site and handler type (scrapes or imports).
+      The search can be filtered by path prefix and can include or exclude subdirectories.
+
+      Features:
+      - Path filtering: Start the search from a specific subdirectory
+      - Root-level filtering: Option to retrieve only root-level files
+      - Pagination: Control the number of results per page and navigate through results
+
+      Each file entry includes:
+      - A unique key (full path relative to the content type root)
+      - File name
+      - File metadata (size and last modified timestamp)
+
+    responses:
+      '200':
+        description: Successfully retrieved the list of files
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  $ref: './schemas.yaml#/ScrapedContentResponse'
+                nextPageToken:
+                  type: string
+                  description: Token for retrieving the next page of results, if available.
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+get-files:
+    get:
+      tags:
+        - scrape
+      summary: Get a file by its storage key
+      description: |
+        Returns a pre-signed URL for accessing a file stored in S3.
+        - Can be used to download or view the file content
+      operationId: getFileByKey
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The ID of the site
+        - name: key
+          in: query
+          required: true
+          description: The S3 object key (file path) of the file to retrieve
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to pre-signed URL for file access
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Pre-signed URL for accessing the file
+        '401':
+          $ref: './responses.yaml#/401'
+        '404':
+          $ref: './responses.yaml#/404'
+        '500':
+          $ref: './responses.yaml#/500'
+      security:
+        - scoped_api_key: [ ] 
+        - cookie_auth: [ ]

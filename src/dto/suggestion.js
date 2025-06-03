@@ -25,7 +25,10 @@ export const SuggestionDto = {
    *  rank: number,
    *  data: object,
    *  kpiDeltas: object,
-   *  status: string
+   *  status: string,
+   *  createdAt: string,
+   *  updatedAt: string,
+   *  updatedBy: string,
    * }} JSON object.
    */
   toJSON: (suggestion) => ({
@@ -38,5 +41,6 @@ export const SuggestionDto = {
     kpiDeltas: suggestion.getKpiDeltas(),
     createdAt: suggestion.getCreatedAt(),
     updatedAt: suggestion.getUpdatedAt(),
+    updatedBy: suggestion.getUpdatedBy(),
   }),
 };

@@ -48,6 +48,7 @@ export const SiteDto = {
     updatedAt: site.getUpdatedAt(),
     config: Config.toDynamoItem(site.getConfig()),
     ...(audit && { audits: [AuditDto.toAbbreviatedJSON(audit)] }),
+    updatedBy: site.getUpdatedBy(),
   }),
 
   // TODO: implement toCSV
