@@ -163,6 +163,7 @@ describe('Suggestions Controller', () => {
   let opportunityNotEnabled;
   let removeStub;
   let suggs;
+  let altTextSuggs;
   let context;
   let apikeyAuthAttributes;
 
@@ -257,8 +258,48 @@ describe('Suggestions Controller', () => {
 
     ];
 
+    altTextSuggs = [
+      {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CONTENT_UPDATE',
+        rank: 1,
+        status: 'NEW',
+        data: {
+          recommendations: [
+            {
+              pageUrl: 'https://example.com/example-page',
+              id: '1398acaa-99a8-4417-a8ee-a2e71d98028b',
+              altText: 'A description of the image',
+              imageUrl: 'https://image.example.com/image1.png',
+            },
+          ],
+        },
+        updatedAt: new Date(),
+      },
+      {
+        id: SUGGESTION_IDS[1],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CONTENT_UPDATE',
+        rank: 2,
+        status: 'NEW',
+        data: {
+          recommendations: [
+            {
+              pageUrl: 'https://example.com/another-page',
+              id: '2398acaa-99a8-4417-a8ee-a2e71d98028c',
+              altText: 'Another description of the image',
+              imageUrl: 'https://image.example.com/image2.png',
+            },
+          ],
+        },
+        updatedAt: new Date(),
+      },
+    ];
+
     const isHandlerEnabledForSite = sandbox.stub();
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('alt-text-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
     mockOpportunity = {
@@ -1337,6 +1378,41 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0]),
+          mockSuggestionEntity(altTextSuggs[1])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...altTextSuggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...altTextSuggs[1], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
         ...context,
       });
 
