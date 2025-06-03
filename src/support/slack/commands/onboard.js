@@ -47,7 +47,7 @@ function OnboardCommand(context) {
     name: 'Onboard Site(s)',
     description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile] [Optional: workflowWaitTime]`,
+    usageText: `${PHRASES[0]} {site} [imsOrgId] [profile] [Optional: workflowWaitTime]`,
   });
 
   const {
@@ -96,6 +96,38 @@ function OnboardCommand(context) {
     const baseURL = extractURLFromSlackInput(baseURLInput);
 
     log.info(`Slack context: ${JSON.stringify(slackContext)}`);
+
+    // Check if site is in LA_CUSTOMERS list
+    if (env.LA_CUSTOMERS) {
+      const laCustomers = env.LA_CUSTOMERS.split(',').map((url) => url.trim());
+      const isLACustomer = laCustomers.some(
+        (url) => baseURL.toLowerCase().endsWith(url.toLowerCase()),
+      );
+
+      if (isLACustomer) {
+        const message = `:warning: Cannot onboard site ${baseURL} as it is a Live Agent customer site!`;
+        log.warn(message);
+        await say(message);
+        return {
+          site: baseURL,
+          imsOrgId: imsOrgID,
+          spacecatOrgId: '',
+          siteId: '',
+          profile: profileName,
+          deliveryType: '',
+          imports: '',
+          audits: '',
+          errors: 'Site is a Live Agent customer',
+          status: 'Failed',
+          existingSite: 'No',
+        };
+      }
+    }
+
+    log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
+    await say(`:white_check_mark: Starting ${profileName} environment setup for site ${baseURL}`);
+    await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request Access Here: https://experienceleague.adobe.com/docs/experience-manager-cloud-service/content/onboarding/getting-access.html?lang=en');
+    await say(':gear: Onboarding the site...');
 
     const reportLine = {
       site: baseURL,
@@ -243,8 +275,6 @@ function OnboardCommand(context) {
 
       log.info(`Site config succesfully saved for site ${siteID}`);
 
-      log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
-
       const auditTypes = Object.keys(profile.audits);
 
       auditTypes.forEach((auditType) => {
@@ -262,8 +292,8 @@ function OnboardCommand(context) {
         if (!configuration.isHandlerEnabledForSite(auditType, site)) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
         } else {
-          log.info(`Triggering multi step audit processing for site ${siteID} with audit type ${auditType}`);
-          await say(`:hourglass_flowing_sand: Triggering multi step audit processing for site ${siteID} with audit type ${auditType}`);
+          log.info(`Running audits... type: ${auditType} and site: ${baseURL}`);
+          await say(`:test_tube: Running audits... type: ${auditType} and site: ${baseURL}`);
           await triggerAuditForSite(
             site,
             auditType,
@@ -280,7 +310,6 @@ function OnboardCommand(context) {
         siteUrl: baseURL,
         auditContext: {
           organizationId,
-          experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
           auditTypes,
           slackContext: {
             channelId: slackContext.channelId,
@@ -288,6 +317,7 @@ function OnboardCommand(context) {
           },
         },
       };
+
       // Disable imports and audits job
       const disableImportAndAuditJob = {
         type: 'disable-import-audit-processor',
@@ -304,6 +334,21 @@ function OnboardCommand(context) {
         },
       };
 
+      // Demo URL job
+      const demoURLJob = {
+        type: 'demo-url',
+        siteId: siteID,
+        siteUrl: baseURL,
+        demoURLContext: {
+          organizationId,
+          experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      };
+
       // Prepare and start step function workflow with the necessary parameters
       const workflowInput = {
         siteUrl: baseURL,
@@ -313,6 +358,7 @@ function OnboardCommand(context) {
         slackContext,
         auditStatusJob,
         disableImportAndAuditJob,
+        demoURLJob,
         workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
       };
 
@@ -351,8 +397,6 @@ function OnboardCommand(context) {
       say, botToken, files, channelId, client, threadTs,
     } = slackContext;
 
-    await say(':spacecat: Mission Control, we are go for *onboarding*! :satellite:');
-
     try {
       if (isNonEmptyArray(files)) {
         // Ensure exactly one CSV file is uploaded
@@ -369,7 +413,7 @@ function OnboardCommand(context) {
           return;
         }
 
-        const profileName = args.length > 0 ? args[0] : 'default';
+        const profileName = args.length > 0 ? args[0] : 'demo';
 
         await say(`:gear: Processing CSV file with profile *${profileName}*...`);
 
@@ -427,12 +471,12 @@ function OnboardCommand(context) {
 
         await say(':white_check_mark: Batch onboarding process finished successfully.');
       } else {
-        if (args.length < 2) {
-          await say(':warning: Missing required arguments. Please provide *Site URL* and *IMS Org ID*.');
+        if (args.length < 1) {
+          await say(':warning: Missing required argument. Please provide at least *Site URL*.');
           return;
         }
 
-        const [baseURLInput, imsOrgID, profileName = 'default', workflowWaitTime] = args;
+        const [baseURLInput, imsOrgID = env.DEMO_IMS_ORG, profileName = 'demo', workflowWaitTime] = args;
         const parsedWaitTime = workflowWaitTime ? parseInt(workflowWaitTime, 10) : undefined;
 
         const configuration = await Configuration.findLatest();
@@ -453,8 +497,6 @@ function OnboardCommand(context) {
         }
 
         const message = `
-        *:spacecat: :satellite: Onboarding started for ${reportLine.site}*
-        Onboarding workflow automatically handles imports, scrapes, and audits for the site.
         :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
         :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
         :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}

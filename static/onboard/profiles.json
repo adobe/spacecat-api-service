@@ -71,8 +71,7 @@
 		"audits": {
 			"broken-backlinks": {},
 			"broken-internal-links": {},
-			"meta-tags": {},
-			"forms-opportunities": {}
+			"meta-tags": {}
 		},
 		"imports": {
 			"organic-traffic" : {
