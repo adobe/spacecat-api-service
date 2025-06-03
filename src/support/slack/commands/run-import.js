@@ -73,7 +73,7 @@ function RunImportCommand(context) {
     endDate,
     config,
     slackContext,
-    pageURL = undefined,
+    pageURL,
   ) => {
     const { say } = slackContext;
 

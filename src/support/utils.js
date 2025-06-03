@@ -79,13 +79,15 @@ export const sentRunScraperMessage = async (
 // todo: prototype - untested
 /* c8 ignore start */
 /**
- * @param {any} sqs
+ * Sends a message to run an import job to the provided SQS queue.
+ *
+ * @param {Object} sqs
  * @param {string} queueUrl
  * @param {string} importType
  * @param {string} siteId
  * @param {string} startDate
  * @param {string} endDate
- * @param {any} slackContext
+ * @param {Object} slackContext
  * @param {string} [pageUrl] - Optional page URL for the import
  */
 export const sendRunImportMessage = async (
@@ -216,13 +218,15 @@ export const triggerScraperRun = async (
 // todo: prototype - untested
 /* c8 ignore start */
 /**
- * @param {any} config
+ * Triggers an import run by sending a message to the SQS queue.
+ *
+ * @param {Object} config
  * @param {string} importType
  * @param {string} siteId
  * @param {string} startDate
  * @param {string} endDate
- * @param {any} slackContext
- * @param {any} lambdaContext
+ * @param {Object} slackContext
+ * @param {Object} lambdaContext
  * @param {string} [pageUrl] - Optional page URL for the import
  */
 export const triggerImportRun = async (
@@ -233,7 +237,7 @@ export const triggerImportRun = async (
   endDate,
   slackContext,
   lambdaContext,
-  pageUrl = undefined,
+  pageUrl,
 ) => sendRunImportMessage(
   lambdaContext.sqs,
   config.getQueues().imports,
