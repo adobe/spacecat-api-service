@@ -511,18 +511,25 @@ function SuggestionsController(ctx, sqs, env) {
       }
     });
 
-    // Group valid suggestions by URL
-    const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
-      const data = suggestion.getData();
-      const url = data?.url || data?.pageUrl || data?.url_from;
-      if (!url) return acc;
+    let suggestionGroups;
+    if (opportunity.getType() !== 'broken-backlinks') {
+      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+        const data = suggestion.getData();
+        const url = data?.url || data?.pageUrl || data?.url_from;
+        if (!url) return acc;
 
-      if (!acc[url]) {
-        acc[url] = [];
-      }
-      acc[url].push(suggestion);
-      return acc;
-    }, {});
+        if (!acc[url]) {
+          acc[url] = [];
+        }
+        acc[url].push(suggestion);
+        return acc;
+      }, {});
+
+      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
+        groupedSuggestions,
+        url,
+      }));
+    }
 
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
@@ -573,17 +580,28 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
-    await Promise.all(
-      Object.entries(suggestionsByUrl).map(([url, urlSuggestions]) => sendAutofixMessage(
+    if (opportunity.getType() !== 'broken-backlinks') {
+      await Promise.all(
+        suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
+          sqs,
+          queueUrl,
+          siteId,
+          opportunityId,
+          groupedSuggestions.map((s) => s.getId()),
+          promiseTokenResponse,
+          { url },
+        )),
+      );
+    } else {
+      await sendAutofixMessage(
         sqs,
         queueUrl,
-        siteId,
         opportunityId,
-        url,
-        urlSuggestions.map((s) => s.getId()),
+        siteId,
+        succeededSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
-      )),
-    );
+      );
+    }
 
     return createResponse(response, 207);
   };

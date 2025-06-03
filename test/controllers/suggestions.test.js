@@ -246,7 +246,6 @@ describe('Suggestions Controller', () => {
         status: 'NEW',
         rank: 2,
         data: {
-          url_from: 'https://example.com/old-link',
           info: 'broken back link data',
         },
         kpiDeltas: {
@@ -260,6 +259,7 @@ describe('Suggestions Controller', () => {
 
     const isHandlerEnabledForSite = sandbox.stub();
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
     mockOpportunity = {
       findById: sandbox.stub(),
@@ -1324,6 +1324,7 @@ describe('Suggestions Controller', () => {
 
   describe('auto-fix suggestions', () => {
     it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
