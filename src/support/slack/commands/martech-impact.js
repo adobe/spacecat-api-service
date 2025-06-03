@@ -63,6 +63,68 @@ export function calculateColumnWidths(table, headers) {
 }
 
 /**
+ * Identifies Adobe Experience Cloud tools from third party summary
+ * @param {Array<Object>} summary - The third party summary array
+ * @returns {Object} Object containing identified Adobe tools
+ */
+export function identifyAdobeTools(summary = []) {
+  const adobeTools = {
+    hasLaunch: false,
+    hasTarget: false,
+    hasAnalytics: false,
+    details: []
+  };
+
+  summary.forEach((thirdParty) => {
+    const { entity, blockingTime, mainThreadTime, transferSize } = thirdParty;
+    const entityLower = entity.toLowerCase();
+
+    // Check for Adobe Launch/Tags
+    if (entityLower.includes('launch.adobe.com') || entityLower.includes('assets.adobedtm.com')) {
+      adobeTools.hasLaunch = true;
+      adobeTools.details.push({ type: 'Adobe Launch/Tags', ...thirdParty });
+    }
+    
+    // Check for Adobe Target
+    if (entityLower.includes('tt.omtrdc.net') || entityLower.includes('adobe target')) {
+      adobeTools.hasTarget = true;
+      adobeTools.details.push({ type: 'Adobe Target', ...thirdParty });
+    }
+    
+    // Check for Adobe Analytics
+    if (entityLower.includes('.sc.omtrdc.net') || entityLower.includes('adobe analytics') || entityLower.includes('2o7.net') || entityLower.includes('omniture')) {
+      adobeTools.hasAnalytics = true;
+      adobeTools.details.push({ type: 'Adobe Analytics', ...thirdParty });
+    }
+  });
+
+  return adobeTools;
+}
+
+/**
+ * Formats Adobe Experience Cloud tools information
+ * @param {Object} adobeTools - The Adobe tools object from identifyAdobeTools
+ * @returns {string} Formatted string with Adobe tools information
+ */
+export function formatAdobeToolsInfo(adobeTools) {
+  if (!adobeTools.details.length) {
+    return '';
+  }
+
+  const lines = ['\n*Adobe Experience Cloud Tools:*'];
+  
+  adobeTools.details.forEach(({ type, entity, blockingTime, mainThreadTime, transferSize }) => {
+    lines.push(`• *${type}*
+    - Entity: ${entity}
+    - Main Thread Time: ${Math.round(mainThreadTime)} ms
+    - Blocking Time: ${Math.round(blockingTime)} ms
+    - Transfer Size: ${formatSize(transferSize)}`);
+  });
+
+  return `\n${lines.join('\n')}\n`;
+}
+
+/**
  * Formats an array of third party sumary into a stringified table format.
  * If summary array is empty, it returns a fallback message. If the formatted
  * table exceeds the character limit, it is sliced and appended
@@ -76,6 +138,9 @@ export function formatThirdPartySummary(summary = []) {
     return '    _No third party impact detected_';
   }
 
+  // First identify Adobe tools
+  const adobeTools = identifyAdobeTools(summary);
+  
   const headers = ['Third Party', 'Main Thread', 'Blocking', 'Transfer'];
   const rows = summary.map((thirdParty) => {
     const {
@@ -94,9 +159,14 @@ export function formatThirdPartySummary(summary = []) {
   const columnWidths = calculateColumnWidths(table);
 
   const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
+  
+  // Add Adobe tools specific information
+  const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
+  
+  const finalOutput = `${formattedTable}${adobeToolsInfo}`;
 
-  // Ensure the formattedTable string does not exceed the Slack message character limit.
-  return formattedTable.length > CHARACTER_LIMIT ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...` : formattedTable;
+  // Ensure the finalOutput string does not exceed the Slack message character limit.
+  return finalOutput.length > CHARACTER_LIMIT ? `${finalOutput.slice(0, CHARACTER_LIMIT - 3)}...` : finalOutput;
 }
 
 /**
