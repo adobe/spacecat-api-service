@@ -140,7 +140,9 @@ paths:
   /sites/{siteId}/key-events/{keyEventId}:
     $ref: './key-event-api.yaml#/key-event'
   /sites/{siteId}/scraped-content/{type}:
-    $ref: './site-scrape-api.yaml#/scraped-content-type'
+    $ref: './scrape-api.yaml#/get-scraped-content-list'
+  /sites/{siteId}/files:
+     $ref: './scrape-api.yaml#/get-files'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
@@ -153,6 +155,16 @@ paths:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes:
+    $ref: './site-opportunities.yaml#/site-opportunity-fixes'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
+    $ref: './site-opportunities.yaml#/site-opportunity-fixes-by-status'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}:
+    $ref: './site-opportunities.yaml#/site-opportunity-fix'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}/suggestions:
+    $ref: './site-opportunities.yaml#/site-opportunity-fix-suggestions'
+  /sites/{siteId}/opportunities/{opportunityId}/status:
+    $ref: './site-opportunities.yaml#/site-opportunity-status'
   /slack/channels/invite-by-user-id:
     $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
@@ -192,6 +204,11 @@ components:
       in: header
       name: x-api-key
       description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)"
+    cookie_auth:
+      type: apiKey
+      in: cookie
+      name: sessionToken
+      description: "Authentication using session cookie"
   schemas:
     $ref: './schemas.yaml'
   examples:

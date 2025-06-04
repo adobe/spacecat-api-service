@@ -11,6 +11,10 @@
  */
 
 /**
+ * @import type { FixesController } from "../controllers/fixes.js"
+ */
+
+/**
  * Extracts parameter names from a route pattern. For example, for the route pattern
  * /sites/:siteId/audits/:auditType, the parameter names are siteId and auditType.
  * The parameter names are prefixed with a colon (:).
@@ -59,6 +63,9 @@ function isStaticRoute(routePattern) {
  * @param {Object} brandsController - The brands controller.
  * @param {Object} preflightController - The preflight controller.
  * @param {Object} demoController - The demo controller.
+ * @param {Object} scrapeController - The scrape controller.
+ * @param {Object} mcpController - The MCP controller.
+ * @param {FixesController} fixesController - The fixes controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -79,6 +86,9 @@ export default function getRouteHandlers(
   brandsController,
   preflightController,
   demoController,
+  scrapeController,
+  mcpController,
+  fixesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -158,6 +168,20 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
     'GET /screenshots': demoController.getScreenshots,
     'POST /screenshots': demoController.takeScreenshots,
+    'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
+    'GET /sites/:siteId/files': scrapeController.getFileByKey,
+    'GET /mcp': mcpController.handleSseRequest,
+    'POST /mcp': mcpController.handleRpc,
+
+    // Fixes
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),
+    'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': (c) => fixesController.getAllSuggestionsForFix(c),
+    'POST /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.createFixes(c),
+    'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
+    'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
+    'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
   };
 
   // Initialization of static and dynamic routes

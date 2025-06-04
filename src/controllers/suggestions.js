@@ -261,7 +261,7 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
-
+    const { authInfo: { profile } } = context.attributes;
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -316,6 +316,7 @@ function SuggestionsController(ctx, sqs, env) {
       }
 
       if (hasUpdates) {
+        suggestion.setUpdatedBy(profile.email || 'system');
         const updatedSuggestion = await suggestion.save();
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
@@ -336,6 +337,7 @@ function SuggestionsController(ctx, sqs, env) {
   const patchSuggestionsStatus = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+    const { authInfo: { profile } } = context.attributes;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -403,6 +405,7 @@ function SuggestionsController(ctx, sqs, env) {
       try {
         if (suggestion.getStatus() !== status) {
           suggestion.setStatus(status);
+          suggestion.setUpdatedBy(profile.email);
         } else {
           return {
             index,
@@ -507,6 +510,27 @@ function SuggestionsController(ctx, sqs, env) {
         }
       }
     });
+
+    let suggestionGroups;
+    if (opportunity.getType() !== 'broken-backlinks') {
+      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+        const data = suggestion.getData();
+        const url = data?.url || data?.recommendations?.[0]?.pageUrl || data?.url_from;
+        if (!url) return acc;
+
+        if (!acc[url]) {
+          acc[url] = [];
+        }
+        acc[url].push(suggestion);
+        return acc;
+      }, {});
+
+      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
+        groupedSuggestions,
+        url,
+      }));
+    }
+
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
         failedSuggestions.push({
@@ -555,14 +579,30 @@ function SuggestionsController(ctx, sqs, env) {
     };
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
-    await sendAutofixMessage(
-      sqs,
-      queueUrl,
-      opportunityId,
-      siteId,
-      succeededSuggestions.map((s) => s.getId()),
-      promiseTokenResponse,
-    );
+
+    if (opportunity.getType() !== 'broken-backlinks') {
+      await Promise.all(
+        suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
+          sqs,
+          queueUrl,
+          siteId,
+          opportunityId,
+          groupedSuggestions.map((s) => s.getId()),
+          promiseTokenResponse,
+          { url },
+        )),
+      );
+    } else {
+      await sendAutofixMessage(
+        sqs,
+        queueUrl,
+        siteId,
+        opportunityId,
+        succeededSuggestions.map((s) => s.getId()),
+        promiseTokenResponse,
+      );
+    }
+
     return createResponse(response, 207);
   };
 
