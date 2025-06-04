@@ -78,6 +78,18 @@ export const sentRunScraperMessage = async (
 
 // todo: prototype - untested
 /* c8 ignore start */
+/**
+ * Sends a message to run an import job to the provided SQS queue.
+ *
+ * @param {Object} sqs
+ * @param {string} queueUrl
+ * @param {string} importType
+ * @param {string} siteId
+ * @param {string} startDate
+ * @param {string} endDate
+ * @param {Object} slackContext
+ * @param {string} [pageUrl] - Optional page URL for the import
+ */
 export const sendRunImportMessage = async (
   sqs,
   queueUrl,
@@ -86,26 +98,30 @@ export const sendRunImportMessage = async (
   startDate,
   endDate,
   slackContext,
+  pageUrl = undefined,
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   siteId,
   startDate,
   endDate,
   slackContext,
+  pageUrl,
 });
 
 export const sendAutofixMessage = async (
   sqs,
   queueUrl,
-  opportunityId,
   siteId,
+  opportunityId,
   suggestionIds,
   promiseToken,
+  { url } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
   suggestionIds,
   promiseToken,
+  url,
 });
 /* c8 ignore end */
 
@@ -203,6 +219,18 @@ export const triggerScraperRun = async (
 );
 // todo: prototype - untested
 /* c8 ignore start */
+/**
+ * Triggers an import run by sending a message to the SQS queue.
+ *
+ * @param {Object} config
+ * @param {string} importType
+ * @param {string} siteId
+ * @param {string} startDate
+ * @param {string} endDate
+ * @param {Object} slackContext
+ * @param {Object} lambdaContext
+ * @param {string} [pageUrl] - Optional page URL for the import
+ */
 export const triggerImportRun = async (
   config,
   importType,
@@ -211,6 +239,7 @@ export const triggerImportRun = async (
   endDate,
   slackContext,
   lambdaContext,
+  pageUrl,
 ) => sendRunImportMessage(
   lambdaContext.sqs,
   config.getQueues().imports,
@@ -222,6 +251,7 @@ export const triggerImportRun = async (
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,
   },
+  pageUrl,
 );
 /* c8 ignore end */
 
