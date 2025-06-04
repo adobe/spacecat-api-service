@@ -97,8 +97,8 @@ export function identifyAdobeTools(summary = []) {
     // Check for Adobe Target (at.js and WebSDK delivery/interact endpoints)
     if (entityLower.includes('tt.omtrdc.net')
         || entityLower.includes('adobe target')
-        || (entityLower.includes('edge.adobedc.net') && entityLower.includes('/delivery'))
-        || (entityLower.includes('edge.adobedc.net') && entityLower.includes('/interact'))
+        || (entityLower.includes('edge.adobedc.net/ee/') && entityLower.includes('/delivery'))
+        || (entityLower.includes('edge.adobedc.net/ee/') && entityLower.includes('/interact'))
         || scriptElements.some((script) => script.includes('window.adobe.target'))) {
       adobeTools.hasTarget = true;
       adobeTools.details.push({ type: 'Adobe Target', ...thirdParty });
@@ -109,7 +109,7 @@ export function identifyAdobeTools(summary = []) {
         || entityLower.includes('adobe analytics')
         || entityLower.includes('2o7.net')
         || entityLower.includes('omniture')
-        || (entityLower.includes('edge.adobedc.net') && entityLower.includes('/collect'))) {
+        || (entityLower.includes('edge.adobedc.net/ee/') && entityLower.includes('/collect'))) {
       adobeTools.hasAnalytics = true;
       adobeTools.details.push({ type: 'Adobe Analytics', ...thirdParty });
     }
@@ -142,19 +142,23 @@ export function formatAdobeToolsInfo(adobeTools) {
     return '';
   }
 
-  const toolDetails = adobeTools.details.map(({
+  const headers = ['Adobe Tool', 'Main Thread', 'Blocking', 'Transfer'];
+  const rows = adobeTools.details.map(({
     type,
-    entity,
     mainThreadTime,
     blockingTime,
     transferSize,
-  }) => `• *${type}*
-    Entity: ${entity}
-    Main Thread Time: ${Math.round(mainThreadTime)} ms
-    Blocking Time: ${Math.round(blockingTime)} ms
-    Transfer Size: ${formatSize(transferSize)}`).join('\n');
+  }) => [
+    addEllipsis(type),
+    `${Math.round(mainThreadTime)} ms`,
+    `${Math.round(blockingTime)} ms`,
+    formatSize(transferSize),
+  ]);
 
-  return `*Adobe Experience Cloud Tools:*\n${toolDetails}`;
+  const table = [headers, ...rows];
+  const columnWidths = calculateColumnWidths(table);
+
+  return `*Adobe Experience Cloud Tools:*\n${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 }
 
 /**
