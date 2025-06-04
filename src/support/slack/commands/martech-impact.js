@@ -85,40 +85,48 @@ export function identifyAdobeTools(summary = []) {
     const entityLower = entity.toLowerCase();
 
     // Check for Adobe Launch/Tags
-    if (entityLower.includes('launch.adobe.com')
+    if ((entityLower.includes('launch.adobe.com')
         || entityLower.includes('assets.adobedtm.com')
         || entityLower.includes('adobe tag')
         || entityLower.includes('adobe launch')
-        || entityLower.includes('adobedtm')) {
+        || entityLower.includes('adobedtm'))
+        && !entityLower.includes('alloy.js')
+        && !entityLower.includes('alloy.min.js')
+        && !entityLower.includes('/collect')
+        && !entityLower.includes('/delivery')
+        && !entityLower.includes('/interact')) {
       adobeTools.hasLaunch = true;
       adobeTools.details.push({ type: 'Adobe Launch/Tags', ...thirdParty });
     }
 
     // Check for Adobe Target (at.js and WebSDK delivery/interact endpoints)
-    if (entityLower.includes('tt.omtrdc.net')
+    if ((entityLower.includes('tt.omtrdc.net')
         || entityLower.includes('adobe target')
-        || (entityLower.includes('edge.adobedc.net/ee/') && entityLower.includes('/delivery'))
-        || (entityLower.includes('edge.adobedc.net/ee/') && entityLower.includes('/interact'))
-        || scriptElements.some((script) => script.includes('window.adobe.target'))) {
+        || (entityLower.includes('edge.adobedc.net/ee/') && (entityLower.includes('/delivery') || entityLower.includes('/interact')))
+        || scriptElements.some((script) => script.includes('window.adobe.target')))
+        && !entityLower.includes('alloy.js')
+        && !entityLower.includes('alloy.min.js')) {
       adobeTools.hasTarget = true;
       adobeTools.details.push({ type: 'Adobe Target', ...thirdParty });
     }
 
     // Check for Adobe Analytics (including WebSDK collect endpoint)
-    if (entityLower.includes('.sc.omtrdc.net')
+    if ((entityLower.includes('.sc.omtrdc.net')
         || entityLower.includes('adobe analytics')
         || entityLower.includes('2o7.net')
         || entityLower.includes('omniture')
-        || (entityLower.includes('edge.adobedc.net/ee/') && entityLower.includes('/collect'))) {
+        || (entityLower.includes('edge.adobedc.net/ee/') && entityLower.includes('/collect')))
+        && !entityLower.includes('alloy.js')
+        && !entityLower.includes('alloy.min.js')) {
       adobeTools.hasAnalytics = true;
       adobeTools.details.push({ type: 'Adobe Analytics', ...thirdParty });
     }
 
     // Check for AEP Web SDK
-    if (entityLower.includes('edge.adobedc.net')
-        || entityLower.includes('.demdex.net')
-        || entityLower.includes('alloy.js')
+    if (entityLower.includes('alloy.js')
         || entityLower.includes('alloy.min.js')
+        || (entityLower.includes('edge.adobedc.net') && !entityLower.includes('edge.adobedc.net/ee/'))
+        || entityLower.includes('.demdex.net')
         || scriptElements.some((script) => script.includes('window.alloy'))) {
       adobeTools.hasWebSDK = true;
       adobeTools.details.push({ type: 'Adobe Experience Platform Web SDK', ...thirdParty });
