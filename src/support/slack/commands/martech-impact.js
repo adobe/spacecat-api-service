@@ -72,12 +72,15 @@ export function identifyAdobeTools(summary = []) {
     hasLaunch: false,
     hasTarget: false,
     hasAnalytics: false,
+    hasWebSDK: false,
+    hasDataLayer: false,
     details: [],
   };
 
   summary.forEach((thirdParty) => {
     const {
       entity,
+      scriptElements = [],
     } = thirdParty;
     const entityLower = entity.toLowerCase();
 
@@ -90,19 +93,39 @@ export function identifyAdobeTools(summary = []) {
       adobeTools.hasLaunch = true;
       adobeTools.details.push({ type: 'Adobe Launch/Tags', ...thirdParty });
     }
-    // Check for Adobe Target
-    if (entityLower.includes('tt.omtrdc.net') || entityLower.includes('adobe target')) {
+
+    // Check for Adobe Target (at.js and WebSDK delivery/interact endpoints)
+    if (entityLower.includes('tt.omtrdc.net')
+        || entityLower.includes('adobe target')
+        || (entityLower.includes('edge.adobedc.net') && entityLower.includes('/delivery'))
+        || (entityLower.includes('edge.adobedc.net') && entityLower.includes('/interact'))
+        || scriptElements.some((script) => script.includes('window.adobe.target'))) {
       adobeTools.hasTarget = true;
       adobeTools.details.push({ type: 'Adobe Target', ...thirdParty });
     }
 
-    // Check for Adobe Analytics
+    // Check for Adobe Analytics (including WebSDK collect endpoint)
     if (entityLower.includes('.sc.omtrdc.net')
         || entityLower.includes('adobe analytics')
         || entityLower.includes('2o7.net')
-        || entityLower.includes('omniture')) {
+        || entityLower.includes('omniture')
+        || (entityLower.includes('edge.adobedc.net') && entityLower.includes('/collect'))) {
       adobeTools.hasAnalytics = true;
       adobeTools.details.push({ type: 'Adobe Analytics', ...thirdParty });
+    }
+
+    // Check for AEP Web SDK
+    if (entityLower.includes('edge.adobedc.net')
+        || entityLower.includes('.demdex.net')
+        || scriptElements.some((script) => script.includes('window.alloy'))) {
+      adobeTools.hasWebSDK = true;
+      adobeTools.details.push({ type: 'Adobe Experience Platform Web SDK', ...thirdParty });
+    }
+
+    // Check for Adobe Client Data Layer
+    if (scriptElements.some((script) => script.includes('window.adobeDataLayer'))) {
+      adobeTools.hasDataLayer = true;
+      adobeTools.details.push({ type: 'Adobe Client Data Layer', ...thirdParty });
     }
   });
 
@@ -116,26 +139,22 @@ export function identifyAdobeTools(summary = []) {
  */
 export function formatAdobeToolsInfo(adobeTools) {
   if (!adobeTools || !adobeTools.details || !adobeTools.details.length) {
-    return '*Adobe Experience Cloud Tools:*\n    _No Adobe Experience Cloud tools detected_';
+    return '';
   }
 
-  const headers = ['Adobe Tool', 'Main Thread', 'Blocking', 'Transfer'];
-  const rows = adobeTools.details.map(({
+  const toolDetails = adobeTools.details.map(({
     type,
+    entity,
     mainThreadTime,
     blockingTime,
     transferSize,
-  }) => [
-    type,
-    `${Math.round(mainThreadTime)} ms`,
-    `${Math.round(blockingTime)} ms`,
-    formatSize(transferSize),
-  ]);
+  }) => `• *${type}*
+    Entity: ${entity}
+    Main Thread Time: ${Math.round(mainThreadTime)} ms
+    Blocking Time: ${Math.round(blockingTime)} ms
+    Transfer Size: ${formatSize(transferSize)}`).join('\n');
 
-  const table = [headers, ...rows];
-  const columnWidths = calculateColumnWidths(table);
-
-  return `*Adobe Experience Cloud Tools:*\n${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
+  return `*Adobe Experience Cloud Tools:*\n${toolDetails}`;
 }
 
 /**
@@ -261,9 +280,6 @@ function MartechImpactCommand(context) {
 
       const { totalBlockingTime, thirdPartySummary } = latestAudit.getAuditResult();
 
-      // Identify Adobe tools for the detailed summary
-      const adobeTools = identifyAdobeTools(thirdPartySummary);
-
       const textSections = [{
         text: `
 *Martech Impact for ${site.getBaseURL()}*
@@ -271,9 +287,6 @@ function MartechImpactCommand(context) {
 ${printSiteDetails(site)}
 
 *Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
-
-*Adobe Experience Cloud Tools Impact:*
-${formatAdobeToolsInfo(adobeTools)}
 
 *Third Party Summary:*
 ${formatThirdPartySummary(thirdPartySummary)}
