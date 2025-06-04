@@ -173,10 +173,17 @@ export function formatThirdPartySummary(summary = []) {
   // Add Adobe tools specific information
   const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
 
-  const finalOutput = `${formattedTable}${adobeToolsInfo}`;
+  // Calculate available space for the table after reserving space for Adobe tools info
+  const adobeToolsLength = adobeToolsInfo.length;
+  const maxTableLength = CHARACTER_LIMIT - adobeToolsLength - 3; // 3 for potential ellipsis
 
-  // Ensure the finalOutput string does not exceed the Slack message character limit.
-  return finalOutput.length > CHARACTER_LIMIT ? `${finalOutput.slice(0, CHARACTER_LIMIT - 3)}...` : finalOutput;
+  // If table needs truncation, do it before adding Adobe tools info
+  const truncatedTable = formattedTable.length > maxTableLength
+    ? `${formattedTable.slice(0, maxTableLength)}...`
+    : formattedTable;
+
+  // Combine the truncated table with Adobe tools info
+  return `${truncatedTable}${adobeToolsInfo}`;
 }
 
 /**
