@@ -43,7 +43,7 @@ export function createAuditTools(auditsController) {
     fetchFn: ({ auditType, siteId }) => auditsController.getLatestForSite({
       params: { auditType, siteId },
     }),
-    notFoundMessage: ({ baseURL }) => `Audit with base URL ${baseURL} not found`,
+    notFoundMessage: ({ siteId }) => `Audit with base URL ${siteId} not found`,
   });
 
   /* ------------- getAllAuditsByBaseURL ---------------- */
@@ -69,7 +69,7 @@ export function createAuditTools(auditsController) {
     fetchFn: ({ auditType, siteId }) => auditsController.getAllForSite({
       params: { auditType, siteId },
     }),
-    notFoundMessage: ({ baseURL }) => `Audit with base URL ${baseURL} not found`,
+    notFoundMessage: ({ siteId }) => `Audit with base URL ${siteId} not found`,
   });
 
   return {
