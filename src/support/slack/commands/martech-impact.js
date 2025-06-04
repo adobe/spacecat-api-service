@@ -112,23 +112,23 @@ export function formatAdobeToolsInfo(adobeTools) {
     return '';
   }
 
-  const lines = ['\n*Adobe Experience Cloud Tools:*'];
-
-  adobeTools.details.forEach(({
+  const headers = ['Adobe Tool', 'Main Thread', 'Blocking', 'Transfer'];
+  const rows = adobeTools.details.map(({
     type,
-    entity,
-    blockingTime,
     mainThreadTime,
+    blockingTime,
     transferSize,
-  }) => {
-    lines.push(`• *${type}*
-    - Entity: ${entity}
-    - Main Thread Time: ${Math.round(mainThreadTime)} ms
-    - Blocking Time: ${Math.round(blockingTime)} ms
-    - Transfer Size: ${formatSize(transferSize)}`);
-  });
+  }) => [
+    type,
+    `${Math.round(mainThreadTime)} ms`,
+    `${Math.round(blockingTime)} ms`,
+    formatSize(transferSize),
+  ]);
 
-  return `\n${lines.join('\n')}\n`;
+  const table = [headers, ...rows];
+  const columnWidths = calculateColumnWidths(table);
+
+  return `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 }
 
 /**
@@ -244,14 +244,8 @@ function MartechImpactCommand(context) {
 
       const { totalBlockingTime, thirdPartySummary } = latestAudit.getAuditResult();
 
-      // Identify Adobe tools
+      // Identify Adobe tools for the detailed summary
       const adobeTools = identifyAdobeTools(thirdPartySummary);
-      const hasAdobeTools = adobeTools.hasLaunch || adobeTools.hasTarget || adobeTools.hasAnalytics;
-
-      // Create summary of detected Adobe tools
-      const adobeToolsSummary = hasAdobeTools
-        ? `\n*Adobe Experience Cloud Tools Detected:*${adobeTools.hasLaunch ? '\n• Adobe Launch/Tags' : ''}${adobeTools.hasTarget ? '\n• Adobe Target' : ''}${adobeTools.hasAnalytics ? '\n• Adobe Analytics' : ''}`
-        : '';
 
       const textSections = [{
         text: `
@@ -261,9 +255,11 @@ ${printSiteDetails(site)}
 
 *Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
 
-*Adobe Experience Cloud Tools Detected:*\n${adobeToolsSummary}
+*Adobe Experience Cloud Tools Impact:*
+${formatAdobeToolsInfo(adobeTools)}
 
-*Third Party Summary:*\n${formatThirdPartySummary(thirdPartySummary)}
+*Third Party Summary:*
+${formatThirdPartySummary(thirdPartySummary)}
   `,
       }];
 
