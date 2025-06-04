@@ -158,6 +158,8 @@ function OnboardCommand(context) {
 
       // check if the organization with IMS Org ID already exists; create if it doesn't
       let organization = await Organization.findByImsOrgId(imsOrgID);
+      // TODO: remove this one as we do not want to create organization.
+      // Let user create organization. Just add a slack message.
       if (!organization) {
         let imsOrgDetails;
         try {
