@@ -117,6 +117,8 @@ export function identifyAdobeTools(summary = []) {
     // Check for AEP Web SDK
     if (entityLower.includes('edge.adobedc.net')
         || entityLower.includes('.demdex.net')
+        || entityLower.includes('alloy.js')
+        || entityLower.includes('alloy.min.js')
         || scriptElements.some((script) => script.includes('window.alloy'))) {
       adobeTools.hasWebSDK = true;
       adobeTools.details.push({ type: 'Adobe Experience Platform Web SDK', ...thirdParty });
