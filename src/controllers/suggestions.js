@@ -596,8 +596,8 @@ function SuggestionsController(ctx, sqs, env) {
       await sendAutofixMessage(
         sqs,
         queueUrl,
-        opportunityId,
         siteId,
+        opportunityId,
         succeededSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
       );
