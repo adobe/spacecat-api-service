@@ -27,29 +27,41 @@ import { ErrorWithStatusCode } from '../../src/support/utils.js';
 use(sinonChai);
 use(chaiAsPromised);
 
-const createImportJob = (data) => (new ImportJob(
-  {
-    entities: {
-      importJob: {
-        model: {
-          schema: { attributes: { status: { type: 'string', get: (value) => value } } },
+const createImportJob = (data) => {
+  const job = new ImportJob(
+    {
+      entities: {
+        importJob: {
+          model: {
+            schema: { attributes: { status: { type: 'string', get: (value) => value } } },
+          },
+          patch: sinon.stub().returns({ go: () => {}, set: () => {} }),
+          remove: sinon.stub().returns({ go: () => {} }),
         },
-        patch: sinon.stub().returns({ go: () => {}, set: () => {} }),
-        remove: sinon.stub().returns({ go: () => {} }),
       },
     },
-  },
-  {
-    log: console,
-    getCollection: stub().returns({
-      schema: ImportJobSchema,
-      findById: stub(),
-    }),
-  },
-  ImportJobSchema,
-  data,
-  console,
-));
+    {
+      log: console,
+      getCollection: stub().returns({
+        schema: ImportJobSchema,
+        findById: stub(),
+      }),
+    },
+    ImportJobSchema,
+    data,
+    console,
+  );
+  job.aclCtx = {
+    acls: [],
+    aclEntities: {
+      exclude: [
+        'importJob',
+        'importUrl',
+      ],
+    },
+  };
+  return job;
+};
 
 const createImportUrl = (data) => (new ImportUrl(
   { entities: { importUrl: {} } },

@@ -34,6 +34,73 @@ use(sinonChai);
 describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();
   const orgId = '9033554c-de8a-44ac-a356-09b51af8cc28';
+
+  const acls1 = [{
+    acl: [{
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/9033554c-de8a-44ac-a356-09b51af8cc28/**',
+    },
+    {
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/9033554c-de8a-44ac-a356-09b51af8cc28',
+    },
+    ],
+  }];
+  const acls2 = [{
+    acl: [{
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/5f3b3626-029c-476e-924b-0c1bba2e871f/**',
+    },
+    {
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/5f3b3626-029c-476e-924b-0c1bba2e871f',
+    },
+    ],
+  }];
+  const acls3 = [{
+    acl: [{
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/org3/**',
+    },
+    {
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/org3',
+    },
+    ],
+  }];
+
+  const actCtx1 = {
+    acls: acls1,
+    aclEntities: {
+      // Right now only check site
+      exclude: [
+        'site', 'apiKey', 'audit', 'configuration', 'experiment',
+        'importJob', 'importUrl', 'keyEvent', 'latestAudit',
+        'opportunity', 'siteCandidate', 'siteTopPage', 'suggestion', 'asyncJob',
+      ],
+    },
+  };
+  const actCtx2 = {
+    acls: acls2,
+    aclEntities: {
+      exclude: [
+        'site', 'apiKey', 'audit', 'configuration', 'experiment',
+        'importJob', 'importUrl', 'keyEvent', 'latestAudit',
+        'opportunity', 'siteCandidate', 'siteTopPage', 'suggestion', 'asyncJob',
+      ],
+    },
+  };
+  const actCtx3 = {
+    acls: acls3,
+    aclEntities: {
+      exclude: [
+        'site', 'apiKey', 'audit', 'configuration', 'experiment',
+        'importJob', 'importUrl', 'keyEvent', 'latestAudit',
+        'opportunity', 'siteCandidate', 'siteTopPage', 'suggestion', 'asyncJob',
+      ],
+    },
+  };
+
   const sites = [
     {
       siteId: 'site1',
@@ -127,6 +194,9 @@ describe('Organizations Controller', () => {
   organizations[0].getConfig = sinon.stub().returns(sampleConfig1);
   organizations[1].getConfig = sinon.stub().returns(sampleConfig1);
   organizations[2].getConfig = sinon.stub().returns(sampleConfig2);
+  organizations[0].aclCtx = actCtx1;
+  organizations[1].aclCtx = actCtx2;
+  organizations[2].aclCtx = actCtx3;
 
   const organizationFunctions = [
     'createOrganization',
