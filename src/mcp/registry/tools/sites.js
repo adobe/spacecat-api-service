@@ -82,7 +82,15 @@ export function createSiteTools(sitesController, context) {
     inputSchema: z.object({
       siteId: z.string().uuid().describe('The ID of the site'),
       metric: z
-        .enum(['organic-keywords', 'organic-keywords-nonbranded', 'organic-traffic', 'all-traffic'])
+        .enum([
+          'organic-keywords',
+          'organic-keywords-nonbranded',
+          'organic-traffic',
+          'organic-keywords-ai-overview',
+          'organic-keywords-feature-snippets',
+          'organic-keyword-questions',
+          'all-traffic',
+        ])
         .describe('The metric to retrieve. For ahrefs source: organic-keywords, organic-keywords-nonbranded, organic-traffic. For rum source: all-traffic'),
       source: z.enum(['ahrefs', 'rum']).describe('The source of the metrics. Supported sources: ahrefs, rum'),
     }).strict(),
