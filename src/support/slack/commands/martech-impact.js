@@ -72,11 +72,13 @@ export function identifyAdobeTools(summary = []) {
     hasLaunch: false,
     hasTarget: false,
     hasAnalytics: false,
-    details: []
+    details: [],
   };
 
   summary.forEach((thirdParty) => {
-    const { entity, blockingTime, mainThreadTime, transferSize } = thirdParty;
+    const { 
+      entity,
+    } = thirdParty;
     const entityLower = entity.toLowerCase();
 
     // Check for Adobe Launch/Tags
@@ -84,7 +86,6 @@ export function identifyAdobeTools(summary = []) {
       adobeTools.hasLaunch = true;
       adobeTools.details.push({ type: 'Adobe Launch/Tags', ...thirdParty });
     }
-    
     // Check for Adobe Target
     if (entityLower.includes('tt.omtrdc.net') || entityLower.includes('adobe target')) {
       adobeTools.hasTarget = true;
@@ -113,7 +114,13 @@ export function formatAdobeToolsInfo(adobeTools) {
 
   const lines = ['\n*Adobe Experience Cloud Tools:*'];
   
-  adobeTools.details.forEach(({ type, entity, blockingTime, mainThreadTime, transferSize }) => {
+  adobeTools.details.forEach(({
+    type,
+    entity,
+    blockingTime,
+    mainThreadTime,
+    transferSize,
+  }) => {
     lines.push(`• *${type}*
     - Entity: ${entity}
     - Main Thread Time: ${Math.round(mainThreadTime)} ms
@@ -140,11 +147,14 @@ export function formatThirdPartySummary(summary = []) {
 
   // First identify Adobe tools
   const adobeTools = identifyAdobeTools(summary);
-  
+
   const headers = ['Third Party', 'Main Thread', 'Blocking', 'Transfer'];
   const rows = summary.map((thirdParty) => {
     const {
-      entity, blockingTime, mainThreadTime, transferSize,
+      entity,
+      blockingTime,
+      mainThreadTime,
+      transferSize,
     } = thirdParty;
 
     return [
@@ -159,10 +169,10 @@ export function formatThirdPartySummary(summary = []) {
   const columnWidths = calculateColumnWidths(table);
 
   const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
-  
+
   // Add Adobe tools specific information
   const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
-  
+
   const finalOutput = `${formattedTable}${adobeToolsInfo}`;
 
   // Ensure the finalOutput string does not exceed the Slack message character limit.
