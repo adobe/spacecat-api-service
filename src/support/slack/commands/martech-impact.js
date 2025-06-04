@@ -154,6 +154,7 @@ export function formatThirdPartySummary(summary = []) {
 
   // First identify Adobe tools
   const adobeTools = identifyAdobeTools(summary);
+  const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
 
   const headers = ['Third Party', 'Main Thread', 'Blocking', 'Transfer'];
   const rows = summary.map((thirdParty) => {
@@ -177,14 +178,29 @@ export function formatThirdPartySummary(summary = []) {
 
   const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 
-  // Ensure the output string does not exceed the Slack message character limit
-  const thirdPartyTable = formattedTable.length > CHARACTER_LIMIT
-    ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...`
+  // If we have Adobe tools info, we need to account for its length plus the newlines
+  const headerText = '*Third Party Summary:*\n';
+  const adobeToolsLength = adobeToolsInfo ? adobeToolsInfo.length + 2 : 0; // +2 for newlines
+  const availableSpace = CHARACTER_LIMIT - adobeToolsLength - headerText.length;
+
+  // If the formatted table is too long, truncate it
+  const truncatedTable = formattedTable.length > availableSpace
+    ? `${formattedTable.slice(0, availableSpace - 3)}...`
     : formattedTable;
 
-  // Add Adobe tools information
-  const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
-  return `${adobeToolsInfo}\n\n*Third Party Summary:*\n${thirdPartyTable}`;
+  // If the total length would still exceed the limit, only show third party summary
+  const combinedLength = (adobeToolsInfo?.length || 0)
+    + truncatedTable.length
+    + headerText.length
+    + 2;
+  if (combinedLength > CHARACTER_LIMIT) {
+    return `${headerText}${truncatedTable}`;
+  }
+
+  // Otherwise show both sections
+  return adobeToolsInfo
+    ? `${adobeToolsInfo}\n\n${headerText}${truncatedTable}`
+    : `${headerText}${truncatedTable}`;
 }
 
 /**
