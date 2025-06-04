@@ -35,6 +35,21 @@ export function createAuditResources(auditsController) {
       }),
       notFoundMessage: ({ auditType, siteId }) => `Audit of ${auditType} for site ${siteId} not found`,
     }),
+    allAuditsBySiteIdAndType: createProxyResource({
+      name: 'allAuditsBySiteIdAndType',
+      description: '\n'
+        + '<use_case>Use this resource template to obtain the all audit results of a given audit type for a site you know its ID of.</use_case>\n'
+        + '<important_notes>'
+        + '1. You may need a tool to obtain site information that yields the site\'s ID.\n'
+        + '2. The audit type must be one of the supported types. Ask the user to provide it.\n'
+        + '</important_notes>\n'
+        + '',
+      uriTemplate: 'spacecat-data://audits/all/{auditType}/{siteId}',
+      fetchFn: ({ auditType, siteId }) => auditsController.getAllForSite({
+        params: { auditType, siteId },
+      }),
+      notFoundMessage: ({ auditType, siteId }) => `Audit of ${auditType} for site ${siteId} not found`,
+    }),
   };
 }
 
