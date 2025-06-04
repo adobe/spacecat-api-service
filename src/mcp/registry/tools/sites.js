@@ -88,7 +88,7 @@ export function createSiteTools(sitesController, context) {
           'organic-traffic',
           'organic-keywords-ai-overview',
           'organic-keywords-feature-snippets',
-          'organic-keyword-questions',
+          'organic-keywords-questions',
           'all-traffic',
         ])
         .describe('The metric to retrieve. For ahrefs source: organic-keywords, organic-keywords-nonbranded, organic-traffic. For rum source: all-traffic'),
