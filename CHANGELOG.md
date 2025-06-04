@@ -1,3 +1,10 @@
+# [1.120.0](https://github.com/adobe/spacecat-api-service/compare/v1.119.2...v1.120.0) (2025-06-04)
+
+
+### Features
+
+* add mcp endpoint to return all audits for historical analysis ([#954](https://github.com/adobe/spacecat-api-service/issues/954)) ([eb90cfc](https://github.com/adobe/spacecat-api-service/commit/eb90cfc3c7f70ea4b76aeea2ed7de2e2c0d66b52))
+
 ## [1.119.2](https://github.com/adobe/spacecat-api-service/compare/v1.119.1...v1.119.2) (2025-06-04)
 
 
