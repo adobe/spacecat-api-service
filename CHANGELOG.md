@@ -1,3 +1,10 @@
+# [1.119.0](https://github.com/adobe/spacecat-api-service/compare/v1.118.2...v1.119.0) (2025-06-04)
+
+
+### Features
+
+* new organic keyword imports ([#957](https://github.com/adobe/spacecat-api-service/issues/957)) ([2dd745b](https://github.com/adobe/spacecat-api-service/commit/2dd745b47f0fba574ab2860542178fa44b162ba1))
+
 ## [1.118.2](https://github.com/adobe/spacecat-api-service/compare/v1.118.1...v1.118.2) (2025-06-04)
 
 
