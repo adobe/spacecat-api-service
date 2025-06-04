@@ -82,7 +82,11 @@ export function identifyAdobeTools(summary = []) {
     const entityLower = entity.toLowerCase();
 
     // Check for Adobe Launch/Tags
-    if (entityLower.includes('launch.adobe.com') || entityLower.includes('assets.adobedtm.com')) {
+    if (entityLower.includes('launch.adobe.com')
+        || entityLower.includes('assets.adobedtm.com')
+        || entityLower.includes('adobe tag')
+        || entityLower.includes('adobe launch')
+        || entityLower.includes('adobedtm')) {
       adobeTools.hasLaunch = true;
       adobeTools.details.push({ type: 'Adobe Launch/Tags', ...thirdParty });
     }
@@ -93,7 +97,10 @@ export function identifyAdobeTools(summary = []) {
     }
 
     // Check for Adobe Analytics
-    if (entityLower.includes('.sc.omtrdc.net') || entityLower.includes('adobe analytics') || entityLower.includes('2o7.net') || entityLower.includes('omniture')) {
+    if (entityLower.includes('.sc.omtrdc.net')
+        || entityLower.includes('adobe analytics')
+        || entityLower.includes('2o7.net')
+        || entityLower.includes('omniture')) {
       adobeTools.hasAnalytics = true;
       adobeTools.details.push({ type: 'Adobe Analytics', ...thirdParty });
     }
@@ -108,8 +115,8 @@ export function identifyAdobeTools(summary = []) {
  * @returns {string} Formatted string with Adobe tools information
  */
 export function formatAdobeToolsInfo(adobeTools) {
-  if (!adobeTools.details.length) {
-    return '';
+  if (!adobeTools || !adobeTools.details || !adobeTools.details.length) {
+    return '*Adobe Experience Cloud Tools:*\n    _No Adobe Experience Cloud tools detected_';
   }
 
   const headers = ['Adobe Tool', 'Main Thread', 'Blocking', 'Transfer'];
@@ -128,7 +135,7 @@ export function formatAdobeToolsInfo(adobeTools) {
   const table = [headers, ...rows];
   const columnWidths = calculateColumnWidths(table);
 
-  return `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
+  return `*Adobe Experience Cloud Tools:*\n${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 }
 
 /**
@@ -170,20 +177,14 @@ export function formatThirdPartySummary(summary = []) {
 
   const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 
-  // Add Adobe tools specific information
-  const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
-
-  // Calculate available space for the table after reserving space for Adobe tools info
-  const adobeToolsLength = adobeToolsInfo.length;
-  const maxTableLength = CHARACTER_LIMIT - adobeToolsLength - 3; // 3 for potential ellipsis
-
-  // If table needs truncation, do it before adding Adobe tools info
-  const truncatedTable = formattedTable.length > maxTableLength
-    ? `${formattedTable.slice(0, maxTableLength)}...`
+  // Ensure the output string does not exceed the Slack message character limit
+  const thirdPartyTable = formattedTable.length > CHARACTER_LIMIT
+    ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...`
     : formattedTable;
 
-  // Combine the truncated table with Adobe tools info
-  return `${truncatedTable}${adobeToolsInfo}`;
+  // Add Adobe tools information
+  const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
+  return `${adobeToolsInfo}\n\n*Third Party Summary:*\n${thirdPartyTable}`;
 }
 
 /**
