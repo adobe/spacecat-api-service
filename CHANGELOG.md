@@ -1,3 +1,17 @@
+## [1.119.1](https://github.com/adobe/spacecat-api-service/compare/v1.119.0...v1.119.1) (2025-06-04)
+
+
+### Bug Fixes
+
+* typo issue for keywords ([#958](https://github.com/adobe/spacecat-api-service/issues/958)) ([c383cf2](https://github.com/adobe/spacecat-api-service/commit/c383cf208766fbadffb06050d7a1703a4813c6a3))
+
+# [1.119.0](https://github.com/adobe/spacecat-api-service/compare/v1.118.2...v1.119.0) (2025-06-04)
+
+
+### Features
+
+* new organic keyword imports ([#957](https://github.com/adobe/spacecat-api-service/issues/957)) ([2dd745b](https://github.com/adobe/spacecat-api-service/commit/2dd745b47f0fba574ab2860542178fa44b162ba1))
+
 ## [1.118.2](https://github.com/adobe/spacecat-api-service/compare/v1.118.1...v1.118.2) (2025-06-04)
 
 
