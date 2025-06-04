@@ -1,3 +1,10 @@
+## [1.118.1](https://github.com/adobe/spacecat-api-service/compare/v1.118.0...v1.118.1) (2025-06-04)
+
+
+### Bug Fixes
+
+* bamboohr operation quota exceeded ([#951](https://github.com/adobe/spacecat-api-service/issues/951)) ([3424a4e](https://github.com/adobe/spacecat-api-service/commit/3424a4e2ffbd27cd56ed859a9a8b5f2cb2130962))
+
 # [1.118.0](https://github.com/adobe/spacecat-api-service/compare/v1.117.5...v1.118.0) (2025-06-03)
 
 
