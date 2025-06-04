@@ -76,7 +76,7 @@ export function identifyAdobeTools(summary = []) {
   };
 
   summary.forEach((thirdParty) => {
-    const { 
+    const {
       entity,
     } = thirdParty;
     const entityLower = entity.toLowerCase();
@@ -91,7 +91,7 @@ export function identifyAdobeTools(summary = []) {
       adobeTools.hasTarget = true;
       adobeTools.details.push({ type: 'Adobe Target', ...thirdParty });
     }
-    
+  
     // Check for Adobe Analytics
     if (entityLower.includes('.sc.omtrdc.net') || entityLower.includes('adobe analytics') || entityLower.includes('2o7.net') || entityLower.includes('omniture')) {
       adobeTools.hasAnalytics = true;
@@ -113,7 +113,7 @@ export function formatAdobeToolsInfo(adobeTools) {
   }
 
   const lines = ['\n*Adobe Experience Cloud Tools:*'];
-  
+
   adobeTools.details.forEach(({
     type,
     entity,
