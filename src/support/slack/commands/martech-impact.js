@@ -91,7 +91,7 @@ export function identifyAdobeTools(summary = []) {
       adobeTools.hasTarget = true;
       adobeTools.details.push({ type: 'Adobe Target', ...thirdParty });
     }
-  
+
     // Check for Adobe Analytics
     if (entityLower.includes('.sc.omtrdc.net') || entityLower.includes('adobe analytics') || entityLower.includes('2o7.net') || entityLower.includes('omniture')) {
       adobeTools.hasAnalytics = true;
