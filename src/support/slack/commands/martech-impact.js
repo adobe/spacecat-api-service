@@ -244,6 +244,15 @@ function MartechImpactCommand(context) {
 
       const { totalBlockingTime, thirdPartySummary } = latestAudit.getAuditResult();
 
+      // Identify Adobe tools
+      const adobeTools = identifyAdobeTools(thirdPartySummary);
+      const hasAdobeTools = adobeTools.hasLaunch || adobeTools.hasTarget || adobeTools.hasAnalytics;
+
+      // Create summary of detected Adobe tools
+      const adobeToolsSummary = hasAdobeTools
+        ? `\n*Adobe Experience Cloud Tools Detected:*${adobeTools.hasLaunch ? '\n• Adobe Launch/Tags' : ''}${adobeTools.hasTarget ? '\n• Adobe Target' : ''}${adobeTools.hasAnalytics ? '\n• Adobe Analytics' : ''}`
+        : '';
+
       const textSections = [{
         text: `
 *Martech Impact for ${site.getBaseURL()}*
@@ -251,6 +260,8 @@ function MartechImpactCommand(context) {
 ${printSiteDetails(site)}
 
 *Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
+
+*Adobe Experience Cloud Tools Detected:*\n${adobeToolsSummary}
 
 *Third Party Summary:*\n${formatThirdPartySummary(thirdPartySummary)}
   `,
