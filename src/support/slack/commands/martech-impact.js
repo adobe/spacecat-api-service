@@ -18,12 +18,10 @@ import {
   extractURLFromSlackInput,
   postErrorMessage,
   postSiteNotFoundMessage,
-  sendMessageBlocks,
 } from '../../../utils/slack/base.js';
 import {
   addEllipsis,
   formatSize,
-  printSiteDetails,
 } from '../../../utils/slack/format.js';
 
 const PHRASES = ['get martech impact', 'get third party impact'];
@@ -65,9 +63,10 @@ export function calculateColumnWidths(table, headers) {
 /**
  * Identifies Adobe Experience Cloud tools from third party summary
  * @param {Array<Object>} summary - The third party summary array
+ * @param {Array<Object>} networkRequests - The network requests array
  * @returns {Object} Object containing identified Adobe tools
  */
-export function identifyAdobeTools(summary = []) {
+export function identifyAdobeTools(summary = [], networkRequests = []) {
   const adobeTools = {
     hasLaunch: false,
     hasTarget: false,
@@ -77,59 +76,98 @@ export function identifyAdobeTools(summary = []) {
     details: [],
   };
 
-  summary.forEach((thirdParty) => {
-    const {
-      entity,
-      scriptElements = [],
-    } = thirdParty;
-    const entityLower = entity.toLowerCase();
+  // Helper function to find matching network request details
+  const findNetworkRequestDetails = (url) => {
+    const request = networkRequests.find((req) => {
+      const reqUrl = req.url.toLowerCase();
+      return reqUrl.includes(url.toLowerCase());
+    });
+    return request ? {
+      url: request.url,
+      statusCode: request.statusCode,
+      priority: request.priority,
+    } : null;
+  };
+
+  // Check network requests first for more accurate detection
+  networkRequests.forEach((request) => {
+    const urlLower = request.url.toLowerCase();
 
     // Check for Adobe Launch/Tags
-    if ((entityLower.includes('launch.adobe.com')
-        || entityLower.includes('assets.adobedtm.com')
-        || entityLower.includes('adobe tag')
-        || entityLower.includes('adobe launch')
-        || entityLower.includes('adobedtm'))
-        && !entityLower.includes('alloy.js')
-        && !entityLower.includes('alloy.min.js')
-        && !entityLower.includes('/collect')
-        && !entityLower.includes('/delivery')
-        && !entityLower.includes('/interact')) {
+    if ((urlLower.includes('launch.adobe.com') || urlLower.includes('assets.adobedtm.com'))
+        && !urlLower.includes('alloy.js')
+        && !urlLower.includes('alloy.min.js')) {
       adobeTools.hasLaunch = true;
-      adobeTools.details.push({ type: 'Adobe Launch/Tags', ...thirdParty });
+      adobeTools.details.push({
+        type: 'Adobe Launch/Tags',
+        url: request.url,
+        statusCode: request.statusCode,
+        priority: request.priority,
+      });
     }
 
-    // Check for Adobe Target (at.js and WebSDK delivery/interact endpoints)
-    if ((entityLower.includes('tt.omtrdc.net')
-        || entityLower.includes('adobe target')
-        || (entityLower.includes('edge.adobedc.net/ee/') && (entityLower.includes('/delivery') || entityLower.includes('/interact')))
-        || scriptElements.some((script) => script.includes('window.adobe.target')))
-        && !entityLower.includes('alloy.js')
-        && !entityLower.includes('alloy.min.js')) {
+    // Check for Adobe Target
+    if ((urlLower.includes('tt.omtrdc.net')
+        || (urlLower.includes('edge.adobedc.net/ee/')
+        && (urlLower.includes('/delivery') || urlLower.includes('/interact'))))
+        && !urlLower.includes('alloy.js')
+        && !urlLower.includes('alloy.min.js')) {
       adobeTools.hasTarget = true;
-      adobeTools.details.push({ type: 'Adobe Target', ...thirdParty });
+      adobeTools.details.push({
+        type: 'Adobe Target',
+        url: request.url,
+        statusCode: request.statusCode,
+        priority: request.priority,
+      });
     }
 
-    // Check for Adobe Analytics (including WebSDK collect endpoint)
-    if ((entityLower.includes('.sc.omtrdc.net')
-        || entityLower.includes('adobe analytics')
-        || entityLower.includes('2o7.net')
-        || entityLower.includes('omniture')
-        || (entityLower.includes('edge.adobedc.net/ee/') && entityLower.includes('/collect')))
-        && !entityLower.includes('alloy.js')
-        && !entityLower.includes('alloy.min.js')) {
+    // Check for Adobe Analytics
+    if ((urlLower.includes('.sc.omtrdc.net')
+        || (urlLower.includes('edge.adobedc.net/ee/') && urlLower.includes('/collect')))
+        && !urlLower.includes('alloy.js')
+        && !urlLower.includes('alloy.min.js')) {
       adobeTools.hasAnalytics = true;
-      adobeTools.details.push({ type: 'Adobe Analytics', ...thirdParty });
+      adobeTools.details.push({
+        type: 'Adobe Analytics',
+        url: request.url,
+        statusCode: request.statusCode,
+        priority: request.priority,
+      });
     }
 
     // Check for AEP Web SDK
-    if (entityLower.includes('alloy.js')
-        || entityLower.includes('alloy.min.js')
-        || (entityLower.includes('edge.adobedc.net') && !entityLower.includes('edge.adobedc.net/ee/'))
-        || entityLower.includes('.demdex.net')
-        || scriptElements.some((script) => script.includes('window.alloy'))) {
+    if (urlLower.includes('alloy.js')
+        || urlLower.includes('alloy.min.js')
+        || (urlLower.includes('edge.adobedc.net') && !urlLower.includes('edge.adobedc.net/ee/'))
+        || urlLower.includes('.demdex.net')) {
       adobeTools.hasWebSDK = true;
-      adobeTools.details.push({ type: 'Adobe Experience Platform Web SDK', ...thirdParty });
+      adobeTools.details.push({
+        type: 'Adobe Experience Platform Web SDK',
+        url: request.url,
+        statusCode: request.statusCode,
+        priority: request.priority,
+      });
+    }
+  });
+
+  // Fallback to checking script elements from third party summary for client-side detection
+  summary.forEach((thirdParty) => {
+    const { scriptElements = [] } = thirdParty;
+
+    // Check for Adobe Target via window object
+    if (scriptElements.some((script) => script.includes('window.adobe.target'))
+        && !adobeTools.hasTarget) {
+      adobeTools.hasTarget = true;
+      const details = findNetworkRequestDetails('tt.omtrdc.net') || thirdParty;
+      adobeTools.details.push({ type: 'Adobe Target', ...details });
+    }
+
+    // Check for AEP Web SDK via window object
+    if (scriptElements.some((script) => script.includes('window.alloy'))
+        && !adobeTools.hasWebSDK) {
+      adobeTools.hasWebSDK = true;
+      const details = findNetworkRequestDetails('edge.adobedc.net') || thirdParty;
+      adobeTools.details.push({ type: 'Adobe Experience Platform Web SDK', ...details });
     }
 
     // Check for Adobe Client Data Layer
@@ -152,17 +190,17 @@ export function formatAdobeToolsInfo(adobeTools) {
     return '';
   }
 
-  const headers = ['Adobe Tool', 'Main Thread', 'Blocking', 'Transfer'];
+  const headers = ['Adobe Tool', 'URL', 'Status', 'Priority'];
   const rows = adobeTools.details.map(({
     type,
-    mainThreadTime,
-    blockingTime,
-    transferSize,
+    url,
+    statusCode,
+    priority,
   }) => [
     addEllipsis(type),
-    `${Math.round(mainThreadTime)} ms`,
-    `${Math.round(blockingTime)} ms`,
-    formatSize(transferSize),
+    addEllipsis(url),
+    statusCode || 'N/A',
+    priority || 'N/A',
   ]);
 
   const table = [headers, ...rows];
@@ -178,15 +216,16 @@ export function formatAdobeToolsInfo(adobeTools) {
  * with an ellipsis.
  *
  * @param {Array<Object>} summary - An array of third party summary objects.
+ * @param {Array<Object>} networkRequests - An array of network request objects.
  * @returns {string} Third party summary formatted into a stringified table or a fallback message.
  */
-export function formatThirdPartySummary(summary = []) {
+export function formatThirdPartySummary(summary = [], networkRequests = []) {
   if (summary.length === 0) {
     return '    _No third party impact detected_';
   }
 
   // First identify Adobe tools
-  const adobeTools = identifyAdobeTools(summary);
+  const adobeTools = identifyAdobeTools(summary, networkRequests);
   const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
 
   const headers = ['Third Party', 'Main Thread', 'Blocking', 'Transfer'];
@@ -212,7 +251,7 @@ export function formatThirdPartySummary(summary = []) {
   const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 
   // If we have Adobe tools info, we need to account for its length plus the newlines
-  const headerText = '*Third Party Summary:*\n';
+  const headerText = '*Third Party Summary (Adobe Tools):*\n';
   const adobeToolsLength = adobeToolsInfo ? adobeToolsInfo.length + 2 : 0; // +2 for newlines
   const availableSpace = CHARACTER_LIMIT - adobeToolsLength - headerText.length;
 
@@ -285,29 +324,28 @@ function MartechImpactCommand(context) {
         return;
       }
 
-      const latestAudit = await site.getLatestAuditByAuditType('lhs-mobile');
+      const audit = await site.getLatestAuditByAuditType('lhs-mobile');
 
-      if (!latestAudit) {
+      if (!audit) {
         await say(`:warning: No audit found for site: ${baseURL}`);
         return;
       }
 
-      const { totalBlockingTime, thirdPartySummary } = latestAudit.getAuditResult();
+      const auditResult = audit.getAuditResult();
+      const { thirdPartySummary = [], networkRequests = [] } = auditResult;
 
-      const textSections = [{
-        text: `
-*Martech Impact for ${site.getBaseURL()}*
+      const formattedSummary = formatThirdPartySummary(thirdPartySummary, networkRequests);
+      const formattedTBT = formatTotalBlockingTime(auditResult.totalBlockingTime);
 
-${printSiteDetails(site)}
+      const message = [
+        `:lighthouse: *Third Party Impact Report for ${baseURL}*`,
+        '',
+        `:clock1: Total Blocking Time: ${formattedTBT} ms`,
+        '',
+        formattedSummary,
+      ].join('\n');
 
-*Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
-
-*Third Party Summary:*
-${formatThirdPartySummary(thirdPartySummary)}
-  `,
-      }];
-
-      await sendMessageBlocks(say, textSections);
+      await say(message);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
