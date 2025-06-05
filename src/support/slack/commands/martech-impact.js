@@ -93,10 +93,14 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
   networkRequests.forEach((request) => {
     const urlLower = request.url.toLowerCase();
 
+    // Log each URL being checked
+    console.log('Checking URL:', urlLower);
+
     // Check for Adobe Launch/Tags
     if ((urlLower.includes('launch.adobe.com') || urlLower.includes('assets.adobedtm.com'))
         && !urlLower.includes('alloy.js')
         && !urlLower.includes('alloy.min.js')) {
+      console.log('Found Adobe Launch/Tags:', request.url);
       adobeTools.hasLaunch = true;
       adobeTools.details.push({
         type: 'Adobe Launch/Tags',
@@ -112,6 +116,7 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
         && (urlLower.includes('/delivery') || urlLower.includes('/interact'))))
         && !urlLower.includes('alloy.js')
         && !urlLower.includes('alloy.min.js')) {
+      console.log('Found Adobe Target:', request.url);
       adobeTools.hasTarget = true;
       adobeTools.details.push({
         type: 'Adobe Target',
@@ -126,6 +131,7 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
         || (urlLower.includes('edge.adobedc.net/ee/') && urlLower.includes('/collect')))
         && !urlLower.includes('alloy.js')
         && !urlLower.includes('alloy.min.js')) {
+      console.log('Found Adobe Analytics:', request.url);
       adobeTools.hasAnalytics = true;
       adobeTools.details.push({
         type: 'Adobe Analytics',
@@ -140,6 +146,7 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
         || urlLower.includes('alloy.min.js')
         || (urlLower.includes('edge.adobedc.net') && !urlLower.includes('edge.adobedc.net/ee/'))
         || urlLower.includes('.demdex.net')) {
+      console.log('Found AEP Web SDK:', request.url);
       adobeTools.hasWebSDK = true;
       adobeTools.details.push({
         type: 'Adobe Experience Platform Web SDK',
@@ -322,6 +329,9 @@ function MartechImpactCommand(context) {
 
       const auditResult = audit.getAuditResult();
       const { thirdPartySummary = [], networkRequests = [] } = auditResult;
+
+      log.info('Network Requests:', JSON.stringify(networkRequests, null, 2));
+      log.info('Third Party Summary:', JSON.stringify(thirdPartySummary, null, 2));
 
       const formattedSummary = formatThirdPartySummary(thirdPartySummary, networkRequests);
       const formattedTBT = formatTotalBlockingTime(auditResult.totalBlockingTime);
