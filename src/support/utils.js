@@ -434,3 +434,46 @@ export function buildS3Prefix(type, siteId, path = '') {
   const normalized = path ? `${path.replace(/^\/+/g, '').replace(/\/+$/g, '')}/` : '';
   return `${type}/${siteId}/${normalized}`;
 }
+
+/**
+ * Extracts key:value pairs from arguments.
+ * @param {string[]} args - Array of arguments that may contain key:value pairs.
+ * @returns {Object} Object with lowercase keys and their values.
+ */
+export const extractKeyValuePairs = (args) => {
+  const params = {};
+
+  args.forEach((arg) => {
+    if (typeof arg === 'string' && arg.includes(':')) {
+      const [key, ...valueParts] = arg.split(':');
+      const value = valueParts.join(':').trim(); // Handle URLs with colons and trim whitespace
+      params[key.toLowerCase().trim()] = value;
+    }
+  });
+
+  return params;
+};
+
+/**
+ * Determines if an argument looks like a URL (even without protocol).
+ * @param {string} arg - The argument to check.
+ * @returns {boolean} True if the argument looks like a URL.
+ */
+export const looksLikeUrl = (arg) => {
+  if (typeof arg !== 'string') return false;
+
+  // Handle Slack's angle bracket URL format: <https://domain.com>
+  const slackUrlPattern = /^<https?:\/\/[^>]+>$/;
+  if (slackUrlPattern.test(arg)) {
+    return true;
+  }
+
+  // Check for protocol URLs
+  if (arg.startsWith('http://') || arg.startsWith('https://')) {
+    return true;
+  }
+
+  // Check for domain-like patterns (domain.com, domain.com:port, subdomain.domain.com:port)
+  const domainPattern = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(:\d+)?($|\/)/;
+  return domainPattern.test(arg);
+};

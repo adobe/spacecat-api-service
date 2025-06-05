@@ -14,14 +14,13 @@
 /* c8 ignore start */
 
 import {
-  hasText,
   isNonEmptyArray,
   isNonEmptyObject,
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
-import { triggerImportRun } from '../../utils.js';
+import { triggerImportRun, extractKeyValuePairs, looksLikeUrl } from '../../utils.js';
 import {
   extractURLFromSlackInput, parseCSV,
   postErrorMessage,
@@ -32,6 +31,87 @@ import { isValidDateInterval } from '../../../utils/date-utils.js';
 const PHRASES = ['run import'];
 
 const SUPPORTS_PAGE_URLS = ['organic-keywords', 'organic-keywords-nonbranded'];
+
+/**
+ * Determines if an argument should be treated as a keyword argument.
+ * @param {string} arg - The argument to check.
+ * @returns {boolean} True if the argument should be treated as a keyword.
+ */
+const isKeywordArg = (arg) => typeof arg === 'string' && arg.includes(':') && !looksLikeUrl(arg);
+
+/**
+ * Preprocesses arguments to handle Slack's "key: value" splitting.
+ * @param {string[]} args - Raw arguments array.
+ * @returns {string[]} Processed arguments array.
+ */
+const preprocessArgs = (args) => {
+  const processed = [];
+  let skipNext = false;
+
+  args.forEach((current, index) => {
+    if (skipNext) {
+      skipNext = false;
+      return;
+    }
+
+    const next = args[index + 1];
+
+    // Handle "key:" + "value" -> "key:value"
+    if (typeof current === 'string' && current.endsWith(':')
+        && next && !isKeywordArg(next)) {
+      processed.push(`${current}${next}`);
+      skipNext = true; // Skip next argument as it's been combined
+    } else {
+      processed.push(current);
+    }
+  });
+
+  return processed;
+};
+
+/**
+ * Parses keyword-based arguments from the command input.
+ * Supports both positional and keyword formats:
+ * - Positional: importType baseURL from to pageURL
+ * - Keyword: importType baseurl:URL from:date to:date pageurl:URL
+ * - Mixed: importType baseURL from:date to:date
+ * @param {string[]} args - Raw arguments from the command.
+ * @returns {Object} Parsed parameters object.
+ */
+const parseKeywordArguments = (args) => {
+  const [importType, ...rawParams] = args;
+  const params = { importtype: importType };
+
+  if (!rawParams.length) return params;
+
+  const processedArgs = preprocessArgs(rawParams);
+  const keywordArgs = processedArgs.filter(isKeywordArg);
+  const positionalArgs = processedArgs.filter((arg) => !isKeywordArg(arg));
+
+  // Extract keyword arguments
+  if (keywordArgs.length > 0) {
+    Object.assign(params, extractKeyValuePairs(keywordArgs));
+  }
+
+  // Handle positional arguments
+  if (positionalArgs.length > 0) {
+    // First positional arg is baseURL if not already provided as keyword
+    if (!params.baseurl) {
+      const [baseURL] = positionalArgs;
+      params.baseurl = baseURL;
+    }
+
+    // If no keywords provided, treat remaining as: startDate, endDate, pageURL
+    if (keywordArgs.length === 0) {
+      const [/* baseURL */, startDate, endDate, pageURL] = positionalArgs;
+      if (startDate) params.from = startDate;
+      if (endDate) params.to = endDate;
+      if (pageURL) params.pageurl = pageURL;
+    }
+  }
+
+  return params;
+};
 
 /**
  * Factory function to create the RunImportCommand object.
@@ -49,7 +129,8 @@ function RunImportCommand(context) {
       + '\nCurrently this will run the import for all sources and all destinations configured for the site, hence be aware of costs'
       + ' (source: ahrefs) when choosing the date range.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType} {baseURL|CSV-file} {startDate} {endDate}`,
+    usageText: `${PHRASES[0]} {importType} {baseURL} [from: {startDate}] [to: {endDate}] [pageurl: {pageURL}]`
+      + `\n${PHRASES[0]} {importType} baseurl: {baseURL|CSV-file} [from: {startDate}] [to: {endDate}] [pageurl: {pageURL}]`,
   });
 
   const { dataAccess, log } = context;
@@ -98,7 +179,7 @@ function RunImportCommand(context) {
   /**
    * Validates input and triggers a new import run for the given site.
    *
-   * @param {string[]} args - The arguments provided to the command ([site]).
+   * @param {string[]} args - The arguments provided to the command.
    * @param {Object} slackContext - The Slack context object.
    * @param {Function} slackContext.say - The Slack say function.
    * @returns {Promise} A promise that resolves when the operation is complete.
@@ -118,17 +199,22 @@ function RunImportCommand(context) {
     */
 
     try {
-      const [importType, baseURLInput, start, end, pageURLInput] = args;
+      const params = parseKeywordArguments(args);
+      const {
+        importtype: importType, baseurl: baseURLInput, from, to,
+      } = params;
+
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const hasValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
 
+      // Handle date arguments - they shift position when files are used
       const [startDate, endDate] = hasFiles
-        ? [baseURLInput, start]
-        : [start, end];
+        ? [baseURLInput, from] // When files: first arg after importType becomes startDate
+        : [from, to]; // Normal case: use from/to parameters
 
-      if (!hasText(importType) || (!hasValidBaseURL && !hasFiles)) {
-        await say(baseCommand.usage());
+      if (!hasFiles && !params.baseurl) {
+        await say(':warning: Missing required parameter: baseURL');
         return;
       }
 
@@ -139,8 +225,8 @@ function RunImportCommand(context) {
 
       if ((startDate || endDate) && !isValidDateInterval(startDate, endDate)) {
         await say(':error: Invalid date interval. '
-        + 'Please provide valid dates in the format YYYY-MM-DD. '
-        + 'The end date must be after the start date and within a two-year range.');
+          + 'Please provide valid dates in the format YYYY-MM-DD. '
+          + 'The end date must be after the start date and within a two-year range.');
         return;
       }
 
@@ -189,8 +275,8 @@ function RunImportCommand(context) {
           }),
         );
       } else if (hasValidBaseURL) {
-        const pageURL = supportsPageURLs && isValidUrl(pageURLInput)
-          ? pageURLInput
+        const pageURL = supportsPageURLs && isValidUrl(params.pageurl)
+          ? params.pageurl
           : undefined;
         await runImportForSite(
           importType,
