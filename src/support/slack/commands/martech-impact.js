@@ -14,7 +14,6 @@ import BaseCommand from './base.js';
 
 import {
   BACKTICKS,
-  CHARACTER_LIMIT,
   extractURLFromSlackInput,
   postErrorMessage,
   postSiteNotFoundMessage,
@@ -61,46 +60,27 @@ export function calculateColumnWidths(table, headers) {
 }
 
 /**
- * Identifies Adobe Experience Cloud tools from third party summary
- * @param {Array<Object>} summary - The third party summary array
+ * Identifies Adobe Experience Cloud tools from network requests only
  * @param {Array<Object>} networkRequests - The network requests array
  * @returns {Object} Object containing identified Adobe tools
  */
-export function identifyAdobeTools(summary = [], networkRequests = []) {
+export function identifyAdobeTools(networkRequests = []) {
   const adobeTools = {
     hasLaunch: false,
     hasTarget: false,
     hasAnalytics: false,
     hasWebSDK: false,
-    hasDataLayer: false,
     details: [],
   };
 
-  // Helper function to find matching network request details
-  const findNetworkRequestDetails = (url) => {
-    const request = networkRequests.find((req) => {
-      const reqUrl = req.url.toLowerCase();
-      return reqUrl.includes(url.toLowerCase());
-    });
-    return request ? {
-      url: request.url,
-      statusCode: request.statusCode,
-      priority: request.priority,
-    } : null;
-  };
-
-  // Check network requests first for more accurate detection
+  // Check network requests for Adobe tool detection
   networkRequests.forEach((request) => {
     const urlLower = request.url.toLowerCase();
-
-    // Log each URL being checked
-    console.log('Checking URL:', urlLower);
 
     // Check for Adobe Launch/Tags
     if ((urlLower.includes('launch.adobe.com') || urlLower.includes('assets.adobedtm.com'))
         && !urlLower.includes('alloy.js')
         && !urlLower.includes('alloy.min.js')) {
-      console.log('Found Adobe Launch/Tags:', request.url);
       adobeTools.hasLaunch = true;
       adobeTools.details.push({
         type: 'Adobe Launch/Tags',
@@ -116,7 +96,6 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
         && (urlLower.includes('/delivery') || urlLower.includes('/interact'))))
         && !urlLower.includes('alloy.js')
         && !urlLower.includes('alloy.min.js')) {
-      console.log('Found Adobe Target:', request.url);
       adobeTools.hasTarget = true;
       adobeTools.details.push({
         type: 'Adobe Target',
@@ -131,7 +110,6 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
         || (urlLower.includes('edge.adobedc.net/ee/') && urlLower.includes('/collect')))
         && !urlLower.includes('alloy.js')
         && !urlLower.includes('alloy.min.js')) {
-      console.log('Found Adobe Analytics:', request.url);
       adobeTools.hasAnalytics = true;
       adobeTools.details.push({
         type: 'Adobe Analytics',
@@ -146,7 +124,6 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
         || urlLower.includes('alloy.min.js')
         || (urlLower.includes('edge.adobedc.net') && !urlLower.includes('edge.adobedc.net/ee/'))
         || urlLower.includes('.demdex.net')) {
-      console.log('Found AEP Web SDK:', request.url);
       adobeTools.hasWebSDK = true;
       adobeTools.details.push({
         type: 'Adobe Experience Platform Web SDK',
@@ -154,33 +131,6 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
         statusCode: request.statusCode,
         priority: request.priority,
       });
-    }
-  });
-
-  // Fallback to checking script elements from third party summary for client-side detection
-  summary.forEach((thirdParty) => {
-    const { scriptElements = [] } = thirdParty;
-
-    // Check for Adobe Target via window object
-    if (scriptElements.some((script) => script.includes('window.adobe.target'))
-        && !adobeTools.hasTarget) {
-      adobeTools.hasTarget = true;
-      const details = findNetworkRequestDetails('tt.omtrdc.net') || thirdParty;
-      adobeTools.details.push({ type: 'Adobe Target', ...details });
-    }
-
-    // Check for AEP Web SDK via window object
-    if (scriptElements.some((script) => script.includes('window.alloy'))
-        && !adobeTools.hasWebSDK) {
-      adobeTools.hasWebSDK = true;
-      const details = findNetworkRequestDetails('edge.adobedc.net') || thirdParty;
-      adobeTools.details.push({ type: 'Adobe Experience Platform Web SDK', ...details });
-    }
-
-    // Check for Adobe Client Data Layer
-    if (scriptElements.some((script) => script.includes('window.adobeDataLayer'))) {
-      adobeTools.hasDataLayer = true;
-      adobeTools.details.push({ type: 'Adobe Client Data Layer', ...thirdParty });
     }
   });
 
@@ -193,8 +143,8 @@ export function identifyAdobeTools(summary = [], networkRequests = []) {
  * @returns {string} Formatted string with Adobe tools information
  */
 export function formatAdobeToolsInfo(adobeTools) {
-  if (!adobeTools || !adobeTools.details || !adobeTools.details.length) {
-    return '';
+  if (!adobeTools || !adobeTools.details || adobeTools.details.length === 0) {
+    return '*Adobe Experience Cloud Tools:*\n    _No Adobe tools detected_';
   }
 
   const headers = ['Adobe Tool', 'URL', 'Status', 'Priority'];
@@ -217,23 +167,16 @@ export function formatAdobeToolsInfo(adobeTools) {
 }
 
 /**
- * Formats an array of third party sumary into a stringified table format.
- * If summary array is empty, it returns a fallback message. If the formatted
- * table exceeds the character limit, it is sliced and appended
- * with an ellipsis.
+ * Formats an array of third party summary into a stringified table format.
+ * If summary array is empty, it returns a fallback message.
  *
  * @param {Array<Object>} summary - An array of third party summary objects.
- * @param {Array<Object>} networkRequests - An array of network request objects.
  * @returns {string} Third party summary formatted into a stringified table or a fallback message.
  */
-export function formatThirdPartySummary(summary = [], networkRequests = []) {
+export function formatThirdPartySummary(summary = []) {
   if (summary.length === 0) {
-    return '    _No third party impact detected_';
+    return '*Third Party Summary:*\n    _No third party impact detected_';
   }
-
-  // First identify Adobe tools
-  const adobeTools = identifyAdobeTools(summary, networkRequests);
-  const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
 
   const headers = ['Third Party', 'Main Thread', 'Blocking', 'Transfer'];
   const rows = summary.map((thirdParty) => {
@@ -255,20 +198,7 @@ export function formatThirdPartySummary(summary = [], networkRequests = []) {
   const table = [headers, ...rows];
   const columnWidths = calculateColumnWidths(table);
 
-  const formattedTable = `*Third Party Summary:*\n${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
-
-  // If we have Adobe tools info, we need to account for its length plus the newlines
-  const availableSpace = CHARACTER_LIMIT - (adobeToolsInfo ? adobeToolsInfo.length + 2 : 0);
-
-  // If the formatted table is too long, truncate it
-  const truncatedTable = formattedTable.length > availableSpace
-    ? `${formattedTable.slice(0, availableSpace - 3)}...`
-    : formattedTable;
-
-  // Return both sections if Adobe tools are found
-  return adobeToolsInfo
-    ? `${adobeToolsInfo}\n\n${truncatedTable}`
-    : truncatedTable;
+  return `*Third Party Summary:*\n${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 }
 
 /**
@@ -330,10 +260,12 @@ function MartechImpactCommand(context) {
       const auditResult = audit.getAuditResult();
       const { thirdPartySummary = [], networkRequests = [] } = auditResult;
 
-      log.info('Network Requests:', JSON.stringify(networkRequests, null, 2));
-      log.info('Third Party Summary:', JSON.stringify(thirdPartySummary, null, 2));
+      // Get Adobe tools info from network requests only
+      const adobeTools = identifyAdobeTools(networkRequests);
+      const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
 
-      const formattedSummary = formatThirdPartySummary(thirdPartySummary, networkRequests);
+      // Get third party summary independently
+      const thirdPartySummaryInfo = formatThirdPartySummary(thirdPartySummary);
       const formattedTBT = formatTotalBlockingTime(auditResult.totalBlockingTime);
 
       const message = [
@@ -341,7 +273,9 @@ function MartechImpactCommand(context) {
         '',
         `:clock1: Total Blocking Time: ${formattedTBT} ms`,
         '',
-        formattedSummary,
+        adobeToolsInfo,
+        '',
+        thirdPartySummaryInfo,
       ].join('\n');
 
       await say(message);
