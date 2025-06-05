@@ -18,29 +18,15 @@ import {
   extractURLFromSlackInput,
   postErrorMessage,
   postSiteNotFoundMessage,
+  sendMessageBlocks,
 } from '../../../utils/slack/base.js';
 import {
   addEllipsis,
   formatSize,
+  printSiteDetails,
 } from '../../../utils/slack/format.js';
 
 const PHRASES = ['get martech impact', 'get third party impact'];
-
-/**
- * Finds a network request that matches the given URL pattern
- * @param {Array<Object>} networkRequests - Array of network requests
- * @param {string} urlPattern - URL pattern to match
- * @returns {Object|null} Matching network request or null if not found
- */
-export function findNetworkRequestDetails(networkRequests = [], urlPattern = '') {
-  if (!networkRequests || !urlPattern) return null;
-  return networkRequests.find((request) => {
-    if (!request || !request.url) return false;
-    const requestUrl = request.url.toLowerCase();
-    const pattern = urlPattern.toLowerCase();
-    return requestUrl.includes(pattern);
-  }) || null;
-}
 
 /**
  * Formats a single row of the table, padding each cell according to the column widths.
@@ -51,7 +37,7 @@ export function findNetworkRequestDetails(networkRequests = [], urlPattern = '')
  * @returns {string} The formatted row.
  */
 export function formatRows(row, columnWidths) {
-  return row.map((cell, i) => String(cell).padEnd(columnWidths[i] + (i === 0 ? 0 : 2))).join('  ');
+  return row.map((cell, i) => cell.padEnd(columnWidths[i] + (i === 0 ? 0 : 2))).join('  ');
 }
 
 export function formatTotalBlockingTime(totalBlockingTime) {
@@ -77,117 +63,6 @@ export function calculateColumnWidths(table, headers) {
 }
 
 /**
- * Identifies Adobe Experience Cloud tools from network requests only
- * @param {Array<Object>} networkRequests - The network requests array
- * @returns {Object} Object containing identified Adobe tools
- */
-export function identifyAdobeTools(networkRequests = []) {
-  const adobeTools = {
-    hasLaunch: false,
-    hasTarget: false,
-    hasAnalytics: false,
-    hasWebSDK: false,
-    details: [],
-  };
-
-  // Check for Adobe Launch/Tags
-  const launchRequest = findNetworkRequestDetails(networkRequests, 'launch.adobe.com')
-    || findNetworkRequestDetails(networkRequests, 'assets.adobedtm.com');
-  if (launchRequest) {
-    const url = launchRequest.url.toLowerCase();
-    if (!url.includes('alloy.js') && !url.includes('alloy.min.js')) {
-      adobeTools.hasLaunch = true;
-      adobeTools.details.push({
-        type: 'Adobe Launch/Tags',
-        url: launchRequest.url,
-        statusCode: launchRequest.statusCode,
-        priority: launchRequest.priority,
-      });
-    }
-  }
-
-  // Check for Adobe Target
-  const targetRequest = findNetworkRequestDetails(networkRequests, 'tt.omtrdc.net')
-    || findNetworkRequestDetails(networkRequests, 'edge.adobedc.net/ee/');
-  if (targetRequest) {
-    const url = targetRequest.url.toLowerCase();
-    if (!url.includes('alloy.js') && !url.includes('alloy.min.js')
-        && (url.includes('/delivery') || url.includes('/interact'))) {
-      adobeTools.hasTarget = true;
-      adobeTools.details.push({
-        type: 'Adobe Target',
-        url: targetRequest.url,
-        statusCode: targetRequest.statusCode,
-        priority: targetRequest.priority,
-      });
-    }
-  }
-
-  // Check for Adobe Analytics
-  const analyticsRequest = findNetworkRequestDetails(networkRequests, '.sc.omtrdc.net')
-    || findNetworkRequestDetails(networkRequests, 'edge.adobedc.net/ee/collect');
-  if (analyticsRequest) {
-    const url = analyticsRequest.url.toLowerCase();
-    if (!url.includes('alloy.js') && !url.includes('alloy.min.js')) {
-      adobeTools.hasAnalytics = true;
-      adobeTools.details.push({
-        type: 'Adobe Analytics',
-        url: analyticsRequest.url,
-        statusCode: analyticsRequest.statusCode,
-        priority: analyticsRequest.priority,
-      });
-    }
-  }
-
-  // Check for AEP Web SDK
-  const webSDKRequest = findNetworkRequestDetails(networkRequests, 'alloy.js')
-    || findNetworkRequestDetails(networkRequests, 'alloy.min.js')
-    || findNetworkRequestDetails(networkRequests, 'edge.adobedc.net')
-    || findNetworkRequestDetails(networkRequests, '.demdex.net');
-  if (webSDKRequest) {
-    adobeTools.hasWebSDK = true;
-    adobeTools.details.push({
-      type: 'Adobe Experience Platform Web SDK',
-      url: webSDKRequest.url,
-      statusCode: webSDKRequest.statusCode,
-      priority: webSDKRequest.priority,
-    });
-  }
-
-  return adobeTools;
-}
-
-/**
- * Formats Adobe tools information into a stringified table format.
- * If no Adobe tools are found, it returns an empty string.
- *
- * @param {Object} adobeTools - Object containing identified Adobe tools
- * @returns {string} Adobe tools information formatted into a stringified table or an empty string
- */
-export function formatAdobeToolsInfo(adobeTools) {
-  if (!adobeTools || !adobeTools.details || adobeTools.details.length === 0) {
-    return '';
-  }
-
-  const headers = ['Adobe Tool', 'URL', 'Status', 'Priority'];
-  const rows = adobeTools.details.map((tool) => [
-    tool.type,
-    tool.url,
-    tool.statusCode,
-    tool.priority,
-  ]);
-
-  const columnWidths = calculateColumnWidths([headers, ...rows], headers);
-  const formattedRows = [
-    formatRows(headers, columnWidths),
-    '-'.repeat(columnWidths.reduce((sum, width) => sum + width + 2, 0)),
-    ...rows.map((row) => formatRows(row, columnWidths)),
-  ];
-
-  return `*Adobe Experience Cloud Tools:*\n${BACKTICKS}\n${formattedRows.join('\n')}\n${BACKTICKS}\n`;
-}
-
-/**
  * Formats an array of third party sumary into a stringified table format.
  * If summary array is empty, it returns a fallback message. If the formatted
  * table exceeds the character limit, it is sliced and appended
@@ -204,10 +79,7 @@ export function formatThirdPartySummary(summary = []) {
   const headers = ['Third Party', 'Main Thread', 'Blocking', 'Transfer'];
   const rows = summary.map((thirdParty) => {
     const {
-      entity,
-      blockingTime,
-      mainThreadTime,
-      transferSize,
+      entity, blockingTime, mainThreadTime, transferSize,
     } = thirdParty;
 
     return [
@@ -221,14 +93,106 @@ export function formatThirdPartySummary(summary = []) {
   const table = [headers, ...rows];
   const columnWidths = calculateColumnWidths(table);
 
-  const formattedTable = `*Third Party Summary:*\n${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
+  const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 
-  // If the formatted table is too long, truncate it
-  const truncatedTable = formattedTable.length > CHARACTER_LIMIT
+  // Ensure the formattedTable string does not exceed the Slack message character limit.
+  return formattedTable.length > CHARACTER_LIMIT
     ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...`
     : formattedTable;
+}
 
-  return truncatedTable;
+/**
+ * Analyzes network requests to identify Adobe Experience Cloud tools.
+ *
+ * @param {Array<Object>} networkRequests - An array of network request objects.
+ * @returns {Array<Object>} An array of identified Adobe tools with their details.
+ */
+export function analyzeAdobeTools(networkRequests = []) {
+  const adobeTools = [];
+  const toolCounts = new Map();
+
+  networkRequests.forEach((request) => {
+    const { url, statusCode, priority } = request;
+    let toolName = null;
+
+    // Adobe Target detection
+    if ((url.includes('/delivery') || url.includes('/interact'))
+        && (url.startsWith('https://ge.adobedc.net/ee') || url.includes('tt.omtrdc.net'))) {
+      toolName = 'Adobe Target';
+    } else if (url.includes('.sc.omtrdc.net') || url.includes('2o7.net')
+             || (url.includes('/collect') && (url.includes('adobe') || url.includes('analytics')))) {
+      // Adobe Analytics detection
+      toolName = 'Adobe Analytics';
+    } else if (url.includes('edge.adobedc.net') || url.includes('.demdex.net')
+             || url.includes('alloy.js') || url.includes('alloy.min.js')) {
+      // AEP WebSDK detection
+      toolName = 'AEP WebSDK';
+    } else if (url.includes('assets.adobedtm.com')) {
+      // Adobe Launch detection
+      toolName = 'Adobe Launch/Tags';
+    }
+
+    if (toolName) {
+      const key = `${toolName}-${statusCode}`;
+      if (!toolCounts.has(key)) {
+        toolCounts.set(key, {
+          tool: toolName,
+          statusCode,
+          priority,
+          requestCount: 0,
+        });
+      }
+      toolCounts.get(key).requestCount += 1;
+    }
+  });
+
+  // Convert map to array
+  toolCounts.forEach((value) => {
+    adobeTools.push(value);
+  });
+
+  return adobeTools;
+}
+
+/**
+ * Formats an array of Adobe tools into a stringified table format.
+ * If tools array is empty, it returns a fallback message. If the formatted
+ * table exceeds the character limit, it is sliced and appended
+ * with an ellipsis.
+ *
+ * @param {Array<Object>} tools - An array of Adobe tool objects.
+ * @returns {string} Adobe tools formatted into a stringified table or a fallback message.
+ */
+export function formatAdobeTools(tools = []) {
+  if (tools.length === 0) {
+    return '    _No Adobe Experience Cloud tools detected_';
+  }
+
+  const headers = ['Tool', 'Status', 'Priority', 'Requests'];
+  const rows = tools.map((tool) => {
+    const {
+      tool: toolName, statusCode, priority, requestCount,
+    } = tool;
+
+    return [
+      addEllipsis(toolName),
+      `${statusCode}`,
+      addEllipsis(priority || 'N/A'),
+      `${requestCount}`,
+    ];
+  });
+
+  const table = [headers, ...rows];
+  const columnWidths = calculateColumnWidths(table);
+
+  const formattedTable = `${BACKTICKS}\n`
+    + `${table.map((row) => formatRows(row, columnWidths)).join('\n')}`
+    + `\n${BACKTICKS}`;
+
+  // Ensure the formattedTable string does not exceed the Slack message character limit.
+  return formattedTable.length > CHARACTER_LIMIT
+    ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...`
+    : formattedTable;
 }
 
 /**
@@ -280,34 +244,33 @@ function MartechImpactCommand(context) {
         return;
       }
 
-      const audit = await site.getLatestAuditByAuditType('lhs-mobile');
+      const latestAudit = await site.getLatestAuditByAuditType('lhs-mobile');
 
-      if (!audit) {
+      if (!latestAudit) {
         await say(`:warning: No audit found for site: ${baseURL}`);
         return;
       }
 
-      const auditResult = audit.getAuditResult();
-      const { thirdPartySummary = [], networkRequests = [] } = auditResult;
+      const auditResult = latestAudit.getAuditResult();
+      const { totalBlockingTime, thirdPartySummary, networkRequests } = auditResult;
 
-      // Identify and format Adobe tools as a separate section
-      const adobeTools = identifyAdobeTools(networkRequests);
-      const adobeToolsInfo = formatAdobeToolsInfo(adobeTools);
+      const adobeTools = analyzeAdobeTools(networkRequests);
 
-      // Format third party summary
-      const formattedSummary = formatThirdPartySummary(thirdPartySummary);
-      const formattedTBT = formatTotalBlockingTime(auditResult.totalBlockingTime);
+      const textSections = [{
+        text: `
+*Martech Impact for ${site.getBaseURL()}*
 
-      const message = [
-        `:lighthouse: *Third Party Impact Report for ${baseURL}*`,
-        '',
-        `:clock1: Total Blocking Time: ${formattedTBT} ms`,
-        '',
-        adobeToolsInfo,
-        formattedSummary,
-      ].filter(Boolean).join('\n');
+${printSiteDetails(site)}
 
-      await say(message);
+*Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
+
+*Third Party Summary:*\n${formatThirdPartySummary(thirdPartySummary)}
+
+*Adobe Experience Cloud Tools:*\n${formatAdobeTools(adobeTools)}
+  `,
+      }];
+
+      await sendMessageBlocks(say, textSections);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
