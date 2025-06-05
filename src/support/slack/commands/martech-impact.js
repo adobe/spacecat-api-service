@@ -248,31 +248,20 @@ export function formatThirdPartySummary(summary = [], networkRequests = []) {
   const table = [headers, ...rows];
   const columnWidths = calculateColumnWidths(table);
 
-  const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
+  const formattedTable = `*Third Party Summary:*\n${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 
   // If we have Adobe tools info, we need to account for its length plus the newlines
-  const headerText = '*Third Party Summary (Adobe Tools):*\n';
-  const adobeToolsLength = adobeToolsInfo ? adobeToolsInfo.length + 2 : 0; // +2 for newlines
-  const availableSpace = CHARACTER_LIMIT - adobeToolsLength - headerText.length;
+  const availableSpace = CHARACTER_LIMIT - (adobeToolsInfo ? adobeToolsInfo.length + 2 : 0);
 
   // If the formatted table is too long, truncate it
   const truncatedTable = formattedTable.length > availableSpace
     ? `${formattedTable.slice(0, availableSpace - 3)}...`
     : formattedTable;
 
-  // If the total length would still exceed the limit, only show third party summary
-  const combinedLength = (adobeToolsInfo?.length || 0)
-    + truncatedTable.length
-    + headerText.length
-    + 2;
-  if (combinedLength > CHARACTER_LIMIT) {
-    return `${headerText}${truncatedTable}`;
-  }
-
-  // Otherwise show both sections
+  // Return both sections if Adobe tools are found
   return adobeToolsInfo
-    ? `${adobeToolsInfo}\n\n${headerText}${truncatedTable}`
-    : `${headerText}${truncatedTable}`;
+    ? `${adobeToolsInfo}\n\n${truncatedTable}`
+    : truncatedTable;
 }
 
 /**
