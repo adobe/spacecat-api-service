@@ -59,8 +59,19 @@ export default class AccessControlUtil {
     return this.authInfo.getType() === 'jwt';
   }
 
+  isAccessTypeIms() {
+    return this.authInfo.getType() === 'ims';
+  }
+
+  isScopeAdmin() {
+    return this.authInfo.getScopes().some((scope) => scope.name === 'admin');
+  }
+
   hasAdminAccess() {
-    if (!this.isAccessTypeJWT()) {
+    if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) {
+      return true;
+    }
+    if (!this.isAccessTypeJWT() && this.isScopeAdmin()) {
       return true;
     }
     return this.authInfo.isAdmin();
@@ -72,7 +83,7 @@ export default class AccessControlUtil {
     }
 
     const { authInfo } = this;
-    if (this.hasAdminAccess() || !this.isAccessTypeJWT()) {
+    if (this.hasAdminAccess()) {
       return true;
     }
 
