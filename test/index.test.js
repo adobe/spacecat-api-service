@@ -16,7 +16,6 @@ import { Request } from '@adobe/fetch';
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import AccessControlUtil from '../src/support/access-control-util.js';
 
 import { main } from '../src/index.js';
 
@@ -51,9 +50,6 @@ describe('Index Tests', () => {
   };
 
   beforeEach('setup', () => {
-    // Mock AccessControlUtil's hasAdminAccess method
-    sinon.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
-
     context = {
       boltApp: {
 
@@ -117,11 +113,6 @@ describe('Index Tests', () => {
         'x-api-key': apiKey,
       },
     });
-  });
-
-  afterEach(() => {
-    // Restore the stub after each test
-    sinon.restore();
   });
 
   it('sends 404 for missing suffix', async () => {
