@@ -99,6 +99,7 @@
     "puppeteer": "^24.10.0",
     "puppeteer-har": "^1.1.2",
     "slack-block-builder": "2.8.0",
+    "typescript": "^5.8.3",
     "urijs": "1.19.11",
     "zod": "3.25.42"
   },
