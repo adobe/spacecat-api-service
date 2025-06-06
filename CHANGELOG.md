@@ -1,3 +1,10 @@
+## [1.120.1](https://github.com/adobe/spacecat-api-service/compare/v1.120.0...v1.120.1) (2025-06-06)
+
+
+### Bug Fixes
+
+* Feature flag non adobe user still use IMS token, need to restrict other org data access ([#919](https://github.com/adobe/spacecat-api-service/issues/919)) ([2e8ddd5](https://github.com/adobe/spacecat-api-service/commit/2e8ddd5160d5505ffb74e6a1538826602db4af72))
+
 # [1.120.0](https://github.com/adobe/spacecat-api-service/compare/v1.119.2...v1.120.0) (2025-06-04)
 
 
