@@ -59,12 +59,8 @@ export default class AccessControlUtil {
     return this.authInfo.getType() === 'jwt';
   }
 
-  isScopeAdmin() {
-    return this.authInfo.getScopes().some((scope) => scope.name === 'admin');
-  }
-
   hasAdminAccess() {
-    if (!this.isAccessTypeJWT() && this.isScopeAdmin()) {
+    if (!this.isAccessTypeJWT()) {
       return true;
     }
     return this.authInfo.isAdmin();
@@ -76,7 +72,7 @@ export default class AccessControlUtil {
     }
 
     const { authInfo } = this;
-    if (this.hasAdminAccess()) {
+    if (this.hasAdminAccess() || !this.isAccessTypeJWT()) {
       return true;
     }
 
