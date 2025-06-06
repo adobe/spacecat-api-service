@@ -50,11 +50,12 @@ function filterBundlesByUrl(url, allBundles) {
 }
 
 /**
- * Get the latest audit for a given site and audit type.
+ * Get the latest bundles for a given url.
  *
- * @param {string} siteId - UUID of the site.
- * @param {string} auditType - Audit type (e.g., 'cwv', 'lhs-desktop', etc.).
- * @param {object} [extraHeaders] - Optional additional headers (e.g., org ID, authorization).
+ * @param {string} url - base url of a site.
+ * @param {string} domainkey - domain key to access rum data.
+ * @param {object} startdate - start of range of data you need.
+ * @param {object} enddate - end of range of data you need.
  * @returns {Promise<object>} - The latest audit result.
  */
 export async function getDataChunks(url, domainkey, startdate, enddate) {
