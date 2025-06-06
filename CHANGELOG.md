@@ -1,3 +1,10 @@
+## [1.120.4](https://github.com/adobe/spacecat-api-service/compare/v1.120.3...v1.120.4) (2025-06-06)
+
+
+### Bug Fixes
+
+* api-key auth flow fix ([#964](https://github.com/adobe/spacecat-api-service/issues/964)) ([b23451f](https://github.com/adobe/spacecat-api-service/commit/b23451fa57e7ab67dcd2e9617145b197e95d8113))
+
 ## [1.120.3](https://github.com/adobe/spacecat-api-service/compare/v1.120.2...v1.120.3) (2025-06-06)
 
 
