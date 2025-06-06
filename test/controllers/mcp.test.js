@@ -29,6 +29,7 @@ describe('MCP Controller', () => {
   let auditsController;
   let sitesController;
   let scrapeController;
+  let cruxController;
 
   beforeEach(() => {
     context = {
@@ -129,10 +130,20 @@ describe('MCP Controller', () => {
       }),
     };
 
+    cruxController = {
+      getCRUXDataByURL: sandbox.stub().resolves(ok({
+        key: { url: 'https://example.com', formFactor: 'DESKTOP' },
+        metrics: {
+          first_contentful_paint: { percentiles: { p75: 1000 } },
+        },
+      })),
+    };
+
     const registry = buildRegistry({
       auditsController,
       sitesController,
       scrapeController,
+      cruxController,
       context,
     });
     mcpController = McpController(context, registry);
@@ -494,5 +505,33 @@ describe('MCP Controller', () => {
     expect(body).to.have.property('result');
     const [first] = body.result.contents;
     expect(first).to.have.property('uri', `scrape-content://sites/${siteId}/files/${encodedKey}`);
+  });
+
+  it('retrieves crux data by url', async () => {
+    const url = 'https://example.com';
+    const formFactor = 'desktop';
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'getCRUXDataByURL',
+        arguments: { url, formFactor },
+      },
+    };
+
+    context.data = payload;
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+    const [first] = body.result.content;
+    expect(JSON.parse(first.text)).to.deep.equal({
+      key: { url, formFactor: 'DESKTOP' },
+      metrics: {
+        first_contentful_paint: { percentiles: { p75: 1000 } },
+      },
+    });
   });
 });

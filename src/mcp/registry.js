@@ -18,6 +18,7 @@ import { createScrapeContentResources } from './registry/resources/scrape-conten
 import { createSiteTools } from './registry/tools/sites.js';
 import { createAuditTools } from './registry/tools/audits.js';
 import { createScrapeContentTools } from './registry/tools/scrape-content.js';
+import { createCruxTools } from './registry/tools/crux.js';
 import utilTools from './registry/tools/utils.js';
 
 /**
@@ -36,6 +37,7 @@ export default function buildRegistry({
   auditsController,
   sitesController,
   scrapeController,
+  cruxController,
   context,
 } = {}) {
   const tools = {
@@ -43,6 +45,7 @@ export default function buildRegistry({
     ...createAuditTools(auditsController),
     ...createSiteTools(sitesController, context),
     ...createScrapeContentTools(scrapeController, context),
+    ...createCruxTools(cruxController),
   };
 
   const resources = {

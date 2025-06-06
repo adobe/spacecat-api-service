@@ -45,6 +45,7 @@ import ExperimentsController from './controllers/experiments.js';
 import HooksController from './controllers/hooks.js';
 import SlackController from './controllers/slack.js';
 import SitesAuditsToggleController from './controllers/sites-audits-toggle.js';
+import CRUXController from './controllers/crux.js';
 import trigger from './controllers/trigger.js';
 
 // prevents webpack build error
@@ -115,12 +116,14 @@ async function run(request, context) {
     const demoController = DemoController(context);
     const scrapeController = ScrapeController(context);
     const fixesController = new FixesController(context);
+    const cruxController = CRUXController(context);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
       auditsController,
       sitesController,
       scrapeController,
+      cruxController,
       context,
     });
     const mcpController = McpController(context, mcpRegistry);
@@ -146,6 +149,7 @@ async function run(request, context) {
       scrapeController,
       mcpController,
       fixesController,
+      cruxController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
