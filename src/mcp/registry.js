@@ -18,7 +18,9 @@ import { createScrapeContentResources } from './registry/resources/scrape-conten
 import { createSiteTools } from './registry/tools/sites.js';
 import { createAuditTools } from './registry/tools/audits.js';
 import { createScrapeContentTools } from './registry/tools/scrape-content.js';
+import { createBundlesTools } from './registry/tools/bundles.js';
 import utilTools from './registry/tools/utils.js';
+import { createBundleResources } from './registry/resources/bundles.js';
 
 /**
  * Build the registry for the current request based on already-constructed
@@ -36,6 +38,7 @@ export default function buildRegistry({
   auditsController,
   sitesController,
   scrapeController,
+  bundleController,
   context,
 } = {}) {
   const tools = {
@@ -43,12 +46,14 @@ export default function buildRegistry({
     ...createAuditTools(auditsController),
     ...createSiteTools(sitesController, context),
     ...createScrapeContentTools(scrapeController, context),
+    ...createBundlesTools(bundleController),
   };
 
   const resources = {
     ...createAuditResources(auditsController),
     ...createSiteResources(sitesController, context),
     ...createScrapeContentResources(scrapeController, context),
+    ...createBundleResources(bundleController),
   };
 
   return {

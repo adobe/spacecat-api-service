@@ -29,6 +29,7 @@ describe('MCP Controller', () => {
   let auditsController;
   let sitesController;
   let scrapeController;
+  let bundleController;
 
   beforeEach(() => {
     context = {
@@ -67,6 +68,37 @@ describe('MCP Controller', () => {
           someProperty: 'somePreviousValue',
         },
       })),
+    };
+
+    bundleController = {
+      getAllBundles: sandbox.stub().resolves(ok(
+        [
+          {
+            count: 31,
+            mean: 100,
+            p50: 95,
+            p75: 105,
+            sum: 3100,
+            url: 'https://example.com',
+          },
+          {
+            count: 15,
+            mean: 200,
+            p50: 190,
+            p75: 210,
+            sum: 3000,
+            url: 'https://example.org',
+          },
+          {
+            count: 20,
+            mean: 150,
+            p50: 145,
+            p75: 155,
+            sum: 3000,
+            url: 'https://example.net',
+          },
+        ],
+      )),
     };
 
     sitesController = {
@@ -133,6 +165,7 @@ describe('MCP Controller', () => {
       auditsController,
       sitesController,
       scrapeController,
+      bundleController,
       context,
     });
     mcpController = McpController(context, registry);
@@ -494,5 +527,59 @@ describe('MCP Controller', () => {
     expect(body).to.have.property('result');
     const [first] = body.result.contents;
     expect(first).to.have.property('uri', `scrape-content://sites/${siteId}/files/${encodedKey}`);
+  });
+
+  it('retrieves RUM bundle stats using the rumBundles tool with stubbed controller', async () => {
+    const url = 'www.example.com';
+    const domainkey = 'xxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';
+    const startdate = '2025-05-21';
+    const enddate = '2025-05-21';
+    const aggregation = 'pageviews';
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/read',
+      params: {
+        uri: `spacecat-data://bundles/${url}/${domainkey}/${startdate}/${enddate}/${aggregation}`,
+      },
+    };
+
+    context.data = payload;
+
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+
+    const [first] = body.result.contents;
+    expect(first).to.have.property('uri', `spacecat-data://bundles/${url}/${domainkey}/${startdate}/${enddate}/${aggregation}`);
+    expect(JSON.parse(first.text)).to.deep.equal([
+      {
+        count: 31,
+        mean: 100,
+        p50: 95,
+        p75: 105,
+        sum: 3100,
+        url: 'https://example.com',
+      },
+      {
+        count: 15,
+        mean: 200,
+        p50: 190,
+        p75: 210,
+        sum: 3000,
+        url: 'https://example.org',
+      },
+      {
+        count: 20,
+        mean: 150,
+        p50: 145,
+        p75: 155,
+        sum: 3000,
+        url: 'https://example.net',
+      },
+    ]);
   });
 });
