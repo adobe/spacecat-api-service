@@ -105,9 +105,10 @@ export function formatThirdPartySummary(summary = []) {
  * Analyzes network requests to identify Adobe Experience Cloud tools.
  *
  * @param {Array<Object>} networkRequests - An array of network request objects.
+ * @param {Object} log - The logging object.
  * @returns {Array<Object>} An array of identified Adobe tools with their details.
  */
-export function analyzeAdobeTools(networkRequests = []) {
+export function analyzeAdobeTools(networkRequests, log = null) {
   const adobeTools = [];
   const toolCounts = new Map();
 
@@ -115,21 +116,28 @@ export function analyzeAdobeTools(networkRequests = []) {
     const { url, statusCode, priority } = request;
     let toolName = null;
 
+    // Debug logging
+    if (log) log.debug('Checking URL:', { url });
+
     // Adobe Target detection
     if ((url.includes('/delivery') || url.includes('/interact'))
         && (url.startsWith('https://edge.adobedc.net/ee') || url.includes('tt.omtrdc.net'))) {
       toolName = 'Adobe Target';
+      if (log) log.debug('Found Adobe Target:', { url });
     } else if (url.includes('.sc.omtrdc.net') || url.includes('2o7.net')
              || (url.includes('/collect') && (url.includes('adobe') || url.includes('analytics')))) {
       // Adobe Analytics detection
       toolName = 'Adobe Analytics';
+      if (log) log.debug('Found Adobe Analytics:', { url });
     } else if (url.includes('edge.adobedc.net') || url.includes('.demdex.net')
              || url.includes('alloy.js') || url.includes('alloy.min.js')) {
       // AEP WebSDK detection
       toolName = 'AEP WebSDK';
-    } else if (url.includes('assets.adobedtm.com')) {
-      // Adobe Launch detection
+      if (log) log.debug('Found AEP WebSDK:', { url });
+    } else if (url && url.toLowerCase().includes('adobedtm.com')) {
+      // Adobe Launch detection - made case insensitive and added null check
       toolName = 'Adobe Launch/Tags';
+      if (log) log.debug('Found Adobe Launch:', { url });
     }
 
     if (toolName) {
@@ -254,7 +262,7 @@ function MartechImpactCommand(context) {
       const auditResult = latestAudit.getAuditResult();
       const { totalBlockingTime, thirdPartySummary, networkRequests } = auditResult;
 
-      const adobeTools = analyzeAdobeTools(networkRequests);
+      const adobeTools = analyzeAdobeTools(networkRequests, log);
 
       const textSections = [{
         text: `
