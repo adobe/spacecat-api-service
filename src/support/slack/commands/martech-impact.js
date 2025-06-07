@@ -140,8 +140,15 @@ export function analyzeAdobeTools(networkRequests = [], log = null) {
       // AEP WebSDK detection
       toolName = 'AEP WebSDK';
       if (log) log.debug('Found AEP WebSDK:', { url });
-    } else if (url && url.toLowerCase().includes('adobedtm.com')) {
-      // Adobe Launch detection - made case insensitive and added null check
+    } else if (url && (
+      url.toLowerCase().includes('adobedtm.com')
+      || url.toLowerCase().includes('assets.adobetm.com')
+      || url.toLowerCase().includes('adobe-tm.com')
+      || url.toLowerCase().includes('adobe.com/dtm/')
+      || url.toLowerCase().includes('adobe-tag-manager')
+      || url.toLowerCase().includes('launch.adobe.com')
+    )) {
+      // Adobe Launch detection - expanded patterns
       toolName = 'Adobe Launch/Tags';
       if (log) log.debug('Found Adobe Launch:', { url });
     }
