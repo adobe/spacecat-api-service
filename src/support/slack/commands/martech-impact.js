@@ -135,9 +135,14 @@ export function analyzeAdobeTools(networkRequests = [], log = null) {
       // Adobe Analytics detection
       toolName = 'Adobe Analytics';
       if (log) log.debug('Found Adobe Analytics:', { url });
-    } else if (url.includes('edge.adobedc.net') || url.includes('.demdex.net')
-             || url.includes('alloy.js') || url.includes('alloy.min.js')) {
-      // AEP WebSDK detection
+    } else if (
+      url.includes('edge.adobedc.net')
+      || url.includes('.demdex.net')
+      || url.includes('alloy.js')
+      || url.includes('alloy.min.js')
+      || (url.includes('/collect') && url.includes('adobedc.net'))
+    ) {
+      // AEP WebSDK detection - expanded patterns
       toolName = 'AEP WebSDK';
       if (log) log.debug('Found AEP WebSDK:', { url });
     } else if (url && (
