@@ -108,9 +108,15 @@ export function formatThirdPartySummary(summary = []) {
  * @param {Object} log - The logging object.
  * @returns {Array<Object>} An array of identified Adobe tools with their details.
  */
-export function analyzeAdobeTools(networkRequests, log = null) {
+export function analyzeAdobeTools(networkRequests = [], log = null) {
   const adobeTools = [];
   const toolCounts = new Map();
+
+  // Add null check before forEach
+  if (!networkRequests) {
+    if (log) log.debug('No network requests provided');
+    return adobeTools;
+  }
 
   networkRequests.forEach((request) => {
     const { url, statusCode, priority } = request;
