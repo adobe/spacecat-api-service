@@ -29,11 +29,18 @@ describe('MCP Controller', () => {
   let auditsController;
   let sitesController;
   let scrapeController;
+  let harController;
 
   beforeEach(() => {
     context = {
       log: console,
       dataAccess: {},
+    };
+
+    harController = {
+      getHar: sandbox.stub().resolves(ok({
+        report: '**Additional Bottlenecks from HAR Data:**\n\n',
+      })),
     };
 
     auditsController = {
@@ -133,6 +140,7 @@ describe('MCP Controller', () => {
       auditsController,
       sitesController,
       scrapeController,
+      harController,
       context,
     });
     mcpController = McpController(context, registry);
@@ -494,5 +502,33 @@ describe('MCP Controller', () => {
     expect(body).to.have.property('result');
     const [first] = body.result.contents;
     expect(first).to.have.property('uri', `scrape-content://sites/${siteId}/files/${encodedKey}`);
+  });
+
+  it('retrieves Har details stats', async () => {
+    const url = Buffer.from('https://www.shredit.com').toString('base64');
+    const deviceType = 'desktop';
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'resources/read',
+      params: {
+        uri: `spacecat-data://hars/${url}/${deviceType}`,
+      },
+    };
+
+    context.data = payload;
+
+    const resp = await mcpController.handleRpc(context);
+
+    expect(resp.status).to.equal(200);
+
+    const body = await resp.json();
+    expect(body).to.have.property('result');
+
+    const [first] = body.result.contents;
+    expect(first).to.have.property('uri', `spacecat-data://hars/${url}/${deviceType}`);
+    expect(JSON.parse(first.text)).to.deep.equal({
+      report: '**Additional Bottlenecks from HAR Data:**\n\n',
+    });
   });
 });
