@@ -119,32 +119,43 @@ export function analyzeAdobeTools(networkRequests = [], log = null) {
   }
 
   networkRequests.forEach((request) => {
-    const { url, statusCode, priority } = request;
+    const {
+      url,
+      statusCode,
+      priority,
+      entity,
+    } = request;
     let toolName = null;
 
     // Debug logging
-    if (log) log.debug('Checking URL:', { url });
+    if (log) {
+      log.debug('Checking request:', {
+        url,
+        entity,
+      });
+    }
 
     // Adobe Target detection
     if ((url.includes('/delivery') || url.includes('/interact'))
         && (url.startsWith('https://edge.adobedc.net/ee') || url.includes('tt.omtrdc.net'))) {
       toolName = 'Adobe Target';
-      if (log) log.debug('Found Adobe Target:', { url });
+      if (log) log.debug('Found Adobe Target:', { url, entity });
     } else if (url.includes('.sc.omtrdc.net') || url.includes('2o7.net')
              || (url.includes('/collect') && (url.includes('adobe') || url.includes('analytics')))) {
       // Adobe Analytics detection
       toolName = 'Adobe Analytics';
-      if (log) log.debug('Found Adobe Analytics:', { url });
+      if (log) log.debug('Found Adobe Analytics:', { url, entity });
     } else if (
-      url.includes('edge.adobedc.net')
+      entity === 'adobedc.net'
+      || url.includes('edge.adobedc.net')
       || url.includes('.demdex.net')
       || url.includes('alloy.js')
       || url.includes('alloy.min.js')
       || (url.includes('/collect') && url.includes('adobedc.net'))
     ) {
-      // AEP WebSDK detection - expanded patterns
+      // AEP WebSDK detection - check entity first
       toolName = 'AEP WebSDK';
-      if (log) log.debug('Found AEP WebSDK:', { url });
+      if (log) log.debug('Found AEP WebSDK:', { url, entity });
     } else if (url && (
       url.toLowerCase().includes('adobedtm.com')
       || url.toLowerCase().includes('assets.adobetm.com')
