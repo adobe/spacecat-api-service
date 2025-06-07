@@ -155,18 +155,27 @@ export function analyzeAdobeTools(networkRequests = [], log = null) {
     ) {
       // AEP WebSDK detection - check entity first
       toolName = 'AEP WebSDK';
-      if (log) log.debug('Found AEP WebSDK:', { url, entity });
-    } else if (url && (
-      url.toLowerCase().includes('adobedtm.com')
-      || url.toLowerCase().includes('assets.adobetm.com')
-      || url.toLowerCase().includes('adobe-tm.com')
-      || url.toLowerCase().includes('adobe.com/dtm/')
-      || url.toLowerCase().includes('adobe-tag-manager')
-      || url.toLowerCase().includes('launch.adobe.com')
-    )) {
+      if (log) {
+        log.debug('Found AEP WebSDK:', {
+          url,
+          entity,
+        });
+      }
+    } else if (
+      entity === 'adobedtm.com'
+      || url.toLowerCase().includes('assets.adobedtm.com')
+      || url.toLowerCase().includes('launch-')
+      || url.toLowerCase().includes('launch.')
+      || url.toLowerCase().includes('.min.js')
+    ) {
       // Adobe Launch detection - expanded patterns
       toolName = 'Adobe Launch/Tags';
-      if (log) log.debug('Found Adobe Launch:', { url });
+      if (log) {
+        log.debug('Found Adobe Launch:', {
+          url,
+          entity,
+        });
+      }
     }
 
     if (toolName) {
