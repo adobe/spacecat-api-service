@@ -117,7 +117,7 @@ export function analyzeAdobeTools(networkRequests = []) {
 
     // Adobe Target detection
     if ((url.includes('/delivery') || url.includes('/interact'))
-        && (url.startsWith('https://ge.adobedc.net/ee') || url.includes('tt.omtrdc.net'))) {
+        && (url.startsWith('https://edge.adobedc.net/ee') || url.includes('tt.omtrdc.net'))) {
       toolName = 'Adobe Target';
     } else if (url.includes('.sc.omtrdc.net') || url.includes('2o7.net')
              || (url.includes('/collect') && (url.includes('adobe') || url.includes('analytics')))) {
@@ -171,13 +171,13 @@ export function formatAdobeTools(tools = []) {
   const headers = ['Tool', 'Status', 'Priority', 'Requests'];
   const rows = tools.map((tool) => {
     const {
-      tool: toolName, statusCode, priority, requestCount,
+      toolName, statusCode, priority, requestCount,
     } = tool;
 
     return [
-      addEllipsis(toolName),
+      toolName,
       `${statusCode}`,
-      addEllipsis(priority || 'N/A'),
+      priority || 'N/A',
       `${requestCount}`,
     ];
   });
