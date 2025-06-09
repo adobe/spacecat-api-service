@@ -75,6 +75,14 @@ describe('getRouteHandlers', () => {
     stopImportJob: sinon.stub(),
   };
 
+  const mockScrapeJobController = {
+    createScrapeJob: sinon.stub(),
+    getScrapeJobStatus: sinon.stub(),
+    getScrapeJobResult: sinon.stub(),
+    getScrapeJobProgress: sinon.stub(),
+    getScrapeJobsByDateRange: sinon.stub(),
+  };
+
   const mockApiKeyController = {
     createApiKey: sinon.stub(),
     deleteApiKey: sinon.stub(),
@@ -158,6 +166,7 @@ describe('getRouteHandlers', () => {
       mockPreflightController,
       mockDemoController,
       mockScrapeController,
+      mockScrapeJobController,
       mockMcpController,
       mockFixesController,
     );
@@ -182,6 +191,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/api-keys',
       'GET /tools/api-keys',
       'POST /tools/import/jobs',
+      'POST /tools/scrape/jobs',
       'GET /screenshots',
       'POST /screenshots',
       'GET /mcp',
@@ -204,6 +214,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /screenshots']).to.equal(mockDemoController.getScreenshots);
     expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
     expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
+    expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
@@ -269,6 +280,11 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
+      'GET /tools/scrape/jobs/:jobId',
+      'POST /tools/scrape/jobs/:jobId/result',
+      'GET /tools/scrape/jobs/:jobId/progress',
+      'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
+      'DELETE /tools/import/jobs/:jobId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -331,5 +347,11 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/scraped-content/:type'].paramNames).to.deep.equal(['siteId', 'type']);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);
+    expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].paramNames).to.deep.equal(['jobId']);
+    expect(dynamicRoutes['POST /tools/scrape/jobs/:jobId/result'].handler).to.equal(mockScrapeJobController.getScrapeJobResult);
+    expect(dynamicRoutes['POST /tools/scrape/jobs/:jobId/result'].paramNames).to.deep.equal(['jobId']);
+    expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId/progress'].handler).to.equal(mockScrapeJobController.getScrapeJobProgress);
+    expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId/progress'].paramNames).to.deep.equal(['jobId']);
   });
 });

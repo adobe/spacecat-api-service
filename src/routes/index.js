@@ -87,6 +87,7 @@ export default function getRouteHandlers(
   preflightController,
   demoController,
   scrapeController,
+  scrapeJobController,
   mcpController,
   fixesController,
 ) {
@@ -172,6 +173,13 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
     'GET /mcp': mcpController.handleSseRequest,
     'POST /mcp': mcpController.handleRpc,
+    'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
+    'GET /tools/scrape/jobs/:jobId': scrapeJobController.getScrapeJobStatus,
+    'DELETE /tools/scrape/jobs/:jobId': scrapeJobController.deleteScrapeJob,
+    // 'PATCH /tools/scrape/jobs/:jobId': scrapeJobController.stopScrapeJob,
+    'GET /tools/scrape/jobs/:jobId/progress': scrapeJobController.getScrapeJobProgress,
+    'POST /tools/scrape/jobs/:jobId/result': scrapeJobController.getScrapeJobResult,
+    'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs': scrapeJobController.getScrapeJobsByDateRange,
 
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
