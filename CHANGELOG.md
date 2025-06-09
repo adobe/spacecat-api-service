@@ -1,3 +1,101 @@
+## [1.120.7](https://github.com/adobe/spacecat-api-service/compare/v1.120.6...v1.120.7) (2025-06-08)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#970](https://github.com/adobe/spacecat-api-service/issues/970)) ([34efb1d](https://github.com/adobe/spacecat-api-service/commit/34efb1d6cad15863c10cfafecf9b3ead82f95da7))
+
+## [1.120.6](https://github.com/adobe/spacecat-api-service/compare/v1.120.5...v1.120.6) (2025-06-07)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#969](https://github.com/adobe/spacecat-api-service/issues/969)) ([17cb8cd](https://github.com/adobe/spacecat-api-service/commit/17cb8cd3b7618decfe76f7b2207b265d4bfe6074))
+
+## [1.120.5](https://github.com/adobe/spacecat-api-service/compare/v1.120.4...v1.120.5) (2025-06-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-ims-client to v1.8.3 ([#968](https://github.com/adobe/spacecat-api-service/issues/968)) ([04e824b](https://github.com/adobe/spacecat-api-service/commit/04e824b0d7ff55985f1a425554b7da01b885fd6b))
+
+## [1.120.4](https://github.com/adobe/spacecat-api-service/compare/v1.120.3...v1.120.4) (2025-06-06)
+
+
+### Bug Fixes
+
+* api-key auth flow fix ([#964](https://github.com/adobe/spacecat-api-service/issues/964)) ([b23451f](https://github.com/adobe/spacecat-api-service/commit/b23451fa57e7ab67dcd2e9617145b197e95d8113))
+
+## [1.120.3](https://github.com/adobe/spacecat-api-service/compare/v1.120.2...v1.120.3) (2025-06-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.14.1 ([#962](https://github.com/adobe/spacecat-api-service/issues/962)) ([e479418](https://github.com/adobe/spacecat-api-service/commit/e479418576fe146325d727e2b32662fdc6d2f520))
+
+## [1.120.2](https://github.com/adobe/spacecat-api-service/compare/v1.120.1...v1.120.2) (2025-06-06)
+
+
+### Bug Fixes
+
+* [Revert] Feature flag non adobe user still use IMS token, need to restrict other org data access ([#963](https://github.com/adobe/spacecat-api-service/issues/963)) ([dce7300](https://github.com/adobe/spacecat-api-service/commit/dce7300ea564312d89c9abd3b726503973836130))
+
+## [1.120.1](https://github.com/adobe/spacecat-api-service/compare/v1.120.0...v1.120.1) (2025-06-06)
+
+
+### Bug Fixes
+
+* Feature flag non adobe user still use IMS token, need to restrict other org data access ([#919](https://github.com/adobe/spacecat-api-service/issues/919)) ([2e8ddd5](https://github.com/adobe/spacecat-api-service/commit/2e8ddd5160d5505ffb74e6a1538826602db4af72))
+
+# [1.120.0](https://github.com/adobe/spacecat-api-service/compare/v1.119.2...v1.120.0) (2025-06-04)
+
+
+### Features
+
+* add mcp endpoint to return all audits for historical analysis ([#954](https://github.com/adobe/spacecat-api-service/issues/954)) ([eb90cfc](https://github.com/adobe/spacecat-api-service/commit/eb90cfc3c7f70ea4b76aeea2ed7de2e2c0d66b52))
+
+## [1.119.2](https://github.com/adobe/spacecat-api-service/compare/v1.119.1...v1.119.2) (2025-06-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.23.2 ([#959](https://github.com/adobe/spacecat-api-service/issues/959)) ([482c7b8](https://github.com/adobe/spacecat-api-service/commit/482c7b838834c5c008c7da8d18a09fad66775e95))
+
+## [1.119.1](https://github.com/adobe/spacecat-api-service/compare/v1.119.0...v1.119.1) (2025-06-04)
+
+
+### Bug Fixes
+
+* typo issue for keywords ([#958](https://github.com/adobe/spacecat-api-service/issues/958)) ([c383cf2](https://github.com/adobe/spacecat-api-service/commit/c383cf208766fbadffb06050d7a1703a4813c6a3))
+
+# [1.119.0](https://github.com/adobe/spacecat-api-service/compare/v1.118.2...v1.119.0) (2025-06-04)
+
+
+### Features
+
+* new organic keyword imports ([#957](https://github.com/adobe/spacecat-api-service/issues/957)) ([2dd745b](https://github.com/adobe/spacecat-api-service/commit/2dd745b47f0fba574ab2860542178fa44b162ba1))
+
+## [1.118.2](https://github.com/adobe/spacecat-api-service/compare/v1.118.1...v1.118.2) (2025-06-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.23.0 ([#956](https://github.com/adobe/spacecat-api-service/issues/956)) ([c1e5f20](https://github.com/adobe/spacecat-api-service/commit/c1e5f20ee5e583631ca60045b0c4c6da2b1295e1))
+
+## [1.118.1](https://github.com/adobe/spacecat-api-service/compare/v1.118.0...v1.118.1) (2025-06-04)
+
+
+### Bug Fixes
+
+* bamboohr operation quota exceeded ([#951](https://github.com/adobe/spacecat-api-service/issues/951)) ([3424a4e](https://github.com/adobe/spacecat-api-service/commit/3424a4e2ffbd27cd56ed859a9a8b5f2cb2130962))
+
+# [1.118.0](https://github.com/adobe/spacecat-api-service/compare/v1.117.5...v1.118.0) (2025-06-03)
+
+
+### Features
+
+* nonbranded organic keywords and keywords for individual pages ([#950](https://github.com/adobe/spacecat-api-service/issues/950)) ([fda2d0b](https://github.com/adobe/spacecat-api-service/commit/fda2d0b9a2a3fd7a64ffc5107265cb54f2cf0f6d))
+
 ## [1.117.5](https://github.com/adobe/spacecat-api-service/compare/v1.117.4...v1.117.5) (2025-06-01)
 
 
