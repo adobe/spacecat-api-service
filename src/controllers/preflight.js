@@ -91,9 +91,9 @@ function PreflightController(ctx, log, env) {
    * @returns {Promise<Object>} The HTTP response object
    */
   const createPreflightJob = async (context) => {
-    const { data } = context;
+    const { data, imsToken } = context;
     log.info(`Creating preflight context data: ${JSON.stringify(data)}`);
-
+    
     try {
       validateRequestData(data);
     } catch (error) {
@@ -114,6 +114,10 @@ function PreflightController(ctx, log, env) {
         throw new Error(`No site found for base URL: ${baseURL}`);
       }
 
+      const secretsClient = new SecretsManagerClient({});
+
+      const refId = await storeIMSToken(imsToken);
+
       // Create a new async job
       const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
@@ -122,6 +126,7 @@ function PreflightController(ctx, log, env) {
             siteId: site.getId(),
             urls: data.urls,
             step,
+            imsTokenRefId: refId,
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -152,6 +157,19 @@ function PreflightController(ctx, log, env) {
       return internalServerError(error.message);
     }
   };
+
+  async function storeIMSToken(imsToken) {
+    const refId = uuidv4();
+    const secretName = `ims-token/${refId}`;
+    await secretsClient.send(new CreateSecretCommand({
+      Name: secretName,
+      SecretString: JSON.stringify({
+        IMSToken: imsToken,
+        expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes from now
+      }),
+    }));
+    return refId;
+  }
 
   /**
    * Gets the status and result of a preflight job
