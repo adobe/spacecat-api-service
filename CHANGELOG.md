@@ -1,3 +1,24 @@
+## [1.120.7](https://github.com/adobe/spacecat-api-service/compare/v1.120.6...v1.120.7) (2025-06-08)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#970](https://github.com/adobe/spacecat-api-service/issues/970)) ([34efb1d](https://github.com/adobe/spacecat-api-service/commit/34efb1d6cad15863c10cfafecf9b3ead82f95da7))
+
+## [1.120.6](https://github.com/adobe/spacecat-api-service/compare/v1.120.5...v1.120.6) (2025-06-07)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#969](https://github.com/adobe/spacecat-api-service/issues/969)) ([17cb8cd](https://github.com/adobe/spacecat-api-service/commit/17cb8cd3b7618decfe76f7b2207b265d4bfe6074))
+
+## [1.120.5](https://github.com/adobe/spacecat-api-service/compare/v1.120.4...v1.120.5) (2025-06-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-ims-client to v1.8.3 ([#968](https://github.com/adobe/spacecat-api-service/issues/968)) ([04e824b](https://github.com/adobe/spacecat-api-service/commit/04e824b0d7ff55985f1a425554b7da01b885fd6b))
+
 ## [1.120.4](https://github.com/adobe/spacecat-api-service/compare/v1.120.3...v1.120.4) (2025-06-06)
 
 
