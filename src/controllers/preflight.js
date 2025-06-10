@@ -12,10 +12,14 @@
 
 import {
   isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
+  scrapeAndStoreUrls, // Add scraping utility
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
+
+import { S3Client } from '@aws-sdk/client-s3'; // Add S3 client
+
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -36,7 +40,7 @@ function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess, sqs } = ctx;
+  const { dataAccess, sqs, s3 } = ctx;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
@@ -83,16 +87,12 @@ function PreflightController(ctx, log, env) {
   }
 
   /**
-   * Creates a new preflight job
-   * @param {Object} context - The request context
-   * @param {Object} context.data - The request data
-   * @param {string[]} context.data.urls - Array of URLs to process
-   * @param {string} context.data.step - The audit step
-   * @returns {Promise<Object>} The HTTP response object
+   * Creates a new preflight job with scraping
    */
   const createPreflightJob = async (context) => {
-    const { data } = context;
-
+    const { data, imsToken } = context;
+    log.info(`Creating preflight context data: ${JSON.stringify(data)}`);
+    
     try {
       validateRequestData(data);
     } catch (error) {
@@ -127,15 +127,45 @@ function PreflightController(ctx, log, env) {
         },
       });
 
+      // Scrape content immediately in the API service
+      log.info('Starting content scraping in preflight API...');
       try {
-        // Send message to SQS to trigger the audit worker
+        const scrapeOptions = {
+          customHeaders: {
+            Authorization: imsToken, // Use IMS token for authenticated scraping
+          },
+          userAgent: 'SpaceCat-Preflight-Scraper/1.0',
+          prefix: 'scrapes', // Store in 'scrapes' prefix to match run-sqs.js expectations
+        };
+
+        const scrapeResults = await scrapeAndStoreUrls(
+          s3.s3Client, // Use S3 client from context
+          env.S3_SCRAPER_BUCKET, // Use scraper bucket
+          site.getId(),
+          data.urls,
+          scrapeOptions
+        );
+
+        const failedScrapes = scrapeResults.filter(r => r.status === 'FAILED');
+        if (failedScrapes.length > 0) {
+          log.warn(`Failed to scrape ${failedScrapes.length} URLs:`, failedScrapes);
+        }
+
+        log.info(`Successfully scraped ${scrapeResults.filter(r => r.status === 'COMPLETE').length}/${data.urls.length} URLs`);
+
+      } catch (scrapeError) {
+        log.error(`Failed to scrape content: ${scrapeError.message}`, scrapeError);
+        // Continue with job creation even if scraping fails - the audit worker can handle it
+      }
+
+      try {
+        // Send message to SQS to trigger the audit worker (it will find the pre-scraped content)
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
           jobId: job.getId(),
           type: 'preflight',
         });
       } catch (error) {
         log.error(`Failed to send message to SQS: ${error.message}`);
-        // roll back the job
         await job.remove();
         throw new Error(`Failed to send message to SQS: ${error.message}`);
       }
