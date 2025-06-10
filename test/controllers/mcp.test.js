@@ -29,7 +29,7 @@ describe('MCP Controller', () => {
   let auditsController;
   let sitesController;
   let scrapeController;
-  let cruxController;
+  let cruxClient;
 
   beforeEach(() => {
     context = {
@@ -130,20 +130,20 @@ describe('MCP Controller', () => {
       }),
     };
 
-    cruxController = {
-      getCRUXDataByURL: sandbox.stub().resolves(ok({
+    cruxClient = {
+      fetchCruxData: sandbox.stub().resolves({
         key: { url: 'https://example.com', formFactor: 'DESKTOP' },
         metrics: {
           first_contentful_paint: { percentiles: { p75: 1000 } },
         },
-      })),
+      }),
     };
 
     const registry = buildRegistry({
       auditsController,
       sitesController,
       scrapeController,
-      cruxController,
+      cruxClient,
       context,
     });
     mcpController = McpController(context, registry);

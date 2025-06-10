@@ -57,4 +57,12 @@ export async function fetchCruxData(params) {
   const json = await response.json();
   return json.record;
 }
+
+export default function CruxClient(context) {
+  const apiKey = context?.env?.CRUX_API_KEY;
+
+  return {
+    fetchCruxData: async (params) => fetchCruxData({ ...params, apiKey }),
+  };
+}
 /* c8 ignore end */

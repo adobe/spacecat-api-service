@@ -11,10 +11,10 @@
  */
 
 import { z } from 'zod';
-import { createProxyTool } from '../../../utils/jsonrpc.js';
+import { withRpcErrorBoundary } from '../../../utils/jsonrpc.js';
 
-export function createCruxTools(cruxController) {
-  const getCRUXDataByURLTool = createProxyTool({
+export function createCruxTools(cruxClient) {
+  const getCRUXDataByURLTool = {
     annotations: {
       title: 'Get CRUX Data By URL',
       readOnlyHint: true,
@@ -33,9 +33,17 @@ export function createCruxTools(cruxController) {
       url: z.string().url().describe('The URL of the page'),
       formFactor: z.enum(['desktop', 'mobile']).describe('The form factor'),
     }),
-    fetchFn: (params) => cruxController.getCRUXDataByURL({ params }),
-    notFoundMessage: ({ url, formFactor }) => `CRUX data for URL ${url} and form factor ${formFactor} not found`,
-  });
+    handler: async (args) => withRpcErrorBoundary(async () => {
+      const { url, formFactor } = args;
+      const cruxData = await cruxClient.fetchCruxData({ url, formFactor });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(cruxData),
+        }],
+      };
+    }, args),
+  };
 
   return {
     getCRUXDataByURL: getCRUXDataByURLTool,

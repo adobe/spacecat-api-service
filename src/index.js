@@ -45,7 +45,6 @@ import ExperimentsController from './controllers/experiments.js';
 import HooksController from './controllers/hooks.js';
 import SlackController from './controllers/slack.js';
 import SitesAuditsToggleController from './controllers/sites-audits-toggle.js';
-import CRUXController from './controllers/crux.js';
 import trigger from './controllers/trigger.js';
 
 // prevents webpack build error
@@ -65,6 +64,7 @@ import DemoController from './controllers/demo.js';
 import ScrapeController from './controllers/scrape.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
+import CruxClient from './support/crux-client.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -116,14 +116,14 @@ async function run(request, context) {
     const demoController = DemoController(context);
     const scrapeController = ScrapeController(context);
     const fixesController = new FixesController(context);
-    const cruxController = CRUXController(context);
+    const cruxClient = CruxClient(context);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
       auditsController,
       sitesController,
       scrapeController,
-      cruxController,
+      cruxClient,
       context,
     });
     const mcpController = McpController(context, mcpRegistry);
@@ -149,7 +149,6 @@ async function run(request, context) {
       scrapeController,
       mcpController,
       fixesController,
-      cruxController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

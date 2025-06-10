@@ -31,13 +31,14 @@ import utilTools from './registry/tools/utils.js';
  * @param {object} deps.sitesController – instance of the Sites controller.
  * @param {object} deps.scrapeController – instance of the Scrape controller.
  * @param {object} deps.context – the context object.
+ * @param {object} [deps.cruxClient] – optional mock crux client for testing.
  * @returns {{ tools: Record<string,object>, resources: object, prompts: object }}
  */
 export default function buildRegistry({
   auditsController,
   sitesController,
   scrapeController,
-  cruxController,
+  cruxClient,
   context,
 } = {}) {
   const tools = {
@@ -45,7 +46,7 @@ export default function buildRegistry({
     ...createAuditTools(auditsController),
     ...createSiteTools(sitesController, context),
     ...createScrapeContentTools(scrapeController, context),
-    ...createCruxTools(cruxController),
+    ...createCruxTools(cruxClient, context),
   };
 
   const resources = {
