@@ -13,12 +13,9 @@
 /* c8 ignore start */
 
 import { createProxyResource } from '../../../utils/jsonrpc.js';
+import { getAllBundles } from '../../../utils/bundles.js';
 
-export function createBundleResources(bundleController) {
-  if (!bundleController) {
-    return {};
-  }
-
+export function createBundleResources() {
   return {
     getAllBundles: createProxyResource({
       name: 'getAllBundles',
@@ -33,7 +30,7 @@ export function createBundleResources(bundleController) {
       uriTemplate: 'spacecat-data://bundles/{url}/{domainkey}/{startdate}/{enddate}/{aggregation}',
       fetchFn: ({
         url, domainkey, startdate, enddate, aggregation,
-      }) => bundleController.getAllBundles({
+      }) => getAllBundles({
         params: {
           url, domainkey, startdate, enddate, aggregation,
         },

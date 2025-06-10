@@ -16,8 +16,6 @@ import {
   badRequest, ok,
 } from '@adobe/spacecat-shared-http-utils';
 
-import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
-
 import { series, DataChunks, utils } from '@adobe/rum-distiller';
 
 export async function loadBundles(url, date, domainkey) {
@@ -26,6 +24,11 @@ export async function loadBundles(url, date, domainkey) {
   const data = await resp.json();
 
   return data;
+}
+
+export function errorsFunc(bundle) {
+  if (!bundle.events || !Array.isArray(bundle.events)) return 0;
+  return bundle.events.filter((e) => e.checkpoint === 'error').length * (bundle.weight || 1);
 }
 
 function filterBundlesByUrl(url, allBundles) {
@@ -97,7 +100,6 @@ export async function getStatistic(url, dataChunks, aggregation) {
   }
 
   let aggHandler;
-
   if (aggregation === 'pageviews') {
     aggHandler = series.pageViews;
   } else if (aggregation === 'visits') {
@@ -118,10 +120,13 @@ export async function getStatistic(url, dataChunks, aggregation) {
     aggHandler = series.ttfb;
   } else if (aggregation === 'engagement') {
     aggHandler = series.engagement;
+  } else if (aggregation === 'errors') {
+    aggHandler = errorsFunc; // custom function you defined
   } else {
     throw new Error(`Unsupported aggregation: ${aggregation}`);
   }
 
+  // Preprocess metrics
   dataChunks.forEach((chunk) => {
     // eslint-disable-next-line no-param-reassign
     chunk.rumBundles = chunk.rumBundles.map(utils.addCalculatedProps);
@@ -133,60 +138,104 @@ export async function getStatistic(url, dataChunks, aggregation) {
   d.addSeries(aggregation, aggHandler);
   d.group((b) => b.url);
 
-  const resultList = [];
-  for (const [urlL, metrics] of Object.entries(d.aggregates)) {
-    const metric = metrics[aggregation];
-    if (metric && metric.count > 0) {
-      resultList.push({
-        urlL,
-        count: metric.count,
-        sum: metric.sum,
-        mean: metric.mean,
-        p50: metric.percentile(50),
-        p75: metric.percentile(75),
-      });
+  // pre-compute visits and errors for all bundles
+  const visitMap = {};
+  const errorMap = {};
+
+  for (const b of d.filteredIn) {
+    let parsed;
+    try {
+      parsed = new URL(b.url).href;
+    } catch {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    // eslint-disable-next-line no-continue
+    if (!b.visit) continue;
+
+    visitMap[parsed] = (visitMap[parsed] || 0) + 1;
+
+    if ((b.events || []).some((e) => e.checkpoint === 'error')) {
+      errorMap[parsed] = (errorMap[parsed] || 0) + 1;
     }
   }
+
+  const resultList = [];
+
+  for (const [urlL, metrics] of Object.entries(d.aggregates)) {
+    const metric = metrics[aggregation];
+    // eslint-disable-next-line no-continue
+    if (!metric || metric.count === 0) continue;
+
+    const result = {
+      urlL,
+      count: metric.count,
+      sum: metric.sum,
+      mean: metric.mean,
+      p50: metric.percentile?.(50),
+      p75: metric.percentile?.(75),
+    };
+
+    // Add error details if requested
+    if (aggregation === 'errors') {
+      const errors = [];
+
+      for (const bundle of d.filteredIn) {
+        let parsedUrl;
+        try {
+          parsedUrl = new URL(bundle.url).href;
+        } catch {
+          // eslint-disable-next-line no-continue
+          continue;
+        }
+
+        // eslint-disable-next-line no-continue
+        if (parsedUrl !== urlL) continue;
+
+        for (const event of bundle.events || []) {
+          if (event.checkpoint === 'error') {
+            errors.push({
+              source: String(event.source || '').slice(0, 500),
+              target: String(event.target || '').slice(0, 500),
+              timeDelta: event.timeDelta ?? null,
+            });
+          }
+        }
+      }
+
+      result.errors = errors;
+    }
+
+    // ➕ Always include errorRate
+    const visits = visitMap[urlL] || 0;
+    const errors = errorMap[urlL] || 0;
+    result.errorRate = visits > 0 ? (errors / visits) * 100 : 0;
+
+    resultList.push(result);
+  }
+
   return resultList;
 }
 
 /**
- * Bundles controller.
- * @param {object} ctx - Context object.
- * @returns {object} Bundles controller.
- * @constructor
- */
-function BundlesController(ctx) {
-  if (!isNonEmptyObject(ctx)) {
-    throw new Error('Context required');
-  }
-
-  /**
  * Gets all bundles for a given url, and date range.
  *
  * @returns {Promise<Response>} Array of bundles response.
  */
-  const getAllBundles = async (context) => {
-    const url = context.params?.url || undefined;
-    const domainkey = context.params?.domainkey || undefined;
-    const startDate = context.params?.startdate || undefined;
-    const endDate = context.params?.enddate || undefined;
-    const aggregation = context.params?.aggregation;
+export async function getAllBundles(context) {
+  const url = context.params?.url || undefined;
+  const domainkey = context.params?.domainkey || undefined;
+  const startDate = context.params?.startdate || undefined;
+  const endDate = context.params?.enddate || undefined;
+  const aggregation = context.params?.aggregation;
 
-    if (!url || !domainkey || !aggregation) {
-      return badRequest('URL, domainKey, and aggregation are required');
-    }
+  if (!url || !domainkey || !aggregation) {
+    return badRequest('URL, domainKey, and aggregation are required');
+  }
 
-    const dataChunks = await getDataChunks(url, domainkey, startDate, endDate, aggregation);
-    const stats = await getStatistic(url, dataChunks, aggregation);
-    return ok(stats);
-  };
-
-  return {
-    getAllBundles,
-  };
+  const dataChunks = await getDataChunks(url, domainkey, startDate, endDate, aggregation);
+  const stats = await getStatistic(url, dataChunks, aggregation);
+  return ok(stats);
 }
-
-export default BundlesController;
 
 /* c8 ignore end */

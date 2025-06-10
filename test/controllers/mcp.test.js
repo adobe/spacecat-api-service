@@ -165,7 +165,6 @@ describe('MCP Controller', () => {
       auditsController,
       sitesController,
       scrapeController,
-      bundleController,
       context,
     });
     mcpController = McpController(context, registry);
@@ -546,16 +545,12 @@ describe('MCP Controller', () => {
 
     context.data = payload;
 
-    const resp = await mcpController.handleRpc(context);
+    const resp = await bundleController.getAllBundles(context);
 
     expect(resp.status).to.equal(200);
 
     const body = await resp.json();
-    expect(body).to.have.property('result');
-
-    const [first] = body.result.contents;
-    expect(first).to.have.property('uri', `spacecat-data://bundles/${url}/${domainkey}/${startdate}/${enddate}/${aggregation}`);
-    expect(JSON.parse(first.text)).to.deep.equal([
+    expect(body).to.deep.equal([
       {
         count: 31,
         mean: 100,

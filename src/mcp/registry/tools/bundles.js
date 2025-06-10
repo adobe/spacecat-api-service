@@ -14,12 +14,9 @@
 
 import { z } from 'zod';
 import { createProxyTool } from '../../../utils/jsonrpc.js';
+import { getAllBundles } from '../../../utils/bundles.js';
 
-export function createBundlesTools(bundleController) {
-  if (!bundleController) {
-    return {};
-  }
-
+export function createBundlesTools() {
   const createRUMBundlesStatsTool = createProxyTool({
     annotations: {
       title: 'Get RUM Bundle Stats by URL and Date Range',
@@ -37,7 +34,7 @@ export function createBundlesTools(bundleController) {
       + '</important_notes>\n',
     inputSchema: z
       .object({
-        url: z.string().url().describe('The full URL to get data for, including path if needed'),
+        url: z.string().describe('The full URL to get data for, including path if needed'),
         domainkey: z.string().describe('The domain key used for authorization and bundle access'),
         startdate: z.string().describe('Start date in YYYY-MM-DD format'),
         enddate: z.string().describe('End date in YYYY-MM-DD format'),
@@ -59,7 +56,7 @@ export function createBundlesTools(bundleController) {
       .strict(),
     fetchFn: ({
       url, domainkey, startdate, enddate, aggregation,
-    }) => bundleController.getAllBundles({
+    }) => getAllBundles({
       params: {
         url, domainkey, startdate, enddate, aggregation,
       },

@@ -38,7 +38,6 @@ export default function buildRegistry({
   auditsController,
   sitesController,
   scrapeController,
-  bundleController,
   context,
 } = {}) {
   const tools = {
@@ -46,14 +45,14 @@ export default function buildRegistry({
     ...createAuditTools(auditsController),
     ...createSiteTools(sitesController, context),
     ...createScrapeContentTools(scrapeController, context),
-    ...createBundlesTools(bundleController),
+    ...createBundlesTools(),
   };
 
   const resources = {
     ...createAuditResources(auditsController),
     ...createSiteResources(sitesController, context),
     ...createScrapeContentResources(scrapeController, context),
-    ...createBundleResources(bundleController),
+    ...createBundleResources(),
   };
 
   return {

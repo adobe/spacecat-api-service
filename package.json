@@ -71,7 +71,7 @@
     "@adobe/helix-shared-wrap": "2.0.2",
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.27",
-    "@adobe/rum-distiller": "^1.16.3",
+    "@adobe/rum-distiller": "1.16.3",
     "@adobe/spacecat-shared-brand-client": "1.1.11",
     "@adobe/spacecat-shared-data-access": "2.23.3",
     "@adobe/spacecat-shared-gpt-client": "1.5.14",
