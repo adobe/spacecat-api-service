@@ -17,6 +17,9 @@ import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 
+import { SecretsManagerClient, CreateSecretCommand } from '@aws-sdk/client-secrets-manager';
+
+
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
