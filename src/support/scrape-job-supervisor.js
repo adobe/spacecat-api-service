@@ -105,7 +105,7 @@ function ScrapeJobSupervisor(services, config) {
     initiatedBy,
     customHeaders = null,
   ) {
-    return ScrapeJob.create({
+    const jobData = {
       baseURL: determineBaseURL(urls),
       scrapeQueueId,
       hashedApiKey,
@@ -115,7 +115,9 @@ function ScrapeJobSupervisor(services, config) {
       status: ScrapeJobModel.ScrapeJobStatus.RUNNING,
       initiatedBy,
       customHeaders,
-    });
+    };
+    log.info(`Creating a new scrape job. Job data: ${JSON.stringify(jobData)}`);
+    return ScrapeJob.create(jobData);
   }
 
   /**
