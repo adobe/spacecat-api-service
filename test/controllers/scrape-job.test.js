@@ -161,7 +161,7 @@ describe('ScrapeJobController tests', () => {
       scrapeQueueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
       options: {
         enableJavascript: true,
-        hideConsentBanner: false,
+        hideConsentBanners: false,
       },
       maxUrlsPerJob: 3,
     };
@@ -424,7 +424,7 @@ describe('ScrapeJobController tests', () => {
 
       expect(importJob.options).to.deep.equal({
         enableJavascript: true,
-        hideConsentBanner: false,
+        hideConsentBanners: false,
       });
     });
 
