@@ -107,6 +107,7 @@ describe('Access Control Util', () => {
           isAdmin: () => false,
           hasOrganization: () => true,
           hasScope: () => true,
+          getScopes: () => [{ name: 'user' }],
         },
       },
     };
@@ -226,6 +227,7 @@ describe('Access Control Util', () => {
       mockAuthInfo = {
         getType: () => 'jwt',
         isAdmin: () => false,
+        getScopes: () => [],
         hasOrganization: sinon.stub(),
         hasScope: sinon.stub(),
       };
@@ -310,6 +312,108 @@ describe('Access Control Util', () => {
       expect(mockAuthInfo.hasOrganization).to.have.been.calledWith('test-org-id');
       expect(mockAuthInfo.hasScope).to.not.have.been.called;
       expect(result).to.be.false;
+    });
+  });
+
+  describe('IMS User Access Control', () => {
+    it('verifies access control for IMS user with user scope and tenant', async () => {
+      const authInfo = new AuthInfo()
+        .withType('ims')
+        .withScopes([{ name: 'user' }])
+        .withProfile({
+          tenants: [{
+            id: 'org-1',
+          }],
+          is_admin: false,
+        })
+        .withAuthenticated(true);
+
+      const contextForIMS = { attributes: { authInfo } };
+      const accessControl = AccessControlUtil.fromContext(contextForIMS);
+
+      // Verify IMS specific checks
+      expect(accessControl.isAccessTypeJWT()).to.be.false;
+      expect(accessControl.isScopeAdmin()).to.be.false;
+      expect(accessControl.hasAdminAccess()).to.be.false;
+
+      // Test access to site from different org
+      const site = {
+        getOrganization: async () => ({
+          getImsOrgId: () => 'org-2',
+        }),
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      const hasAccess = await accessControl.hasAccess(site);
+      expect(hasAccess).to.be.false;
+
+      // Test access to site from same org
+      const siteFromSameOrg = {
+        getOrganization: async () => ({
+          getImsOrgId: () => 'org-1',
+        }),
+      };
+      Object.setPrototypeOf(siteFromSameOrg, Site.prototype);
+
+      const hasAccessToSameOrg = await accessControl.hasAccess(siteFromSameOrg);
+      expect(hasAccessToSameOrg).to.be.true;
+    });
+  });
+
+  describe('Organization Access Control', () => {
+    it('verifies access control for IMS user with admin scope', async () => {
+      const authInfo = new AuthInfo()
+        .withType('ims')
+        .withScopes([{ name: 'admin' }])
+        .withAuthenticated(true);
+
+      const contextForIMS = { attributes: { authInfo } };
+      const accessControl = AccessControlUtil.fromContext(contextForIMS);
+
+      // Test Organization instance
+      const org = {
+        getImsOrgId: () => 'org-1',
+      };
+      Object.setPrototypeOf(org, Organization.prototype);
+
+      const hasAccess = await accessControl.hasAccess(org);
+      expect(hasAccess).to.be.true;
+
+      // Test Organization instance with different org
+      const differentOrg = {
+        getImsOrgId: () => 'org-2',
+      };
+      Object.setPrototypeOf(differentOrg, Organization.prototype);
+
+      const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
+      expect(hasAccessToDifferentOrg).to.be.true;
+    });
+
+    it('should return true for hasAdminAccess when auth type is foo', async () => {
+      const authInfo = new AuthInfo()
+        .withType('foo')
+        .withAuthenticated(true);
+
+      const contextForIMS = { attributes: { authInfo } };
+      const accessControl = AccessControlUtil.fromContext(contextForIMS);
+
+      // Test Organization instance
+      const org = {
+        getImsOrgId: () => 'org-1',
+      };
+      Object.setPrototypeOf(org, Organization.prototype);
+
+      const hasAccess = await accessControl.hasAccess(org);
+      expect(hasAccess).to.be.true;
+
+      // Test Organization instance with different org
+      const differentOrg = {
+        getImsOrgId: () => 'org-2',
+      };
+      Object.setPrototypeOf(differentOrg, Organization.prototype);
+
+      const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
+      expect(hasAccessToDifferentOrg).to.be.true;
     });
   });
 });
