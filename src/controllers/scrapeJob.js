@@ -186,6 +186,7 @@ function ScrapeJobController(context) {
       // TODO: remove adminFlag once we have a proper auth flow
       let adminFlag = false;
       adminFlag = multipartFormData?.adminFlag;
+      log.info(`scrape-job-adminFlag: ${adminFlag}`);
 
       // The API scope scrapes.write is required to create a new scrape job
       if (!adminFlag) {
