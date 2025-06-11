@@ -64,6 +64,23 @@ function ScrapeJobController(context) {
     env,
   };
 
+  // TODO: remove adminFlag once we have a proper auth flow
+  let adminFlag = false;
+  adminFlag = context?.data?.adminFlag;
+  log.info(`scrape-job-adminFlag: ${adminFlag}`);
+  if (adminFlag) {
+    attributes.authInfo.profile = {
+      getScopes: () => [
+        {
+          name: SCOPE.ALL_DOMAINS,
+        },
+      ],
+      getName: () => 'Test User',
+      getImsOrgId: () => '1234567890',
+      getImsUserId: () => '1234567890',
+    };
+  }
+
   let scrapeConfiguration = {};
   try {
     scrapeConfiguration = JSON.parse(env.SCRAPE_JOB_CONFIGURATION);
@@ -81,7 +98,7 @@ function ScrapeJobController(context) {
 
   function validateRequestData(data) {
     if (!isObject(data)) {
-      throw new ErrorWithStatusCode('Invalid request: missing multipart/form-data request data', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode('Invalid request: missing application/json request data', STATUS_BAD_REQUEST);
     }
 
     if (!Array.isArray(data.urls) || !data.urls.length > 0) {
@@ -120,6 +137,10 @@ function ScrapeJobController(context) {
    */
   function validateAccessScopes(scopes) {
     log.debug(`validating scopes: ${scopes}`);
+
+    if (adminFlag) {
+      return;
+    }
 
     try {
       auth.checkScopes(scopes);
@@ -174,58 +195,34 @@ function ScrapeJobController(context) {
   /**
    * Create and start a new scrape job.
    * @param {UniversalContext} requestContext - The context of the universal serverless function.
-   * @param {object} requestContext.multipartFormData - Parsed multipart/form-data request data.
+   * @param {object} requestContext.data - Parsed json request data.
    * @param {object} requestContext.pathInfo.headers - HTTP request headers.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createScrapeJob(requestContext) {
-    const { multipartFormData, pathInfo: { headers } } = requestContext;
+    const { data, pathInfo: { headers } } = requestContext;
     const { 'x-api-key': scrapeApiKey, 'user-agent': userAgent } = headers;
 
     try {
-      // TODO: remove adminFlag once we have a proper auth flow
-      let adminFlag = false;
-      adminFlag = multipartFormData?.adminFlag;
-      log.info(`scrape-job-adminFlag: ${adminFlag}`);
-      log.info(`scrape-job-data: ${JSON.stringify(multipartFormData)}`);
-
       // The API scope scrapes.write is required to create a new scrape job
-      if (!adminFlag) {
-        validateAccessScopes([SCOPE.WRITE]);
-      }
-      validateRequestData(multipartFormData);
+      validateAccessScopes([SCOPE.WRITE]);
+      validateRequestData(data);
 
-      let profile;
       let initiatedBy = {};
-      if (!adminFlag) {
-        const { authInfo } = attributes;
-        profile = authInfo.profile;
+      const { authInfo: { profile } } = attributes;
 
-        if (profile) {
-          initiatedBy = {
-            apiKeyName: profile.getName(),
-            imsOrgId: profile.getImsOrgId(),
-            imsUserId: profile.getImsUserId(),
-            userAgent,
-          };
-        }
-      } else {
-        profile = {
-          name: 'Test User',
-          imsOrgId: '1234567890',
-          imsUserId: '1234567890',
+      if (profile) {
+        initiatedBy = {
+          apiKeyName: profile.getName(),
+          imsOrgId: profile.getImsOrgId(),
+          imsUserId: profile.getImsUserId(),
           userAgent,
-          getScopes: () => [
-            {
-              name: SCOPE.ALL_DOMAINS,
-            },
-          ],
         };
       }
 
       const {
         urls, options, customHeaders, processingType,
-      } = multipartFormData;
+      } = data;
 
       const scopes = profile.getScopes();
 

@@ -78,7 +78,7 @@ describe('ScrapeJobController tests', () => {
   const defaultHeaders = {
     'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
     'user-agent': 'Unit test',
-    'content-type': 'multipart/form-data; boundary=12345',
+    'content-type': 'application/json',
   };
 
   const exampleCustomHeaders = {
@@ -188,7 +188,7 @@ describe('ScrapeJobController tests', () => {
         },
       },
       params: {},
-      multipartFormData: {
+      data: {
         urls,
       },
     };
@@ -207,22 +207,27 @@ describe('ScrapeJobController tests', () => {
   });
 
   describe('createScrapeJob', () => {
+    beforeEach(() => {
+      delete baseContext.data.adminFlag;
+      scrapeJobController = ScrapeJobController(baseContext);
+    });
+
     it('should fail for a non-multipart/form-data request', async () => {
-      delete baseContext.multipartFormData;
+      delete baseContext.data;
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: missing multipart/form-data request data');
+      expect(response.headers.get('x-error')).to.equal('Invalid request: missing application/json request data');
     });
 
     it('should fail if processingType is provided but invalid', async () => {
-      baseContext.multipartFormData.processingType = 'invalid';
+      baseContext.data.processingType = 'invalid';
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.match(/^Invalid request: processingType must be either/);
     });
 
     it('should respond with an error code when the data format is incorrect', async () => {
-      baseContext.multipartFormData.urls = 'https://example.com/must/be/an/array';
+      baseContext.data.urls = 'https://example.com/must/be/an/array';
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
@@ -230,7 +235,7 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should fail when url is not part of the allowed domains', async () => {
-      baseContext.multipartFormData.urls = ['https://test.com/page1'];
+      baseContext.data.urls = ['https://test.com/page1'];
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
@@ -272,7 +277,7 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should respond with an error code when custom header is not an object', async () => {
-      baseContext.multipartFormData.customHeaders = JSON.stringify([42]);
+      baseContext.data.customHeaders = JSON.stringify([42]);
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
@@ -320,7 +325,7 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should reject when invalid URLs are passed in', async () => {
-      baseContext.multipartFormData.urls = ['https://example.com/page1', 'not-a-valid-url'];
+      baseContext.data.urls = ['https://example.com/page1', 'not-a-valid-url'];
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
@@ -328,7 +333,7 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should reject when an invalid options object is provided', async () => {
-      baseContext.multipartFormData.options = 'options object should be an object, not a string';
+      baseContext.data.options = 'options object should be an object, not a string';
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
@@ -336,8 +341,8 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should reject when an non-object options param is provided', async () => {
-      baseContext.multipartFormData.urls = urls;
-      baseContext.multipartFormData.options = [12345, 42];
+      baseContext.data.urls = urls;
+      baseContext.data.options = [12345, 42];
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
@@ -352,7 +357,7 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should start a new scrape job', async () => {
-      baseContext.multipartFormData.customHeaders = {
+      baseContext.data.customHeaders = {
         ...exampleCustomHeaders,
       };
       const response = await scrapeJobController.createScrapeJob(baseContext);
@@ -410,7 +415,7 @@ describe('ScrapeJobController tests', () => {
 
     it('should pick up the default options when none are provided', async () => {
       baseContext.env.SCRAPE_JOB_CONFIGURATION = JSON.stringify(scrapeJobConfiguration);
-      baseContext.multipartFormData.customHeaders = exampleCustomHeaders;
+      baseContext.data.customHeaders = exampleCustomHeaders;
       const response = await scrapeJobController.createScrapeJob(baseContext);
       const importJob = await response.json();
 
@@ -424,7 +429,7 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should fail when the number of URLs exceeds the maximum allowed', async () => {
-      baseContext.multipartFormData.urls = [
+      baseContext.data.urls = [
         'https://example.com/page1',
         'https://example.com/page2',
         'https://example.com/page3',
@@ -438,7 +443,7 @@ describe('ScrapeJobController tests', () => {
     it('should fail when the number of URLs exceeds the (default) maximum allowed', async () => {
       delete scrapeJobConfiguration.maxUrlsPerJob; // Should fall back to 1
       baseContext.env.SCRAPE_JOB_CONFIGURATION = JSON.stringify(scrapeJobConfiguration);
-      baseContext.multipartFormData.urls = [
+      baseContext.data.urls = [
         'https://example.com/page1',
         'https://example.com/page2',
       ];
@@ -449,14 +454,15 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should fail when URLs are empty', async () => {
-      baseContext.multipartFormData.urls = [];
+      baseContext.data.urls = [];
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
 
     it('should bypass auth check when adminFlag is true', async () => {
-      baseContext.multipartFormData.adminFlag = true;
+      baseContext.data.adminFlag = true;
+      scrapeJobController = ScrapeJobController(baseContext);
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
     });
