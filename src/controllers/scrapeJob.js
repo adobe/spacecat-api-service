@@ -54,7 +54,7 @@ function ScrapeJobController(context) {
   };
 
   const {
-    dataAccess, sqs, s3, log, env, auth, attributes,
+    dataAccess, sqs, s3, log, env, auth, // attributes,
   } = context;
   const services = {
     dataAccess,
@@ -184,19 +184,32 @@ function ScrapeJobController(context) {
 
     try {
       // The API scope scrapes.write is required to create a new scrape job
-      validateAccessScopes([SCOPE.WRITE]);
+      // TODO: re-add scoped auth once it's set up on DB-side
+      // validateAccessScopes([SCOPE.WRITE]);
       validateRequestData(multipartFormData);
 
-      const { authInfo: { profile } } = attributes;
-      let initiatedBy = {};
-      if (profile) {
-        initiatedBy = {
-          apiKeyName: profile.getName(),
-          imsOrgId: profile.getImsOrgId(),
-          imsUserId: profile.getImsUserId(),
-          userAgent,
-        };
-      }
+      // const { authInfo: { profile } } = attributes;
+      // let initiatedBy = {};
+      // if (profile) {
+      //   initiatedBy = {
+      //     apiKeyName: profile.getName(),
+      //     imsOrgId: profile.getImsOrgId(),
+      //     imsUserId: profile.getImsUserId(),
+      //     userAgent,
+      //   };
+      // }
+      // TEMPORARY Profile, allowing all domains for testing
+      const profile = {
+        name: 'Test User',
+        imsOrgId: '1234567890',
+        imsUserId: '1234567890',
+        userAgent,
+        getScopes: () => [
+          {
+            name: SCOPE.ALL_DOMAINS,
+          },
+        ],
+      };
 
       const {
         urls, options, customHeaders, processingType,
@@ -233,7 +246,7 @@ function ScrapeJobController(context) {
         scrapeApiKey,
         processingType,
         mergedOptions,
-        initiatedBy,
+        // initiatedBy,
         customHeaders,
       );
       return createResponse(ScrapeJobDto.toJSON(job), STATUS_ACCEPTED);
