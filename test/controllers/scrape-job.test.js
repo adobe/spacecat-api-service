@@ -454,6 +454,12 @@ describe('ScrapeJobController tests', () => {
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
+
+    it('should bypass auth check when adminFlag is true', async () => {
+      baseContext.multipartFormData.adminFlag = true;
+      const response = await scrapeJobController.createScrapeJob(baseContext);
+      expect(response.status).to.equal(202);
+    });
   });
 
   describe('getScrapeJobProgress', () => {
