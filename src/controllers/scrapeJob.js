@@ -187,6 +187,7 @@ function ScrapeJobController(context) {
       let adminFlag = false;
       adminFlag = multipartFormData?.adminFlag;
       log.info(`scrape-job-adminFlag: ${adminFlag}`);
+      log.info(`scrape-job-data: ${JSON.stringify(multipartFormData)}`);
 
       // The API scope scrapes.write is required to create a new scrape job
       if (!adminFlag) {
