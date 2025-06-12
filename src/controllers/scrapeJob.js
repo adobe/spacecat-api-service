@@ -65,8 +65,9 @@ function ScrapeJobController(context) {
   };
 
   // TODO: remove adminFlag once we have a proper auth flow
+  const { pathInfo: { headers } } = context;
   let adminFlag = false;
-  adminFlag = context?.data?.adminFlag;
+  adminFlag = context?.data?.adminFlag || headers['x-admin-flag'] === 'true';
   log.info(`scrape-job-adminFlag: ${adminFlag}`);
   if (adminFlag) {
     attributes.authInfo.profile = {
@@ -200,7 +201,7 @@ function ScrapeJobController(context) {
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createScrapeJob(requestContext) {
-    const { data, pathInfo: { headers } } = requestContext;
+    const { data } = requestContext;
     const { 'x-api-key': scrapeApiKey, 'user-agent': userAgent } = headers;
 
     try {
