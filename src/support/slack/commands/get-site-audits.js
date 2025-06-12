@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -24,13 +24,11 @@ const PHRASES = ['get site-audits'];
 /**
  * Formats the audit status list showing enabled and disabled audit types.
  *
- * @param {Array<Object>} auditResults - Array of audit result objects with auditType and isEnabled.
+ * @param {Array<Object>} enabledAudits - Array of enabled audit result objects with auditType.
+ * @param {Array<Object>} disabledAudits - Array of disabled audit result objects with auditType.
  * @returns {string} The formatted audit status list.
  */
-export function formatAuditStatus(auditResults) {
-  const enabledAudits = auditResults.filter((result) => result.isEnabled);
-  const disabledAudits = auditResults.filter((result) => !result.isEnabled);
-
+export function formatAuditStatus(enabledAudits, disabledAudits) {
   let output = '';
 
   if (enabledAudits.length > 0) {
@@ -118,8 +116,11 @@ function GetSiteAuditsCommand(context) {
         };
       });
 
-      const enabledCount = auditResults.filter((result) => result.isEnabled).length;
-      const disabledCount = auditResults.filter((result) => !result.isEnabled).length;
+      const enabledAudits = auditResults.filter((result) => result.isEnabled);
+      const disabledAudits = auditResults.filter((result) => !result.isEnabled);
+
+      const enabledCount = enabledAudits.length;
+      const disabledCount = disabledAudits.length;
 
       const textSections = [{
         text: `
@@ -127,7 +128,7 @@ function GetSiteAuditsCommand(context) {
 
 📊 *Summary:* ${enabledCount} enabled, ${disabledCount} disabled (${auditTypes.length} total audit types)
 
-${formatAuditStatus(auditResults)}
+${formatAuditStatus(enabledAudits, disabledAudits)}
   `,
       }];
 
