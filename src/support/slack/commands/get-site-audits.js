@@ -19,7 +19,7 @@ import {
   sendMessageBlocks,
 } from '../../../utils/slack/base.js';
 
-const PHRASES = ['get site audits'];
+const PHRASES = ['get site-audits'];
 
 /**
  * Formats the audit status list showing enabled and disabled audit types.

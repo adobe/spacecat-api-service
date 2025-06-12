@@ -61,7 +61,7 @@ describe('GetSiteAuditsCommand', () => {
       expect(command.id).to.equal('get-site-audits');
       expect(command.name).to.equal('Get all audits for a site');
       expect(command.description).to.equal('Retrieves all audit types (enabled and disabled) for a site by a given base URL');
-      expect(command.phrases).to.deep.equal(['get site audits']);
+      expect(command.phrases).to.deep.equal(['get site-audits']);
     });
   });
 
