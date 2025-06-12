@@ -14,8 +14,10 @@ import {
   isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
-  badRequest, internalServerError, notFound, ok, accepted,
+  badRequest, internalServerError, notFound, ok, accepted, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -36,7 +38,7 @@ function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess, sqs } = ctx;
+  const { dataAccess, sqs, s3 } = ctx;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
@@ -113,6 +115,21 @@ function PreflightController(ctx, log, env) {
         throw new Error(`No site found for base URL: ${baseURL}`);
       }
 
+      // Get promise token for AEM CS sites (similar to suggestions controller)
+      let promiseTokenResponse;
+      if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+        try {
+          promiseTokenResponse = await getCSPromiseToken(context);
+          log.info('Successfully retrieved promise token for AEM CS site');
+        } catch (e) {
+          log.error(`Failed to get promise token: ${e.message}`);
+          if (e instanceof ErrorWithStatusCode) {
+            return badRequest(e.message);
+          }
+          return createResponse({ message: 'Error getting promise token' }, 500);
+        }
+      }
+
       // Create a new async job
       const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
@@ -121,6 +138,7 @@ function PreflightController(ctx, log, env) {
             siteId: site.getId(),
             urls: data.urls,
             step,
+            promiseToken: promiseTokenResponse, // Include promise token in job metadata
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -132,10 +150,10 @@ function PreflightController(ctx, log, env) {
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
           jobId: job.getId(),
           type: 'preflight',
+          promiseToken: promiseTokenResponse, // Include promise token in SQS message
         });
       } catch (error) {
         log.error(`Failed to send message to SQS: ${error.message}`);
-        // roll back the job
         await job.remove();
         throw new Error(`Failed to send message to SQS: ${error.message}`);
       }
