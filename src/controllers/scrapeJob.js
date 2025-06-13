@@ -18,7 +18,6 @@ import {
 import {
   isIsoDate, isObject, isValidUrl,
 } from '@adobe/spacecat-shared-utils';
-import psl from 'psl';
 import { ScrapeJob as ScrapeJobModel } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ScrapeJobSupervisor from '../support/scrape-job-supervisor.js';
@@ -38,23 +37,8 @@ import { STATUS_NOT_FOUND } from '../utils/constants.js';
  * @constructor
  */
 function ScrapeJobController(context) {
-  /**
-   * The scrape controller has a number of scopes that are required to access different parts of the
-   * scrape functionality. These scopes are used to validate the authenticated user has the required
-   * level of access.
-   * @type {{READ: 'scrapes.read', ALL_DOMAINS: 'scrapes.all_domains',
-   * READ_ALL: 'scrapes.read_all', WRITE: 'scrapes.write'}}
-   */
-  const SCOPE = {
-    READ: 'scrapes.read', // allows users to read the scrape jobs created with their API key
-    WRITE: 'scrapes.write', // allows users to create new scrape jobs
-    READ_ALL: 'scrapes.read_all', // allows users to view all scrape jobs
-    ALL_DOMAINS: 'scrapes.all_domains', // allows users to scrape across any domain
-    DELETE: 'scrapes.delete', // access to delete scrape jobs
-  };
-
   const {
-    dataAccess, sqs, s3, log, env, auth, attributes,
+    dataAccess, sqs, s3, log, env,
   } = context;
   const services = {
     dataAccess,
@@ -64,24 +48,6 @@ function ScrapeJobController(context) {
     env,
   };
 
-  // TODO: remove adminFlag once we have a proper auth flow
-  const { pathInfo: { headers } } = context;
-  let adminFlag = false;
-  adminFlag = context?.data?.adminFlag || headers['x-admin-flag'] === 'true';
-  log.info(`scrape-job-adminFlag: ${adminFlag}`);
-  if (adminFlag) {
-    attributes.authInfo.profile = {
-      getScopes: () => [
-        {
-          name: SCOPE.ALL_DOMAINS,
-        },
-      ],
-      getName: () => 'Test User',
-      getImsOrgId: () => '1234567890',
-      getImsUserId: () => '1234567890',
-    };
-  }
-
   let scrapeConfiguration = {};
   try {
     scrapeConfiguration = JSON.parse(env.SCRAPE_JOB_CONFIGURATION);
@@ -89,13 +55,15 @@ function ScrapeJobController(context) {
     log.error(`Failed to parse scrape job configuration: ${error.message}`);
   }
 
+  const { pathInfo: { headers } } = context;
+
   const scrapeSupervisor = new ScrapeJobSupervisor(services, scrapeConfiguration);
   const { maxUrlsPerJob = 1 } = scrapeConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
   const STATUS_ACCEPTED = 202;
-  const STATUS_UNAUTHORIZED = 401;
+  // const STATUS_UNAUTHORIZED = 401;
 
   function validateRequestData(data) {
     if (!isObject(data)) {
@@ -131,25 +99,6 @@ function ScrapeJobController(context) {
     }
   }
 
-  /**
-   * Verify that the authenticated user has the required level of access scope.
-   * @param scopes a list of scopes to validate the user has access to.
-   * @return {object} the user profile.
-   */
-  function validateAccessScopes(scopes) {
-    log.debug(`validating scopes: ${scopes}`);
-
-    if (adminFlag) {
-      return;
-    }
-
-    try {
-      auth.checkScopes(scopes);
-    } catch (error) {
-      throw new ErrorWithStatusCode('Missing required scopes', STATUS_UNAUTHORIZED);
-    }
-  }
-
   function createErrorResponse(error) {
     return createResponse({}, error.status || 500, {
       [HEADER_ERROR]: error.message,
@@ -163,37 +112,6 @@ function ScrapeJobController(context) {
   }
 
   /**
-   * Extract the domain from a URL.
-   * @param {string} inputUrl the URL to extract the domain from.
-   * @return {string} the domain extracted from the URL.
-   */
-  function getDomain(inputUrl) {
-    const parsedUrl = new URL(inputUrl);
-    const parsedDomain = psl.parse(parsedUrl.hostname);
-    return parsedDomain.domain; // Extracts the full domain (e.g., example.co.uk)
-  }
-
-  /**
-   * Check if the URLs in urlList belong to any of the base domains.
-   * @param {string[]} urlList the list of URLs to check.
-   * @param {string[]} baseDomainList the list of base domains to check against.
-   * @return {true} if all URLs belong to an allowed base domain
-   * @throws {ErrorWithStatusCode} if any URL does not belong to an allowed base domain
-   */
-  function isUrlInBaseDomains(urlList, baseDomainList) {
-    const invalidUrls = urlList.filter((inputUrl) => {
-      const urlDomain = getDomain(inputUrl);
-      return !baseDomainList.some((baseDomain) => urlDomain === baseDomain);
-    });
-
-    if (invalidUrls.length > 0) {
-      throw new ErrorWithStatusCode(`Invalid request: URLs not allowed: ${invalidUrls.join(', ')}`, STATUS_BAD_REQUEST);
-    }
-
-    return true;
-  }
-
-  /**
    * Create and start a new scrape job.
    * @param {UniversalContext} requestContext - The context of the universal serverless function.
    * @param {object} requestContext.data - Parsed json request data.
@@ -202,45 +120,14 @@ function ScrapeJobController(context) {
    */
   async function createScrapeJob(requestContext) {
     const { data } = requestContext;
-    const { 'x-api-key': scrapeApiKey, 'user-agent': userAgent } = headers;
+    const { 'x-api-key': scrapeApiKey } = headers;
 
     try {
-      // The API scope scrapes.write is required to create a new scrape job
-      validateAccessScopes([SCOPE.WRITE]);
       validateRequestData(data);
-
-      let initiatedBy = {};
-      const { authInfo: { profile } } = attributes;
-
-      if (profile) {
-        initiatedBy = {
-          apiKeyName: profile.getName(),
-          imsOrgId: profile.getImsOrgId(),
-          imsUserId: profile.getImsUserId(),
-          userAgent,
-        };
-      }
 
       const {
         urls, options, customHeaders, processingType,
       } = data;
-
-      const scopes = profile.getScopes();
-
-      // We only check if the URLs belong to the allowed domains if the user has the write scope
-      // We do not need to check the domains for users with scope: all_domains
-      if (!scopes.some((scope) => scope.name === SCOPE.ALL_DOMAINS)) {
-        const allowedDomains = scopes
-          .filter((scope) => scope.name === SCOPE.WRITE
-            && scope.domains && scope.domains.length > 0)
-          .flatMap((scope) => scope.domains.map(getDomain));
-
-        if (allowedDomains.length === 0) {
-          throw new ErrorWithStatusCode('Missing domain information', STATUS_UNAUTHORIZED);
-        }
-
-        isUrlInBaseDomains(urls, allowedDomains);
-      }
 
       log.info(`Creating a new scrape job with ${urls.length} URLs.`);
 
@@ -256,7 +143,6 @@ function ScrapeJobController(context) {
         scrapeApiKey,
         processingType,
         mergedOptions,
-        initiatedBy,
         customHeaders,
       );
       return createResponse(ScrapeJobDto.toJSON(job), STATUS_ACCEPTED);
@@ -289,7 +175,6 @@ function ScrapeJobController(context) {
     log.debug(`Fetching scrape jobs between startDate: ${startDate} and endDate: ${endDate}.`);
 
     try {
-      validateAccessScopes([SCOPE.READ_ALL]);
       validateIsoDates(startDate, endDate);
       const jobs = await scrapeSupervisor.getScrapeJobsByDateRange(startDate, endDate);
       return ok(jobs.map((job) => ScrapeJobDto.toJSON(job)));
@@ -310,8 +195,6 @@ function ScrapeJobController(context) {
     const { jobId, scrapeApiKey } = parseRequestContext(requestContext);
 
     try {
-      // The API scope scrapes.read is required to get the scrape job status
-      validateAccessScopes([SCOPE.READ]);
       const job = await scrapeSupervisor.getScrapeJob(jobId, scrapeApiKey);
       return ok(ScrapeJobDto.toJSON(job));
     } catch (error) {
@@ -331,8 +214,6 @@ function ScrapeJobController(context) {
     const { jobId, scrapeApiKey } = parseRequestContext(requestContext);
 
     try {
-      // The API scope scrapes.read is required to get the scrape job status
-      validateAccessScopes([SCOPE.READ]);
       const job = await scrapeSupervisor.getScrapeJob(jobId, scrapeApiKey);
       if (job.getStatus() === ScrapeJobModel.ScrapeJobStatus.RUNNING) {
         throw new ErrorWithStatusCode('Job results not available yet, job status is: RUNNING', STATUS_NOT_FOUND);
@@ -360,7 +241,6 @@ function ScrapeJobController(context) {
     const { jobId, scrapeApiKey } = parseRequestContext(requestContext);
 
     try {
-      validateAccessScopes([SCOPE.READ]);
       const progress = await scrapeSupervisor.getScrapeJobProgress(jobId, scrapeApiKey);
       return ok(progress);
     } catch (error) {
@@ -370,7 +250,7 @@ function ScrapeJobController(context) {
   }
 
   /**
-   * Delete an scrape job.
+   * Delete a scrape job.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to delete.
    * @return {Promise<Response>} 204 No Content if successful, 4xx or 5xx otherwise.
@@ -379,7 +259,6 @@ function ScrapeJobController(context) {
     const { jobId, scrapeApiKey } = parseRequestContext(requestContext);
 
     try {
-      validateAccessScopes([SCOPE.DELETE]);
       await scrapeSupervisor.deleteScrapeJob(jobId, scrapeApiKey);
 
       return noContent();

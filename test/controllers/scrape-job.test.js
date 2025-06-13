@@ -92,9 +92,6 @@ describe('ScrapeJobController tests', () => {
     baseURL: 'https://www.example.com',
     hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
     scrapeQueueId: 'spacecat-scrape-queue-1',
-    initiatedBy: {
-      apiKeyName: 'Test key',
-    },
   };
 
   const exampleApiKeyMetadata = {
@@ -117,17 +114,12 @@ describe('ScrapeJobController tests', () => {
       purgeQueue: sandbox.stub(),
     };
 
-    mockAuth = {
-      checkScopes: sandbox.stub().resolves(true),
-    };
-
     mockAttributes = {
       authInfo: {
         profile: {
           getName: () => 'Test User',
           getImsOrgId: () => 'TestOrgId',
           getImsUserId: () => 'TestUserId',
-          getScopes: () => [{ name: 'scrapes.write', domains: ['https://www.example.com'] }],
         },
       },
     };
@@ -208,7 +200,6 @@ describe('ScrapeJobController tests', () => {
 
   describe('createScrapeJob', () => {
     beforeEach(() => {
-      delete baseContext.data.adminFlag;
       scrapeJobController = ScrapeJobController(baseContext);
     });
 
@@ -234,61 +225,12 @@ describe('ScrapeJobController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
     });
 
-    it('should fail when url is not part of the allowed domains', async () => {
-      baseContext.data.urls = ['https://test.com/page1'];
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-
-      expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: URLs not allowed: https://test.com/page1');
-    });
-
-    it('should fail when there are no domains listed for the user scope scrapes.write', async () => {
-      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'scrapes.write', domains: [] }];
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-
-      expect(response.status).to.equal(401);
-      expect(response.headers.get('x-error')).to.equal('Missing domain information');
-    });
-
-    it('should create an scrape job for the user scope scrapes.write', async () => {
-      baseContext.attributes.authInfo.profile.getScopes = () => [
-        { name: 'scrapes.write', domains: ['https://www.example.com'] },
-        { name: 'scrapes.read', domains: ['https://www.example.com'] },
-      ];
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-
-      expect(response.status).to.equal(202);
-    });
-
-    it('should create an scrape job for the user scope scrapes.all_domains', async () => {
-      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'scrapes.all_domains' }, { name: 'scrapes.write' }];
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-
-      expect(response.status).to.equal(202);
-    });
-
-    it('should fail when the domains listed for scrapes.write do not match the URL', async () => {
-      baseContext.attributes.authInfo.profile.getScopes = () => [{ name: 'scrapes.read', domains: ['https://www.example.com'] }, { name: 'scrapes.write', domains: ['https://www.test.com'] }];
-
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-
-      expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: URLs not allowed: https://www.example.com/page1, https://www.example.com/page2, https://www.example.com/page3');
-    });
-
     it('should respond with an error code when custom header is not an object', async () => {
       baseContext.data.customHeaders = JSON.stringify([42]);
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: customHeaders must be an object');
-    });
-
-    it('should reject when auth scopes are invalid', async () => {
-      baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-      expect(response.status).to.equal(401);
-      expect(response.headers.get('x-error')).to.equal('Missing required scopes');
     });
 
     it('should reject when no scrape queues are defined', async () => {
@@ -458,13 +400,6 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
-    });
-
-    it('should bypass auth check when adminFlag is true', async () => {
-      baseContext.data.adminFlag = true;
-      scrapeJobController = ScrapeJobController(baseContext);
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-      expect(response.status).to.equal(202);
     });
   });
 
@@ -652,26 +587,11 @@ describe('ScrapeJobController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       const responseResult = await response.json();
-      expect(responseResult[0].initiatedBy).to.deep.equal({
-        apiKeyName: 'Test key',
-      });
       expect(responseResult[0].baseURL).to.equal('https://www.example.com');
     });
   });
 
   describe('deleteScrapeJob', () => {
-    it('should fail when api key does not have the correct scopes', async () => {
-      baseContext.auth.checkScopes = sandbox.stub().throws(new Error('Invalid scopes'));
-      baseContext.params.jobId = exampleJob.scrapeJobId;
-      const response = await scrapeJobController.deleteScrapeJob(baseContext);
-
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(401);
-      expect(response.headers.get('x-error')).to.equal('Missing required scopes');
-
-      expect(mockDataAccess.ScrapeJob.findById).to.not.have.been.called;
-    });
-
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
       baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
       baseContext.params.jobId = exampleJob.scrapeJobId;

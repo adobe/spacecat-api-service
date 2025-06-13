@@ -92,7 +92,6 @@ function ScrapeJobSupervisor(services, config) {
    * @param {string} hashedApiKey - API key used to authenticate the scrape job request.
    * @param {string} processingType - The scrape handler to be used for the scrape job.
    * @param {object} options - Client provided options for the scrape job.
-   * @param initiatedBy - Details about the initiator of the scrape job.
    * @param {object} customHeaders - Custom headers to be sent with each request.
    * @returns {Promise<ScrapeJob>}
    */
@@ -102,7 +101,6 @@ function ScrapeJobSupervisor(services, config) {
     hashedApiKey,
     processingType,
     options,
-    initiatedBy,
     customHeaders = null,
   ) {
     const jobData = {
@@ -113,7 +111,6 @@ function ScrapeJobSupervisor(services, config) {
       options,
       urlCount: urls.length,
       status: ScrapeJobModel.ScrapeJobStatus.RUNNING,
-      initiatedBy,
       customHeaders,
     };
     log.info(`Creating a new scrape job. Job data: ${JSON.stringify(jobData)}`);
@@ -163,7 +160,6 @@ function ScrapeJobSupervisor(services, config) {
    * @param {Array<string>} urls - The URLs to scrape.
    * @param {string} scrapeApiKey - The API key to use for the scrape job.
    * @param {object} options - Optional configuration params for the scrape job.
-   * @param {object} initiatedBy - Details about the initiator of the scrape job.
    * @param {object} customHeaders - Optional custom headers to be sent with each request.
    * @returns {Promise<ScrapeJob>}
    */
@@ -172,7 +168,6 @@ function ScrapeJobSupervisor(services, config) {
     scrapeApiKey,
     processingType,
     options,
-    initiatedBy,
     customHeaders,
   ) {
     // Hash the API Key to ensure it is not stored in plain text
@@ -189,7 +184,6 @@ function ScrapeJobSupervisor(services, config) {
       hashedApiKey,
       processingType,
       options,
-      initiatedBy,
       customHeaders,
     );
 
@@ -197,7 +191,6 @@ function ScrapeJobSupervisor(services, config) {
       'New scrape job created:\n'
       + `- baseUrl: ${newScrapeJob.getBaseURL()}\n`
       + `- urlCount: ${urls.length}\n`
-      + `- apiKeyName: ${initiatedBy.apiKeyName}\n`
       + `- jobId: ${newScrapeJob.getId()}\n`
       + `- scrapeQueueId: ${scrapeQueueId}\n`
       + `- customHeaders: ${JSON.stringify(customHeaders)}\n`
