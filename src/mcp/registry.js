@@ -19,6 +19,8 @@ import { createSiteTools } from './registry/tools/sites.js';
 import { createAuditTools } from './registry/tools/audits.js';
 import { createScrapeContentTools } from './registry/tools/scrape-content.js';
 import utilTools from './registry/tools/utils.js';
+import { createHarTools } from './registry/tools/hars.js';
+import { createHarResource } from './registry/resources/hars.js';
 
 /**
  * Build the registry for the current request based on already-constructed
@@ -36,6 +38,7 @@ export default function buildRegistry({
   auditsController,
   sitesController,
   scrapeController,
+  harController,
   context,
 } = {}) {
   const tools = {
@@ -43,12 +46,14 @@ export default function buildRegistry({
     ...createAuditTools(auditsController),
     ...createSiteTools(sitesController, context),
     ...createScrapeContentTools(scrapeController, context),
+    ...createHarTools(harController),
   };
 
   const resources = {
     ...createAuditResources(auditsController),
     ...createSiteResources(sitesController, context),
     ...createScrapeContentResources(scrapeController, context),
+    ...createHarResource(harController),
   };
 
   return {
