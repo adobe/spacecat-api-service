@@ -38,7 +38,7 @@ function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess, sqs, s3 } = ctx;
+  const { dataAccess, sqs } = ctx;
 
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
