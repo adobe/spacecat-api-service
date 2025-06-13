@@ -64,6 +64,7 @@ import DemoController from './controllers/demo.js';
 import ScrapeController from './controllers/scrape.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
+import CruxClient from './support/crux-client.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -115,12 +116,14 @@ async function run(request, context) {
     const demoController = DemoController(context);
     const scrapeController = ScrapeController(context);
     const fixesController = new FixesController(context);
+    const cruxClient = CruxClient(context);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
       auditsController,
       sitesController,
       scrapeController,
+      cruxClient,
       context,
     });
     const mcpController = McpController(context, mcpRegistry);
