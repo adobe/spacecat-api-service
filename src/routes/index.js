@@ -177,9 +177,9 @@ export default function getRouteHandlers(
     // Scrape Jobs
     'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
     'GET /tools/scrape/jobs/:jobId': scrapeJobController.getScrapeJobStatus,
-    'DELETE /tools/scrape/jobs/:jobId': scrapeJobController.deleteScrapeJob,
     'GET /tools/scrape/jobs/:jobId/progress': scrapeJobController.getScrapeJobProgress,
-    'POST /tools/scrape/jobs/:jobId/result': scrapeJobController.getScrapeJobResult,
+    'GET /tools/scrape/jobs/:jobId/result': scrapeJobController.getScrapeJobResult,
+    'DELETE /tools/scrape/jobs/:jobId': scrapeJobController.deleteScrapeJob,
     'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs': scrapeJobController.getScrapeJobsByDateRange,
 
     // Fixes

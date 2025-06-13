@@ -281,7 +281,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'GET /tools/scrape/jobs/:jobId',
-      'POST /tools/scrape/jobs/:jobId/result',
+      'GET /tools/scrape/jobs/:jobId/result',
       'GET /tools/scrape/jobs/:jobId/progress',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
       'DELETE /tools/import/jobs/:jobId',
@@ -349,8 +349,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].paramNames).to.deep.equal(['jobId']);
-    expect(dynamicRoutes['POST /tools/scrape/jobs/:jobId/result'].handler).to.equal(mockScrapeJobController.getScrapeJobResult);
-    expect(dynamicRoutes['POST /tools/scrape/jobs/:jobId/result'].paramNames).to.deep.equal(['jobId']);
+    expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId/result'].handler).to.equal(mockScrapeJobController.getScrapeJobResult);
+    expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId/result'].paramNames).to.deep.equal(['jobId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId/progress'].handler).to.equal(mockScrapeJobController.getScrapeJobProgress);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId/progress'].paramNames).to.deep.equal(['jobId']);
   });
