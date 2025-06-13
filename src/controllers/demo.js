@@ -76,7 +76,7 @@ function DemoController(ctx) {
       skipMessage: true,
       skipStorage: false,
       options: {
-        pageLoadTimeout: 10000,
+        storagePrefix: 'consent-banner-on',
         enableJavaScript: true,
         enableAuthentication: false,
         screenshotTypes: [
@@ -89,10 +89,6 @@ function DemoController(ctx) {
       }],
     });
 
-    const waitForSelector = site.getDeliveryType() === 'aem_edge'
-      ? '.footer[data-block-status="loaded"]'
-      : undefined;
-
     // without banner
     await sqs.sendMessage(queueUrl, {
       processingType: 'default',
@@ -101,12 +97,10 @@ function DemoController(ctx) {
       skipStorage: false,
       options: {
         storagePrefix: 'consent-banner-off',
-        pageLoadTimeout: 10000,
         enableJavaScript: true,
         enableAuthentication: false,
         screenshotTypes: ['viewport'],
         hideConsentBanners: true,
-        ...(waitForSelector ? { waitForSelector } : {}),
       },
       urls: [{
         url,
