@@ -150,6 +150,7 @@ describe('Preflight Controller', () => {
         {
           jobId,
           type: 'preflight',
+          siteId: 'test-site-123',
         },
       );
     });
@@ -200,6 +201,7 @@ describe('Preflight Controller', () => {
         {
           jobId,
           type: 'preflight',
+          siteId: 'test-site-123',
         },
       );
     });
