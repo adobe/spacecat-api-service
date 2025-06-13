@@ -107,10 +107,10 @@ function PreflightController(ctx, log, env) {
       log.info(`Creating preflight job for ${data.urls.length} URLs with step: ${step}`);
 
       const url = new URL(data.urls[0]);
-      const baseURL = `${url.protocol}//${url.hostname}`;
-      const site = await dataAccess.Site.findByBaseURL(baseURL);
+      const previewBaseURL = `${url.protocol}//${url.hostname}`;
+      const site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
       if (!site) {
-        throw new Error(`No site found for base URL: ${baseURL}`);
+        throw new Error(`No site found for preview URL: ${previewBaseURL}`);
       }
 
       // Create a new async job
@@ -131,6 +131,7 @@ function PreflightController(ctx, log, env) {
         // Send message to SQS to trigger the audit worker
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
           jobId: job.getId(),
+          siteId: site.getId(),
           type: 'preflight',
         });
       } catch (error) {

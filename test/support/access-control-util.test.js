@@ -56,43 +56,6 @@ describe('Access Control Util', () => {
     }
   });
 
-  xit('should check if user is part of the organization based on the Site entity', async () => {
-    const orgId = '12345';
-
-    const site = await Site.create({
-      id: 'site1',
-      name: 'Test Site',
-      organizationId: orgId,
-    });
-    const authInfo = new AuthInfo()
-      .withProfile({
-        tenants: [{
-          id: orgId,
-        }],
-      });
-    const context = { attributes: { authInfo } };
-    const accessControlUtil = AccessControlUtil.fromContext(context);
-    const hasAccess = await accessControlUtil.hasAccess(site);
-    expect(hasAccess).to.be.true;
-  });
-
-  xit('should check if user is part of the organization based on the Organization entity', async () => {
-    const orgId = '12345';
-    const org = {
-      getImsOrgId: () => orgId,
-    };
-    const authInfo = new AuthInfo()
-      .withProfile({
-        tenants: [{
-          id: orgId,
-        }],
-      });
-    const context = { attributes: { authInfo } };
-    const accessControlUtil = AccessControlUtil.fromContext(context);
-    const hasAccess = await accessControlUtil.hasAccess(org);
-    expect(hasAccess).to.be.true;
-  });
-
   const sandbox = sinon.createSandbox();
   let context;
   let logSpy;
