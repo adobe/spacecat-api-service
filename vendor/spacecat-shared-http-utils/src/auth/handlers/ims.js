@@ -40,6 +40,7 @@ const loadConfig = (context) => {
   try {
     const config = JSON.parse(context.env.AUTH_HANDLER_IMS);
     context.log.info(`Loaded config name: ${config.name}`);
+    context.log.info(`IGRO works: ${config.name}`);
     return config;
   } catch (e) {
     context.log.error(`Failed to load config from context: ${e.message}`);
