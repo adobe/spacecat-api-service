@@ -120,7 +120,7 @@ function PreflightController(ctx, log, env) {
       if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
         try {
           promiseTokenResponse = await getCSPromiseToken(context);
-          log.info('Successfully retrieved promise token for AEM CS site');
+          log.info(`Promise token response: ${JSON.stringify(promiseTokenResponse)}`);
         } catch (e) {
           log.error(`Failed to get promise token: ${e.message}`);
           if (e instanceof ErrorWithStatusCode) {
