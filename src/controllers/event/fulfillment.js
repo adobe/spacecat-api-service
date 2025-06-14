@@ -36,7 +36,12 @@ function FulfillmentController(context) {
   const ACCEPTED = 'accepted';
   const REJECTED = 'rejected';
 
-  async function queueEventsForProcessing(hoolihanEventArray) {
+  const FULFILLMENT_EVENT_TYPES = {
+    EDGE_DELIVERY_SERVICES: 'edge-delivery-services',
+    AEM_SITES_OPTIMIZER: 'aem-sites-optimizer',
+  };
+
+  async function queueEventsForProcessing(hoolihanEventArray, eventType) {
     if (!Array.isArray(hoolihanEventArray)) {
       const error = new Error('Invalid event envelope, must be an array');
       error.code = INVALID_EVENT_ERROR_CODE;
@@ -54,6 +59,9 @@ function FulfillmentController(context) {
         // Parse the event payload from Base64 to JSON
         const eventContent = Buffer.from(hoolihanEvent.value.content, 'base64').toString('utf-8');
         const fulfillmentEvent = JSON.parse(eventContent);
+
+        // Add fulfillment_event_type to the event
+        fulfillmentEvent.fulfillment_event_type = eventType;
 
         validationStatus.push({
           status: ACCEPTED,
@@ -99,7 +107,20 @@ function FulfillmentController(context) {
    */
   async function processFulfillmentEvents(requestContext) {
     try {
-      const results = await queueEventsForProcessing(requestContext.data);
+      const eventType = requestContext.params?.eventType
+        || FULFILLMENT_EVENT_TYPES.EDGE_DELIVERY_SERVICES;
+
+      log.info(`Processing fulfillment events for event type: ${eventType}`);
+
+      // Validate eventType
+      if (!Object.values(FULFILLMENT_EVENT_TYPES).includes(eventType)) {
+        log.error(`Invalid event type: ${eventType}`);
+        return createResponse({ message: 'Bad Request - Invalid event type' }, 400, {
+          'x-error': 'Bad Request - Invalid event type',
+        });
+      }
+
+      const results = await queueEventsForProcessing(requestContext.data, eventType);
       const acceptedCount = countByStatus(results, ACCEPTED);
       const rejectedCount = results.length - acceptedCount;
 
