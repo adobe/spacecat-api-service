@@ -1,3 +1,17 @@
+## [1.120.10](https://github.com/adobe/spacecat-api-service/compare/v1.120.9...v1.120.10) (2025-06-14)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#983](https://github.com/adobe/spacecat-api-service/issues/983)) ([9f76ff5](https://github.com/adobe/spacecat-api-service/commit/9f76ff5cdba290aea07b467adabff4d8d8e29614))
+
+## [1.120.9](https://github.com/adobe/spacecat-api-service/compare/v1.120.8...v1.120.9) (2025-06-13)
+
+
+### Bug Fixes
+
+* screenshot taking with prefixes ([#982](https://github.com/adobe/spacecat-api-service/issues/982)) ([fe6c418](https://github.com/adobe/spacecat-api-service/commit/fe6c4180d21bdfdb13c7024a606fe0d909af2ff5))
+
 ## [1.120.8](https://github.com/adobe/spacecat-api-service/compare/v1.120.7...v1.120.8) (2025-06-12)
 
 
