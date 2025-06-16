@@ -1,3 +1,10 @@
+## [1.120.13](https://github.com/adobe/spacecat-api-service/compare/v1.120.12...v1.120.13) (2025-06-16)
+
+
+### Bug Fixes
+
+* case insensitive email check ([#988](https://github.com/adobe/spacecat-api-service/issues/988)) ([e70a570](https://github.com/adobe/spacecat-api-service/commit/e70a5709fa3087193b67b2de924f4c65c99fcd50))
+
 ## [1.120.12](https://github.com/adobe/spacecat-api-service/compare/v1.120.11...v1.120.12) (2025-06-14)
 
 
