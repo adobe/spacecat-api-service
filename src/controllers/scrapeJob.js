@@ -122,6 +122,11 @@ function ScrapeJobController(context) {
     try {
       validateRequestData(data);
 
+      // add default processing type if not provided
+      if (!data.processingType) {
+        data.processingType = ScrapeJobModel.ScrapeProcessingType.DEFAULT;
+      }
+
       const {
         urls, options, customHeaders, processingType,
       } = data;

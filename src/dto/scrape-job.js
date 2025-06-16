@@ -27,7 +27,6 @@ export const ScrapeJobDto = {
     duration: scrapeJob.getDuration(),
     status: scrapeJob.getStatus(),
     urlCount: scrapeJob.getUrlCount(),
-    initiatedBy: scrapeJob.getInitiatedBy(),
     successCount: scrapeJob.getSuccessCount(),
     failedCount: scrapeJob.getFailedCount(),
     redirectCount: scrapeJob.getRedirectCount(),
