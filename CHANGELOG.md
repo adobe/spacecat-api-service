@@ -1,3 +1,38 @@
+## [1.120.12](https://github.com/adobe/spacecat-api-service/compare/v1.120.11...v1.120.12) (2025-06-14)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#985](https://github.com/adobe/spacecat-api-service/issues/985)) ([a675098](https://github.com/adobe/spacecat-api-service/commit/a675098c982b0e11f48915c000157a3fe1a5088a))
+
+## [1.120.11](https://github.com/adobe/spacecat-api-service/compare/v1.120.10...v1.120.11) (2025-06-14)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#984](https://github.com/adobe/spacecat-api-service/issues/984)) ([ff67dd7](https://github.com/adobe/spacecat-api-service/commit/ff67dd7bca4aedb1d6989500d2f9bdfdf39486ad))
+
+## [1.120.10](https://github.com/adobe/spacecat-api-service/compare/v1.120.9...v1.120.10) (2025-06-14)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#983](https://github.com/adobe/spacecat-api-service/issues/983)) ([9f76ff5](https://github.com/adobe/spacecat-api-service/commit/9f76ff5cdba290aea07b467adabff4d8d8e29614))
+
+## [1.120.9](https://github.com/adobe/spacecat-api-service/compare/v1.120.8...v1.120.9) (2025-06-13)
+
+
+### Bug Fixes
+
+* screenshot taking with prefixes ([#982](https://github.com/adobe/spacecat-api-service/issues/982)) ([fe6c418](https://github.com/adobe/spacecat-api-service/commit/fe6c4180d21bdfdb13c7024a606fe0d909af2ff5))
+
+## [1.120.8](https://github.com/adobe/spacecat-api-service/compare/v1.120.7...v1.120.8) (2025-06-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.39.0 ([#977](https://github.com/adobe/spacecat-api-service/issues/977)) ([1ee220c](https://github.com/adobe/spacecat-api-service/commit/1ee220cc9587410d4c55c0a5b290aad7c2ffba33))
+
 ## [1.120.7](https://github.com/adobe/spacecat-api-service/compare/v1.120.6...v1.120.7) (2025-06-08)
 
 

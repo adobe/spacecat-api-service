@@ -76,7 +76,7 @@ function DemoController(ctx) {
       skipMessage: true,
       skipStorage: false,
       options: {
-        pageLoadTimeout: 10000,
+        storagePrefix: 'consent-banner-on',
         enableJavaScript: true,
         enableAuthentication: false,
         screenshotTypes: [
@@ -89,10 +89,6 @@ function DemoController(ctx) {
       }],
     });
 
-    const waitForSelector = site.getDeliveryType() === 'aem_edge'
-      ? '.footer[data-block-status="loaded"]'
-      : undefined;
-
     // without banner
     await sqs.sendMessage(queueUrl, {
       processingType: 'default',
@@ -101,12 +97,10 @@ function DemoController(ctx) {
       skipStorage: false,
       options: {
         storagePrefix: 'consent-banner-off',
-        pageLoadTimeout: 10000,
         enableJavaScript: true,
         enableAuthentication: false,
         screenshotTypes: ['viewport'],
         hideConsentBanners: true,
-        ...(waitForSelector ? { waitForSelector } : {}),
       },
       urls: [{
         url,
@@ -128,9 +122,9 @@ function DemoController(ctx) {
 
     const site = await Site.findByBaseURL(composeBaseURL(origin));
 
-    const desktopOnKey = getKey(site.getId(), pathname, 'screenshot-desktop-viewport');
+    const desktopOnKey = getKey(site.getId(), pathname, 'consent-banner-on/screenshot-desktop-viewport');
     const desktopOffKey = getKey(site.getId(), pathname, 'consent-banner-off/screenshot-desktop-viewport');
-    const mobileOnKey = getKey(site.getId(), pathname, 'screenshot-iphone-6-viewport');
+    const mobileOnKey = getKey(site.getId(), pathname, 'consent-banner-on/screenshot-iphone-6-viewport');
     const mobileOffKey = getKey(site.getId(), pathname, 'consent-banner-off/screenshot-iphone-6-viewport');
 
     const checks = await Promise.all(
