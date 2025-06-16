@@ -55,8 +55,6 @@ function ScrapeJobController(context) {
     log.error(`Failed to parse scrape job configuration: ${error.message}`);
   }
 
-  const { pathInfo: { headers } } = context;
-
   const scrapeSupervisor = new ScrapeJobSupervisor(services, scrapeConfiguration);
   const { maxUrlsPerJob = 1 } = scrapeConfiguration;
 
@@ -120,7 +118,6 @@ function ScrapeJobController(context) {
    */
   async function createScrapeJob(requestContext) {
     const { data } = requestContext;
-    const { 'x-api-key': scrapeApiKey } = headers;
 
     try {
       validateRequestData(data);
@@ -140,7 +137,6 @@ function ScrapeJobController(context) {
 
       const job = await scrapeSupervisor.startNewJob(
         urls,
-        scrapeApiKey,
         processingType,
         mergedOptions,
         customHeaders,
@@ -158,7 +154,6 @@ function ScrapeJobController(context) {
       jobId: requestContext.params.jobId,
       startDate: requestContext.params.startDate,
       endDate: requestContext.params.endDate,
-      scrapeApiKey: requestContext.pathInfo.headers['x-api-key'],
     };
   }
 
@@ -167,7 +162,6 @@ function ScrapeJobController(context) {
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.startDate - The start date of the range.
    * @param {string} requestContext.params.endDate - The end date of the range.
-   * @param {string} requestContext.pathInfo.headers.x-api-key - API key to use for the job.
    * @returns {Promise<Response>} 200 OK with a JSON representation of the scrape jobs.
    */
   async function getScrapeJobsByDateRange(requestContext) {
@@ -188,14 +182,13 @@ function ScrapeJobController(context) {
    * Get the status of an scrape job.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @param {string} requestContext.pathInfo.headers.x-api-key - API key used for the job.
    * @returns {Promise<Response>} 200 OK with a JSON representation of the scrape job.
    */
   async function getScrapeJobStatus(requestContext) {
-    const { jobId, scrapeApiKey } = parseRequestContext(requestContext);
+    const { jobId } = parseRequestContext(requestContext);
 
     try {
-      const job = await scrapeSupervisor.getScrapeJob(jobId, scrapeApiKey);
+      const job = await scrapeSupervisor.getScrapeJob(jobId);
       return ok(ScrapeJobDto.toJSON(job));
     } catch (error) {
       log.error(`Failed to fetch scrape job status for jobId: ${jobId}, message: ${error.message}`);
@@ -207,14 +200,13 @@ function ScrapeJobController(context) {
    * Get the result of an scrape job, as a pre-signed download URL to S3.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @param {string} requestContext.pathInfo.headers.x-api-key - API key used for the job.
    * @returns {Promise<Response>} 200 OK with a pre-signed URL to download the job result.
    */
   async function getScrapeJobResult(requestContext) {
-    const { jobId, scrapeApiKey } = parseRequestContext(requestContext);
+    const { jobId } = parseRequestContext(requestContext);
 
     try {
-      const job = await scrapeSupervisor.getScrapeJob(jobId, scrapeApiKey);
+      const job = await scrapeSupervisor.getScrapeJob(jobId);
       if (job.getStatus() === ScrapeJobModel.ScrapeJobStatus.RUNNING) {
         throw new ErrorWithStatusCode('Job results not available yet, job status is: RUNNING', STATUS_NOT_FOUND);
       }
@@ -238,10 +230,10 @@ function ScrapeJobController(context) {
    * @return {Promise<Response>} 200 OK with a JSON representation of the scrape job progress.
    */
   async function getScrapeJobProgress(requestContext) {
-    const { jobId, scrapeApiKey } = parseRequestContext(requestContext);
+    const { jobId } = parseRequestContext(requestContext);
 
     try {
-      const progress = await scrapeSupervisor.getScrapeJobProgress(jobId, scrapeApiKey);
+      const progress = await scrapeSupervisor.getScrapeJobProgress(jobId);
       return ok(progress);
     } catch (error) {
       log.error(`Failed to fetch the scrape job progress: ${error.message}`);
@@ -256,10 +248,10 @@ function ScrapeJobController(context) {
    * @return {Promise<Response>} 204 No Content if successful, 4xx or 5xx otherwise.
    */
   async function deleteScrapeJob(requestContext) {
-    const { jobId, scrapeApiKey } = parseRequestContext(requestContext);
+    const { jobId } = parseRequestContext(requestContext);
 
     try {
-      await scrapeSupervisor.deleteScrapeJob(jobId, scrapeApiKey);
+      await scrapeSupervisor.deleteScrapeJob(jobId);
 
       return noContent();
     } catch (error) {

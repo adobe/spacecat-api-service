@@ -11,7 +11,6 @@
  */
 
 import { ScrapeJob as ScrapeJobModel } from '@adobe/spacecat-shared-data-access';
-import { hashWithSHA256 } from '@adobe/spacecat-shared-http-utils';
 import { isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from './utils.js';
@@ -52,30 +51,29 @@ function ScrapeJobSupervisor(services, config) {
   } = config;
 
   /**
-   * Get an available scrape queue name that is not currently in use. Throws an error if no queue
-   * is currently available.
+   * Get the queue with the least number of messages.
    */
-  async function getAvailableScrapeQueue(hashedApiKey, baseURL) {
-    const runningScrapeJobs = await ScrapeJob.allByStatus(ScrapeJobModel.ScrapeJobStatus.RUNNING);
+  async function getAvailableScrapeQueue() {
+    const countMessages = async (queue) => {
+      const count = await sqs.getQueueMessageCount(queue);
+      return { queue, count };
+    };
 
-    // Check that this scrape API key has capacity to start an scrape job
-    // by checking if it is already in use for another scrape job
-    // with the same base URL
-    for (const job of runningScrapeJobs) {
-      if (job.getHashedApiKey() === hashedApiKey && job.getBaseURL() === baseURL) {
-        throw new ErrorWithStatusCode(`Too Many Requests: API key hash ${hashedApiKey} cannot be used to start any more scrape jobs for ${baseURL}`, 429);
-      }
+    const arrProm = queues.map(
+      (queue) => countMessages(queue),
+    );
+    const queueMessageCounts = await Promise.all(arrProm);
+
+    if (queueMessageCounts.length === 0) {
+      return null;
     }
 
-    const activeQueues = runningScrapeJobs.map((job) => job.getScrapeQueueId());
-
-    // Find an scrape queue that is not in use
-    for (const candidateQueue of queues) {
-      if (!activeQueues.includes(candidateQueue)) {
-        return candidateQueue;
-      }
-    }
-    throw new ErrorWithStatusCode('Service Unavailable: No scrape queue available', 503);
+    // get the queue with the lowest number of messages
+    const queueWithLeastMessages = queueMessageCounts.reduce(
+      (min, current) => (min.count < current.count ? min : current),
+    );
+    log.info(`Queue with least messages: ${queueWithLeastMessages.queue}`);
+    return queueWithLeastMessages.queue;
   }
 
   function determineBaseURL(urls) {
@@ -89,7 +87,6 @@ function ScrapeJobSupervisor(services, config) {
    * metadata, and setting the job status to 'RUNNING'.
    * @param {Array<string>} urls - The list of URLs to scrape.
    * @param {string} scrapeQueueId - Name of the queue to use for this scrape job.
-   * @param {string} hashedApiKey - API key used to authenticate the scrape job request.
    * @param {string} processingType - The scrape handler to be used for the scrape job.
    * @param {object} options - Client provided options for the scrape job.
    * @param {object} customHeaders - Custom headers to be sent with each request.
@@ -98,7 +95,6 @@ function ScrapeJobSupervisor(services, config) {
   async function createNewScrapeJob(
     urls,
     scrapeQueueId,
-    hashedApiKey,
     processingType,
     options,
     customHeaders = null,
@@ -106,7 +102,6 @@ function ScrapeJobSupervisor(services, config) {
     const jobData = {
       baseURL: determineBaseURL(urls),
       scrapeQueueId,
-      hashedApiKey,
       processingType,
       options,
       urlCount: urls.length,
@@ -158,30 +153,28 @@ function ScrapeJobSupervisor(services, config) {
   /**
    * Starts a new scrape job.
    * @param {Array<string>} urls - The URLs to scrape.
-   * @param {string} scrapeApiKey - The API key to use for the scrape job.
    * @param {object} options - Optional configuration params for the scrape job.
    * @param {object} customHeaders - Optional custom headers to be sent with each request.
    * @returns {Promise<ScrapeJob>}
    */
   async function startNewJob(
     urls,
-    scrapeApiKey,
     processingType,
     options,
     customHeaders,
   ) {
-    // Hash the API Key to ensure it is not stored in plain text
-    const hashedApiKey = hashWithSHA256(scrapeApiKey);
-
     const baseURL = determineBaseURL(urls);
     // Determine if there is a free scrape queue
-    const scrapeQueueId = await getAvailableScrapeQueue(hashedApiKey, baseURL);
+    const scrapeQueueId = await getAvailableScrapeQueue(baseURL);
+
+    if (scrapeQueueId === null) {
+      throw new ErrorWithStatusCode('Service Unavailable: No scrape queue available', 503);
+    }
 
     // If a queue is available, create the scrape-job record in dataAccess:
     const newScrapeJob = await createNewScrapeJob(
       urls,
       scrapeQueueId,
-      hashedApiKey,
       processingType,
       options,
       customHeaders,
@@ -205,40 +198,27 @@ function ScrapeJobSupervisor(services, config) {
   }
 
   /**
-   * Get an scrape job from the data layer. Verifies the API key to ensure it matches the one
+   * Get an scrape job from the data layer.
    * used to start the job.
    * @param {string} jobId - The ID of the job.
-   * @param {string} scrapeApiKey - API key that was provided to start the job.
    * @returns {Promise<ScrapeJob>}
    */
-  async function getScrapeJob(jobId, scrapeApiKey) {
+  async function getScrapeJob(jobId) {
     if (!isValidUUID(jobId)) {
       throw new ErrorWithStatusCode('Job ID is required', 400);
     }
 
-    const job = await ScrapeJob.findById(jobId);
-    let hashedApiKey;
-    if (job) {
-      hashedApiKey = hashWithSHA256(scrapeApiKey);
-    }
-
-    // Job must exist, and the scrape API key must match the one provided
-    if (!job || job.getHashedApiKey() !== hashedApiKey) {
-      throw new ErrorWithStatusCode('Not found', 404);
-    }
-
-    return job;
+    return ScrapeJob.findById(jobId);
   }
 
   /**
    * Get the progress of an import job.
    * @param {string} jobId - The ID of the job.
-   * @param {string} scrapeApiKey - API key that was provided to start the job.
    * @returns {Promise<{pending: number, redirect: number, completed: number, failed: number}>}
    */
-  async function getScrapeJobProgress(jobId, scrapeApiKey) {
+  async function getScrapeJobProgress(jobId) {
     // verify that the job exists
-    const job = await getScrapeJob(jobId, scrapeApiKey);
+    const job = await getScrapeJob(jobId);
 
     // get the url entries for the job
     const urls = await ScrapeUrl.allByScrapeJobId(job.getId());
@@ -273,13 +253,12 @@ function ScrapeJobSupervisor(services, config) {
   /**
    * Delete an scrape job and all associated URLs.
    * @param {string} jobId - The ID of the job.
-   * @param {string} scrapeApiKey - API key provided to the delete request.
    * @returns {Promise<ScrapeJob>} Resolves once the deletion is complete.
    */
-  async function deleteScrapeJob(jobId, scrapeApiKey) {
-    // Fetch the job. This also confirms the API key matches the one used to start the job.
-    const job = await getScrapeJob(jobId, scrapeApiKey);
-    log.info(`Deletion of scrape job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(scrapeApiKey)}`);
+  async function deleteScrapeJob(jobId) {
+    // Fetch the job.
+    const job = await getScrapeJob(jobId);
+    log.info(`Deletion of scrape job with jobId: ${jobId}`);
 
     return job.remove();
   }
@@ -290,7 +269,6 @@ function ScrapeJobSupervisor(services, config) {
     getScrapeJobsByDateRange,
     getScrapeJobProgress,
     deleteScrapeJob,
-    // stopScrapeJob,
   };
 }
 

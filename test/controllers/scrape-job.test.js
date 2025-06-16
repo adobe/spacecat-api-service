@@ -76,7 +76,6 @@ describe('ScrapeJobController tests', () => {
   let mockAttributes;
 
   const defaultHeaders = {
-    'x-api-key': 'b9ebcfb5-80c9-4236-91ba-d50e361db71d',
     'user-agent': 'Unit test',
     'content-type': 'application/json',
   };
@@ -90,14 +89,7 @@ describe('ScrapeJobController tests', () => {
     status: 'RUNNING',
     options: {},
     baseURL: 'https://www.example.com',
-    hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
     scrapeQueueId: 'spacecat-scrape-queue-1',
-  };
-
-  const exampleApiKeyMetadata = {
-    hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
-    name: 'Test API Key',
-    imsOrgId: 'Test Org',
   };
 
   const urls = [
@@ -112,7 +104,21 @@ describe('ScrapeJobController tests', () => {
     mockSqsClient = {
       sendMessage: sandbox.stub(),
       purgeQueue: sandbox.stub(),
+      getQueueMessageCount: sandbox.stub(),
     };
+
+    mockSqsClient.getQueueMessageCount.callsFake(async (queueUrl) => {
+      if (queueUrl === 'spacecat-scrape-queue-1') {
+        return Promise.resolve(2);
+      }
+      if (queueUrl === 'spacecat-scrape-queue-2') {
+        return Promise.resolve(1);
+      }
+      if (queueUrl === 'spacecat-scrape-queue-3') {
+        return Promise.resolve(4);
+      }
+      return Promise.resolve(0);
+    });
 
     mockAttributes = {
       authInfo: {
@@ -125,9 +131,6 @@ describe('ScrapeJobController tests', () => {
     };
 
     mockDataAccess = {
-      ApiKey: {
-        allByHashedApiKey: sandbox.stub().resolves(exampleApiKeyMetadata),
-      },
       ScrapeJob: {
         allByDateRange: sandbox.stub().resolves([]),
         allByStatus: sandbox.stub().resolves([]),
@@ -148,7 +151,7 @@ describe('ScrapeJobController tests', () => {
     });
 
     scrapeJobConfiguration = {
-      queues: ['spacecat-scrape-queue-1', 'spacecat-scrape-queue-2'],
+      queues: ['spacecat-scrape-queue-1', 'spacecat-scrape-queue-2', 'spacecat-scrape-queue-3'],
       scrapeWorkerQueue: 'https://sqs.us-east-1.amazonaws.com/1234567890/scrape-worker-queue',
       scrapeQueueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
       options: {
@@ -243,27 +246,22 @@ describe('ScrapeJobController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Service Unavailable: No scrape queue available');
     });
 
-    it('should reject when the given API key is already running an scrape job with the same baseURL', async () => {
-      baseContext.dataAccess.ScrapeJob.allByStatus = sandbox.stub().resolves([
-        createScrapeJob({
-          ...exampleJob,
-          hashedApiKey: 'c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441',
-        }),
-      ]);
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-      expect(response.status).to.equal(429);
-      expect(response.headers.get('x-error')).to.equal('Too Many Requests: API key hash c0fd7780368f08e883651422e6b96cf2320cc63e17725329496e27eb049a5441 cannot be used to start any more scrape jobs for https://www.example.com');
-    });
-
-    it('should create an scrape job when the given API key is already running an scrape job with a different baseURL', async () => {
-      baseContext.dataAccess.ScrapeJob.allByStatus = sandbox.stub().resolves([
-        createScrapeJob({
-          ...exampleJob,
-          baseURL: 'https://www.another-example.com',
-        }),
-      ]);
-      const response = await scrapeJobController.createScrapeJob(baseContext);
+    it('correctly returns queue with least messages', async () => {
+      scrapeJobConfiguration.queues = ['spacecat-scrape-queue-1', 'spacecat-scrape-queue-2'];
+      baseContext.env.SCRAPE_JOB_CONFIGURATION = JSON.stringify(scrapeJobConfiguration);
+      baseContext.log.info = sandbox.stub();
+      const testScrapeJobController = ScrapeJobController(baseContext);
+      const response = await testScrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(202);
+      expect(baseContext.log.info.getCalls()[1].args[0]).to.equal('Queue with least messages: spacecat-scrape-queue-2');
+
+      scrapeJobConfiguration.queues = ['spacecat-scrape-queue-1', 'spacecat-scrape-queue-3'];
+      baseContext.log.info = sandbox.stub();
+      baseContext.env.SCRAPE_JOB_CONFIGURATION = JSON.stringify(scrapeJobConfiguration);
+      const testScrapeJobController2 = ScrapeJobController(baseContext);
+      const response2 = await testScrapeJobController2.createScrapeJob(baseContext);
+      expect(response2.status).to.equal(202);
+      expect(baseContext.log.info.getCalls()[1].args[0]).to.equal('Queue with least messages: spacecat-scrape-queue-1');
     });
 
     it('should reject when invalid URLs are passed in', async () => {
@@ -317,7 +315,6 @@ describe('ScrapeJobController tests', () => {
       baseContext.dataAccess.getScrapeJobsByStatus = sandbox.stub().resolves([
         createScrapeJob({
           ...exampleJob,
-          hashedApiKey: 'ac90ae98768efdb4c6349f23e63fc35e465333ca21bd30dd2838a100d1fd09d7', // Queue is in use by another API key
         }),
       ]);
       const response = await scrapeJobController.createScrapeJob(baseContext);
@@ -332,27 +329,6 @@ describe('ScrapeJobController tests', () => {
       const firstCall = mockSqsClient.sendMessage.getCall(0);
       expect(firstCall.args[1].urls.length).to.equal(3);
       expect(firstCall.args[0]).to.equal('https://sqs.us-east-1.amazonaws.com/1234567890/scrape-worker-queue');
-    });
-
-    it('should fail when all (both) available queues are in use', async () => {
-      baseContext.dataAccess.ScrapeJob.allByStatus = sandbox.stub().resolves([
-        createScrapeJob({
-          ...exampleJob,
-          scrapeQueueId: 'spacecat-scrape-queue-1',
-          hashedApiKey: 'b76319539c6c50113d425259385cd1a382a369441d9242e641be22ed8c2d8069', // Queue is in use by another API key
-        }),
-        createScrapeJob({
-          ...exampleJob,
-          scrapeQueueId: 'spacecat-scrape-queue-2',
-          hashedApiKey: '23306638a0b7ed823e4da979b73592bf2a7ddd0ee027a58b1fc75b337b97cd9d', // Queue is in use by another API key
-        }),
-      ]);
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(503); // Service unavailable
-      expect(response.headers.get('x-error'))
-        .to.equal('Service Unavailable: No scrape queue available');
     });
 
     it('should pick up the default options when none are provided', async () => {
@@ -408,7 +384,6 @@ describe('ScrapeJobController tests', () => {
       baseContext.dataAccess.getScrapeJobProgress = sandbox.stub().resolves([
         createScrapeJob({
           ...exampleJob,
-          hashedApiKey: '123',
         }),
       ]);
 
@@ -453,7 +428,7 @@ describe('ScrapeJobController tests', () => {
 
     it('should return default values when no import urls are available', async () => {
       baseContext.dataAccess.getScrapeJobProgress = sandbox.stub().resolves([
-        createScrapeJob({ ...exampleJob, hashedApiKey: '123' }),
+        createScrapeJob({ ...exampleJob }),
       ]);
 
       baseContext.params.jobId = exampleJob.scrapeJobId;
@@ -470,15 +445,6 @@ describe('ScrapeJobController tests', () => {
         completed: 0,
         failed: 0,
       });
-    });
-
-    it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
-      baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
-      baseContext.params.jobId = exampleJob.scrapeJobId;
-      const response = await scrapeJobController.getScrapeJobProgress(baseContext);
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(404);
-      expect(response.headers.get('x-error')).to.equal('Not found');
     });
   });
 
@@ -500,16 +466,6 @@ describe('ScrapeJobController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Not found');
     });
 
-    it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
-      baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
-      baseContext.params.jobId = exampleJob.scrapeJobId;
-      const response = await scrapeJobController.getScrapeJobStatus(baseContext);
-
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(404);
-      expect(response.headers.get('x-error')).to.equal('Not found');
-    });
-
     it('should return job details for a valid jobId', async () => {
       baseContext.params.jobId = exampleJob.scrapeJobId;
       const response = await scrapeJobController.getScrapeJobStatus(baseContext);
@@ -517,7 +473,6 @@ describe('ScrapeJobController tests', () => {
       expect(response.status).to.equal(200);
       const jobStatus = await response.json();
       expect(jobStatus.id).to.equal('f91afda0-afc8-467e-bfa3-fdbeba3037e8');
-      expect(jobStatus.apiKey).to.be.undefined;
       expect(jobStatus.baseURL).to.equal('https://www.example.com');
       expect(jobStatus.status).to.equal('RUNNING');
       expect(jobStatus.options).to.deep.equal({});
@@ -526,7 +481,6 @@ describe('ScrapeJobController tests', () => {
 
   describe('getScrapeJobResult', () => {
     beforeEach(() => {
-      baseContext.pathInfo.headers['x-api-key'] = 'b9ebcfb5-80c9-4236-91ba-d50e361db71d';
       baseContext.params.jobId = exampleJob.scrapeJobId;
     });
 
@@ -593,8 +547,7 @@ describe('ScrapeJobController tests', () => {
 
   describe('deleteScrapeJob', () => {
     it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
-      baseContext.pathInfo.headers['x-api-key'] = '7828b114-e20f-4234-bc4e-5b438b861edd';
-      baseContext.params.jobId = exampleJob.scrapeJobId;
+      baseContext.params.jobId = 'B771125B-9AF1-4720-BEA7-8877654EB17C'; // exampleJob.scrapeJobId;
       const job = await mockDataAccess.ScrapeJob.findById(exampleJob.scrapeJobId);
       job.remove = sandbox.stub().resolves();
 
