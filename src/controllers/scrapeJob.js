@@ -228,53 +228,35 @@ function ScrapeJobController(context) {
     }
   }
 
-  // /**
-  //  * Get the progress of an scrape job. Results are broken down into the following:
-  //  * - complete: URLs that have been successfully scrapeed.
-  //  * - failed: URLs that have failed to scrape.
-  //  * - pending: URLs that are still being processed.
-  //  * - redirected: URLs that have been redirected.
-  //  * @param requestContext - Context of the request.
-  //  * @return {Promise<Response>} 200 OK with a JSON representation of the scrape job progress.
-  //  */
-  // async function getScrapeJobProgress(requestContext) {
-  //   const { jobId } = parseRequestContext(requestContext);
+  /**
+   * Get all scrape jobs by baseURL
+   * @param {object} requestContext - Context of the request.
+   * @param {string} requestContext.params.baseURL - The baseURL of the jobs to fetch.
+   * @returns {Promise<Response>} 200 OK with a JSON representation of the scrape jobs
+   * or empty array if no jobs are found.
+   */
+  async function getScrapeJobsByBaseURL(requestContext) {
+    const { baseURL } = parseRequestContext(requestContext);
+    log.debug(`Fetching scrape jobs by baseURL: ${baseURL}.`);
 
-  //   try {
-  //     const progress = await scrapeSupervisor.getScrapeJobProgress(jobId);
-  //     return ok(progress);
-  //   } catch (error) {
-  //     log.error(`Failed to fetch the scrape job progress: ${error.message}`);
-  //     return createErrorResponse(error);
-  //   }
-  // }
-
-  // /**
-  //  * Delete a scrape job.
-  //  * @param {object} requestContext - Context of the request.
-  //  * @param {string} requestContext.params.jobId - The ID of the job to delete.
-  //  * @return {Promise<Response>} 204 No Content if successful, 4xx or 5xx otherwise.
-  //  */
-  // async function deleteScrapeJob(requestContext) {
-  //   const { jobId } = parseRequestContext(requestContext);
-
-  //   try {
-  //     await scrapeSupervisor.deleteScrapeJob(jobId);
-
-  //     return noContent();
-  //   } catch (error) {
-  //     log.error(`Failed to delete scrape jobId: ${jobId} : ${error.message}`);
-  //     return createErrorResponse(error);
-  //   }
-  // }
+    try {
+      const jobs = await scrapeSupervisor.getScrapeJobsByBaseURL(baseURL);
+      if (!jobs || jobs.length === 0) {
+        return ok([]);
+      }
+      return ok(jobs.map((job) => ScrapeJobDto.toJSON(job)));
+    } catch (error) {
+      log.error(`Failed to fetch scrape jobs by baseURL: ${baseURL}, ${error.message}`);
+      return createErrorResponse(error);
+    }
+  }
 
   return {
     createScrapeJob,
     getScrapeJobStatus,
     getScrapeJobUrlResults,
-    // getScrapeJobProgress,
+    getScrapeJobsByBaseURL,
     getScrapeJobsByDateRange,
-    // deleteScrapeJob,
   };
 }
 

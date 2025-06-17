@@ -579,4 +579,39 @@ describe('ScrapeJobController tests', () => {
       expect(() => ScrapeJobController(context)).to.throw('Invalid services: dataAccess is required');
     });
   });
+
+  describe('getScrapeJobsByBaseURL', () => {
+    it('should return an array of scrape jobs', async () => {
+      const job = createScrapeJob(exampleJob);
+      baseContext.dataAccess.ScrapeJob.allByBaseURL = sandbox.stub().resolves([job]);
+      baseContext.params.baseURL = 'https://www.example.com';
+
+      const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const responseResult = await response.json();
+      expect(responseResult[0].baseURL).to.equal('https://www.example.com');
+    });
+
+    it('should return an empty array if no jobs are found for this baseUrl', async () => {
+      baseContext.dataAccess.ScrapeJob.allByBaseURL = sandbox.stub().resolves([]);
+      baseContext.params.baseURL = 'https://www.example.com';
+
+      const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const responseResult = await response.json();
+      expect(responseResult).to.deep.equal([]);
+    });
+
+    it('should handle errors while trying to fetch scrape jobs by baseURL gracefully', async () => {
+      baseContext.dataAccess.ScrapeJob.allByBaseURL = sandbox.stub().rejects(new Error('Failed to fetch scrape jobs by baseURL'));
+      baseContext.params.baseURL = 'https://www.example.com';
+
+      const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape jobs by baseURL');
+    });
+  });
 });
