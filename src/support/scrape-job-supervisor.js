@@ -123,6 +123,15 @@ function ScrapeJobSupervisor(services, config) {
   }
 
   /**
+   * Get all scrape jobs by baseURL
+   * @param {string} baseURL - The baseURL of the jobs to fetch.
+   * @returns {Promise<ScrapeJob[]>}
+   */
+  async function getScrapeJobsByBaseURL(baseURL) {
+    return ScrapeJob.allByBaseURL(baseURL);
+  }
+
+  /**
    * Queue all URLs as a single message for processing by another function. This will enable
    * the controller to respond with a new job ID ASAP, while the individual URLs are queued up
    * asynchronously.
@@ -211,64 +220,11 @@ function ScrapeJobSupervisor(services, config) {
     return ScrapeJob.findById(jobId);
   }
 
-  // /**
-  //  * Get the progress of an import job.
-  //  * @param {string} jobId - The ID of the job.
-  //  * @returns {Promise<{pending: number, redirect: number, completed: number, failed: number}>}
-  //  */
-  // async function getScrapeJobProgress(jobId) {
-  //   // verify that the job exists
-  //   const job = await getScrapeJob(jobId);
-
-  //   // get the url entries for the job
-  //   const urls = await ScrapeUrl.allByScrapeJobId(job.getId());
-
-  //   // merge all url entries into a single object
-  //   return urls.reduce((acc, url) => {
-  //     // intentionally ignore RUNNING as currently no code will flip the url to a running state
-  //     // eslint-disable-next-line default-case
-  //     switch (url.getStatus()) {
-  //       case ScrapeJobModel.ScrapeUrlStatus.PENDING:
-  //         acc.pending += 1;
-  //         break;
-  //       case ScrapeJobModel.ScrapeUrlStatus.REDIRECT:
-  //         acc.redirect += 1;
-  //         break;
-  //       case ScrapeJobModel.ScrapeUrlStatus.COMPLETE:
-  //         acc.completed += 1;
-  //         break;
-  //       case ScrapeJobModel.ScrapeUrlStatus.FAILED:
-  //         acc.failed += 1;
-  //         break;
-  //     }
-  //     return acc;
-  //   }, {
-  //     pending: 0,
-  //     redirect: 0,
-  //     completed: 0,
-  //     failed: 0,
-  //   });
-  // }
-
-  // /**
-  //  * Delete an scrape job and all associated URLs.
-  //  * @param {string} jobId - The ID of the job.
-  //  * @returns {Promise<ScrapeJob>} Resolves once the deletion is complete.
-  //  */
-  // async function deleteScrapeJob(jobId) {
-  //   // Fetch the job.
-  //   const job = await getScrapeJob(jobId);
-  //   log.info(`Deletion of scrape job with jobId: ${jobId}`);
-
-  //   return job.remove();
-  // }
-
   return {
     startNewJob,
     getScrapeJob,
     getScrapeJobsByDateRange,
-    // getScrapeJobProgress,
-    // deleteScrapeJob,
+    getScrapeJobsByBaseURL,
   };
 }
 
