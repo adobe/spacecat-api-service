@@ -31,6 +31,5 @@ export const ScrapeJobDto = {
     failedCount: scrapeJob.getFailedCount(),
     redirectCount: scrapeJob.getRedirectCount(),
     customHeaders: scrapeJob.getCustomHeaders(),
-    results: scrapeJob.getResults(),
   }),
 };
