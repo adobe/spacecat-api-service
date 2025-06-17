@@ -1,3 +1,10 @@
+## [1.120.14](https://github.com/adobe/spacecat-api-service/compare/v1.120.13...v1.120.14) (2025-06-17)
+
+
+### Bug Fixes
+
+* broken internal links ([#990](https://github.com/adobe/spacecat-api-service/issues/990)) ([478d0c6](https://github.com/adobe/spacecat-api-service/commit/478d0c6d9c26772b10741b44cd41cdffdfe599e2))
+
 ## [1.120.13](https://github.com/adobe/spacecat-api-service/compare/v1.120.12...v1.120.13) (2025-06-16)
 
 
