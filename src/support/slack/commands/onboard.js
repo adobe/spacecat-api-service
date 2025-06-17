@@ -338,7 +338,7 @@ function OnboardCommand(context) {
 
       // Demo URL job
       const demoURLJob = {
-        type: 'demo-url',
+        type: 'demo-url-processor',
         siteId: siteID,
         siteUrl: baseURL,
         demoURLContext: {
