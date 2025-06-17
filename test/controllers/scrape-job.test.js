@@ -613,5 +613,13 @@ describe('ScrapeJobController tests', () => {
       expect(response.status).to.equal(500);
       expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape jobs by baseURL');
     });
+
+    it('should handle invalid baseURL gracefully', async () => {
+      baseContext.params.baseURL = 'invalid-baseURL';
+      const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Invalid request: baseURL must be a valid URL');
+    });
   });
 });

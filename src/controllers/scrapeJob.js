@@ -156,6 +156,7 @@ function ScrapeJobController(context) {
       jobId: requestContext.params.jobId,
       startDate: requestContext.params.startDate,
       endDate: requestContext.params.endDate,
+      baseURL: requestContext.params.baseURL,
     };
   }
 
@@ -239,14 +240,21 @@ function ScrapeJobController(context) {
     const { baseURL } = parseRequestContext(requestContext);
     log.debug(`Fetching scrape jobs by baseURL: ${baseURL}.`);
 
+    let decodedBaseURL = baseURL;
     try {
-      const jobs = await scrapeSupervisor.getScrapeJobsByBaseURL(baseURL);
+      decodedBaseURL = decodeURIComponent(baseURL);
+
+      if (!isValidUrl(decodedBaseURL)) {
+        throw new ErrorWithStatusCode('Invalid request: baseURL must be a valid URL', STATUS_BAD_REQUEST);
+      }
+
+      const jobs = await scrapeSupervisor.getScrapeJobsByBaseURL(decodedBaseURL);
       if (!jobs || jobs.length === 0) {
         return ok([]);
       }
       return ok(jobs.map((job) => ScrapeJobDto.toJSON(job)));
     } catch (error) {
-      log.error(`Failed to fetch scrape jobs by baseURL: ${baseURL}, ${error.message}`);
+      log.error(`Failed to fetch scrape jobs by baseURL: ${decodedBaseURL}, ${error.message}`);
       return createErrorResponse(error);
     }
   }
