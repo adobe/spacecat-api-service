@@ -20,6 +20,22 @@ import {
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
+export const AUDIT_CANONICAL = 'canonical';
+export const AUDIT_LINKS = 'links';
+export const AUDIT_METATAGS = 'metatags';
+export const AUDIT_BODY_SIZE = 'body-size';
+export const AUDIT_LOREM_IPSUM = 'lorem-ipsum';
+export const AUDIT_H1_COUNT = 'h1-count';
+
+const AVAILABLE_CHECKS = [
+  AUDIT_CANONICAL,
+  AUDIT_LINKS,
+  AUDIT_METATAGS,
+  AUDIT_BODY_SIZE,
+  AUDIT_LOREM_IPSUM,
+  AUDIT_H1_COUNT,
+];
+
 /**
  * Creates a preflight controller instance
  * @param {Object} ctx - The context object containing dataAccess and sqs
@@ -80,6 +96,16 @@ function PreflightController(ctx, log, env) {
     if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data?.step?.toLowerCase())) {
       throw new Error(`Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`);
     }
+
+    // Validate checks if provided
+    if (data.checks !== undefined) {
+      if (!isNonEmptyArray(data.checks)) {
+        throw new Error('Invalid request: checks must be a non-empty array of strings');
+      }
+      if (!data.checks.every((check) => AVAILABLE_CHECKS.includes(check))) {
+        throw new Error(`Invalid request: checks must be one of: ${AVAILABLE_CHECKS.join(', ')}`);
+      }
+    }
   }
 
   /**
@@ -121,6 +147,7 @@ function PreflightController(ctx, log, env) {
             siteId: site.getId(),
             urls: data.urls,
             step,
+            checks: data.checks || AVAILABLE_CHECKS,
           },
           jobType: 'preflight',
           tags: ['preflight'],
