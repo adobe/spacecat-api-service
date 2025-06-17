@@ -335,12 +335,12 @@ describe('ScrapeJobController tests', () => {
       baseContext.env.SCRAPE_JOB_CONFIGURATION = JSON.stringify(scrapeJobConfiguration);
       baseContext.data.customHeaders = exampleCustomHeaders;
       const response = await scrapeJobController.createScrapeJob(baseContext);
-      const importJob = await response.json();
+      const scrapeJob = await response.json();
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(202);
 
-      expect(importJob.options).to.deep.equal({
+      expect(scrapeJob.options).to.deep.equal({
         enableJavascript: true,
         hideConsentBanners: false,
       });
@@ -379,39 +379,101 @@ describe('ScrapeJobController tests', () => {
     });
   });
 
-  describe('getScrapeJobProgress', () => {
+  describe('getScrapeJobUrlResults', () => {
     it('should respond with an expected progress response', async () => {
-      baseContext.dataAccess.getScrapeJobProgress = sandbox.stub().resolves([
+      baseContext.dataAccess.getScrapeJobUrlResults = sandbox.stub().resolves([
         createScrapeJob({
           ...exampleJob,
         }),
       ]);
 
-      // only need to provide enough import url data to satisfy the import-supervisor, no need
+      // only need to provide enough scrape url data to satisfy the scrape-supervisor, no need
       // for all the other properties of a ImportUrl object.
       baseContext.dataAccess.ScrapeUrl.allByScrapeJobId = sandbox.stub().resolves([
-        { getStatus: () => ScrapeJob.ScrapeUrlStatus.COMPLETE },
-        { getStatus: () => ScrapeJob.ScrapeUrlStatus.COMPLETE },
-        // setting a status to RUNNING should not affect the result
-        // as no process will flip a ImportUrl status to running at this time, therefore
-        // the code will ignore running in the results
-        { getStatus: () => ScrapeJob.ScrapeUrlStatus.RUNNING },
-        { getStatus: () => ScrapeJob.ScrapeUrlStatus.PENDING },
-        { getStatus: () => ScrapeJob.ScrapeUrlStatus.REDIRECT },
-        { getStatus: () => ScrapeJob.ScrapeUrlStatus.FAILED },
+        {
+          getStatus: () => ScrapeJob.ScrapeUrlStatus.COMPLETE,
+          getPath: () => 'path/to/result1',
+          getUrl: () => 'https://example.com/page1',
+          getReason: () => null,
+        },
+        {
+          getStatus: () => ScrapeJob.ScrapeUrlStatus.COMPLETE,
+          getPath: () => 'path/to/result2',
+          getUrl: () => 'https://example.com/page2',
+          getReason: () => null,
+        },
+        {
+          getStatus: () => ScrapeJob.ScrapeUrlStatus.RUNNING,
+          getPath: () => 'path/to/result3',
+          getUrl: () => 'https://example.com/page3',
+          getReason: () => null,
+        },
+        {
+          getStatus: () => ScrapeJob.ScrapeUrlStatus.PENDING,
+          getPath: () => 'path/to/result5',
+          getUrl: () => 'https://example.com/page5',
+          getReason: () => null,
+        },
+        {
+          getStatus: () => ScrapeJob.ScrapeUrlStatus.REDIRECT,
+          getPath: () => 'path/to/result6',
+          getUrl: () => 'https://example.com/page6',
+          getReason: () => null,
+        },
+        {
+          getStatus: () => ScrapeJob.ScrapeUrlStatus.FAILED,
+          getPath: () => 'path/to/result7',
+          getUrl: () => 'https://example.com/page7',
+          getReason: () => 'An error occurred',
+        },
       ]);
 
       baseContext.params.jobId = exampleJob.scrapeJobId;
       scrapeJobController = ScrapeJobController(baseContext);
-      const response = await scrapeJobController.getScrapeJobProgress(baseContext);
+      const response = await scrapeJobController.getScrapeJobUrlResults(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
-      const progress = await response.json();
-      expect(progress).to.deep.equal({
-        pending: 1,
-        redirect: 1,
-        completed: 2,
-        failed: 1,
+      const results = await response.json();
+      expect(results).to.deep.equal({
+        jobId: exampleJob.scrapeJobId,
+        results: [
+          {
+            url: 'https://example.com/page1',
+            status: 'COMPLETE',
+            reason: null,
+            path: 'path/to/result1',
+          },
+          {
+            url: 'https://example.com/page2',
+            status: 'COMPLETE',
+            reason: null,
+            path: 'path/to/result2',
+          },
+          {
+            url: 'https://example.com/page3',
+            status: 'RUNNING',
+            reason: null,
+            path: 'path/to/result3',
+          },
+          {
+            url: 'https://example.com/page5',
+            status: 'PENDING',
+            reason: null,
+            path: 'path/to/result5',
+          },
+          {
+            url: 'https://example.com/page6',
+            status: 'REDIRECT',
+            reason: null,
+            path: 'path/to/result6',
+          },
+          {
+            url: 'https://example.com/page7',
+            status: 'FAILED',
+            reason: 'An error occurred',
+            path: 'path/to/result7',
+          },
+        ],
       });
     });
 
@@ -420,13 +482,13 @@ describe('ScrapeJobController tests', () => {
       baseContext.params.jobId = '3ec88567-c9f8-4fb1-8361-b53985a2898b'; // non existent job
 
       scrapeJobController = ScrapeJobController(baseContext);
-      const response = await scrapeJobController.getScrapeJobProgress(baseContext);
+      const response = await scrapeJobController.getScrapeJobUrlResults(baseContext);
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
     });
 
-    it('should return default values when no import urls are available', async () => {
+    it('should return default values when no scrape urls are available', async () => {
       baseContext.dataAccess.getScrapeJobProgress = sandbox.stub().resolves([
         createScrapeJob({ ...exampleJob }),
       ]);
@@ -434,16 +496,14 @@ describe('ScrapeJobController tests', () => {
       baseContext.params.jobId = exampleJob.scrapeJobId;
       scrapeJobController = ScrapeJobController(baseContext);
 
-      const response = await scrapeJobController.getScrapeJobProgress(baseContext);
+      const response = await scrapeJobController.getScrapeJobUrlResults(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
 
-      const progress = await response.json();
-      expect(progress).to.deep.equal({
-        pending: 0,
-        redirect: 0,
-        completed: 0,
-        failed: 0,
+      const results = await response.json();
+      expect(results).to.deep.equal({
+        jobId: exampleJob.scrapeJobId,
+        results: [],
       });
     });
   });
@@ -479,41 +539,6 @@ describe('ScrapeJobController tests', () => {
     });
   });
 
-  describe('getScrapeJobResult', () => {
-    beforeEach(() => {
-      baseContext.params.jobId = exampleJob.scrapeJobId;
-    });
-
-    it('should fail to fetch the import result for a running job', async () => {
-      // exampleJob is RUNNING
-      const response = await scrapeJobController.getScrapeJobResult(baseContext);
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(404);
-      expect(response.headers.get('x-error')).to.equal('Job results not available yet, job status is: RUNNING');
-    });
-
-    it('should successfully fetch the import result for a completed job', async () => {
-      // create a completed job
-      const fakeResults = {
-        test: 'test',
-      };
-      baseContext.params.jobId = exampleJob.scrapeJobId;
-      const job = createScrapeJob(exampleJob);
-      job.getStatus = sandbox.stub().returns(ScrapeJob.ScrapeJobStatus.COMPLETED);
-      job.getResults = sandbox.stub().returns(fakeResults);
-      baseContext.dataAccess.ScrapeJob.findById = sandbox.stub().resolves(job);
-
-      const response = await scrapeJobController.getScrapeJobResult(baseContext);
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(200);
-      const result = await response.json();
-      expect(result).to.deep.equal({
-        id: exampleJob.scrapeJobId,
-        results: fakeResults,
-      });
-    });
-  });
-
   describe('getScrapeJobsByDateRange', () => {
     it('should throw an error when startDate is not present', async () => {
       baseContext.params.endDate = '2024-05-29T14:26:00.000Z';
@@ -545,36 +570,6 @@ describe('ScrapeJobController tests', () => {
     });
   });
 
-  describe('deleteScrapeJob', () => {
-    it('should return 404 when the api key is valid but does not match the key used to start the job', async () => {
-      baseContext.params.jobId = 'B771125B-9AF1-4720-BEA7-8877654EB17C'; // exampleJob.scrapeJobId;
-      const job = await mockDataAccess.ScrapeJob.findById(exampleJob.scrapeJobId);
-      job.remove = sandbox.stub().resolves();
-
-      const response = await scrapeJobController.deleteScrapeJob(baseContext);
-
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(404);
-      expect(response.headers.get('x-error')).to.equal('Not found');
-
-      expect(job.remove).to.not.have.been.called;
-    });
-
-    it('should delete the specified job', async () => {
-      baseContext.params.jobId = exampleJob.scrapeJobId;
-      const job = createScrapeJob(exampleJob);
-      job.remove = sandbox.stub().resolves();
-      baseContext.dataAccess.ScrapeJob.findById = sandbox.stub().resolves(job);
-
-      const response = await scrapeJobController.deleteScrapeJob(baseContext);
-
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(204);
-
-      // Check that removeScrapeJob was invoked with the expected jobId
-      expect(job.remove).to.have.been.calledOnce;
-    });
-  });
   describe('ScrapeJobSupervisor', () => {
     it('should fail to validate the required services, if one is missing', async () => {
       const context = {

@@ -43,7 +43,7 @@ function ScrapeJobSupervisor(services, config) {
     dataAccess, sqs, log,
   } = services;
 
-  const { ScrapeJob, ScrapeUrl } = dataAccess;
+  const { ScrapeJob } = dataAccess;
 
   const {
     queues = [], // Array of scrape queues
@@ -211,64 +211,64 @@ function ScrapeJobSupervisor(services, config) {
     return ScrapeJob.findById(jobId);
   }
 
-  /**
-   * Get the progress of an import job.
-   * @param {string} jobId - The ID of the job.
-   * @returns {Promise<{pending: number, redirect: number, completed: number, failed: number}>}
-   */
-  async function getScrapeJobProgress(jobId) {
-    // verify that the job exists
-    const job = await getScrapeJob(jobId);
+  // /**
+  //  * Get the progress of an import job.
+  //  * @param {string} jobId - The ID of the job.
+  //  * @returns {Promise<{pending: number, redirect: number, completed: number, failed: number}>}
+  //  */
+  // async function getScrapeJobProgress(jobId) {
+  //   // verify that the job exists
+  //   const job = await getScrapeJob(jobId);
 
-    // get the url entries for the job
-    const urls = await ScrapeUrl.allByScrapeJobId(job.getId());
+  //   // get the url entries for the job
+  //   const urls = await ScrapeUrl.allByScrapeJobId(job.getId());
 
-    // merge all url entries into a single object
-    return urls.reduce((acc, url) => {
-      // intentionally ignore RUNNING as currently no code will flip the url to a running state
-      // eslint-disable-next-line default-case
-      switch (url.getStatus()) {
-        case ScrapeJobModel.ScrapeUrlStatus.PENDING:
-          acc.pending += 1;
-          break;
-        case ScrapeJobModel.ScrapeUrlStatus.REDIRECT:
-          acc.redirect += 1;
-          break;
-        case ScrapeJobModel.ScrapeUrlStatus.COMPLETE:
-          acc.completed += 1;
-          break;
-        case ScrapeJobModel.ScrapeUrlStatus.FAILED:
-          acc.failed += 1;
-          break;
-      }
-      return acc;
-    }, {
-      pending: 0,
-      redirect: 0,
-      completed: 0,
-      failed: 0,
-    });
-  }
+  //   // merge all url entries into a single object
+  //   return urls.reduce((acc, url) => {
+  //     // intentionally ignore RUNNING as currently no code will flip the url to a running state
+  //     // eslint-disable-next-line default-case
+  //     switch (url.getStatus()) {
+  //       case ScrapeJobModel.ScrapeUrlStatus.PENDING:
+  //         acc.pending += 1;
+  //         break;
+  //       case ScrapeJobModel.ScrapeUrlStatus.REDIRECT:
+  //         acc.redirect += 1;
+  //         break;
+  //       case ScrapeJobModel.ScrapeUrlStatus.COMPLETE:
+  //         acc.completed += 1;
+  //         break;
+  //       case ScrapeJobModel.ScrapeUrlStatus.FAILED:
+  //         acc.failed += 1;
+  //         break;
+  //     }
+  //     return acc;
+  //   }, {
+  //     pending: 0,
+  //     redirect: 0,
+  //     completed: 0,
+  //     failed: 0,
+  //   });
+  // }
 
-  /**
-   * Delete an scrape job and all associated URLs.
-   * @param {string} jobId - The ID of the job.
-   * @returns {Promise<ScrapeJob>} Resolves once the deletion is complete.
-   */
-  async function deleteScrapeJob(jobId) {
-    // Fetch the job.
-    const job = await getScrapeJob(jobId);
-    log.info(`Deletion of scrape job with jobId: ${jobId}`);
+  // /**
+  //  * Delete an scrape job and all associated URLs.
+  //  * @param {string} jobId - The ID of the job.
+  //  * @returns {Promise<ScrapeJob>} Resolves once the deletion is complete.
+  //  */
+  // async function deleteScrapeJob(jobId) {
+  //   // Fetch the job.
+  //   const job = await getScrapeJob(jobId);
+  //   log.info(`Deletion of scrape job with jobId: ${jobId}`);
 
-    return job.remove();
-  }
+  //   return job.remove();
+  // }
 
   return {
     startNewJob,
     getScrapeJob,
     getScrapeJobsByDateRange,
-    getScrapeJobProgress,
-    deleteScrapeJob,
+    // getScrapeJobProgress,
+    // deleteScrapeJob,
   };
 }
 

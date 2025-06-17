@@ -12,7 +12,6 @@
 
 import {
   createResponse,
-  noContent,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
@@ -22,7 +21,6 @@ import { ScrapeJob as ScrapeJobModel } from '@adobe/spacecat-shared-data-access'
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ScrapeJobSupervisor from '../support/scrape-job-supervisor.js';
 import { ScrapeJobDto } from '../dto/scrape-job.js';
-import { STATUS_NOT_FOUND } from '../utils/constants.js';
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
@@ -61,7 +59,6 @@ function ScrapeJobController(context) {
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
   const STATUS_ACCEPTED = 202;
-  // const STATUS_UNAUTHORIZED = 401;
 
   function validateRequestData(data) {
     if (!isObject(data)) {
@@ -205,19 +202,25 @@ function ScrapeJobController(context) {
    * Get the result of an scrape job, as a pre-signed download URL to S3.
    * @param {object} requestContext - Context of the request.
    * @param {string} requestContext.params.jobId - The ID of the job to fetch.
-   * @returns {Promise<Response>} 200 OK with a pre-signed URL to download the job result.
+   * @returns {Promise<Response>} 200 OK with all url results (status and path of scrape results)
    */
-  async function getScrapeJobResult(requestContext) {
+  async function getScrapeJobUrlResults(requestContext) {
     const { jobId } = parseRequestContext(requestContext);
 
     try {
       const job = await scrapeSupervisor.getScrapeJob(jobId);
-      if (job.getStatus() === ScrapeJobModel.ScrapeJobStatus.RUNNING) {
-        throw new ErrorWithStatusCode('Job results not available yet, job status is: RUNNING', STATUS_NOT_FOUND);
-      }
+      const { ScrapeUrl } = dataAccess;
+      const scrapeUrls = await ScrapeUrl.allByScrapeJobId(job.getId());
+      const results = scrapeUrls.map((url) => ({
+        url: url.getUrl(),
+        status: url.getStatus(),
+        reason: url.getReason(),
+        path: url.getPath(),
+      }));
+
       return ok({
-        id: job.getId(),
-        results: job.getResults(),
+        jobId: job.getId(),
+        results,
       });
     } catch (error) {
       log.error(`Failed to fetch the scrape job result: ${error.message}`);
@@ -225,53 +228,53 @@ function ScrapeJobController(context) {
     }
   }
 
-  /**
-   * Get the progress of an scrape job. Results are broken down into the following:
-   * - complete: URLs that have been successfully scrapeed.
-   * - failed: URLs that have failed to scrape.
-   * - pending: URLs that are still being processed.
-   * - redirected: URLs that have been redirected.
-   * @param requestContext - Context of the request.
-   * @return {Promise<Response>} 200 OK with a JSON representation of the scrape job progress.
-   */
-  async function getScrapeJobProgress(requestContext) {
-    const { jobId } = parseRequestContext(requestContext);
+  // /**
+  //  * Get the progress of an scrape job. Results are broken down into the following:
+  //  * - complete: URLs that have been successfully scrapeed.
+  //  * - failed: URLs that have failed to scrape.
+  //  * - pending: URLs that are still being processed.
+  //  * - redirected: URLs that have been redirected.
+  //  * @param requestContext - Context of the request.
+  //  * @return {Promise<Response>} 200 OK with a JSON representation of the scrape job progress.
+  //  */
+  // async function getScrapeJobProgress(requestContext) {
+  //   const { jobId } = parseRequestContext(requestContext);
 
-    try {
-      const progress = await scrapeSupervisor.getScrapeJobProgress(jobId);
-      return ok(progress);
-    } catch (error) {
-      log.error(`Failed to fetch the scrape job progress: ${error.message}`);
-      return createErrorResponse(error);
-    }
-  }
+  //   try {
+  //     const progress = await scrapeSupervisor.getScrapeJobProgress(jobId);
+  //     return ok(progress);
+  //   } catch (error) {
+  //     log.error(`Failed to fetch the scrape job progress: ${error.message}`);
+  //     return createErrorResponse(error);
+  //   }
+  // }
 
-  /**
-   * Delete a scrape job.
-   * @param {object} requestContext - Context of the request.
-   * @param {string} requestContext.params.jobId - The ID of the job to delete.
-   * @return {Promise<Response>} 204 No Content if successful, 4xx or 5xx otherwise.
-   */
-  async function deleteScrapeJob(requestContext) {
-    const { jobId } = parseRequestContext(requestContext);
+  // /**
+  //  * Delete a scrape job.
+  //  * @param {object} requestContext - Context of the request.
+  //  * @param {string} requestContext.params.jobId - The ID of the job to delete.
+  //  * @return {Promise<Response>} 204 No Content if successful, 4xx or 5xx otherwise.
+  //  */
+  // async function deleteScrapeJob(requestContext) {
+  //   const { jobId } = parseRequestContext(requestContext);
 
-    try {
-      await scrapeSupervisor.deleteScrapeJob(jobId);
+  //   try {
+  //     await scrapeSupervisor.deleteScrapeJob(jobId);
 
-      return noContent();
-    } catch (error) {
-      log.error(`Failed to delete scrape jobId: ${jobId} : ${error.message}`);
-      return createErrorResponse(error);
-    }
-  }
+  //     return noContent();
+  //   } catch (error) {
+  //     log.error(`Failed to delete scrape jobId: ${jobId} : ${error.message}`);
+  //     return createErrorResponse(error);
+  //   }
+  // }
 
   return {
     createScrapeJob,
     getScrapeJobStatus,
-    getScrapeJobResult,
-    getScrapeJobProgress,
+    getScrapeJobUrlResults,
+    // getScrapeJobProgress,
     getScrapeJobsByDateRange,
-    deleteScrapeJob,
+    // deleteScrapeJob,
   };
 }
 

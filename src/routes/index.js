@@ -177,10 +177,10 @@ export default function getRouteHandlers(
     // Scrape Jobs
     'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
     'GET /tools/scrape/jobs/:jobId': scrapeJobController.getScrapeJobStatus,
-    'GET /tools/scrape/jobs/:jobId/progress': scrapeJobController.getScrapeJobProgress,
-    'GET /tools/scrape/jobs/:jobId/result': scrapeJobController.getScrapeJobResult,
-    'DELETE /tools/scrape/jobs/:jobId': scrapeJobController.deleteScrapeJob,
+    'GET /tools/scrape/jobs/:jobId/results': scrapeJobController.getScrapeJobUrlResults,
     'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs': scrapeJobController.getScrapeJobsByDateRange,
+    // 'GET /tools/scrape/jobs/:jobId/progress': scrapeJobController.getScrapeJobProgress,
+    // 'DELETE /tools/scrape/jobs/:jobId': scrapeJobController.deleteScrapeJob,
 
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
