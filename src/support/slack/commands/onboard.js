@@ -356,8 +356,6 @@ function OnboardCommand(context) {
 
       // Prepare and start step function workflow with the necessary parameters
       const workflowInput = {
-        auditStatusJob,
-        disableImportAndAuditJob,
         demoURLJob,
         workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
       };
