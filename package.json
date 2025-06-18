@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.120.13",
+  "version": "1.120.15",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -130,7 +130,7 @@
     "nock": "14.0.5",
     "nodemon": "3.1.10",
     "semantic-release": "24.2.5",
-    "sinon": "20.0.0",
+    "sinon": "21.0.0",
     "sinon-chai": "4.0.0",
     "yaml": "2.8.0"
   },
