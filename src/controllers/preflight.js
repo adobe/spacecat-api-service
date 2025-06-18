@@ -94,7 +94,6 @@ function PreflightController(ctx, log, env) {
    */
   const createPreflightJob = async (context) => {
     const { data } = context;
-    log.info(`In createPreflightJob context: ${JSON.stringify(context)}`);
 
     try {
       validateRequestData(data);
