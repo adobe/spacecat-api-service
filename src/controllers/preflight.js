@@ -16,7 +16,7 @@ import {
 import {
   badRequest, internalServerError, notFound, ok, accepted, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
-// import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
@@ -117,21 +117,18 @@ function PreflightController(ctx, log, env) {
       }
 
       let promiseTokenResponse;
-      try {
-        promiseTokenResponse = await getCSPromiseToken(context);
-        log.info(`Promise token response: ${JSON.stringify(promiseTokenResponse)}`);
-      } catch (e) {
-        log.error(`Failed to get promise token: ${e.message}`);
-        if (e instanceof ErrorWithStatusCode) {
-          return badRequest(e.message);
+      if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+        try {
+          promiseTokenResponse = await getCSPromiseToken(context);
+          log.info(`Promise token response: ${JSON.stringify(promiseTokenResponse)}`);
+        } catch (e) {
+          log.error(`Failed to get promise token: ${e.message}`);
+          if (e instanceof ErrorWithStatusCode) {
+            return badRequest(e.message);
+          }
+          return createResponse({ message: 'Error getting promise token' }, 500);
         }
-        return createResponse({ message: 'Error getting promise token' }, 500);
       }
-
-      // Get promise token for AEM CS sites (similar to suggestions controller)
-
-      // if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
-      // }
 
       // Create a new async job
       const job = await dataAccess.AsyncJob.create({
@@ -141,7 +138,6 @@ function PreflightController(ctx, log, env) {
             siteId: site.getId(),
             urls: data.urls,
             step,
-            promiseToken: promiseTokenResponse, // Include promise token in job metadata
           },
           jobType: 'preflight',
           tags: ['preflight'],
