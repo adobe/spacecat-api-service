@@ -15,7 +15,7 @@
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
-// import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -91,7 +91,7 @@ function OnboardCommand(context) {
     slackContext,
   ) => {
     const { say } = slackContext;
-    // const sfnClient = new SFNClient();
+    const sfnClient = new SFNClient();
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -358,21 +358,23 @@ function OnboardCommand(context) {
       log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
       log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
 
-      // // Prepare and start step function workflow with the necessary parameters
-      // const workflowInput = {
-      //   demoURLJob,
-      //   workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
-      // };
+      // Prepare and start step function workflow with the necessary parameters
+      const workflowInput = {
+        auditStatusJob,
+        disableImportAndAuditJob,
+        demoURLJob,
+        workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
+      };
 
-      // const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+      const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
 
-      // const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
-      // const startCommand = new StartExecutionCommand({
-      //   stateMachineArn: onboardWorkflowArn,
-      //   input: JSON.stringify(workflowInput),
-      //   name: workflowName,
-      // });
-      // await sfnClient.send(startCommand);
+      const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
+      const startCommand = new StartExecutionCommand({
+        stateMachineArn: onboardWorkflowArn,
+        input: JSON.stringify(workflowInput),
+        name: workflowName,
+      });
+      await sfnClient.send(startCommand);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
