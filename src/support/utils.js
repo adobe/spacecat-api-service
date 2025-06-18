@@ -397,7 +397,6 @@ export function getImsUserToken(context) {
 /**
  * Get an IMS promise token from the authorization header in context.
  * @param {object} context - The context of the request.
- * @param {object} [log] - The optional log object.
  * @returns {Promise<{
  *   promise_token: string,
  *   expires_in: number,
@@ -405,7 +404,7 @@ export function getImsUserToken(context) {
  * }>} - The promise token response.
  * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
  */
-export async function getCSPromiseToken(context, log = undefined) {
+export async function getCSPromiseToken(context) {
   // get IMS promise token and attach to queue message
   let userToken;
   try {
@@ -417,10 +416,6 @@ export async function getCSPromiseToken(context, log = undefined) {
     context,
     ImsPromiseClient.CLIENT_TYPE.EMITTER,
   );
-
-  if (log) {
-    log.info('IMS promise client own properties:', Object.getOwnPropertyNames(imsPromiseClient));
-  }
 
   return imsPromiseClient.getPromiseToken(
     userToken,
