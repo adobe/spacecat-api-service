@@ -1,3 +1,52 @@
+## [1.120.15](https://github.com/adobe/spacecat-api-service/compare/v1.120.14...v1.120.15) (2025-06-17)
+
+
+### Bug Fixes
+
+* update api docs ([#991](https://github.com/adobe/spacecat-api-service/issues/991)) ([dc7019d](https://github.com/adobe/spacecat-api-service/commit/dc7019ddbaa7869b3ec9b502df53cda22bd7abed))
+
+## [1.120.14](https://github.com/adobe/spacecat-api-service/compare/v1.120.13...v1.120.14) (2025-06-17)
+
+
+### Bug Fixes
+
+* broken internal links ([#990](https://github.com/adobe/spacecat-api-service/issues/990)) ([478d0c6](https://github.com/adobe/spacecat-api-service/commit/478d0c6d9c26772b10741b44cd41cdffdfe599e2))
+
+## [1.120.13](https://github.com/adobe/spacecat-api-service/compare/v1.120.12...v1.120.13) (2025-06-16)
+
+
+### Bug Fixes
+
+* case insensitive email check ([#988](https://github.com/adobe/spacecat-api-service/issues/988)) ([e70a570](https://github.com/adobe/spacecat-api-service/commit/e70a5709fa3087193b67b2de924f4c65c99fcd50))
+
+## [1.120.12](https://github.com/adobe/spacecat-api-service/compare/v1.120.11...v1.120.12) (2025-06-14)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#985](https://github.com/adobe/spacecat-api-service/issues/985)) ([a675098](https://github.com/adobe/spacecat-api-service/commit/a675098c982b0e11f48915c000157a3fe1a5088a))
+
+## [1.120.11](https://github.com/adobe/spacecat-api-service/compare/v1.120.10...v1.120.11) (2025-06-14)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#984](https://github.com/adobe/spacecat-api-service/issues/984)) ([ff67dd7](https://github.com/adobe/spacecat-api-service/commit/ff67dd7bca4aedb1d6989500d2f9bdfdf39486ad))
+
+## [1.120.10](https://github.com/adobe/spacecat-api-service/compare/v1.120.9...v1.120.10) (2025-06-14)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#983](https://github.com/adobe/spacecat-api-service/issues/983)) ([9f76ff5](https://github.com/adobe/spacecat-api-service/commit/9f76ff5cdba290aea07b467adabff4d8d8e29614))
+
+## [1.120.9](https://github.com/adobe/spacecat-api-service/compare/v1.120.8...v1.120.9) (2025-06-13)
+
+
+### Bug Fixes
+
+* screenshot taking with prefixes ([#982](https://github.com/adobe/spacecat-api-service/issues/982)) ([fe6c418](https://github.com/adobe/spacecat-api-service/commit/fe6c4180d21bdfdb13c7024a606fe0d909af2ff5))
+
 ## [1.120.8](https://github.com/adobe/spacecat-api-service/compare/v1.120.7...v1.120.8) (2025-06-12)
 
 
