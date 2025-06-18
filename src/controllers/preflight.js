@@ -94,7 +94,6 @@ function PreflightController(ctx, log, env) {
    */
   const createPreflightJob = async (context) => {
     const { data } = context;
-
     try {
       validateRequestData(data);
     } catch (error) {
@@ -145,11 +144,14 @@ function PreflightController(ctx, log, env) {
 
       try {
         // Send message to SQS to trigger the audit worker
-        await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
+        const sqsMessage = {
           jobId: job.getId(),
           type: 'preflight',
-          promiseToken: promiseTokenResponse, // Include promise token in SQS message
-        });
+        };
+        if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+          sqsMessage.promiseToken = promiseTokenResponse;
+        }
+        await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
       } catch (error) {
         log.error(`Failed to send message to SQS: ${error.message}`);
         await job.remove();
