@@ -310,8 +310,9 @@ function OnboardCommand(context) {
         type: 'audit-status-processor',
         siteId: siteID,
         siteUrl: baseURL,
-        auditContext: {
-          organizationId,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
           auditTypes,
           slackContext: {
             channelId: slackContext.channelId,
@@ -325,8 +326,9 @@ function OnboardCommand(context) {
         type: 'disable-import-audit-processor',
         siteId: siteID,
         siteUrl: baseURL,
-        auditContext: {
-          organizationId,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
           importTypes,
           auditTypes,
           slackContext: {
@@ -341,8 +343,9 @@ function OnboardCommand(context) {
         type: 'demo-url-processor',
         siteId: siteID,
         siteUrl: baseURL,
-        demoURLContext: {
-          organizationId,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
           experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
           slackContext: {
             channelId: slackContext.channelId,
@@ -353,11 +356,6 @@ function OnboardCommand(context) {
 
       // Prepare and start step function workflow with the necessary parameters
       const workflowInput = {
-        siteUrl: baseURL,
-        imsOrgId: imsOrgID,
-        organizationId,
-        siteId: siteID,
-        slackContext,
         auditStatusJob,
         disableImportAndAuditJob,
         demoURLJob,
@@ -368,11 +366,17 @@ function OnboardCommand(context) {
       const serializedInput = JSON.stringify(workflowInput);
       log.info(`Serialized Step Functions input (${serializedInput.length} chars): ${serializedInput.substring(0, 500)}${serializedInput.length > 500 ? '...' : ''}`);
 
+      const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+
+      log.info(`Audit status job: ${JSON.stringify(auditStatusJob)}`);
+      log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
+      log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
+
       const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
       const startCommand = new StartExecutionCommand({
         stateMachineArn: onboardWorkflowArn,
         input: JSON.stringify(workflowInput),
-        name: `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`,
+        name: workflowName,
       });
       await sfnClient.send(startCommand);
     } catch (error) {
