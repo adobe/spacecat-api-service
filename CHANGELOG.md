@@ -1,3 +1,10 @@
+# [1.121.0](https://github.com/adobe/spacecat-api-service/compare/v1.120.16...v1.121.0) (2025-06-18)
+
+
+### Features
+
+* accepting a subset of checks to run ([#992](https://github.com/adobe/spacecat-api-service/issues/992)) ([a5ee4cc](https://github.com/adobe/spacecat-api-service/commit/a5ee4cc47be88cb9e5016c20bd45a58248729fdf))
+
 ## [1.120.16](https://github.com/adobe/spacecat-api-service/compare/v1.120.15...v1.120.16) (2025-06-18)
 
 
