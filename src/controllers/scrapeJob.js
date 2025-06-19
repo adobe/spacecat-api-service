@@ -161,7 +161,7 @@ function ScrapeJobController(context) {
   /**
    * Get all scrape jobs by baseURL
    * @param {object} requestContext - Context of the request.
-   * @param {string} requestContext.params.baseURL - The baseURL of the jobs to fetch.
+   * @param {string} requestContext.params.baseURL - The baseURL encoded in base64
    * @returns {Promise<Response>} 200 OK with a JSON representation of the scrape jobs
    * or empty array if no jobs are found.
    */
