@@ -597,7 +597,7 @@ describe('ScrapeJobController tests', () => {
     it('should return an array of scrape jobs', async () => {
       const job = createScrapeJob(exampleJob);
       baseContext.dataAccess.ScrapeJob.allByBaseURL = sandbox.stub().resolves([job]);
-      baseContext.params.baseURL = 'https://www.example.com';
+      baseContext.params.baseURL = 'aHR0cHM6Ly93d3cuZXhhbXBsZS5jb20=';
 
       const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
       expect(response).to.be.an.instanceOf(Response);
@@ -608,7 +608,7 @@ describe('ScrapeJobController tests', () => {
 
     it('should return an empty array if no jobs are found for this baseUrl', async () => {
       baseContext.dataAccess.ScrapeJob.allByBaseURL = sandbox.stub().resolves([]);
-      baseContext.params.baseURL = 'https://www.example.com';
+      baseContext.params.baseURL = 'aHR0cHM6Ly93d3cuZXhhbXBsZS5jb20=';
 
       const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
       expect(response).to.be.an.instanceOf(Response);
@@ -619,7 +619,7 @@ describe('ScrapeJobController tests', () => {
 
     it('should handle errors while trying to fetch scrape jobs by baseURL gracefully', async () => {
       baseContext.dataAccess.ScrapeJob.allByBaseURL = sandbox.stub().rejects(new Error('Failed to fetch scrape jobs by baseURL'));
-      baseContext.params.baseURL = 'https://www.example.com';
+      baseContext.params.baseURL = 'aHR0cHM6Ly93d3cuZXhhbXBsZS5jb20=';
 
       const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
       expect(response).to.be.an.instanceOf(Response);
@@ -633,6 +633,14 @@ describe('ScrapeJobController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Invalid request: baseURL must be a valid URL');
+    });
+
+    it('should handle errors when no baseUrl is provided', async () => {
+      baseContext.params.baseURL = '';
+      const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('Base URL required');
     });
   });
 });

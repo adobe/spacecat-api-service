@@ -14,9 +14,11 @@ import ScrapeClient from '@adobe/spacecat-shared-scrape-client';
 import {
   createResponse,
   ok,
+  badRequest,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isValidUrl,
+  hasText,
 } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../support/utils.js';
 
@@ -164,12 +166,15 @@ function ScrapeJobController(context) {
    * or empty array if no jobs are found.
    */
   async function getScrapeJobsByBaseURL(requestContext) {
-    const { baseURL } = parseRequestContext(requestContext);
-    log.debug(`Fetching scrape jobs by baseURL: ${baseURL}.`);
+    const { baseURL: encodedBaseURL } = parseRequestContext(requestContext);
 
-    let decodedBaseURL = baseURL;
+    if (!hasText(encodedBaseURL)) {
+      return badRequest('Base URL required');
+    }
+
+    let decodedBaseURL = null;
     try {
-      decodedBaseURL = decodeURIComponent(baseURL);
+      decodedBaseURL = Buffer.from(encodedBaseURL, 'base64').toString('utf-8').trim();
 
       if (!isValidUrl(decodedBaseURL)) {
         throw new ErrorWithStatusCode('Invalid request: baseURL must be a valid URL', STATUS_BAD_REQUEST);
