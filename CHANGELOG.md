@@ -1,3 +1,10 @@
+## [1.121.2](https://github.com/adobe/spacecat-api-service/compare/v1.121.1...v1.121.2) (2025-06-19)
+
+
+### Bug Fixes
+
+* updating api to create promiseToken ([#978](https://github.com/adobe/spacecat-api-service/issues/978)) ([684a288](https://github.com/adobe/spacecat-api-service/commit/684a288df3989a731e164f5f12e7946b61ce3df1))
+
 ## [1.121.1](https://github.com/adobe/spacecat-api-service/compare/v1.121.0...v1.121.1) (2025-06-19)
 
 
