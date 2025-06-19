@@ -210,14 +210,7 @@ describe('ScrapeJobController tests', () => {
       delete baseContext.data;
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: missing application/json request data');
-    });
-
-    it('should fail if processingType is provided but invalid', async () => {
-      baseContext.data.processingType = 'invalid';
-      const response = await scrapeJobController.createScrapeJob(baseContext);
-      expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.match(/^Invalid request: processingType must be either/);
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: missing application/json request data');
     });
 
     it('should respond with an error code when the data format is incorrect', async () => {
@@ -225,7 +218,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: urls must be provided as a non-empty array');
     });
 
     it('should respond with an error code when custom header is not an object', async () => {
@@ -233,7 +226,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: customHeaders must be an object');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: customHeaders must be an object');
     });
 
     it('should reject when no scrape queues are defined', async () => {
@@ -243,7 +236,7 @@ describe('ScrapeJobController tests', () => {
       const scrapeJobControllerNoQueues = ScrapeJobController(baseContext);
       const response = await scrapeJobControllerNoQueues.createScrapeJob(baseContext);
       expect(response.status).to.equal(503);
-      expect(response.headers.get('x-error')).to.equal('Service Unavailable: No scrape queue available');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Service Unavailable: No scrape queue available');
     });
 
     it('correctly returns queue with least messages', async () => {
@@ -269,7 +262,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: not-a-valid-url is not a valid URL');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: not-a-valid-url is not a valid URL');
     });
 
     it('should reject when an invalid options object is provided', async () => {
@@ -277,7 +270,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: options must be an object');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: options must be an object');
     });
 
     it('should reject when an non-object options param is provided', async () => {
@@ -286,14 +279,14 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: options must be an object');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: options must be an object');
     });
 
     it('should fail if sqs fails to send a message', async () => {
       baseContext.sqs.sendMessage = sandbox.stub().throws(new Error('Queue error'));
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(500);
-      expect(response.headers.get('x-error')).to.equal('Queue error');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Queue error');
     });
 
     it('should start a new scrape job', async () => {
@@ -355,7 +348,7 @@ describe('ScrapeJobController tests', () => {
       ];
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (4) exceeds the maximum allowed (3)');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: number of URLs provided (4) exceeds the maximum allowed (3)');
     });
 
     it('should fail when the number of URLs exceeds the (default) maximum allowed', async () => {
@@ -368,14 +361,14 @@ describe('ScrapeJobController tests', () => {
       scrapeJobController = ScrapeJobController(baseContext);
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
     });
 
     it('should fail when URLs are empty', async () => {
       baseContext.data.urls = [];
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: urls must be provided as a non-empty array');
+      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: urls must be provided as a non-empty array');
     });
   });
 

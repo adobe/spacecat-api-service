@@ -10,14 +10,15 @@
  * governing permissions and limitations under the License.
  */
 
+import ScrapeClient from '@adobe/spacecat-shared-scrape-client';
 import {
   createResponse,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  isIsoDate, isObject, isValidUrl,
+  isValidUrl, isIsoDate,
 } from '@adobe/spacecat-shared-utils';
-import { ScrapeJob as ScrapeJobModel } from '@adobe/spacecat-shared-data-access';
+// import { ScrapeJob as ScrapeJobModel } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ScrapeJobSupervisor from '../support/scrape-job-supervisor.js';
 import { ScrapeJobDto } from '../dto/scrape-job.js';
@@ -36,15 +37,17 @@ import { ScrapeJobDto } from '../dto/scrape-job.js';
  */
 function ScrapeJobController(context) {
   const {
-    dataAccess, sqs, s3, log, env,
+    dataAccess, log, env, sqs,
   } = context;
+
   const services = {
     dataAccess,
     sqs,
-    s3,
     log,
     env,
   };
+
+  const scrapeClient = ScrapeClient.createFrom(context);
 
   let scrapeConfiguration = {};
   try {
@@ -54,55 +57,24 @@ function ScrapeJobController(context) {
   }
 
   const scrapeSupervisor = new ScrapeJobSupervisor(services, scrapeConfiguration);
-  const { maxUrlsPerJob = 1 } = scrapeConfiguration;
+  // const { maxUrlsPerJob = 1 } = scrapeConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
   const STATUS_ACCEPTED = 202;
 
-  function validateRequestData(data) {
-    if (!isObject(data)) {
-      throw new ErrorWithStatusCode('Invalid request: missing application/json request data', STATUS_BAD_REQUEST);
-    }
-
-    if (!Array.isArray(data.urls) || !data.urls.length > 0) {
-      throw new ErrorWithStatusCode('Invalid request: urls must be provided as a non-empty array', STATUS_BAD_REQUEST);
-    }
-
-    if (data.urls.length > maxUrlsPerJob) {
-      throw new ErrorWithStatusCode(`Invalid request: number of URLs provided (${data.urls.length}) exceeds the maximum allowed (${maxUrlsPerJob})`, STATUS_BAD_REQUEST);
-    }
-
-    data.urls.forEach((url) => {
-      if (!isValidUrl(url)) {
-        throw new ErrorWithStatusCode(`Invalid request: ${url} is not a valid URL`, STATUS_BAD_REQUEST);
-      }
-    });
-
-    if (data.options && !isObject(data.options)) {
-      throw new ErrorWithStatusCode('Invalid request: options must be an object', STATUS_BAD_REQUEST);
-    }
-
-    const processingTypes = Object.values(ScrapeJobModel.ScrapeProcessingType);
-    // the type property is optional for backwards compatibility, if it is provided it must be valid
-    if (data.processingType && !processingTypes.includes(data.processingType)) {
-      throw new ErrorWithStatusCode(`Invalid request: processingType must be either ${processingTypes.join(' or ')}`, STATUS_BAD_REQUEST);
-    }
-
-    if (data.customHeaders && !isObject(data.customHeaders)) {
-      throw new ErrorWithStatusCode('Invalid request: customHeaders must be an object', STATUS_BAD_REQUEST);
-    }
-  }
-
-  function createErrorResponse(error) {
-    return createResponse({}, error.status || 500, {
+  function createErrorResponse(error, status = 500) {
+    return createResponse({}, error.status || status || 500, {
       [HEADER_ERROR]: error.message,
     });
   }
 
   function validateIsoDates(startDate, endDate) {
     if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
-      throw new ErrorWithStatusCode('Invalid request: startDate and endDate must be in ISO 8601 format', STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode(
+        'Invalid request: startDate and endDate must be in ISO 8601 format',
+        STATUS_BAD_REQUEST,
+      );
     }
   }
 
@@ -117,35 +89,17 @@ function ScrapeJobController(context) {
     const { data } = requestContext;
 
     try {
-      validateRequestData(data);
+      const job = await scrapeClient.createScrapeJob(data);
 
-      // add default processing type if not provided
-      if (!data.processingType) {
-        data.processingType = ScrapeJobModel.ScrapeProcessingType.DEFAULT;
-      }
-
-      const {
-        urls, options, customHeaders, processingType,
-      } = data;
-
-      log.info(`Creating a new scrape job with ${urls.length} URLs.`);
-
-      // Merge the scrape configuration options with the request options allowing the user options
-      // to override the defaults
-      const mergedOptions = {
-        ...scrapeConfiguration.options,
-        ...options,
-      };
-
-      const job = await scrapeSupervisor.startNewJob(
-        urls,
-        processingType,
-        mergedOptions,
-        customHeaders,
-      );
-      return createResponse(ScrapeJobDto.toJSON(job), STATUS_ACCEPTED);
+      // return createResponse(ScrapeJobDto.toJSON(job), STATUS_ACCEPTED);
+      return createResponse(job, STATUS_ACCEPTED);
     } catch (error) {
-      log.error(`Failed to create a new scrape job: ${error.message}`);
+      log.error(error.message);
+      if (error?.message?.includes('Invalid request')) {
+        return createErrorResponse(error, 400);
+      } else if (error?.message?.includes('Service Unavailable')) {
+        return createErrorResponse(error, 503);
+      }
       return createErrorResponse(error);
     }
   }
