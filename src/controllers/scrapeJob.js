@@ -14,13 +14,14 @@ import { ScrapeClient } from '@adobe/spacecat-shared-scrape-client';
 import {
   createResponse,
   ok,
+  accepted,
+  notFound,
   badRequest,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isValidUrl,
   hasText,
 } from '@adobe/spacecat-shared-utils';
-import { ErrorWithStatusCode } from '../support/utils.js';
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
@@ -41,8 +42,6 @@ function ScrapeJobController(context) {
   const scrapeClient = ScrapeClient.createFrom(context);
 
   const HEADER_ERROR = 'x-error';
-  const STATUS_BAD_REQUEST = 400;
-  const STATUS_ACCEPTED = 202;
 
   function createErrorResponse(error) {
     return createResponse({}, error.status || 500, {
@@ -62,12 +61,11 @@ function ScrapeJobController(context) {
     try {
       const job = await scrapeClient.createScrapeJob(data);
 
-      return createResponse(job, STATUS_ACCEPTED);
+      return accepted(job);
     } catch (error) {
       log.error(error.message);
       if (error?.message?.includes('Invalid request')) {
-        error.status = 400;
-        return createErrorResponse(error);
+        return badRequest(error);
       } else if (error?.message?.includes('Service Unavailable')) {
         error.status = 503;
         return createErrorResponse(error);
@@ -104,8 +102,7 @@ function ScrapeJobController(context) {
     } catch (error) {
       log.error(`Failed to fetch scrape jobs between startDate: ${startDate} and endDate: ${endDate}, ${error.message}`);
       if (error?.message?.includes('Invalid request')) {
-        error.status = 400;
-        return createErrorResponse(error);
+        return badRequest(error);
       }
       return createErrorResponse(error);
     }
@@ -126,11 +123,9 @@ function ScrapeJobController(context) {
     } catch (error) {
       log.error(`Failed to fetch scrape job status for jobId: ${jobId}, message: ${error.message}`);
       if (error?.message?.includes('Not found')) {
-        error.status = 404;
-        return createErrorResponse(error);
+        return notFound(error);
       } else if (error?.message?.includes('Job ID is required')) {
-        error.status = 400;
-        return createErrorResponse(error);
+        return badRequest(error);
       }
       return createErrorResponse(error);
     }
@@ -148,12 +143,14 @@ function ScrapeJobController(context) {
     try {
       const results = await scrapeClient.getScrapeJobUrlResults(jobId);
 
-      return ok(results);
+      return ok({
+        jobId,
+        results,
+      });
     } catch (error) {
       log.error(`Failed to fetch the scrape job result: ${error.message}`);
       if (error?.message?.includes('Not found')) {
-        error.status = 404;
-        return createErrorResponse(error);
+        return notFound(error);
       }
       return createErrorResponse(error);
     }
@@ -180,7 +177,7 @@ function ScrapeJobController(context) {
       decodedBaseURL = Buffer.from(encodedBaseURL, 'base64').toString('utf-8').trim();
 
       if (!isValidUrl(decodedBaseURL)) {
-        throw new ErrorWithStatusCode('Invalid request: baseURL must be a valid URL', STATUS_BAD_REQUEST);
+        return badRequest('Invalid request: baseURL must be a valid URL');
       }
 
       const jobs = await scrapeClient.getScrapeJobsByBaseURL(decodedBaseURL, processingType);

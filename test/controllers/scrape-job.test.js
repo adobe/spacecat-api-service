@@ -211,7 +211,7 @@ describe('ScrapeJobController tests', () => {
       delete baseContext.data;
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: missing application/json request data');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: missing application/json request data');
     });
 
     it('should respond with an error code when the data format is incorrect', async () => {
@@ -219,7 +219,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: urls must be provided as a non-empty array');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: urls must be provided as a non-empty array');
     });
 
     it('should respond with an error code when custom header is not an object', async () => {
@@ -227,7 +227,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: customHeaders must be an object');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: customHeaders must be an object');
     });
 
     it('should reject when no scrape queues are defined', async () => {
@@ -263,7 +263,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: not-a-valid-url is not a valid URL');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: not-a-valid-url is not a valid URL');
     });
 
     it('should reject when an invalid options object is provided', async () => {
@@ -271,7 +271,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: options must be an object');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: options must be an object');
     });
 
     it('should reject when an non-object options param is provided', async () => {
@@ -280,7 +280,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.createScrapeJob(baseContext);
 
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: options must be an object');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: options must be an object');
     });
 
     it('should fail if sqs fails to send a message', async () => {
@@ -349,7 +349,7 @@ describe('ScrapeJobController tests', () => {
       ];
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: number of URLs provided (4) exceeds the maximum allowed (3)');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: number of URLs provided (4) exceeds the maximum allowed (3)');
     });
 
     it('should fail when the number of URLs exceeds the (default) maximum allowed', async () => {
@@ -362,14 +362,14 @@ describe('ScrapeJobController tests', () => {
       scrapeJobController = ScrapeJobController(baseContext);
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: number of URLs provided (2) exceeds the maximum allowed (1)');
     });
 
     it('should fail when URLs are empty', async () => {
       baseContext.data.urls = [];
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Invalid request: urls must be provided as a non-empty array');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: urls must be provided as a non-empty array');
     });
   });
 
@@ -428,44 +428,47 @@ describe('ScrapeJobController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       const results = await response.json();
-      expect(results).to.deep.equal([
-        {
-          url: 'https://example.com/page1',
-          status: 'COMPLETE',
-          reason: null,
-          path: 'path/to/result1',
-        },
-        {
-          url: 'https://example.com/page2',
-          status: 'COMPLETE',
-          reason: null,
-          path: 'path/to/result2',
-        },
-        {
-          url: 'https://example.com/page3',
-          status: 'RUNNING',
-          reason: null,
-          path: 'path/to/result3',
-        },
-        {
-          url: 'https://example.com/page5',
-          status: 'PENDING',
-          reason: null,
-          path: 'path/to/result5',
-        },
-        {
-          url: 'https://example.com/page6',
-          status: 'REDIRECT',
-          reason: null,
-          path: 'path/to/result6',
-        },
-        {
-          url: 'https://example.com/page7',
-          status: 'FAILED',
-          reason: 'An error occurred',
-          path: 'path/to/result7',
-        },
-      ]);
+      expect(results).to.deep.equal({
+        jobId: exampleJob.scrapeJobId,
+        results: [
+          {
+            url: 'https://example.com/page1',
+            status: 'COMPLETE',
+            reason: null,
+            path: 'path/to/result1',
+          },
+          {
+            url: 'https://example.com/page2',
+            status: 'COMPLETE',
+            reason: null,
+            path: 'path/to/result2',
+          },
+          {
+            url: 'https://example.com/page3',
+            status: 'RUNNING',
+            reason: null,
+            path: 'path/to/result3',
+          },
+          {
+            url: 'https://example.com/page5',
+            status: 'PENDING',
+            reason: null,
+            path: 'path/to/result5',
+          },
+          {
+            url: 'https://example.com/page6',
+            status: 'REDIRECT',
+            reason: null,
+            path: 'path/to/result6',
+          },
+          {
+            url: 'https://example.com/page7',
+            status: 'FAILED',
+            reason: 'An error occurred',
+            path: 'path/to/result7',
+          },
+        ],
+      });
     });
 
     it('should respond a job not found for non existent jobs', async () => {
@@ -489,7 +492,10 @@ describe('ScrapeJobController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
 
-      expect(await response.json()).to.deep.equal([]);
+      expect(await response.json()).to.deep.equal({
+        jobId: exampleJob.scrapeJobId,
+        results: [],
+      });
     });
 
     it('should handle errors while trying to fetch scrape job url results gracefully', async () => {
@@ -508,7 +514,7 @@ describe('ScrapeJobController tests', () => {
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Job ID is required');
+      expect(response.headers.get('x-error')).to.equal('Error: Job ID is required');
     });
 
     it('should return 404 when the jobID cannot be found', async () => {
@@ -517,7 +523,7 @@ describe('ScrapeJobController tests', () => {
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
-      expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape job status for jobId: 3ec88567-c9f8-4fb1-8361-b53985a2898b, message: Not found');
+      expect(response.headers.get('x-error')).to.equal('Error: Failed to fetch scrape job status for jobId: 3ec88567-c9f8-4fb1-8361-b53985a2898b, message: Not found');
     });
 
     it('should return job details for a valid jobId', async () => {
@@ -548,7 +554,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.getScrapeJobsByDateRange(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO 8601 format');
+      expect(response.headers.get('x-error')).to.equal('Error: Invalid request: startDate and endDate must be in ISO 8601 format');
     });
 
     it('should throw an error when endDate is not present', async () => {
@@ -556,7 +562,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.getScrapeJobsByDateRange(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('Invalid request: startDate and endDate must be in ISO 8601 format');
+      expect(response.headers.get('x-error')).to.equal('Error: Invalid request: startDate and endDate must be in ISO 8601 format');
     });
 
     it('should return an array of scrape jobs', async () => {
