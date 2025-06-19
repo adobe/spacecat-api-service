@@ -416,6 +416,7 @@ export async function getCSPromiseToken(context) {
     context,
     ImsPromiseClient.CLIENT_TYPE.EMITTER,
   );
+
   return imsPromiseClient.getPromiseToken(
     userToken,
     context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT,
