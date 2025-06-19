@@ -17,19 +17,12 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import ImsPromiseClient from '@adobe/spacecat-shared-ims-client/src/clients/ims-promise-client.js';
+import esmock from 'esmock';
+import * as utils from '../../src/support/utils.js';
 import PreflightController from '../../src/controllers/preflight.js';
-import { ErrorWithStatusCode } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
-const mockImsPromiseClient = {
-  getPromiseToken: sinon.stub(),
-};
-
-// Mock the static createFrom method
-// eslint-disable-next-line no-unused-vars
-const createFromStub = sinon.stub(ImsPromiseClient, 'createFrom').returns(mockImsPromiseClient);
 
 describe('Preflight Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -101,9 +94,6 @@ describe('Preflight Controller', () => {
     mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(mockJob);
     mockDataAccess.Site.findByBaseURL = sandbox.stub().resolves(mockSite);
     mockSqs.sendMessage = sandbox.stub().resolves();
-
-    // Reset the stubs
-    mockImsPromiseClient.getPromiseToken.reset();
   });
 
   afterEach(() => {
@@ -393,128 +383,24 @@ describe('Preflight Controller', () => {
       expect(mockJob.remove).to.have.been.calledOnce;
     });
 
-    it('gets promise token for AEM CS sites', async () => {
-      // Mock site as AEM CS
-      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.AEM_CS;
-
-      const mockPromiseToken = {
-        promise_token: 'test-token',
-        expires_in: 3600,
-        token_type: 'promise_token',
+    it('creates a preflight job with AEM_CS delivery type and includes promise token', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
       };
+      mockDataAccess.Site.findByBaseURL.resolves(aemCsSite);
 
-      // Mock ImsPromiseClient.getPromiseToken to return the token
-      mockImsPromiseClient.getPromiseToken.resolves(mockPromiseToken);
-      // ImsPromiseClient.createFrom.returns(mockImsPromiseClient);
-
-      const context = {
-        data: {
-          urls: ['https://example.com/test.html'],
-          step: 'identify',
+      const mockPromiseToken = { promise_token: 'test-token', expires_in: 3600, token_type: 'Bearer' };
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getCSPromiseToken: async () => mockPromiseToken,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
-        pathInfo: {
-          headers: {
-            authorization: 'Bearer test-token',
-          },
-        },
-      };
-
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(202);
-
-      // Verify ImsPromiseClient was created and used
-      expect(ImsPromiseClient.createFrom).to.have.been.calledWith(context, 'emitter');
-      expect(mockImsPromiseClient.getPromiseToken).to.have.been.calledWith('test-token');
-
-      expect(loggerStub.info).to.have.been.calledWith(`Promise token response: ${JSON.stringify(mockPromiseToken)}`);
-
-      expect(mockSqs.sendMessage).to.have.been.calledWith(
-        'https://sqs.test.amazonaws.com/audit-queue',
-        {
-          jobId,
-          type: 'preflight',
-          promiseToken: mockPromiseToken,
-        },
-      );
-    });
-
-    it('handles promise token error with status code', async () => {
-      // Mock site as AEM CS
-      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.AEM_CS;
-      // Mock ImsPromiseClient to throw an error
-      const error = new ErrorWithStatusCode('IMS getPromiseToken request failed with status: 401', 401);
-
-      mockImsPromiseClient.getPromiseToken.rejects(error);
-      ImsPromiseClient.createFrom.returns(mockImsPromiseClient);
-
-      const context = {
-        data: {
-          urls: ['https://example.com/test.html'],
-          step: 'identify',
-        },
-        pathInfo: {
-          headers: {
-            authorization: 'Bearer invalid-token',
-          },
-        },
-      };
-
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(400);
-
-      const result = await response.json();
-      expect(result).to.deep.equal({
-        message: 'IMS getPromiseToken request failed with status: 401',
       });
 
-      expect(loggerStub.error).to.have.been.calledWith('Failed to get promise token: IMS getPromiseToken request failed with status: 401');
-    });
-
-    it('handles generic promise token error', async () => {
-      // Mock site as AEM CS
-      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.AEM_CS;
-
-      const errorMessage = 'Network error';
-
-      // Mock ImsPromiseClient to throw a generic error
-      mockImsPromiseClient.getPromiseToken.rejects(new Error(errorMessage));
-      ImsPromiseClient.createFrom.returns(mockImsPromiseClient);
-
-      const context = {
-        data: {
-          urls: ['https://example.com/test.html'],
-          step: 'identify',
-        },
-        pathInfo: {
-          headers: {
-            authorization: 'Bearer test-token',
-          },
-        },
-      };
-
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(500);
-
-      const result = await response.json();
-      expect(result).to.deep.equal({
-        message: 'Error getting promise token',
-      });
-
-      expect(loggerStub.error).to.have.been.calledWith(`Failed to get promise token: ${errorMessage}`);
-    });
-
-    it('skips promise token for non-AEM CS sites', async () => {
-      // Ensure site is not AEM CS
-      mockSite.getDeliveryType = () => SiteModel.DELIVERY_TYPES.AEM_EDGE;
-
-      const getCSPromiseTokenStub = sandbox.stub();
-
-      preflightController = PreflightController(
-        {
-          dataAccess: mockDataAccess,
-          sqs: mockSqs,
-          getCSPromiseToken: getCSPromiseTokenStub,
-        },
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
         loggerStub,
         {
           AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
@@ -529,9 +415,94 @@ describe('Preflight Controller', () => {
         },
       };
 
-      const response = await preflightController.createPreflightJob(context);
+      const response = await preflightControllerWithMock.createPreflightJob(context);
       expect(response.status).to.equal(202);
-      expect(getCSPromiseTokenStub).to.not.have.been.called;
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          type: 'preflight',
+          promiseToken: mockPromiseToken,
+        },
+      );
+    });
+
+    it('handles promise token error for AEM_CS site', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+      };
+      mockDataAccess.Site.findByBaseURL.resolves(aemCsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getCSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Missing Authorization header',
+      });
+    });
+
+    it('handles promise token error for AEM_CS site with generic error', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+      };
+      mockDataAccess.Site.findByBaseURL.resolves(aemCsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getCSPromiseToken: async () => { throw new Error('Generic error'); },
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Error getting promise token',
+      });
     });
   });
 
