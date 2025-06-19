@@ -21,7 +21,7 @@ import {
 // import { ScrapeJob as ScrapeJobModel } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ScrapeJobSupervisor from '../support/scrape-job-supervisor.js';
-import { ScrapeJobDto } from '../dto/scrape-job.js';
+import { ScrapeJobDto } from '../dto/scrapeJobDto.js';
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
@@ -63,8 +63,8 @@ function ScrapeJobController(context) {
   const STATUS_BAD_REQUEST = 400;
   const STATUS_ACCEPTED = 202;
 
-  function createErrorResponse(error, status = 500) {
-    return createResponse({}, error.status || status || 500, {
+  function createErrorResponse(error) {
+    return createResponse({}, error.status || 500, {
       [HEADER_ERROR]: error.message,
     });
   }
@@ -96,9 +96,11 @@ function ScrapeJobController(context) {
     } catch (error) {
       log.error(error.message);
       if (error?.message?.includes('Invalid request')) {
-        return createErrorResponse(error, 400);
+        error.status = 400;
+        return createErrorResponse(error);
       } else if (error?.message?.includes('Service Unavailable')) {
-        return createErrorResponse(error, 503);
+        error.status = 503;
+        return createErrorResponse(error);
       }
       return createErrorResponse(error);
     }
