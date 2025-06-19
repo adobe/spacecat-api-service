@@ -51,7 +51,7 @@ export default (context) => {
       await say(`${SUCCESS_MESSAGE_PREFIX}${JSON.stringify(siteConfig, null, 2)}`);
     } catch (error) {
       log.error(error);
-      await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to automatically group pages by URL pattern: ${error.message}`);
+      await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to automatically group pages by URL pattern: ${error.message}.`);
     }
   };
 
