@@ -11,6 +11,7 @@
  */
 import {
   SendMessageCommand, SQSClient, PurgeQueueCommand, GetQueueUrlCommand,
+  GetQueueAttributesCommand,
 } from '@aws-sdk/client-sqs';
 
 /**
@@ -54,6 +55,25 @@ export class SQS {
       this.log.error(`Message sent failed. Type: ${type}, Code: ${code}, Message: ${msg}`);
       throw e;
     }
+  }
+
+  /**
+   * Get the number of messages in the queue.
+   * @param {string} queueUrl - The URL of the queue.
+   * @returns {Promise<number>} - A promise that resolves to the number of messages in the queue.
+   */
+  getQueueMessageCount(queueUrl) {
+    return new Promise((resolve, reject) => {
+      const command = new GetQueueAttributesCommand({
+        QueueUrl: queueUrl,
+        AttributeNames: ['ApproximateNumberOfMessages'],
+      });
+      this.sqsClient.send(command).then((response) => {
+        resolve(response.Attributes.ApproximateNumberOfMessages);
+      }).catch((error) => {
+        reject(error);
+      });
+    });
   }
 
   /**
