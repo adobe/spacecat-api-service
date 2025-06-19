@@ -16,6 +16,8 @@ import {
 import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -118,7 +120,6 @@ function PreflightController(ctx, log, env) {
    */
   const createPreflightJob = async (context) => {
     const { data } = context;
-
     try {
       validateRequestData(data);
     } catch (error) {
@@ -139,6 +140,20 @@ function PreflightController(ctx, log, env) {
         throw new Error(`No site found for base URL: ${baseURL}`);
       }
 
+      let promiseTokenResponse;
+      if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+        try {
+          promiseTokenResponse = await getCSPromiseToken(context);
+          log.info('Successfully got promise token');
+        } catch (e) {
+          log.error(`Failed to get promise token: ${e.message}`);
+          if (e instanceof ErrorWithStatusCode) {
+            return badRequest(e.message);
+          }
+          return internalServerError('Error getting promise token');
+        }
+      }
+
       // Create a new async job
       const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
@@ -156,10 +171,14 @@ function PreflightController(ctx, log, env) {
 
       try {
         // Send message to SQS to trigger the audit worker
-        await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
+        const sqsMessage = {
           jobId: job.getId(),
           type: 'preflight',
-        });
+        };
+        if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+          sqsMessage.promiseToken = promiseTokenResponse;
+        }
+        await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
       } catch (error) {
         log.error(`Failed to send message to SQS: ${error.message}`);
         // roll back the job
