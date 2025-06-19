@@ -1,3 +1,10 @@
+# [1.122.0](https://github.com/adobe/spacecat-api-service/compare/v1.121.4...v1.122.0) (2025-06-19)
+
+
+### Features
+
+* added endpoints for Scrape Client ([#998](https://github.com/adobe/spacecat-api-service/issues/998)) ([0b59538](https://github.com/adobe/spacecat-api-service/commit/0b59538786a1b81a476e3f2b183b5efc02eb7ee0))
+
 ## [1.121.4](https://github.com/adobe/spacecat-api-service/compare/v1.121.3...v1.121.4) (2025-06-19)
 
 
