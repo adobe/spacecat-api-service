@@ -1732,14 +1732,8 @@ ScrapeRequest:
     - processingType
   properties:
     processingType:
-      description: The name of the scrape handler to use
+      description: The name of the scrape handler to use.
       type: string
-      enum:
-        - 'default'
-        - 'accessibility'
-        - 'form'
-        - 'form-accessibility'
-        - 'text-content'
       default: 'default'
     options:
       description: Optional configuration params, defined as a JSON object

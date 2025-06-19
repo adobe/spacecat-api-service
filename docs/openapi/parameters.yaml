@@ -201,3 +201,10 @@ endDate:
   required: true
   schema:
     $ref: './schemas.yaml#/DateTime'
+processingType:
+  name: processingType
+  description: The processing type/handler used by the scrape job
+  in: path
+  required: true
+  schema:
+    type: string
