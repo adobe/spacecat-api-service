@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import ScrapeClient from '@adobe/spacecat-shared-scrape-client';
+import { ScrapeClient } from '@adobe/spacecat-shared-scrape-client';
 import {
   createResponse,
   ok,
