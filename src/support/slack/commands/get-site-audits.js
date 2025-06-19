@@ -10,8 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
-
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -91,6 +91,11 @@ function GetSiteAuditsCommand(context) {
         return;
       }
 
+      if (!isValidUrl(baseURL)) {
+        await say(':warning: Please provide a valid URL.');
+        return;
+      }
+
       const site = await Site.findByBaseURL(baseURL);
 
       if (!site) {
@@ -99,34 +104,30 @@ function GetSiteAuditsCommand(context) {
       }
 
       const configuration = await Configuration.findLatest();
-      const registeredAudits = configuration.getHandlers();
-      const auditTypes = Object.keys(registeredAudits);
 
-      if (!auditTypes.length) {
+      // Use the existing configuration methods to get enabled and disabled audits
+      const enabledAuditTypes = configuration.getEnabledAuditsForSite(site);
+      const disabledAuditTypes = configuration.getDisabledAuditsForSite(site);
+
+      const enabledCount = enabledAuditTypes.length;
+      const disabledCount = disabledAuditTypes.length;
+      const totalCount = enabledCount + disabledCount;
+
+      if (totalCount === 0) {
         await say(':warning: No audit types are configured in the system.');
         return;
       }
 
-      // Check status for all audit types
-      const auditResults = auditTypes.map((auditType) => {
-        const isEnabled = configuration.isHandlerEnabledForSite(auditType, site);
-        return {
-          auditType,
-          isEnabled,
-        };
-      });
-
-      const enabledAudits = auditResults.filter((result) => result.isEnabled);
-      const disabledAudits = auditResults.filter((result) => !result.isEnabled);
-
-      const enabledCount = enabledAudits.length;
-      const disabledCount = disabledAudits.length;
+      // Convert arrays of strings to arrays of objects for formatting
+      const enabledAudits = enabledAuditTypes.map((auditType) => ({ auditType, isEnabled: true }));
+      const disabledAudits = disabledAuditTypes
+        .map((auditType) => ({ auditType, isEnabled: false }));
 
       const textSections = [{
         text: `
 *Site Audit Status for ${site.getBaseURL()}*
 
-📊 *Summary:* ${enabledCount} enabled, ${disabledCount} disabled (${auditTypes.length} total audit types)
+📊 *Summary:* ${enabledCount} enabled, ${disabledCount} disabled (${totalCount} total audit types)
 
 ${formatAuditStatus(enabledAudits, disabledAudits)}
   `,
