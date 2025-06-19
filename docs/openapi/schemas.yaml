@@ -1855,6 +1855,11 @@ ScrapeJobsByDateRangeResponse:
   items:
     $ref: '#/CreateAsyncJobAcceptedResponse'
 
+ScrapeJobsByBaseURLResponse:
+  type: array
+  items:
+    $ref: '#/CreateAsyncJobAcceptedResponse'
+
 BrokenBacklink:
   type: object
   properties:

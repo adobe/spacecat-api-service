@@ -97,6 +97,8 @@ paths:
     $ref: './scrape-api.yaml#/get-scrape-job-url-results'
   /scrape/jobs/by-date-range/{startDate}/{endDate}/all-jobs:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-date-range'
+  /scrape/jobs/by-base-url/{base64BaseUrl}:
+    $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:

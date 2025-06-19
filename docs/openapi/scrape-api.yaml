@@ -105,6 +105,30 @@ get-scrape-jobs-by-date-range:
       '400':
         $ref: './responses.yaml#/400'
 
+get-scrape-jobs-by-base-url:
+  parameters:
+    - $ref: './parameters.yaml#/base64BaseUrl'
+  get:
+    tags:
+      - scrape
+    security:
+      - api_key: [ ]
+    summary: Get Scrape Jobs by Base URL
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+      This endpoint is used to retrieve the scrape jobs by base URL.
+      The baseURL must be provided in the path parameter. (see samples)
+    operationId: getScrapeJobsByBaseURL
+    responses:
+      '200':
+        description: Scrape jobs
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ScrapeJobsByBaseURLResponse'
+      '500':
+        $ref: './responses.yaml#/500'
+
 get-scraped-content-list:
   parameters:
     - $ref: './parameters.yaml#/siteId'
