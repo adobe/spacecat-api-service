@@ -143,6 +143,7 @@ describe('Preflight Controller', () => {
             siteId: 'test-site-123',
             urls: ['https://example.com/test.html'],
             step: 'identify',
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -156,6 +157,87 @@ describe('Preflight Controller', () => {
           type: 'preflight',
         },
       );
+    });
+
+    it('creates a preflight job with specific checks', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+          checks: ['canonical', 'metatags'],
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['https://example.com/test.html'],
+            step: 'identify',
+            checks: ['canonical', 'metatags'],
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+    });
+
+    it('returns 400 Bad Request for empty checks array', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+          checks: [],
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: checks must be a non-empty array of strings',
+      });
+    });
+
+    it('returns 400 Bad Request for invalid check type', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+          checks: ['invalid-check'],
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: checks must be one of: canonical, links, metatags, body-size, lorem-ipsum, h1-count',
+      });
+    });
+
+    it('returns 400 Bad Request if checks is not an array', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+          checks: 'canonical',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: checks must be a non-empty array of strings',
+      });
     });
 
     it('creates a preflight job successfully in CI environment', async () => {
@@ -193,6 +275,7 @@ describe('Preflight Controller', () => {
             siteId: 'test-site-123',
             urls: ['https://example.com/test.html'],
             step: 'identify',
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
