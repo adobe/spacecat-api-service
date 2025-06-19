@@ -55,6 +55,8 @@ function FulfillmentController(context) {
         const eventContent = Buffer.from(hoolihanEvent.value.content, 'base64').toString('utf-8');
         const fulfillmentEvent = JSON.parse(eventContent);
 
+        log.info('fulfillment event: ', fulfillmentEvent);
+
         validationStatus.push({
           status: ACCEPTED,
           requestId: fulfillmentEvent.external_request_id || 'no-external-request-id',
@@ -116,6 +118,7 @@ function FulfillmentController(context) {
         });
       }
       // Unknown error code; re-throw
+      log.error(`Error occurred (test): ${error.message}`);
       throw error;
     }
   }
