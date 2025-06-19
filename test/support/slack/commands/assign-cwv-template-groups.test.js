@@ -87,13 +87,14 @@ describe('AssignCwvTemplateGroups', () => {
     sandbox.restore();
   });
 
-  it('Assign Template-Based Page Groups', async () => {
+  it('Assigns page groups when the configuration has no patterns but suggestions are available', async () => {
     const baseUrl = 'https://site0.com';
-    const groupedUrls = [{ pattern: 'test' }];
+    const currentGroupedUrls = undefined;
+    const suggestedGroupedUrls = [{ pattern: 'test' }];
     const groupCount = 0;
 
     dataAccessMock.Site.findByBaseURL.withArgs(baseUrl).resolves(siteMock);
-    siteConfigMock.getGroupedURLs.withArgs(Audit.AUDIT_TYPES.CWV).returns(groupedUrls);
+    siteConfigMock.getGroupedURLs.withArgs(Audit.AUDIT_TYPES.CWV).returns(currentGroupedUrls);
 
     const command = AssignCwvTemplateGroupsCommand(contextMock);
     const args = [baseUrl];
@@ -108,14 +109,15 @@ describe('AssignCwvTemplateGroups', () => {
       `Expected siteConfig.getGroupedURLs to be called with "${Audit.AUDIT_TYPES.CWV}", but it was not`,
     ).to.be.true;
     expect(
-      siteConfigMock.updateGroupedURLs.calledWith(Audit.AUDIT_TYPES.CWV, groupedUrls),
+      siteConfigMock.updateGroupedURLs.calledWith(Audit.AUDIT_TYPES.CWV, suggestedGroupedUrls),
       'Expected siteConfig.updateGroupedURLs to be called , but it was not',
     ).to.be.true;
     expect(
       siteMock.setConfig.calledOnce,
       'Expected site.setConfig to be called once, but it was not',
     ).to.be.true;
-    const expectedMessage = `${SUCCESS_MESSAGE_PREFIX}Found ${groupCount} new group(s) for site "${baseUrl}" and added them to the configuration. Please re-run the CWV audit to see the results.`;
+    const expectedMessage = `${SUCCESS_MESSAGE_PREFIX}Found ${groupCount} new group(s) for site "${baseUrl}"`
+      + ' and added them to the configuration. Please re-run the CWV audit to see the results.';
     expect(
       slackContextMock.say.calledWith(expectedMessage),
       `Expected say method to be called with message: "${expectedMessage}"`,

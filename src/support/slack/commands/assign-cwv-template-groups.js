@@ -52,12 +52,12 @@ export default (context) => {
       const siteConfig = site.getConfig();
       await say(`${SUCCESS_MESSAGE_PREFIX}${JSON.stringify(siteConfig, null, 2)}`);
 
-      const groupedURLs = [{ pattern: 'test' }];
+      const suggestedGroupedUrls = [{ pattern: 'test' }];
       const currentGroupedURLs = siteConfig.getGroupedURLs(Audit.AUDIT_TYPES.CWV) || [];
       let patchedGroupedURLs = [];
-      if (groupedURLs.length !== 0) {
+      if (suggestedGroupedUrls.length !== 0) {
         patchedGroupedURLs = Object.values(
-          [...currentGroupedURLs, ...groupedURLs].reduce((acc, item) => {
+          [...currentGroupedURLs, ...suggestedGroupedUrls].reduce((acc, item) => {
             acc[item.pattern] = item;
             return acc;
           }, {}),
@@ -70,7 +70,8 @@ export default (context) => {
       // await site.save();
 
       const groupCount = 0;
-      await say(`${SUCCESS_MESSAGE_PREFIX}Found ${groupCount} new group(s) for site "${baseURL}" and added them to the configuration. Please re-run the CWV audit to see the results.`);
+      await say(`${SUCCESS_MESSAGE_PREFIX}Found ${groupCount} new group(s) for site "${baseURL}" and added them`
+        + ' to the configuration. Please re-run the CWV audit to see the results.');
     } catch (error) {
       log.error(error);
       await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to automatically group pages by URL pattern: ${error.message}.`);
