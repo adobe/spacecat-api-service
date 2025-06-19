@@ -104,6 +104,8 @@ get-scrape-jobs-by-date-range:
               $ref: './schemas.yaml#/ScrapeJobsByDateRangeResponse'
       '400':
         $ref: './responses.yaml#/400'
+      '500':
+        $ref: './responses.yaml#/500'
 
 get-scrape-jobs-by-base-url:
   parameters:
@@ -126,6 +128,8 @@ get-scrape-jobs-by-base-url:
           application/json:
             schema:
               $ref: './schemas.yaml#/ScrapeJobsByBaseURLResponse'
+      '400':
+        $ref: './responses.yaml#/400'
       '500':
         $ref: './responses.yaml#/500'
 
