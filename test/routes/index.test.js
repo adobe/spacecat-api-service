@@ -284,6 +284,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
       'GET /tools/scrape/jobs/by-base-url/:baseURL',
+      'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -352,5 +353,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId/results'].paramNames).to.deep.equal(['jobId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/by-base-url/:baseURL'].handler).to.equal(mockScrapeJobController.getScrapeJobsByBaseURL);
     expect(dynamicRoutes['GET /tools/scrape/jobs/by-base-url/:baseURL'].paramNames).to.deep.equal(['baseURL']);
+    expect(dynamicRoutes['GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType'].handler).to.equal(mockScrapeJobController.getScrapeJobsByBaseURL);
+    expect(dynamicRoutes['GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType'].paramNames).to.deep.equal(['baseURL', 'processingType']);
   });
 });
