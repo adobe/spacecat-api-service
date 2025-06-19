@@ -14,7 +14,7 @@ import {
   isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
-  badRequest, internalServerError, notFound, ok, accepted, createResponse,
+  badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
@@ -118,13 +118,13 @@ function PreflightController(ctx, log, env) {
       if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
         try {
           promiseTokenResponse = await getCSPromiseToken(context);
-          log.info(`Promise token response: ${JSON.stringify(promiseTokenResponse)}`);
+          log.info('Successfully got promise token');
         } catch (e) {
           log.error(`Failed to get promise token: ${e.message}`);
           if (e instanceof ErrorWithStatusCode) {
             return badRequest(e.message);
           }
-          return createResponse({ message: 'Error getting promise token' }, 500);
+          return internalServerError('Error getting promise token');
         }
       }
 
@@ -154,6 +154,7 @@ function PreflightController(ctx, log, env) {
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
       } catch (error) {
         log.error(`Failed to send message to SQS: ${error.message}`);
+        // roll back the job
         await job.remove();
         throw new Error(`Failed to send message to SQS: ${error.message}`);
       }
