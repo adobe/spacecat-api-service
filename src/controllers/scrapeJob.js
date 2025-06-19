@@ -83,6 +83,7 @@ function ScrapeJobController(context) {
       startDate: requestContext.params.startDate,
       endDate: requestContext.params.endDate,
       baseURL: requestContext.params.baseURL,
+      processingType: requestContext.params.processingType,
     };
   }
 
@@ -166,11 +167,13 @@ function ScrapeJobController(context) {
    * or empty array if no jobs are found.
    */
   async function getScrapeJobsByBaseURL(requestContext) {
-    const { baseURL: encodedBaseURL } = parseRequestContext(requestContext);
+    const { baseURL: encodedBaseURL, processingType } = parseRequestContext(requestContext);
 
     if (!hasText(encodedBaseURL)) {
       return badRequest('Base URL required');
     }
+
+    log.debug(`Fetching scrape jobs by baseURL: ${encodedBaseURL} and processingType: ${processingType}.`);
 
     let decodedBaseURL = null;
     try {
@@ -180,7 +183,7 @@ function ScrapeJobController(context) {
         throw new ErrorWithStatusCode('Invalid request: baseURL must be a valid URL', STATUS_BAD_REQUEST);
       }
 
-      const jobs = await scrapeClient.getScrapeJobsByBaseURL(decodedBaseURL);
+      const jobs = await scrapeClient.getScrapeJobsByBaseURL(decodedBaseURL, processingType);
 
       if (!jobs || jobs.length === 0) {
         return ok([]);

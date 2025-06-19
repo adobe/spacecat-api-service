@@ -90,6 +90,7 @@ describe('ScrapeJobController tests', () => {
     options: {},
     baseURL: 'https://www.example.com',
     scrapeQueueId: 'spacecat-scrape-queue-1',
+    processingType: 'form',
   };
 
   const urls = [
@@ -598,6 +599,21 @@ describe('ScrapeJobController tests', () => {
       const job = createScrapeJob(exampleJob);
       baseContext.dataAccess.ScrapeJob.allByBaseURL = sandbox.stub().resolves([job]);
       baseContext.params.baseURL = 'aHR0cHM6Ly93d3cuZXhhbXBsZS5jb20=';
+
+      const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const responseResult = await response.json();
+      expect(responseResult[0].baseURL).to.equal('https://www.example.com');
+    });
+
+    it('should return an array of scrape jobs for baseUrl and processingType', async () => {
+      const job = createScrapeJob(exampleJob);
+      baseContext.dataAccess.ScrapeJob.allByBaseURLAndProcessingType = sandbox
+        .stub()
+        .resolves([job]);
+      baseContext.params.baseURL = 'aHR0cHM6Ly93d3cuZXhhbXBsZS5jb20=';
+      baseContext.params.processingType = 'form';
 
       const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
       expect(response).to.be.an.instanceOf(Response);
