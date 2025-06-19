@@ -427,47 +427,44 @@ describe('ScrapeJobController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
       const results = await response.json();
-      expect(results).to.deep.equal({
-        jobId: exampleJob.scrapeJobId,
-        results: [
-          {
-            url: 'https://example.com/page1',
-            status: 'COMPLETE',
-            reason: null,
-            path: 'path/to/result1',
-          },
-          {
-            url: 'https://example.com/page2',
-            status: 'COMPLETE',
-            reason: null,
-            path: 'path/to/result2',
-          },
-          {
-            url: 'https://example.com/page3',
-            status: 'RUNNING',
-            reason: null,
-            path: 'path/to/result3',
-          },
-          {
-            url: 'https://example.com/page5',
-            status: 'PENDING',
-            reason: null,
-            path: 'path/to/result5',
-          },
-          {
-            url: 'https://example.com/page6',
-            status: 'REDIRECT',
-            reason: null,
-            path: 'path/to/result6',
-          },
-          {
-            url: 'https://example.com/page7',
-            status: 'FAILED',
-            reason: 'An error occurred',
-            path: 'path/to/result7',
-          },
-        ],
-      });
+      expect(results).to.deep.equal([
+        {
+          url: 'https://example.com/page1',
+          status: 'COMPLETE',
+          reason: null,
+          path: 'path/to/result1',
+        },
+        {
+          url: 'https://example.com/page2',
+          status: 'COMPLETE',
+          reason: null,
+          path: 'path/to/result2',
+        },
+        {
+          url: 'https://example.com/page3',
+          status: 'RUNNING',
+          reason: null,
+          path: 'path/to/result3',
+        },
+        {
+          url: 'https://example.com/page5',
+          status: 'PENDING',
+          reason: null,
+          path: 'path/to/result5',
+        },
+        {
+          url: 'https://example.com/page6',
+          status: 'REDIRECT',
+          reason: null,
+          path: 'path/to/result6',
+        },
+        {
+          url: 'https://example.com/page7',
+          status: 'FAILED',
+          reason: 'An error occurred',
+          path: 'path/to/result7',
+        },
+      ]);
     });
 
     it('should respond a job not found for non existent jobs', async () => {
@@ -476,8 +473,6 @@ describe('ScrapeJobController tests', () => {
 
       scrapeJobController = ScrapeJobController(baseContext);
       const response = await scrapeJobController.getScrapeJobUrlResults(baseContext);
-
-      expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
     });
 
@@ -493,11 +488,16 @@ describe('ScrapeJobController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(200);
 
-      const results = await response.json();
-      expect(results).to.deep.equal({
-        jobId: exampleJob.scrapeJobId,
-        results: [],
-      });
+      expect(await response.json()).to.deep.equal([]);
+    });
+
+    it('should handle errors while trying to fetch scrape job url results gracefully', async () => {
+      baseContext.dataAccess.ScrapeUrl.allByScrapeJobId = sandbox.stub().rejects(new Error('Failed to fetch scrape job url results'));
+      baseContext.params.jobId = exampleJob.scrapeJobId;
+      const response = await scrapeJobController.getScrapeJobUrlResults(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Failed to fetch the scrape job result: Failed to fetch scrape job url results');
     });
   });
 
@@ -516,7 +516,7 @@ describe('ScrapeJobController tests', () => {
 
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(404);
-      expect(response.headers.get('x-error')).to.equal('Not found');
+      expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape job status for jobId: 3ec88567-c9f8-4fb1-8361-b53985a2898b, message: Not found');
     });
 
     it('should return job details for a valid jobId', async () => {
@@ -529,6 +529,15 @@ describe('ScrapeJobController tests', () => {
       expect(jobStatus.baseURL).to.equal('https://www.example.com');
       expect(jobStatus.status).to.equal('RUNNING');
       expect(jobStatus.options).to.deep.equal({});
+    });
+
+    it('should handle errors while trying to fetch scrape job status gracefully', async () => {
+      baseContext.dataAccess.ScrapeJob.findById = sandbox.stub().rejects(new Error('Failed to fetch scrape job status'));
+      baseContext.params.jobId = exampleJob.scrapeJobId;
+      const response = await scrapeJobController.getScrapeJobStatus(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape job status for jobId: f91afda0-afc8-467e-bfa3-fdbeba3037e8, message: Failed to fetch scrape job status');
     });
   });
 
@@ -560,6 +569,17 @@ describe('ScrapeJobController tests', () => {
       expect(response.status).to.equal(200);
       const responseResult = await response.json();
       expect(responseResult[0].baseURL).to.equal('https://www.example.com');
+    });
+
+    it('should handle errors while trying to fetch scrape jobs by date range gracefully', async () => {
+      baseContext.dataAccess.ScrapeJob.allByDateRange = sandbox.stub().rejects(new Error('Failed to fetch scrape jobs by date range'));
+      baseContext.params.startDate = '2022-10-05T14:48:00.000Z';
+      baseContext.params.endDate = '2022-10-07T14:48:00.000Z';
+
+      const response = await scrapeJobController.getScrapeJobsByDateRange(baseContext);
+      expect(response).to.be.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape jobs between startDate: 2022-10-05T14:48:00.000Z and endDate: 2022-10-07T14:48:00.000Z, Failed to fetch scrape jobs by date range');
     });
   });
 
@@ -604,7 +624,7 @@ describe('ScrapeJobController tests', () => {
       const response = await scrapeJobController.getScrapeJobsByBaseURL(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(500);
-      expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape jobs by baseURL');
+      expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape jobs by baseURL: https://www.example.com, Failed to fetch scrape jobs by baseURL');
     });
 
     it('should handle invalid baseURL gracefully', async () => {

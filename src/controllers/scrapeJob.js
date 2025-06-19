@@ -16,19 +16,15 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  isValidUrl, isIsoDate,
+  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
-// import { ScrapeJob as ScrapeJobModel } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
-import ScrapeJobSupervisor from '../support/scrape-job-supervisor.js';
-import { ScrapeJobDto } from '../dto/scrapeJobDto.js';
 
 /**
  * Scrape controller. Provides methods to create, read, and fetch the result of scrape jobs.
  * @param {UniversalContext} context - The context of the universal serverless function.
  * @param {DataAccess} context.dataAccess - Data access.
  * @param {object} context.sqs - AWS Simple Queue Service client.
- * @param {object} context.s3 - AWS S3 client and related helpers.
  * @param {object} context.env - Environment details.
  * @param {string} context.env.SCRAPE_JOB_CONFIGURATION - Scrape configuration, as a JSON string.
  * @param {object} context.log - Logger.
@@ -37,27 +33,10 @@ import { ScrapeJobDto } from '../dto/scrapeJobDto.js';
  */
 function ScrapeJobController(context) {
   const {
-    dataAccess, log, env, sqs,
+    log,
   } = context;
 
-  const services = {
-    dataAccess,
-    sqs,
-    log,
-    env,
-  };
-
   const scrapeClient = ScrapeClient.createFrom(context);
-
-  let scrapeConfiguration = {};
-  try {
-    scrapeConfiguration = JSON.parse(env.SCRAPE_JOB_CONFIGURATION);
-  } catch (error) {
-    log.error(`Failed to parse scrape job configuration: ${error.message}`);
-  }
-
-  const scrapeSupervisor = new ScrapeJobSupervisor(services, scrapeConfiguration);
-  // const { maxUrlsPerJob = 1 } = scrapeConfiguration;
 
   const HEADER_ERROR = 'x-error';
   const STATUS_BAD_REQUEST = 400;
@@ -69,20 +48,10 @@ function ScrapeJobController(context) {
     });
   }
 
-  function validateIsoDates(startDate, endDate) {
-    if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
-      throw new ErrorWithStatusCode(
-        'Invalid request: startDate and endDate must be in ISO 8601 format',
-        STATUS_BAD_REQUEST,
-      );
-    }
-  }
-
   /**
    * Create and start a new scrape job.
    * @param {UniversalContext} requestContext - The context of the universal serverless function.
    * @param {object} requestContext.data - Parsed json request data.
-   * @param {object} requestContext.pathInfo.headers - HTTP request headers.
    * @returns {Promise<Response>} 202 Accepted if successful, 4xx or 5xx otherwise.
    */
   async function createScrapeJob(requestContext) {
@@ -91,7 +60,6 @@ function ScrapeJobController(context) {
     try {
       const job = await scrapeClient.createScrapeJob(data);
 
-      // return createResponse(ScrapeJobDto.toJSON(job), STATUS_ACCEPTED);
       return createResponse(job, STATUS_ACCEPTED);
     } catch (error) {
       log.error(error.message);
@@ -128,11 +96,14 @@ function ScrapeJobController(context) {
     log.debug(`Fetching scrape jobs between startDate: ${startDate} and endDate: ${endDate}.`);
 
     try {
-      validateIsoDates(startDate, endDate);
-      const jobs = await scrapeSupervisor.getScrapeJobsByDateRange(startDate, endDate);
-      return ok(jobs.map((job) => ScrapeJobDto.toJSON(job)));
+      const jobs = await scrapeClient.getScrapeJobsByDateRange(startDate, endDate);
+      return ok(jobs);
     } catch (error) {
       log.error(`Failed to fetch scrape jobs between startDate: ${startDate} and endDate: ${endDate}, ${error.message}`);
+      if (error?.message?.includes('Invalid request')) {
+        error.status = 400;
+        return createErrorResponse(error);
+      }
       return createErrorResponse(error);
     }
   }
@@ -147,10 +118,17 @@ function ScrapeJobController(context) {
     const { jobId } = parseRequestContext(requestContext);
 
     try {
-      const job = await scrapeSupervisor.getScrapeJob(jobId);
-      return ok(ScrapeJobDto.toJSON(job));
+      const job = await scrapeClient.getScrapeJobStatus(jobId);
+      return ok(job);
     } catch (error) {
       log.error(`Failed to fetch scrape job status for jobId: ${jobId}, message: ${error.message}`);
+      if (error?.message?.includes('Not found')) {
+        error.status = 404;
+        return createErrorResponse(error);
+      } else if (error?.message?.includes('Job ID is required')) {
+        error.status = 400;
+        return createErrorResponse(error);
+      }
       return createErrorResponse(error);
     }
   }
@@ -165,22 +143,15 @@ function ScrapeJobController(context) {
     const { jobId } = parseRequestContext(requestContext);
 
     try {
-      const job = await scrapeSupervisor.getScrapeJob(jobId);
-      const { ScrapeUrl } = dataAccess;
-      const scrapeUrls = await ScrapeUrl.allByScrapeJobId(job.getId());
-      const results = scrapeUrls.map((url) => ({
-        url: url.getUrl(),
-        status: url.getStatus(),
-        reason: url.getReason(),
-        path: url.getPath(),
-      }));
+      const results = await scrapeClient.getScrapeJobUrlResults(jobId);
 
-      return ok({
-        jobId: job.getId(),
-        results,
-      });
+      return ok(results);
     } catch (error) {
       log.error(`Failed to fetch the scrape job result: ${error.message}`);
+      if (error?.message?.includes('Not found')) {
+        error.status = 404;
+        return createErrorResponse(error);
+      }
       return createErrorResponse(error);
     }
   }
@@ -204,11 +175,12 @@ function ScrapeJobController(context) {
         throw new ErrorWithStatusCode('Invalid request: baseURL must be a valid URL', STATUS_BAD_REQUEST);
       }
 
-      const jobs = await scrapeSupervisor.getScrapeJobsByBaseURL(decodedBaseURL);
+      const jobs = await scrapeClient.getScrapeJobsByBaseURL(decodedBaseURL);
+
       if (!jobs || jobs.length === 0) {
         return ok([]);
       }
-      return ok(jobs.map((job) => ScrapeJobDto.toJSON(job)));
+      return ok(jobs);
     } catch (error) {
       log.error(`Failed to fetch scrape jobs by baseURL: ${decodedBaseURL}, ${error.message}`);
       return createErrorResponse(error);
