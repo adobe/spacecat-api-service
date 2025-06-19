@@ -9,7 +9,9 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { Audit } from '@adobe/spacecat-shared-data-access';
 import { isString } from '@adobe/spacecat-shared-utils';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
 
@@ -49,6 +51,26 @@ export default (context) => {
 
       const siteConfig = site.getConfig();
       await say(`${SUCCESS_MESSAGE_PREFIX}${JSON.stringify(siteConfig, null, 2)}`);
+
+      const groupedURLs = [{ pattern: 'test' }];
+      const currentGroupedURLs = siteConfig.getGroupedURLs(Audit.AUDIT_TYPES.CWV) || [];
+      let patchedGroupedURLs = [];
+      if (groupedURLs.length !== 0) {
+        patchedGroupedURLs = Object.values(
+          [...currentGroupedURLs, ...groupedURLs].reduce((acc, item) => {
+            acc[item.pattern] = item;
+            return acc;
+          }, {}),
+        );
+      }
+
+      // if objects are not equal
+      siteConfig.updateGroupedURLs(Audit.AUDIT_TYPES.CWV, patchedGroupedURLs);
+      site.setConfig(Config.toDynamoItem(siteConfig));
+      // await site.save();
+
+      const groupCount = 0;
+      await say(`${SUCCESS_MESSAGE_PREFIX}Found ${groupCount} new group(s) for site "${baseURL}" and added them to the configuration. Please re-run the CWV audit to see the results.`);
     } catch (error) {
       log.error(error);
       await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to automatically group pages by URL pattern: ${error.message}.`);

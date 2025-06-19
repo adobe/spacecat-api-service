@@ -14,6 +14,7 @@
 
 import sinon from 'sinon';
 import { expect } from 'chai';
+import { Audit } from '@adobe/spacecat-shared-data-access';
 import AssignCwvTemplateGroupsCommand from '../../../../src/support/slack/commands/assign-cwv-template-groups.js';
 
 const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
@@ -22,11 +23,20 @@ const ERROR_MESSAGE_PREFIX = ':x: ';
 describe('AssignCwvTemplateGroups', () => {
   const sandbox = sinon.createSandbox();
 
-  const site = {
-    // getId: () => 'site0',
-    // getBaseURL: () => 'https://site0.com',
-    // getDeliveryType: () => 'aem_edge',
-    getConfig: () => ({ test: 'value' }),
+  const siteConfigMock = {
+    getGroupedURLs: sandbox.stub(),
+    updateGroupedURLs: sandbox.stub(),
+    getSlackConfig: () => {},
+    getHandlers: () => (({ [Audit.AUDIT_TYPES.CWV]: {} })),
+    getContentAiConfig: () => {},
+    getImports: () => [],
+    getFetchConfig: () => {},
+    getBrandConfig: () => {},
+  };
+
+  const siteMock = {
+    getConfig: sandbox.stub().returns(siteConfigMock),
+    setConfig: sandbox.stub(),
   };
 
   let configurationMock;
@@ -78,24 +88,42 @@ describe('AssignCwvTemplateGroups', () => {
   });
 
   it('Assign Template-Based Page Groups', async () => {
-    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+    const baseUrl = 'https://site0.com';
+    const groupedUrls = [{ pattern: 'test' }];
+    const groupCount = 0;
+
+    dataAccessMock.Site.findByBaseURL.withArgs(baseUrl).resolves(siteMock);
+    siteConfigMock.getGroupedURLs.withArgs(Audit.AUDIT_TYPES.CWV).returns(groupedUrls);
 
     const command = AssignCwvTemplateGroupsCommand(contextMock);
-    const args = ['https://site0.com'];
+    const args = [baseUrl];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
-      'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
+      dataAccessMock.Site.findByBaseURL.calledWith(baseUrl),
+      `Expected dataAccess.getSiteByBaseURL to be called with "${baseUrl}", but it was not`,
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}${JSON.stringify({ test: 'value' }, null, 2)}`),
-      'Expected Slack message to be sent confirming "some_audit" was enabled for "https://site0.com", but it was not',
+      siteConfigMock.getGroupedURLs.calledWith(Audit.AUDIT_TYPES.CWV),
+      `Expected siteConfig.getGroupedURLs to be called with "${Audit.AUDIT_TYPES.CWV}", but it was not`,
+    ).to.be.true;
+    expect(
+      siteConfigMock.updateGroupedURLs.calledWith(Audit.AUDIT_TYPES.CWV, groupedUrls),
+      'Expected siteConfig.updateGroupedURLs to be called , but it was not',
+    ).to.be.true;
+    expect(
+      siteMock.setConfig.calledOnce,
+      'Expected site.setConfig to be called once, but it was not',
+    ).to.be.true;
+    const expectedMessage = `${SUCCESS_MESSAGE_PREFIX}Found ${groupCount} new group(s) for site "${baseUrl}" and added them to the configuration. Please re-run the CWV audit to see the results.`;
+    expect(
+      slackContextMock.say.calledWith(expectedMessage),
+      `Expected say method to be called with message: "${expectedMessage}"`,
     ).to.be.true;
   });
 
   it('if site base URL without scheme should be added "https://"', async () => {
-    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(siteMock);
 
     const command = AssignCwvTemplateGroupsCommand(contextMock);
     const args = ['site0.com'];
