@@ -255,7 +255,7 @@ function OnboardCommand(context) {
       }
 
       const importTypes = Object.keys(profile.imports);
-      reportLine.imports = importTypes.join(',');
+      reportLine.imports = importTypes.join(', ');
       const siteConfig = site.getConfig();
       for (const importType of importTypes) {
         siteConfig.enableImport(importType);
@@ -281,10 +281,10 @@ function OnboardCommand(context) {
         configuration.enableHandlerForSite(auditType, site);
       });
 
-      reportLine.audits = auditTypes.join(',');
+      reportLine.audits = auditTypes.join(', ');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
 
-      await say(`:white_check_mark: *Enabled imports*: ${reportLine.imports} *and audits*: ${reportLine.audits} *for site* ${siteID}`);
+      await say(`:white_check_mark: *Enabled imports*: ${reportLine.imports} *and audits*: ${reportLine.audits}`);
       // trigger audit runs
       log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
       await say(`:gear: Starting audits: ${auditTypes}`);
