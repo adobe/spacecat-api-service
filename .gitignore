@@ -11,3 +11,4 @@ admin-idp-p*.json
 *.env
 .idea
 .nvmrc
+*.code-workspace

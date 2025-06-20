@@ -12,8 +12,12 @@
 import { DevelopmentServer } from '@adobe/helix-universal-devserver';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { config } from 'dotenv';
 
 import { main } from '../../src/index.js';
+
+// Load environment variables from .env file
+config();
 
 // eslint-disable-next-line no-underscore-dangle
 global.__rootdir = resolve(fileURLToPath(import.meta.url), '..', '..', '..');

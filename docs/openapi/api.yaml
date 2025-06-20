@@ -5,7 +5,7 @@ info:
   title: SpaceCat API
   description: |
     The SpaceCat API is used to manage edge delivery site directory and obtain audit information.
-    
+
     ## Authentication
     <SecurityDefinitions />
 
@@ -93,6 +93,14 @@ paths:
     $ref: './scrape-api.yaml#/create-scrape-job'
   /scrape/jobs/{jobId}:
     $ref: './scrape-api.yaml#/get-scrape-job-status'
+  /scrape/jobs/{jobId}/results:
+    $ref: './scrape-api.yaml#/get-scrape-job-url-results'
+  /scrape/jobs/by-date-range/{startDate}/{endDate}/all-jobs:
+    $ref: './scrape-api.yaml#/get-scrape-jobs-by-date-range'
+  /scrape/jobs/by-base-url/{base64BaseUrl}:
+    $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url'
+  /scrape/jobs/by-base-url/{base64BaseUrl}/by-processingtype/{processingType}:
+    $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url-and-processing-type'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:
