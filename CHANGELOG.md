@@ -1,3 +1,17 @@
+# [1.123.0](https://github.com/adobe/spacecat-api-service/compare/v1.122.1...v1.123.0) (2025-06-20)
+
+
+### Features
+
+* slack command to check for enabled and disabled audits for a site ([#976](https://github.com/adobe/spacecat-api-service/issues/976)) ([259a58a](https://github.com/adobe/spacecat-api-service/commit/259a58ae6c18c9770c3499b890d3216ad03a74b7))
+
+## [1.122.1](https://github.com/adobe/spacecat-api-service/compare/v1.122.0...v1.122.1) (2025-06-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.27.0 ([#1000](https://github.com/adobe/spacecat-api-service/issues/1000)) ([45b397a](https://github.com/adobe/spacecat-api-service/commit/45b397abb65549968164614dd94747378bdd9fa3))
+
 # [1.122.0](https://github.com/adobe/spacecat-api-service/compare/v1.121.4...v1.122.0) (2025-06-19)
 
 
