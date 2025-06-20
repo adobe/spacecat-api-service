@@ -305,7 +305,7 @@ function OnboardCommand(context) {
         }
       }
 
-      // Audit status job
+      // Opportunity status job
       const opportunityStatusJob = {
         type: 'opportunity-status-processor',
         siteId: siteID,
