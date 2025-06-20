@@ -16,9 +16,27 @@ import {
 import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
+
+export const AUDIT_CANONICAL = 'canonical';
+export const AUDIT_LINKS = 'links';
+export const AUDIT_METATAGS = 'metatags';
+export const AUDIT_BODY_SIZE = 'body-size';
+export const AUDIT_LOREM_IPSUM = 'lorem-ipsum';
+export const AUDIT_H1_COUNT = 'h1-count';
+
+const AVAILABLE_CHECKS = [
+  AUDIT_CANONICAL,
+  AUDIT_LINKS,
+  AUDIT_METATAGS,
+  AUDIT_BODY_SIZE,
+  AUDIT_LOREM_IPSUM,
+  AUDIT_H1_COUNT,
+];
 
 /**
  * Creates a preflight controller instance
@@ -80,6 +98,16 @@ function PreflightController(ctx, log, env) {
     if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data?.step?.toLowerCase())) {
       throw new Error(`Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`);
     }
+
+    // Validate checks if provided
+    if (data.checks !== undefined) {
+      if (!isNonEmptyArray(data.checks)) {
+        throw new Error('Invalid request: checks must be a non-empty array of strings');
+      }
+      if (!data.checks.every((check) => AVAILABLE_CHECKS.includes(check))) {
+        throw new Error(`Invalid request: checks must be one of: ${AVAILABLE_CHECKS.join(', ')}`);
+      }
+    }
   }
 
   /**
@@ -92,7 +120,6 @@ function PreflightController(ctx, log, env) {
    */
   const createPreflightJob = async (context) => {
     const { data } = context;
-
     try {
       validateRequestData(data);
     } catch (error) {
@@ -113,6 +140,20 @@ function PreflightController(ctx, log, env) {
         throw new Error(`No site found for preview URL: ${previewBaseURL}`);
       }
 
+      let promiseTokenResponse;
+      if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+        try {
+          promiseTokenResponse = await getCSPromiseToken(context);
+          log.info('Successfully got promise token');
+        } catch (e) {
+          log.error(`Failed to get promise token: ${e.message}`);
+          if (e instanceof ErrorWithStatusCode) {
+            return badRequest(e.message);
+          }
+          return internalServerError('Error getting promise token');
+        }
+      }
+
       // Create a new async job
       const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
@@ -121,6 +162,7 @@ function PreflightController(ctx, log, env) {
             siteId: site.getId(),
             urls: data.urls,
             step,
+            checks: data.checks || AVAILABLE_CHECKS,
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -129,11 +171,15 @@ function PreflightController(ctx, log, env) {
 
       try {
         // Send message to SQS to trigger the audit worker
-        await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, {
+        const sqsMessage = {
           jobId: job.getId(),
           siteId: site.getId(),
           type: 'preflight',
-        });
+        };
+        if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+          sqsMessage.promiseToken = promiseTokenResponse;
+        }
+        await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
       } catch (error) {
         log.error(`Failed to send message to SQS: ${error.message}`);
         // roll back the job
