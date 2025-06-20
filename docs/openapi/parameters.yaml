@@ -187,3 +187,24 @@ fixId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+startDate:
+  name: startDate
+  description: The start date in ISO 8601 format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/DateTime'
+endDate:
+  name: endDate
+  description: The end date in ISO 8601 format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/DateTime'
+processingType:
+  name: processingType
+  description: The processing type/handler used by the scrape job
+  in: path
+  required: true
+  schema:
+    type: string
