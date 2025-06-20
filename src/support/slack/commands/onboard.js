@@ -306,8 +306,8 @@ function OnboardCommand(context) {
       }
 
       // Audit status job
-      const auditStatusJob = {
-        type: 'audit-status-processor',
+      const opportunityStatusJob = {
+        type: 'opportunity-status-processor',
         siteId: siteID,
         siteUrl: baseURL,
         imsOrgId: imsOrgID,
@@ -354,13 +354,13 @@ function OnboardCommand(context) {
         },
       };
 
-      log.info(`Audit status job: ${JSON.stringify(auditStatusJob)}`);
+      log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
       log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
       log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
 
       // Prepare and start step function workflow with the necessary parameters
       const workflowInput = {
-        auditStatusJob,
+        opportunityStatusJob,
         disableImportAndAuditJob,
         demoURLJob,
         workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
