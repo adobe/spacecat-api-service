@@ -125,9 +125,8 @@ function OnboardCommand(context) {
     }
 
     log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
-    await say(`:white_check_mark: Starting ${profileName} environment setup for site ${baseURL}`);
-    await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request Access Here: https://experienceleague.adobe.com/docs/experience-manager-cloud-service/content/onboarding/getting-access.html?lang=en');
-    await say(':gear: Onboarding the site...');
+    await say(`:hourglass_flowing_sand: *Onboarding site* ${baseURL} with profile ${profileName}...this can take a while...`);
+    await say(':key: Please make sure you have access to the AEM Shared Production environment otherwise request access here: https://experienceleague.adobe.com/docs/experience-manager-cloud-service/content/onboarding/getting-access.html?lang=en');
 
     const reportLine = {
       site: baseURL,
@@ -286,16 +285,16 @@ function OnboardCommand(context) {
       reportLine.audits = auditTypes.join(',');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
 
-      await say(`Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits} for site ${siteID}`);
-
+      await say(`:white_check_mark: Enabled imports: ${reportLine.imports} for site ${siteID}`);
+      await say(`:white_check_mark: Enabled audits: ${reportLine.audits} for site ${siteID}`);
       // trigger audit runs
+      log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
+      await say(`:gear: Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
       for (const auditType of auditTypes) {
         /* eslint-disable no-await-in-loop */
         if (!configuration.isHandlerEnabledForSite(auditType, site)) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
         } else {
-          log.info(`Running audits... type: ${auditType} and site: ${baseURL}`);
-          await say(`:test_tube: Running audits... type: ${auditType} and site: ${baseURL}`);
           await triggerAuditForSite(
             site,
             auditType,
