@@ -1,3 +1,10 @@
+# [1.124.0](https://github.com/adobe/spacecat-api-service/compare/v1.123.2...v1.124.0) (2025-06-20)
+
+
+### Features
+
+* preflight job creation through live site ([#948](https://github.com/adobe/spacecat-api-service/issues/948)) ([df3163d](https://github.com/adobe/spacecat-api-service/commit/df3163d7b345bb226a4743d59f20ec05831ec01f))
+
 ## [1.123.2](https://github.com/adobe/spacecat-api-service/compare/v1.123.1...v1.123.2) (2025-06-20)
 
 
