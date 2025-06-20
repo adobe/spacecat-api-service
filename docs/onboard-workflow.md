@@ -1,139 +1,163 @@
-# SpaceCat Onboarding Workflow
+# Onboard Workflow Documentation
 
 ## Overview
 
-The SpaceCat onboarding workflow provides an efficient and scalable solution for onboarding new sites to the SpaceCat system. This architecture employs AWS Step Functions to orchestrate long-running processes while avoiding Lambda timeout limitations. The design follows a profile-driven approach that enables flexible configuration of imports and audits without requiring workflow changes.
+The onboard workflow is a comprehensive automation system that handles the complete onboarding process for new sites in SpaceCat. It combines Slack command execution with AWS Step Functions to orchestrate a series of tasks including site setup, audit execution, and post-processing activities.
 
-## Architecture Components
+## Architecture
 
-### 1. Entry Point: Onboard.js
+The workflow consists of several components:
 
-- Located at: `src/support/slack/commands/onboard.js`
-- Serves as the central entry point for the onboarding process
-- Responsibilities:
-  - Validates site URL and IMS organization ID
-  - Creates or retrieves the organization and site
-  - Determines site delivery type
-  - Loads the appropriate profile configuration
-  - Enables imports and audits in the site configuration
-  - Initiates direct imports for the site
-  - Starts the Step Functions workflow for subsequent operations
+1. **Slack Command** (`onboard.js`) - Initiates the onboarding process
+2. **Step Functions State Machine** - Orchestrates the workflow execution
+3. **Task Processor Jobs** - Handle specific post-onboarding tasks
+4. **Lambda Functions** - Execute the task processor jobs
 
-### 2. Step Functions State Machine
+## Slack Command: `onboard site`
 
-- Defined in the spacecat-infrastructure repository
-  - modules/step_functions/statemachine/onboard-workflow.js
-- Orchestrates the workflow with the following key states:
-  - Scrape: Executes site scraping
-  - Batch Audits: Processes all audits defined in the profile
-  - Disable Imports/Audits: Cleans up by disabling imports and audits
-- Error handling states that send notifications on failures
-- Each state invokes the workflow handler with appropriate command parameters
+### Usage
 
-### 3. Workflow Handler
+```bash
+# Single site onboarding
+@spacecat onboard site {site} [imsOrgId] [profile] [workflowWaitTime]
 
-- Located at: `src/support/slack/commands/step_functions/workflow-handler.js`
-- Provides a unified interface for workflow operations
-- Supports the following commands:
-  - `run-scrape`: Executes site scraping
-  - `run-batch-audits`: Processes all audits defined in the profile
-  - `disable-imports-audits`: Disables imports and audits at the end of the workflow
-  - `notify`: Sends error notifications to Slack
+# Batch onboarding with CSV file
+@spacecat onboard site {profile}
+```
 
-### 4. Slack Integration
+### Parameters
 
-- Commands triggered via Slack interface
-- Error notifications sent back to the originating Slack channel
-- Consistent error formatting with clear indicators
+- `site` (required): The site URL to onboard
+- `imsOrgId` (optional): IMS Organization ID (defaults to `DEMO_IMS_ORG` environment variable)
+- `profile` (optional): Profile name for configuration (defaults to 'demo')
+- `workflowWaitTime` (optional): Custom wait time in seconds for the workflow
 
-## Workflow Sequence
+### Supported Profiles
 
-1. **Initial Setup (Onboard.js)**:
-   - User triggers onboarding via Slack command
-   - Site and organization are created or validated
-   - Profile configuration is loaded
-   - Imports and audits are enabled in site configuration
-   - Direct imports are initiated
+The system supports multiple profiles defined in `static/onboard/profiles.json`:
 
-2. **Step Functions Execution**:
-   - Step Functions workflow is started with site information and profile details
-   - Site scraping is executed
-   - Batch audits are processed
-   - Imports and audits are disabled at completion
+- **default**: Full audit and import configuration
+- **summit**: Summit-specific configuration
+- **summit-lower-quality**: Reduced quality summit configuration
+- **demo**: Minimal configuration for demonstration purposes
 
-3. **Error Handling**:
-   - Failures at any step send error notifications to Slack
-   - Workflow continues to cleanup phase even after non-critical failures
-   - Critical failures transition to WorkflowFailed state
-
-## Profile-Driven Configuration
-
-The workflow uses profile-based configuration to determine which imports and audits to run:
+### Profile Structure
 
 ```json
 {
-  "default": {
-    "imports": {
-      "ahrefs": {
-        "startDate": "2023-01-01",
-        "endDate": "2023-12-31"
-      }
-    },
-    "audits": {
-      "cwv": {},
-      "404": {},
-      "lhs-mobile": {}
+  "audits": {
+    "audit-type": {}
+  },
+  "imports": {
+    "import-type": {
+      "start-date": "2025-02-24",
+      "end-date": "2025-03-02"
     }
-  }
+  },
+  "config": {},
+  "integrations": {}
 }
 ```
 
-Benefits of this approach:
-- Add or remove import/audit types without changing workflow code
-- Configure date ranges or other parameters per import type
-- Create different profiles for different site categories
+## Onboarding Process
 
-## Error Notification System
+### 1. Initial Validation
 
-The workflow includes a focused error notification system:
-- Error messages sent to Slack using the `:x:` emoji indicator
-- Clear error context provided in messages
-- Error details logged to CloudWatch for troubleshooting
+The command performs several validation checks:
 
-## Implementation Best Practices
+- **URL Validation**: Ensures the provided site URL is valid
+- **IMS Org ID Validation**: Validates the IMS Organization ID format
+- **Live Agent Customer Check**: Prevents onboarding of Live Agent customer sites (if `LA_CUSTOMERS` environment variable is set)
 
-1. **Profile Configuration**:
-   - Store profiles in `static/onboard/profiles.json`
-   - Include proper date ranges for time-based imports
-   - Document any special parameters needed for custom audit types
+### 2. Organization Management
 
-2. **Error Handling**:
-   - Log detailed error information for debugging
-   - Send clear error notifications to users
-   - Consider recovery options for non-critical failures
+- Checks if an organization with the provided IMS Org ID exists
+- Creates a new organization if it doesn't exist
+- Retrieves organization details from IMS if needed
 
-3. **Monitoring**:
-   - Use AWS CloudWatch for logs and metrics
-   - Monitor Step Functions execution status
-   - Track Lambda function performance
+### 3. Site Setup
 
-## Usage Example
+- Checks if the site already exists in the system
+- Creates a new site if it doesn't exist, determining the delivery type automatically
+- Updates site configuration with enabled imports and audits based on the selected profile
 
-To onboard a new site using the default profile:
+### 4. Audit Execution
 
-```
-@spacecat onboard site https://example.com 123456789@AdobeOrg default
-```
+- Triggers audits for all enabled audit types in the profile
+- Sends audit messages to the SQS queue for processing
+- Provides real-time feedback via Slack messages
 
-To use a custom profile:
+### 5. Step Functions Workflow Initiation
 
-```
-@spacecat onboard site https://example.com 123456789@AdobeOrg custom-profile
+Creates task processor jobs and starts the Step Functions workflow:
+
+```javascript
+const workflowInput = {
+  opportunityStatusJob,
+  disableImportAndAuditJob,
+  demoURLJob,
+  workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
+};
 ```
 
-## Extending the Workflow
+## Step Functions Workflow
 
-To add new audit or import types:
+The workflow orchestrates task processor jobs to complete the post processing activities by caling Task Processor lambda for each job.
 
-1. Add the new type to your profile configuration
-2. No changes needed to the workflow definition or state machine 
+## Environment Variables
+
+The following environment variables are used by the onboard workflow:
+
+- `ONBOARD_WORKFLOW_STATE_MACHINE_ARN`: ARN of the Step Functions state machine
+- `WORKFLOW_WAIT_TIME_IN_SECONDS`: Default wait time between workflow steps
+- `DEMO_IMS_ORG`: Default IMS Organization ID for demo sites
+- `LA_CUSTOMERS`: Comma-separated list of Live Agent customer URLs
+- `EXPERIENCE_URL`: Base URL for Experience Cloud (defaults to 'https://experience.adobe.com')
+
+## Error Handling
+
+### Slack Command Errors
+
+- **Invalid URL**: Returns error and stops processing
+- **Invalid IMS Org ID**: Returns error and stops processing
+- **Live Agent Customer**: Returns warning and stops processing
+- **Organization Creation Failure**: Returns error and stops processing
+- **Site Creation Failure**: Returns error and stops processing
+- **Profile Loading Failure**: Returns error and stops processing
+
+### Workflow Errors
+
+- **Step Functions Execution Failure**: Logs error and continues
+- **Processor Job Failure**: Individual jobs handle their own errors
+- **SQS Message Failure**: Retries with exponential backoff
+
+## Monitoring and Logging
+
+### Logging
+
+The workflow provides comprehensive logging at each step:
+
+- Site validation and creation
+- Organization management
+- Profile loading and configuration
+- Audit triggering
+- Workflow initiation
+- Processor job execution
+
+### Slack Notifications
+
+Real-time notifications are sent to Slack throughout the process:
+
+- Initial setup confirmation
+- Progress updates
+- Error notifications
+- Completion status
+- Demo URL availability
+
+### Debug Steps
+
+1. Check CloudWatch logs for detailed error information
+2. Verify environment variables are correctly set
+3. Test individual components in isolation
+4. Review Step Functions execution history
+5. Check SQS queue metrics and dead letter queues
