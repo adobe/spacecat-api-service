@@ -47,7 +47,7 @@ function OnboardCommand(context) {
     name: 'Onboard Site(s)',
     description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [imsOrgId] [profile] [Optional: workflowWaitTime]`,
+    usageText: `${PHRASES[0]} {site} [imsOrgId] [profile] [workflowWaitTime]`,
   });
 
   const {
@@ -105,7 +105,7 @@ function OnboardCommand(context) {
       );
 
       if (isLACustomer) {
-        const message = `:warning: Cannot onboard site ${baseURL} as it is a Live Agent customer site!`;
+        const message = `:warning: Cannot onboard site ${baseURL} - it's already onboarded and live!`;
         log.warn(message);
         await say(message);
         return {
@@ -125,9 +125,8 @@ function OnboardCommand(context) {
     }
 
     log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
-    await say(`:hourglass_flowing_sand: *Onboarding site* ${baseURL} with profile ${profileName}...this can take a while...`);
-    await say(':key: Please make sure you have access to the AEM Shared Production environment otherwise request access here: https://experienceleague.adobe.com/docs/experience-manager-cloud-service/content/onboarding/getting-access.html?lang=en');
-
+    await say(`:gear:  Starting ${profileName} environment setup for site ${baseURL}`);
+    await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
     const reportLine = {
       site: baseURL,
       imsOrgId: imsOrgID,
@@ -285,11 +284,10 @@ function OnboardCommand(context) {
       reportLine.audits = auditTypes.join(',');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
 
-      await say(`:white_check_mark: Enabled imports: ${reportLine.imports} for site ${siteID}`);
-      await say(`:white_check_mark: Enabled audits: ${reportLine.audits} for site ${siteID}`);
+      await say(`:white_check_mark: *Enabled imports*: ${reportLine.imports} and *audits*: ${reportLine.audits} for site ${siteID}`);
       // trigger audit runs
       log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
-      await say(`:gear: Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
+      await say(`:gear: Starting audit types: ${auditTypes}`);
       for (const auditType of auditTypes) {
         /* eslint-disable no-await-in-loop */
         if (!configuration.isHandlerEnabledForSite(auditType, site)) {

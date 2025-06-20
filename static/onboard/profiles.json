@@ -71,7 +71,12 @@
 		"audits": {
 			"broken-backlinks": {},
 			"broken-internal-links": {},
-			"meta-tags": {}
+			"meta-tags": {},
+			"sitemap": {},
+			"canonical": {},
+			"apex": {},
+			"cwv": {},
+			"alt-text": {}
 		},
 		"imports": {
 			"organic-traffic" : {
