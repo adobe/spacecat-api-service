@@ -284,10 +284,10 @@ function OnboardCommand(context) {
       reportLine.audits = auditTypes.join(',');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
 
-      await say(`:white_check_mark: *Enabled imports*: ${reportLine.imports} and *audits*: ${reportLine.audits} for site ${siteID}`);
+      await say(`:white_check_mark: *Enabled imports*: ${reportLine.imports} *and audits*: ${reportLine.audits} *for site* ${siteID}`);
       // trigger audit runs
       log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
-      await say(`:gear: Starting audit types: ${auditTypes}`);
+      await say(`:gear: Starting audits: ${auditTypes}`);
       for (const auditType of auditTypes) {
         /* eslint-disable no-await-in-loop */
         if (!configuration.isHandlerEnabledForSite(auditType, site)) {
