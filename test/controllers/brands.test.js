@@ -41,10 +41,12 @@ describe('Brands Controller', () => {
   const SITE_ID = '0b4dcf79-fe5f-410b-b11f-641f0bf56da3';
   const IMS_ORG_ID = '1234567890ABCDEF12345678@AdobeOrg';
   const BRAND_ID = 'brand123';
+  const USER_ID = 'user123';
 
   const sampleConfig = Config({
     brandConfig: {
       brandId: BRAND_ID,
+      userId: USER_ID,
     },
   });
 
@@ -281,7 +283,10 @@ describe('Brands Controller', () => {
       const guidelines = await response.json();
       expect(guidelines).to.deep.equal(mockGuidelines);
       expect(brandClientStub.getBrandGuidelines).to.have.been.calledWith(
-        BRAND_ID,
+        {
+          brandId: BRAND_ID,
+          userId: USER_ID,
+        },
         IMS_ORG_ID,
         {
           host: mockEnv.BRAND_IMS_HOST,
@@ -360,7 +365,7 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(404);
       const error = await response.json();
-      expect(error).to.have.property('message', `Brand mapping not found for site ID: ${SITE_ID}`);
+      expect(error).to.have.property('message', `Brand config missing brandId or userId for site ID: ${SITE_ID}`);
     });
 
     it('returns unauthorized if IMS config is missing', async () => {
