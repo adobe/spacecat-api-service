@@ -203,10 +203,11 @@ function RunImportCommand(context) {
           : undefined;
         log.info(`Import run of type ${importType} for site ${baseURL}`, {
           pageURLInput,
+          extractedPageURL,
           startDate,
           endDate,
           supportsPageURLs,
-          isValid: isValidUrl(pageURLInput),
+          isValid: isValidUrl(extractedPageURL),
           args,
         });
         await runImportForSite(
