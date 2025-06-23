@@ -1,3 +1,10 @@
+# [1.125.0](https://github.com/adobe/spacecat-api-service/compare/v1.124.3...v1.125.0) (2025-06-23)
+
+
+### Features
+
+* add event type support to fulfillment events ([#941](https://github.com/adobe/spacecat-api-service/issues/941)) ([7bf7c06](https://github.com/adobe/spacecat-api-service/commit/7bf7c0611d6bdf616425fc708609e09c51ccaaa9))
+
 ## [1.124.3](https://github.com/adobe/spacecat-api-service/compare/v1.124.2...v1.124.3) (2025-06-22)
 
 
