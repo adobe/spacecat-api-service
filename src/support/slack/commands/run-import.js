@@ -190,7 +190,12 @@ function RunImportCommand(context) {
         );
       } else if (hasValidBaseURL) {
         log.info(`Import run of type ${importType} for site ${baseURL}`, {
-          pageURLInput, startDate, endDate, supportsPageURLs, isValid: isValidUrl(pageURLInput),
+          pageURLInput,
+          startDate,
+          endDate,
+          supportsPageURLs,
+          isValid: isValidUrl(pageURLInput),
+          args,
         });
         const pageURL = supportsPageURLs && isValidUrl(pageURLInput)
           ? pageURLInput
