@@ -46,6 +46,21 @@ describe('sqs', () => {
     sandbox.restore();
   });
 
+  it('fetches the message count of a queue that contains 1 message', async () => {
+    const sqs = new SQS(AWS_REGION, console);
+    sqs.sqsClient.send = sandbox.stub().resolves(
+      { Attributes: { ApproximateNumberOfMessages: 1 } },
+    );
+    const count = await sqs.getQueueMessageCount(QUEUE_URL);
+    expect(count).to.equal(1);
+  });
+
+  it('fetches the message count of a queue but an error occurs', async () => {
+    const sqs = new SQS(AWS_REGION, console);
+    sqs.sqsClient.send = sandbox.stub().rejects(new Error('test error'));
+    await expect(sqs.getQueueMessageCount(QUEUE_URL)).to.be.rejectedWith('test error');
+  });
+
   it('do not initialize a new sqs if already initialized', async () => {
     const instance = {
       sendMessage: sandbox.stub().resolves(),
