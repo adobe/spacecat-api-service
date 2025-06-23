@@ -189,6 +189,9 @@ function RunImportCommand(context) {
           }),
         );
       } else if (hasValidBaseURL) {
+        log.info(`Import run of type ${importType} for site ${baseURL}`, {
+          pageURLInput, startDate, endDate, supportsPageURLs, isValid: isValidUrl(pageURLInput),
+        });
         const pageURL = supportsPageURLs && isValidUrl(pageURLInput)
           ? pageURLInput
           : undefined;
