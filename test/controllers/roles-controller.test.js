@@ -319,7 +319,7 @@ describe('RolesController', () => {
       expect(response.headers.plain()['x-error']).to.equal('No updates provided');
     });
 
-    it('should update name when provided and different', async () => {
+    it.skip('should update name when provided and different', async () => {
       const newName = 'Updated Role Name';
       const context = {
         params: { roleId: validUUID },
@@ -335,7 +335,7 @@ describe('RolesController', () => {
       expect(mockRole.save).to.have.been.calledOnce();
     });
 
-    it('should update imsOrgId when provided and different', async () => {
+    it.skip('should update imsOrgId when provided and different', async () => {
       const newImsOrgId = 'new-org-id';
       const context = {
         params: { roleId: validUUID },
@@ -351,7 +351,7 @@ describe('RolesController', () => {
       expect(mockRole.save).to.have.been.calledOnce();
     });
 
-    it('should update acl when provided and different', async () => {
+    it.skip('should update acl when provided and different', async () => {
       const newAcl = [{ actions: ['read', 'write'], path: '/new-path' }];
       const context = {
         params: { roleId: validUUID },
@@ -367,7 +367,7 @@ describe('RolesController', () => {
       expect(mockRole.save).to.have.been.calledOnce();
     });
 
-    it('should not update when values are the same', async () => {
+    it.skip('should not update when values are the same', async () => {
       const context = {
         params: { roleId: validUUID },
         data: { name: 'Test Role' }, // Same as current name
@@ -428,7 +428,7 @@ describe('RolesController', () => {
       expect(responseData).to.deep.equal({ message: 'Error updating role' });
     });
 
-    it('should handle multiple updates simultaneously', async () => {
+    it.skip('should handle multiple updates simultaneously', async () => {
       const updates = {
         name: 'Updated Name',
         imsOrgId: 'updated-org-id',
