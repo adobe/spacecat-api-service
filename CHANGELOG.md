@@ -1,3 +1,10 @@
+## [1.125.2](https://github.com/adobe/spacecat-api-service/compare/v1.125.1...v1.125.2) (2025-06-24)
+
+
+### Bug Fixes
+
+* extract page URL correctly, organic-keywords-* all support page URLs ([#1010](https://github.com/adobe/spacecat-api-service/issues/1010)) ([425493a](https://github.com/adobe/spacecat-api-service/commit/425493a2fe4a187b5765e8ed6fed884ab2a29096))
+
 ## [1.125.1](https://github.com/adobe/spacecat-api-service/compare/v1.125.0...v1.125.1) (2025-06-23)
 
 
