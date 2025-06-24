@@ -89,7 +89,7 @@ export default function matchPath(httpMethod, incomingPath, routeDefinitions) {
       return { handler, params };
     }
 
-    return null; // Continue reducing if no match
+    return matched; // Continue reducing if no match
   }, null); // Initial value is null
 }
 

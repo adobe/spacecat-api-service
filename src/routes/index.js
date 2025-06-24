@@ -90,6 +90,7 @@ export default function getRouteHandlers(
   scrapeJobController,
   mcpController,
   fixesController,
+  rolesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -192,6 +193,9 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
+
+    // Roles
+    'POST /roles': rolesController.createRole,
   };
 
   // Initialization of static and dynamic routes
