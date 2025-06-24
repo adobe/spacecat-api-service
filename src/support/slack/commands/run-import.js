@@ -196,12 +196,15 @@ function RunImportCommand(context) {
         );
       } else if (hasValidBaseURL) {
         // if pageURLInput is enclosed in brackets, remove them.
+        // Slack sends URLs enclosed in brackets if not configured differently.
+        // For details, check https://api.slack.com/interactivity/slash-commands
+        //
         // extractURLFromSlackInput also removes the www. subdomain; we want to avoid that here.
         const extractedPageURL = /^<(.*)>/.exec(pageURLInput ?? '')?.[1] ?? pageURLInput;
         const pageURL = extractedPageURL && supportsPageURLs && isValidUrl(extractedPageURL)
           ? extractedPageURL
           : undefined;
-        log.info(`Import run of type ${importType} for site ${baseURL}`, { pageURL, startDate, endDate });
+        log.info(`Import run of type ${importType} for site ${baseURL} with input: `, { pageURL, startDate, endDate });
         await runImportForSite(
           importType,
           baseURL,
