@@ -119,8 +119,16 @@ metric:
   schema:
     type: string
     enum:
-      - 'organic-traffic'
-      - 'organic-keywords'
+      - all-traffic
+      - cwv-daily
+      - cwv-weekly
+      - organic-keywords
+      - organic-keywords-ai-overview
+      - organic-keywords-feature-snippets
+      - organic-keywords-nonbranded
+      - organic-keywords-questions
+      - organic-traffic
+      - top-pages
     example: 'organic-traffic'
 jobId:
   name: jobId
