@@ -1,3 +1,52 @@
+## [1.125.2](https://github.com/adobe/spacecat-api-service/compare/v1.125.1...v1.125.2) (2025-06-24)
+
+
+### Bug Fixes
+
+* extract page URL correctly, organic-keywords-* all support page URLs ([#1010](https://github.com/adobe/spacecat-api-service/issues/1010)) ([425493a](https://github.com/adobe/spacecat-api-service/commit/425493a2fe4a187b5765e8ed6fed884ab2a29096))
+
+## [1.125.1](https://github.com/adobe/spacecat-api-service/compare/v1.125.0...v1.125.1) (2025-06-23)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1008](https://github.com/adobe/spacecat-api-service/issues/1008)) ([5599bf4](https://github.com/adobe/spacecat-api-service/commit/5599bf46735ec50aab2245a6b541754b7c56a9c9))
+
+# [1.125.0](https://github.com/adobe/spacecat-api-service/compare/v1.124.3...v1.125.0) (2025-06-23)
+
+
+### Features
+
+* add event type support to fulfillment events ([#941](https://github.com/adobe/spacecat-api-service/issues/941)) ([7bf7c06](https://github.com/adobe/spacecat-api-service/commit/7bf7c0611d6bdf616425fc708609e09c51ccaaa9))
+
+## [1.124.3](https://github.com/adobe/spacecat-api-service/compare/v1.124.2...v1.124.3) (2025-06-22)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1007](https://github.com/adobe/spacecat-api-service/issues/1007)) ([c970e22](https://github.com/adobe/spacecat-api-service/commit/c970e22dc0ece3f1cf66549238512ef8a873239f))
+
+## [1.124.2](https://github.com/adobe/spacecat-api-service/compare/v1.124.1...v1.124.2) (2025-06-21)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1006](https://github.com/adobe/spacecat-api-service/issues/1006)) ([bd65e05](https://github.com/adobe/spacecat-api-service/commit/bd65e0558090dc7fb94d8611114fce0f617907fd))
+
+## [1.124.1](https://github.com/adobe/spacecat-api-service/compare/v1.124.0...v1.124.1) (2025-06-21)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.29.0 ([#1005](https://github.com/adobe/spacecat-api-service/issues/1005)) ([970a667](https://github.com/adobe/spacecat-api-service/commit/970a667e704473c3966bd9c8aed21c781138bb07))
+
+# [1.124.0](https://github.com/adobe/spacecat-api-service/compare/v1.123.2...v1.124.0) (2025-06-20)
+
+
+### Features
+
+* preflight job creation through live site ([#948](https://github.com/adobe/spacecat-api-service/issues/948)) ([df3163d](https://github.com/adobe/spacecat-api-service/commit/df3163d7b345bb226a4743d59f20ec05831ec01f))
+
 ## [1.123.2](https://github.com/adobe/spacecat-api-service/compare/v1.123.1...v1.123.2) (2025-06-20)
 
 

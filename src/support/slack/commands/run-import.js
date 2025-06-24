@@ -31,7 +31,13 @@ import { isValidDateInterval } from '../../../utils/date-utils.js';
 
 const PHRASES = ['run import'];
 
-const SUPPORTS_PAGE_URLS = ['organic-keywords', 'organic-keywords-nonbranded'];
+const SUPPORTS_PAGE_URLS = [
+  'organic-keywords',
+  'organic-keywords-nonbranded',
+  'organic-keywords-ai-overview',
+  'organic-keywords-feature-snippets',
+  'organic-keywords-questions',
+];
 
 /**
  * Factory function to create the RunImportCommand object.
@@ -189,9 +195,16 @@ function RunImportCommand(context) {
           }),
         );
       } else if (hasValidBaseURL) {
-        const pageURL = supportsPageURLs && isValidUrl(pageURLInput)
-          ? pageURLInput
+        // if pageURLInput is enclosed in brackets, remove them.
+        // Slack sends URLs enclosed in brackets if not configured differently.
+        // For details, check https://api.slack.com/interactivity/slash-commands
+        //
+        // extractURLFromSlackInput also removes the www. subdomain; we want to avoid that here.
+        const extractedPageURL = /^<(.*)>/.exec(pageURLInput ?? '')?.[1] ?? pageURLInput;
+        const pageURL = extractedPageURL && supportsPageURLs && isValidUrl(extractedPageURL)
+          ? extractedPageURL
           : undefined;
+        log.info(`Import run of type ${importType} for site ${baseURL} with input: `, { pageURL, startDate, endDate });
         await runImportForSite(
           importType,
           baseURL,
