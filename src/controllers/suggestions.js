@@ -511,25 +511,24 @@ function SuggestionsController(ctx, sqs, env) {
       }
     });
 
-    let suggestionGroups;
-    if (opportunity.getType() !== 'broken-backlinks') {
-      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
-        const data = suggestion.getData();
-        const url = data?.url || data?.recommendations?.[0]?.pageUrl || data?.url_from;
-        if (!url) return acc;
+    const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+      const data = suggestion.getData();
+      const url = opportunity.getType() === 'broken-backlinks'
+        ? data?.url_from
+        : data?.url || data?.recommendations?.[0]?.pageUrl || data?.url_from;
+      if (!url) return acc;
 
-        if (!acc[url]) {
-          acc[url] = [];
-        }
-        acc[url].push(suggestion);
-        return acc;
-      }, {});
+      if (!acc[url]) {
+        acc[url] = [];
+      }
+      acc[url].push(suggestion);
+      return acc;
+    }, {});
 
-      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
-        groupedSuggestions,
-        url,
-      }));
-    }
+    const suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
+      groupedSuggestions,
+      url,
+    }));
 
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
@@ -580,28 +579,17 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
-    if (opportunity.getType() !== 'broken-backlinks') {
-      await Promise.all(
-        suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
-          sqs,
-          queueUrl,
-          siteId,
-          opportunityId,
-          groupedSuggestions.map((s) => s.getId()),
-          promiseTokenResponse,
-          { url },
-        )),
-      );
-    } else {
-      await sendAutofixMessage(
+    await Promise.all(
+      suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
         sqs,
         queueUrl,
         siteId,
         opportunityId,
-        succeededSuggestions.map((s) => s.getId()),
+        groupedSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
-      );
-    }
+        { url },
+      )),
+    );
 
     return createResponse(response, 207);
   };
