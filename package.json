@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "nodemon",
-    "test": "c8 --skip-full --exclude='src/agents/org-detector/**' --exclude='src/index.js' --exclude='src/controllers/**' --exclude='src/routes/index.js' mocha -i -g 'Post-Deploy' --exclude='**/agents/org-detector/**' --exclude='src/index.js' --exclude='src/controllers/**' --exclude='src/routes/index.js' --spec=test/**/*.test.js",
+    "test": "c8 --skip-full mocha -i -g 'Post-Deploy' --spec=test/**/*.test.js",
     "test-postdeploy": "mocha -g 'Post-Deploy' --spec=test/**/*.test.js",
     "test-e2e": "mocha --timeout 30s --spec=test/**/*.e2e.js",
     "lint": "eslint .",
