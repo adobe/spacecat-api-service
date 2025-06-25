@@ -1,3 +1,10 @@
+## [1.125.4](https://github.com/adobe/spacecat-api-service/compare/v1.125.3...v1.125.4) (2025-06-25)
+
+
+### Bug Fixes
+
+* add support for batchSize and allowCache options to scrape slack command ([#1015](https://github.com/adobe/spacecat-api-service/issues/1015)) ([ceaf72a](https://github.com/adobe/spacecat-api-service/commit/ceaf72ac1a435c53a83ed872394bd56ac94a1621))
+
 ## [1.125.3](https://github.com/adobe/spacecat-api-service/compare/v1.125.2...v1.125.3) (2025-06-24)
 
 
