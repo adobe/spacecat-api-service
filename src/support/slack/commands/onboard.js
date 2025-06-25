@@ -27,7 +27,7 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
+import { findDeliveryType, triggerImportRun, triggerAuditForSite } from '../../utils.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -72,6 +72,42 @@ function OnboardCommand(context) {
   });
 
   /**
+   * Checks if a site is in the LA_CUSTOMERS list and returns appropriate response if it is.
+   *
+   * @param {string} baseURL - The site URL to check.
+   * @param {string} imsOrgID - The IMS Org ID.
+   * @param {string} profileName - The profile name.
+   * @param {Object} slackContext - Slack context with say function.
+   * @returns {Promise<Object|null>} - Returns a report line if site is restricted, null otherwise.
+   */
+  const checkLACustomerRestriction = async (baseURL, imsOrgID, profileName, slackContext) => {
+    const { say } = slackContext;
+
+    if (env.LA_CUSTOMERS) {
+      const laCustomers = env.LA_CUSTOMERS.split(',').map((url) => url.trim());
+      const isLACustomer = laCustomers.some(
+        (url) => baseURL.toLowerCase().endsWith(url.toLowerCase()),
+      );
+
+      if (isLACustomer) {
+        const message = `:warning: Cannot onboard site ${baseURL} - it's already onboarded and live!`;
+        log.warn(message);
+        await say(message);
+        return {
+          site: baseURL,
+          imsOrgId: imsOrgID,
+          profile: profileName,
+          errors: 'Site is a Live customer',
+          status: 'Failed',
+          existingSite: 'Yes',
+        };
+      }
+    }
+
+    return null;
+  };
+
+  /**
    * Onboards a single site.
    *
    * @param {string} baseURLInput - The site URL.
@@ -95,33 +131,15 @@ function OnboardCommand(context) {
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
 
-    log.info(`Slack context: ${JSON.stringify(slackContext)}`);
-
     // Check if site is in LA_CUSTOMERS list
-    if (env.LA_CUSTOMERS) {
-      const laCustomers = env.LA_CUSTOMERS.split(',').map((url) => url.trim());
-      const isLACustomer = laCustomers.some(
-        (url) => baseURL.toLowerCase().endsWith(url.toLowerCase()),
-      );
-
-      if (isLACustomer) {
-        const message = `:warning: Cannot onboard site ${baseURL} - it's already onboarded and live!`;
-        log.warn(message);
-        await say(message);
-        return {
-          site: baseURL,
-          imsOrgId: imsOrgID,
-          spacecatOrgId: '',
-          siteId: '',
-          profile: profileName,
-          deliveryType: '',
-          imports: '',
-          audits: '',
-          errors: 'Site is a Live Agent customer',
-          status: 'Failed',
-          existingSite: 'No',
-        };
-      }
+    const laCustomerCheck = await checkLACustomerRestriction(
+      baseURL,
+      imsOrgID,
+      profileName,
+      slackContext,
+    );
+    if (laCustomerCheck) {
+      return laCustomerCheck;
     }
 
     log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
@@ -275,6 +293,21 @@ function OnboardCommand(context) {
 
       log.info(`Site config succesfully saved for site ${siteID}`);
 
+      for (const importType of importTypes) {
+        /* eslint-disable no-await-in-loop */
+        await triggerImportRun(
+          configuration,
+          importType,
+          siteID,
+          profile.imports[importType].startDate,
+          profile.imports[importType].endDate,
+          slackContext,
+          context,
+        );
+      }
+
+      log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
+
       const auditTypes = Object.keys(profile.audits);
 
       auditTypes.forEach((auditType) => {
@@ -365,9 +398,8 @@ function OnboardCommand(context) {
 
       const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
 
-      const onboardWorkflowArn = env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN;
       const startCommand = new StartExecutionCommand({
-        stateMachineArn: onboardWorkflowArn,
+        stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,
         input: JSON.stringify(workflowInput),
         name: workflowName,
       });
@@ -412,7 +444,7 @@ function OnboardCommand(context) {
           return;
         }
 
-        const profileName = args.length > 0 ? args[0] : 'demo';
+        const profileName = args[0] || 'demo';
 
         await say(`:gear: Processing CSV file with profile *${profileName}*...`);
 
@@ -476,7 +508,7 @@ function OnboardCommand(context) {
         }
 
         const [baseURLInput, imsOrgID = env.DEMO_IMS_ORG, profileName = 'demo', workflowWaitTime] = args;
-        const parsedWaitTime = workflowWaitTime ? parseInt(workflowWaitTime, 10) : undefined;
+        const parsedWaitTime = workflowWaitTime ? Number(workflowWaitTime) : undefined;
 
         const configuration = await Configuration.findLatest();
 
