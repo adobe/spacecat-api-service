@@ -40,13 +40,13 @@ function RunScrapeCommand(context) {
             + '\nOnly members of role "scrape" can run this command.'
             + '\nCurrently this will run the scraper for all sources and all destinations configured for the site, hence be aware of costs.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {baseURL|CSV-File} {allowCache}`,
+    usageText: `${PHRASES[0]} {baseURL|CSV-File} {batchSize} {allowCache}`,
   });
 
   const { dataAccess, log } = context;
   const { Site } = dataAccess;
 
-  const scrapeSite = async (baseURL, allowCache, slackContext) => {
+  const scrapeSite = async (baseURL, batchSize, allowCache, slackContext) => {
     const { say } = slackContext;
     const site = await Site.findByBaseURL(baseURL);
     if (!isNonEmptyObject(site)) {
@@ -66,8 +66,8 @@ function RunScrapeCommand(context) {
     log.info(`Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
     const batches = [];
-    for (let i = 0; i < urls.length; i += 50) {
-      batches.push(urls.slice(i, i + 50));
+    for (let i = 0; i < urls.length; i += batchSize) {
+      batches.push(urls.slice(i, i + batchSize));
     }
 
     return Promise.all(
@@ -97,7 +97,7 @@ function RunScrapeCommand(context) {
     }
     */
     try {
-      const [baseURLInput, allowCache = false] = args;
+      const [baseURLInput, batchSize = 50, allowCache = false] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const isValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
@@ -131,7 +131,7 @@ function RunScrapeCommand(context) {
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             try {
-              await scrapeSite(csvBaseURL, allowCache, slackContext);
+              await scrapeSite(csvBaseURL, batchSize, allowCache, slackContext);
             } catch (error) {
               say(`:warning: Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
             }
@@ -139,7 +139,7 @@ function RunScrapeCommand(context) {
         );
       } else if (isValidBaseURL) {
         say(`:adobe-run: Triggering scrape run for site \`${baseURL}\` with allowCache: ${allowCache}`);
-        await scrapeSite(baseURL, allowCache, slackContext);
+        await scrapeSite(baseURL, batchSize, allowCache, slackContext);
         say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\`.`);
       }
     } catch (error) {
