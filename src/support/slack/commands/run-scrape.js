@@ -68,6 +68,7 @@ function RunScrapeCommand(context) {
 
     const batches = [];
     for (let i = 0; i < urls.length; i += batchSize) {
+      log.info(`creating batch with size ${batchSize} from ${i} to ${i + batchSize}`);
       batches.push(urls.slice(i, i + batchSize));
     }
 
