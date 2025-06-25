@@ -64,6 +64,7 @@ function RunScrapeCommand(context) {
 
     const urls = topPages.map((page) => ({ url: page.getUrl() }));
     log.info(`Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
+    log.info(`Batch size: ${batchSize}, allowCache: ${allowCache}`);
 
     const batches = [];
     for (let i = 0; i < urls.length; i += batchSize) {
