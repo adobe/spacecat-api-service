@@ -71,17 +71,17 @@
 		"audits": {
 			"broken-backlinks": {},
 			"broken-internal-links": {},
+			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"sitemap": {},
 			"cwv": {},
 			"alt-text": {}
 		},
 		"imports": {
-			"organic-traffic" : {
-				"start-date": "2025-02-24",
-				"end-date": "2025-03-02"
-			},
-			"top-pages" : {}
+			"organic-traffic" : {},
+			"top-pages" : {},
+			"organic-keywords" :{},
+			"all-traffic": {}
 		},
 		"config": {},
 		"integrations": {}
