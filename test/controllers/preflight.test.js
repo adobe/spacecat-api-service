@@ -49,7 +49,7 @@ describe('Preflight Controller', () => {
     getMetadata: () => ({
       payload: {
         siteId: 'test-site-123',
-        urls: ['https://example.com/test.html'],
+        urls: ['https://main--example-site.aem.page/test.html'],
         step: 'identify',
       },
       jobType: 'preflight',
@@ -69,7 +69,7 @@ describe('Preflight Controller', () => {
       findById: sandbox.stub().resolves(mockJob),
     },
     Site: {
-      findByBaseURL: sandbox.stub().resolves(mockSite),
+      findByPreviewURL: sandbox.stub().resolves(mockSite),
     },
   };
 
@@ -92,7 +92,7 @@ describe('Preflight Controller', () => {
     // Reset and recreate stubs
     mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockJob);
     mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(mockJob);
-    mockDataAccess.Site.findByBaseURL = sandbox.stub().resolves(mockSite);
+    mockDataAccess.Site.findByPreviewURL = sandbox.stub().resolves(mockSite);
     mockSqs.sendMessage = sandbox.stub().resolves();
   });
 
@@ -120,7 +120,7 @@ describe('Preflight Controller', () => {
     it('creates a preflight job successfully in production environment', async () => {
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'identify',
         },
       };
@@ -141,7 +141,7 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: ['https://example.com/test.html'],
+            urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
           },
@@ -155,6 +155,7 @@ describe('Preflight Controller', () => {
         {
           jobId,
           type: 'preflight',
+          siteId: 'test-site-123',
         },
       );
     });
@@ -243,7 +244,7 @@ describe('Preflight Controller', () => {
     it('creates a preflight job successfully in CI environment', async () => {
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'identify',
         },
       };
@@ -273,7 +274,7 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: ['https://example.com/test.html'],
+            urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
           },
@@ -287,6 +288,7 @@ describe('Preflight Controller', () => {
         {
           jobId,
           type: 'preflight',
+          siteId: 'test-site-123',
         },
       );
     });
@@ -294,18 +296,18 @@ describe('Preflight Controller', () => {
     it('extracts base URL correctly from full URL', async () => {
       const context = {
         data: {
-          urls: ['https://example.com/path/to/page?query=123'],
+          urls: ['https://main--example-site.aem.page/path/to/page?query=123'],
           step: 'identify',
         },
       };
 
       await preflightController.createPreflightJob(context);
 
-      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(mockDataAccess.Site.findByPreviewURL).to.have.been.calledWith('https://main--example-site.aem.page');
     });
 
     it('handles errors during site lookup', async () => {
-      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.findByPreviewURL.resolves(null);
 
       const context = {
         data: {
@@ -319,7 +321,7 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'No site found for base URL: https://non-registered-site.com',
+        message: 'No site found for preview URL: https://non-registered-site.com',
       });
     });
 
@@ -357,7 +359,7 @@ describe('Preflight Controller', () => {
     it('returns 400 Bad Request if urls is not an array', async () => {
       const context = {
         data: {
-          urls: 'https://example.com/test.html',
+          urls: 'https://main--example-site.aem.page/test.html',
           step: 'identify',
         },
       };
@@ -391,7 +393,7 @@ describe('Preflight Controller', () => {
     it('returns 400 Bad Request for invalid step', async () => {
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'invalid-step',
         },
       };
@@ -409,7 +411,7 @@ describe('Preflight Controller', () => {
       const context = {
         data: {
           urls: [
-            'https://example.com/page1.html',
+            'https://main--example-site.aem.page/page1.html',
             'https://different-site.com/page2.html',
           ],
           step: 'identify',
@@ -430,7 +432,7 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'identify',
         },
       };
@@ -449,7 +451,7 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'identify',
         },
       };
@@ -471,7 +473,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
       };
-      mockDataAccess.Site.findByBaseURL.resolves(aemCsSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
       const mockPromiseToken = { promise_token: 'test-token', expires_in: 3600, token_type: 'Bearer' };
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
@@ -504,6 +506,7 @@ describe('Preflight Controller', () => {
         'https://sqs.test.amazonaws.com/audit-queue',
         {
           jobId,
+          siteId: mockSite.getId(),
           type: 'preflight',
           promiseToken: mockPromiseToken,
         },
@@ -515,7 +518,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
       };
-      mockDataAccess.Site.findByBaseURL.resolves(aemCsSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
@@ -554,7 +557,7 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
       };
-      mockDataAccess.Site.findByBaseURL.resolves(aemCsSite);
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
@@ -616,7 +619,7 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: ['https://example.com/test.html'],
+            urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
           },
           jobType: 'preflight',

@@ -15,6 +15,7 @@ import addSite from './commands/add-site.js';
 import getExpCandidates from './commands/get-exp-candidates.js';
 import getSite from './commands/get-site.js';
 import getSites from './commands/get-sites.js';
+import getSiteAudits from './commands/get-site-audits.js';
 import martechImpact from './commands/martech-impact.js';
 import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
@@ -40,6 +41,7 @@ export default (context) => [
   getExpCandidates(context),
   getSite(context),
   getSites(context),
+  getSiteAudits(context),
   martechImpact(context),
   runAudit(context),
   runImport(context),

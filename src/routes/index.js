@@ -87,6 +87,7 @@ export default function getRouteHandlers(
   preflightController,
   demoController,
   scrapeController,
+  scrapeJobController,
   mcpController,
   fixesController,
 ) {
@@ -101,6 +102,7 @@ export default function getRouteHandlers(
     'GET /configurations/:version': configurationController.getByVersion,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
+    'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
     'GET /organizations': organizationsController.getAll,
@@ -172,6 +174,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
     'GET /mcp': mcpController.handleSseRequest,
     'POST /mcp': mcpController.handleRpc,
+
+    // Scrape Jobs
+    'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
+    'GET /tools/scrape/jobs/:jobId': scrapeJobController.getScrapeJobStatus,
+    'GET /tools/scrape/jobs/:jobId/results': scrapeJobController.getScrapeJobUrlResults,
+    'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs': scrapeJobController.getScrapeJobsByDateRange,
+    'GET /tools/scrape/jobs/by-base-url/:baseURL': scrapeJobController.getScrapeJobsByBaseURL,
+    'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType': scrapeJobController.getScrapeJobsByBaseURL,
 
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
