@@ -40,13 +40,13 @@ function RunScrapeCommand(context) {
             + '\nOnly members of role "scrape" can run this command.'
             + '\nCurrently this will run the scraper for all sources and all destinations configured for the site, hence be aware of costs.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {baseURL|CSV-File}`,
+    usageText: `${PHRASES[0]} {baseURL|CSV-File} {allowCache}`,
   });
 
   const { dataAccess, log } = context;
   const { Site } = dataAccess;
 
-  const scrapeSite = async (baseURL, slackContext) => {
+  const scrapeSite = async (baseURL, allowCache, slackContext) => {
     const { say } = slackContext;
     const site = await Site.findByBaseURL(baseURL);
     if (!isNonEmptyObject(site)) {
@@ -71,7 +71,7 @@ function RunScrapeCommand(context) {
     }
 
     return Promise.all(
-      batches.map((urlsBatch) => triggerScraperRun(`${site.getId()}`, urlsBatch, slackContext, context)),
+      batches.map((urlsBatch) => triggerScraperRun(`${site.getId()}`, urlsBatch, slackContext, context, allowCache)),
     );
   };
 
@@ -97,7 +97,7 @@ function RunScrapeCommand(context) {
     }
     */
     try {
-      const [baseURLInput] = args;
+      const [baseURLInput, allowCache = false] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const isValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
@@ -131,7 +131,7 @@ function RunScrapeCommand(context) {
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             try {
-              await scrapeSite(csvBaseURL, slackContext);
+              await scrapeSite(csvBaseURL, allowCache, slackContext);
             } catch (error) {
               say(`:warning: Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
             }
@@ -139,7 +139,7 @@ function RunScrapeCommand(context) {
         );
       } else if (isValidBaseURL) {
         say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
-        await scrapeSite(baseURL, slackContext);
+        await scrapeSite(baseURL, allowCache, slackContext);
         say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\`.`);
       }
     } catch (error) {
