@@ -99,10 +99,18 @@ describe('Index Tests', () => {
           allWithLatestAudit: sinon.stub().resolves([]),
           findById: sinon.stub().resolves({
             id: 'site-id',
+            getId: () => 'site-id',
+            getLatestAuditByAuditType: () => mockAuditData,
           }),
         },
         Opportunity: {},
         Suggestion: {},
+      },
+      rbacDataAccess: {
+        Role: {
+          create: sinon.stub(),
+          findById: sinon.stub(),
+        },
       },
       s3Client: {
         send: sinon.stub(),
@@ -197,7 +205,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('site.getId is not a function');
+    expect(resp.headers.plain()['x-error']).to.equal('site.getBaseURL is not a function');
   });
 
   it('handles dynamic route', async () => {

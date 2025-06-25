@@ -63,7 +63,7 @@ describe('Fixes Controller', () => {
   const siteId = '86ef4aae-7296-417d-9658-8cd4c7edc374';
   const opportunityId = 'a3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
 
-  const log = { ...console, debug: () => undefined, info: () => undefined };
+  const log = { ...console, debug: () => sandbox.stub(), info: () => sandbox.stub() };
 
   beforeEach(() => {
     const { fixEntity, opportunity, suggestion } = electroService.entities;
@@ -75,7 +75,7 @@ describe('Fixes Controller', () => {
       .withArgs({ opportunityId })
       .callsFake((data) => ({ go: async () => ({ data: { ...data, siteId } }) }));
 
-    const entityRegistry = new EntityRegistry(electroService, log);
+    const entityRegistry = new EntityRegistry(electroService, {}, log);
     const dataAccess = entityRegistry.getCollections();
     fixEntityCollection = dataAccess.FixEntity;
     suggestionCollection = dataAccess.Suggestion;
