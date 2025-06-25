@@ -138,7 +138,7 @@ function RunScrapeCommand(context) {
           }),
         );
       } else if (isValidBaseURL) {
-        say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
+        say(`:adobe-run: Triggering scrape run for site \`${baseURL}\` with allowCache: ${allowCache}`);
         await scrapeSite(baseURL, allowCache, slackContext);
         say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\`.`);
       }
