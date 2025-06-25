@@ -511,24 +511,30 @@ function SuggestionsController(ctx, sqs, env) {
       }
     });
 
-    const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
-      const data = suggestion.getData();
-      const url = opportunity.getType() === 'broken-backlinks'
-        ? data?.url_from
-        : data?.url || data?.recommendations?.[0]?.pageUrl || data?.url_from;
-      if (!url) return acc;
+    let suggestionGroups;
+    if (opportunity.getType() === 'broken-backlinks') {
+      suggestionGroups = [{
+        groupedSuggestions: validSuggestions,
+        url: null,
+      }];
+    } else {
+      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+        const data = suggestion.getData();
+        const url = data?.url || data?.recommendations?.[0]?.pageUrl || data?.url_from;
+        if (!url) return acc;
 
-      if (!acc[url]) {
-        acc[url] = [];
-      }
-      acc[url].push(suggestion);
-      return acc;
-    }, {});
+        if (!acc[url]) {
+          acc[url] = [];
+        }
+        acc[url].push(suggestion);
+        return acc;
+      }, {});
 
-    const suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
-      groupedSuggestions,
-      url,
-    }));
+      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
+        groupedSuggestions,
+        url,
+      }));
+    }
 
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
