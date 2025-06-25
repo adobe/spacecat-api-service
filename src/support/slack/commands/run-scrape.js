@@ -64,11 +64,9 @@ function RunScrapeCommand(context) {
 
     const urls = topPages.map((page) => ({ url: page.getUrl() }));
     log.info(`Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
-    log.info(`Batch size: ${batchSize}, allowCache: ${allowCache}`);
 
     const batches = [];
     for (let i = 0; i < urls.length; i += batchSize) {
-      log.info(`creating batch with size ${batchSize} from ${i} to ${i + batchSize}`);
       batches.push(urls.slice(i, i + batchSize));
     }
 
@@ -100,6 +98,7 @@ function RunScrapeCommand(context) {
     */
     try {
       const [baseURLInput, batchSize = 50, allowCache = false] = args;
+      const batchSizeNum = parseInt(batchSize, 10);
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const isValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
@@ -111,6 +110,10 @@ function RunScrapeCommand(context) {
 
       if (isValidBaseURL && hasFiles) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
+        return;
+      }
+      if (Number.isNaN(batchSizeNum)) {
+        await say(':error: Batch size must be a number.');
         return;
       }
 
@@ -133,7 +136,7 @@ function RunScrapeCommand(context) {
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             try {
-              await scrapeSite(csvBaseURL, batchSize, allowCache, slackContext);
+              await scrapeSite(csvBaseURL, batchSizeNum, allowCache, slackContext);
             } catch (error) {
               say(`:warning: Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
             }
@@ -141,7 +144,7 @@ function RunScrapeCommand(context) {
         );
       } else if (isValidBaseURL) {
         say(`:adobe-run: Triggering scrape run for site \`${baseURL}\` with batchSize: ${batchSize} and allowCache: ${allowCache}`);
-        await scrapeSite(baseURL, batchSize, allowCache, slackContext);
+        await scrapeSite(baseURL, batchSizeNum, allowCache, slackContext);
         say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\`.`);
       }
     } catch (error) {

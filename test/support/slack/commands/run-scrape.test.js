@@ -275,5 +275,11 @@ describe('RunScrapeCommand', () => {
 
       expect(slackContext.say.calledWith(':warning: Failed scrape for `https://valid.url`: Test Error')).to.be.true;
     });
+
+    it('handles invalid batch size', async () => {
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com', 'invalid', 'true'], slackContext);
+      expect(slackContext.say.calledWith(':error: Batch size must be a number.')).to.be.true;
+    });
   });
 });
