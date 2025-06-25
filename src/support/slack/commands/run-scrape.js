@@ -97,8 +97,8 @@ function RunScrapeCommand(context) {
     }
     */
     try {
-      const [baseURLInput, batchSize = 50, allowCache = false] = args;
-      const batchSizeNum = parseInt(batchSize, 10);
+      const [baseURLInput, batchSize = 20, allowCache = false] = args;
+      const batchSizeNum = parseInt(batchSize, 20);
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const isValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
