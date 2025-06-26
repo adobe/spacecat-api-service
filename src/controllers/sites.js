@@ -29,6 +29,7 @@ import {
   isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import { SiteDto } from '../dto/site.js';
@@ -598,15 +599,19 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can update its sites');
     }
 
-    const config = site.getConfig();
+    try {
+      const siteConfig = site.getConfig();
+      siteConfig.updateCdnLogsConfig(cdnLogsConfig);
 
-    site.setConfig({
-      ...config,
-      cdnLogsConfig,
-    });
+      const configObj = Config.toDynamoItem(siteConfig);
+      site.setConfig(configObj);
 
-    const updatedSite = await site.save();
-    return ok(SiteDto.toJSON(updatedSite));
+      const updatedSite = await site.save();
+      return ok(SiteDto.toJSON(updatedSite));
+    } catch (error) {
+      log.error(`Error updating CDN logs config for site ${siteId}: ${error.message}`);
+      return badRequest('Failed to update CDN logs config');
+    }
   };
 
   return {

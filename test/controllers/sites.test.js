@@ -1401,7 +1401,6 @@ describe('Sites Controller', () => {
       });
 
       expect(site.getConfig).to.have.been.calledTwice;
-      expect(site.setConfig).to.have.been.calledOnce;
       expect(site.save).to.have.been.calledOnce;
       expect(response.status).to.equal(200);
 
@@ -1503,13 +1502,15 @@ describe('Sites Controller', () => {
       site.setConfig = sandbox.stub();
       site.save = sandbox.stub().resolves(site);
 
-      await sitesController.updateCdnLogsConfig({
+      const response = await sitesController.updateCdnLogsConfig({
         params: { siteId: SITE_IDS[0] },
         data: { cdnLogsConfig },
         ...defaultAuthAttributes,
       });
 
-      expect(site.setConfig).to.have.been.called;
+      expect(site.setConfig).to.have.been.calledOnce;
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
     });
 
     it('overwrites existing cdnLogsConfig when updating', async () => {
@@ -1532,13 +1533,15 @@ describe('Sites Controller', () => {
       site.setConfig = sandbox.stub();
       site.save = sandbox.stub().resolves(site);
 
-      await sitesController.updateCdnLogsConfig({
+      const response = await sitesController.updateCdnLogsConfig({
         params: { siteId: SITE_IDS[0] },
         data: { cdnLogsConfig: newCdnLogsConfig },
         ...defaultAuthAttributes,
       });
 
-      expect(site.setConfig).to.have.been.called;
+      expect(site.setConfig).to.have.been.calledOnce;
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
     });
 
     it('returns forbidden when user does not have access to the site', async () => {
@@ -1565,6 +1568,42 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Cdn logs config required');
+    });
+
+    it('handles errors during config update', async () => {
+      const site = sites[0];
+      const cdnLogsConfig = { bucketName: 'test-bucket' };
+
+      site.getConfig = sandbox.stub().throws(new Error('Config update failed'));
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Failed to update CDN logs config');
+    });
+
+    it('handles errors during site save', async () => {
+      const site = sites[0];
+      const cdnLogsConfig = { bucketName: 'test-bucket' };
+
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().rejects(new Error('Save failed'));
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Failed to update CDN logs config');
     });
   });
 });
