@@ -314,7 +314,7 @@ function SitesController(ctx, log, env) {
     }
 
     if (hasText(requestBody.organizationId)
-        && requestBody.organizationId !== site.getOrganizationId()) {
+      && requestBody.organizationId !== site.getOrganizationId()) {
       site.setOrganizationId(requestBody.organizationId);
       updates = true;
     }
@@ -330,13 +330,13 @@ function SitesController(ctx, log, env) {
     }
 
     if (requestBody.deliveryType !== site.getDeliveryType()
-        && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
+      && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
       site.setDeliveryType(requestBody.deliveryType);
       updates = true;
     }
 
     if (isObject(requestBody.deliveryConfig)
-        && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
+      && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
       site.setDeliveryConfig(requestBody.deliveryConfig);
       updates = true;
     }
@@ -577,6 +577,38 @@ function SitesController(ctx, log, env) {
     return ok(metrics);
   };
 
+  const updateCdnLogsConfig = async (context) => {
+    const siteId = context.params?.siteId;
+    const { cdnLogsConfig } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isObject(cdnLogsConfig)) {
+      return badRequest('Cdn logs config required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can update its sites');
+    }
+
+    const config = site.getConfig();
+
+    site.setConfig({
+      ...config,
+      cdnLogsConfig,
+    });
+
+    const updatedSite = await site.save();
+    return ok(SiteDto.toJSON(updatedSite));
+  };
+
   return {
     createSite,
     getAll,
@@ -589,6 +621,7 @@ function SitesController(ctx, log, env) {
     getByID,
     removeSite,
     updateSite,
+    updateCdnLogsConfig,
 
     // key events
     createKeyEvent,

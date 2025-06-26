@@ -150,6 +150,7 @@ describe('Sites Controller', () => {
     'getByID',
     'removeSite',
     'updateSite',
+    'updateCdnLogsConfig',
     'createKeyEvent',
     'getKeyEventsBySiteID',
     'removeKeyEvent',
@@ -1374,5 +1375,201 @@ describe('Sites Controller', () => {
     const updatedSite = await response.json();
     expect(updatedSite).to.have.property('id', SITE_IDS[0]);
     expect(updatedSite).to.have.property('name', 'new-name');
+  });
+
+  describe('updateCdnLogsConfig', () => {
+    it('updates CDN logs config successfully', async () => {
+      const site = sites[0];
+      const originalConfig = { existingConfig: 'value' };
+      const cdnLogsConfig = {
+        enabled: true,
+        logLevel: 'info',
+        destinations: ['s3://bucket/path'],
+      };
+
+      site.getConfig = sandbox.stub().returns(originalConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.getConfig).to.have.been.calledOnce;
+      expect(site.setConfig).to.have.been.calledWith({
+        ...originalConfig,
+        cdnLogsConfig,
+      });
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+
+      const updatedSite = await response.json();
+      expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    });
+
+    it('returns bad request when site ID is not provided', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: {},
+        data: { cdnLogsConfig: { enabled: true } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request when site ID is invalid', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: 'invalid-uuid' },
+        data: { cdnLogsConfig: { enabled: true } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request when cdnLogsConfig is not provided', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Cdn logs config required');
+    });
+
+    it('returns bad request when cdnLogsConfig is not an object', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: 'not-an-object' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Cdn logs config required');
+    });
+
+    it('returns bad request when cdnLogsConfig is null', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: null },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Cdn logs config required');
+    });
+
+    it('returns not found when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: { enabled: true } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('merges cdnLogsConfig with existing config', async () => {
+      const site = sites[0];
+      const existingConfig = {
+        existingField: 'value',
+        anotherField: 'another-value',
+      };
+      const cdnLogsConfig = {
+        enabled: true,
+        logLevel: 'debug',
+      };
+
+      site.getConfig = sandbox.stub().returns(existingConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setConfig).to.have.been.calledWith({
+        existingField: 'value',
+        anotherField: 'another-value',
+        cdnLogsConfig: {
+          enabled: true,
+          logLevel: 'debug',
+        },
+      });
+    });
+
+    it('overwrites existing cdnLogsConfig when updating', async () => {
+      const site = sites[0];
+      const existingConfig = {
+        existingField: 'value',
+        cdnLogsConfig: {
+          enabled: false,
+          logLevel: 'error',
+          oldField: 'old-value',
+        },
+      };
+      const newCdnLogsConfig = {
+        enabled: true,
+        logLevel: 'info',
+        newField: 'new-value',
+      };
+
+      site.getConfig = sandbox.stub().returns(existingConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: newCdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setConfig).to.have.been.calledWith({
+        existingField: 'value',
+        cdnLogsConfig: newCdnLogsConfig,
+      });
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: { enabled: true } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only users belonging to the organization can update its sites');
+    });
+
+    it('handles missing context data gracefully', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        // No data property
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Cdn logs config required');
+    });
   });
 });
