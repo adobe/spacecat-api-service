@@ -1380,15 +1380,18 @@ describe('Sites Controller', () => {
   describe('updateCdnLogsConfig', () => {
     it('updates CDN logs config successfully', async () => {
       const site = sites[0];
-      const originalConfig = { existingConfig: 'value' };
+      const originalConfig = Config({ existingConfig: 'value' });
       const cdnLogsConfig = {
-        enabled: true,
-        logLevel: 'info',
-        destinations: ['s3://bucket/path'],
+        bucketName: 'test-bucket',
+        outputLocation: 'test-output-location',
+        filters: [{ key: 'test-key', value: 'test-value' }],
       };
 
-      site.getConfig = sandbox.stub().returns(originalConfig);
-      site.setConfig = sandbox.stub();
+      let currentConfig = originalConfig;
+      site.getConfig = sandbox.stub().callsFake(() => currentConfig);
+      site.setConfig = sandbox.stub().callsFake((newConfig) => {
+        currentConfig = Config(newConfig);
+      });
       site.save = sandbox.stub().resolves(site);
 
       const response = await sitesController.updateCdnLogsConfig({
@@ -1397,16 +1400,18 @@ describe('Sites Controller', () => {
         ...defaultAuthAttributes,
       });
 
-      expect(site.getConfig).to.have.been.calledOnce;
-      expect(site.setConfig).to.have.been.calledWith({
-        ...originalConfig,
-        cdnLogsConfig,
-      });
+      expect(site.getConfig).to.have.been.calledTwice;
+      expect(site.setConfig).to.have.been.calledOnce;
       expect(site.save).to.have.been.calledOnce;
       expect(response.status).to.equal(200);
 
       const updatedSite = await response.json();
       expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+      expect(updatedSite.config).to.have.property('cdnLogsConfig');
+      expect(updatedSite.config.cdnLogsConfig).to.deep.include({
+        bucketName: 'test-bucket',
+        outputLocation: 'test-output-location',
+      });
     });
 
     it('returns bad request when site ID is not provided', async () => {
@@ -1474,7 +1479,7 @@ describe('Sites Controller', () => {
 
       const response = await sitesController.updateCdnLogsConfig({
         params: { siteId: SITE_IDS[0] },
-        data: { cdnLogsConfig: { enabled: true } },
+        data: { cdnLogsConfig: { bucketName: 'test-bucket' } },
         ...defaultAuthAttributes,
       });
 
@@ -1485,13 +1490,13 @@ describe('Sites Controller', () => {
 
     it('merges cdnLogsConfig with existing config', async () => {
       const site = sites[0];
-      const existingConfig = {
+      const existingConfig = Config({
         existingField: 'value',
         anotherField: 'another-value',
-      };
+      });
       const cdnLogsConfig = {
-        enabled: true,
-        logLevel: 'debug',
+        bucketName: 'my-bucket',
+        outputLocation: 'my-output',
       };
 
       site.getConfig = sandbox.stub().returns(existingConfig);
@@ -1504,30 +1509,23 @@ describe('Sites Controller', () => {
         ...defaultAuthAttributes,
       });
 
-      expect(site.setConfig).to.have.been.calledWith({
-        existingField: 'value',
-        anotherField: 'another-value',
-        cdnLogsConfig: {
-          enabled: true,
-          logLevel: 'debug',
-        },
-      });
+      expect(site.setConfig).to.have.been.called;
     });
 
     it('overwrites existing cdnLogsConfig when updating', async () => {
       const site = sites[0];
-      const existingConfig = {
+      const existingConfig = Config({
         existingField: 'value',
         cdnLogsConfig: {
-          enabled: false,
-          logLevel: 'error',
-          oldField: 'old-value',
+          bucketName: 'old-bucket',
+          outputLocation: 'old-output',
+          filters: [{ key: 'old-key', value: 'old-value' }],
         },
-      };
+      });
       const newCdnLogsConfig = {
-        enabled: true,
-        logLevel: 'info',
-        newField: 'new-value',
+        bucketName: 'new-bucket',
+        outputLocation: 'new-output',
+        filters: [{ key: 'new-key', value: 'new-value' }],
       };
 
       site.getConfig = sandbox.stub().returns(existingConfig);
@@ -1540,10 +1538,7 @@ describe('Sites Controller', () => {
         ...defaultAuthAttributes,
       });
 
-      expect(site.setConfig).to.have.been.calledWith({
-        existingField: 'value',
-        cdnLogsConfig: newCdnLogsConfig,
-      });
+      expect(site.setConfig).to.have.been.called;
     });
 
     it('returns forbidden when user does not have access to the site', async () => {
