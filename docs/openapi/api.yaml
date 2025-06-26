@@ -113,8 +113,6 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-latest'
   /sites/{siteId}:
     $ref: './site-api.yaml#/site'
-  /sites/{siteId}/config/cdn-logs:
-    $ref: './site-api.yaml#/site-cdn-logs-config'
   /sites/{siteId}/audits:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/audits/{auditType}:
@@ -129,6 +127,8 @@ paths:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
     $ref: './brands-api.yaml#/brand-guidelines-by-site-id'
+  /sites/{siteId}/config/cdn-logs:
+    $ref: './site-api.yaml#/site-cdn-logs-config'
   /sites/{siteId}/opportunities:
     $ref: './site-opportunities.yaml#/site-opportunities'
   /sites/{siteId}/opportunities/by-status/{status}:
