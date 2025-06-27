@@ -3047,3 +3047,50 @@ FixStatusUpdateListResponse:
   required:
     - fixes
     - metadata
+
+PaidSiteTopPage:
+  type: object
+  required:
+    - url
+    - ctr
+    - avgClicksPerSession
+    - pageViews
+    - clickedSessions
+    - bounceRate
+    - totalNumClicks
+    - source
+  properties:
+    url:
+      type: string
+      format: uri
+    ctr:
+      type: number
+      format: float
+    avgClicksPerSession:
+      type: number
+      format: float
+    pageViews:
+      type: integer
+    clickedSessions:
+      type: integer
+    bounceRate:
+      type: number
+      format: float
+    totalNumClicks:
+      type: integer
+    source:
+      type: string
+      description: Paid traffic source (e.g., paid:search:google)
+  example:
+    url: "https://www.example.com/uk/"
+    ctr: 0.015
+    avgClicksPerSession: 1.82
+    pageViews: 6100
+    clickedSessions: 1800
+    bounceRate: 0.98
+    totalNumClicks: 5100
+    source: "paid:affiliate:"
+PaidSiteTopPageList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/PaidSiteTopPage'

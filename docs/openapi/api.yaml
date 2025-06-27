@@ -191,6 +191,8 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
+  /paid/sites/{siteId}/top-pages:
+    $ref: './paid-api.yaml#/paid-site-top-pages'
 
 components:
   securitySchemes:
