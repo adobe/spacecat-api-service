@@ -1,21 +1,12 @@
-paid-site-top-pages:
+site-traffic-paid-top-pages:
   parameters:
     - $ref: './parameters.yaml#/siteId'
-    - name: limit
-      in: query
-      description: Maximum number of top URLs to return.
-      required: false
-      schema:
-        type: integer
-        default: 10
-        minimum: 1
-        maximum: 10
   get:
     tags:
       - site
       - paid
     summary: Get top pages by paid traffic for a site
-    description: Returns the top pages receiving the most paid traffic for a given week.
+    description: Returns the top pages per traffic source receiving the most paid traffic for a given week.
     operationId: getPaidSiteTopPages
     responses:
       '200':
