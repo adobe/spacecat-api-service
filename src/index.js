@@ -182,14 +182,6 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
-  .with(authWrapper, {
-    authHandlers: [
-      JwtHandler,
-      AdobeImsHandler,
-      ScopedApiKeyHandler,
-      LegacyApiKeyHandler,
-    ],
-  })
   .with(dataAccess)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(bodyData)
@@ -199,4 +191,12 @@ export const main = wrap(run)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(secrets, { name: resolveSecretsName })
-  .with(helixStatus);
+  .with(helixStatus)
+  .with(authWrapper, {
+    authHandlers: [
+      JwtHandler,
+      AdobeImsHandler,
+      ScopedApiKeyHandler,
+      LegacyApiKeyHandler,
+    ],
+  });
