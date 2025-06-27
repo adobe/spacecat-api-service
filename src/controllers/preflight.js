@@ -120,6 +120,7 @@ function PreflightController(ctx, log, env) {
    */
   const createPreflightJob = async (context) => {
     const { data } = context;
+    const CS_TYPES = [SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW];
     try {
       validateRequestData(data);
     } catch (error) {
@@ -141,7 +142,7 @@ function PreflightController(ctx, log, env) {
       }
 
       let promiseTokenResponse;
-      if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+      if (CS_TYPES.includes(site.getAuthoringType())) {
         try {
           promiseTokenResponse = await getCSPromiseToken(context);
           log.info('Successfully got promise token');
@@ -176,7 +177,7 @@ function PreflightController(ctx, log, env) {
           siteId: site.getId(),
           type: 'preflight',
         };
-        if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+        if (CS_TYPES.includes(site.getAuthoringType())) {
           sqsMessage.promiseToken = promiseTokenResponse;
         }
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
