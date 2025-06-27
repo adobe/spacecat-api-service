@@ -182,8 +182,6 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
-  .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
-  .with(dataAccess)
   .with(authWrapper, {
     authHandlers: [
       JwtHandler,
@@ -192,6 +190,8 @@ export const main = wrap(run)
       LegacyApiKeyHandler,
     ],
   })
+  .with(dataAccess)
+  .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(bodyData)
   .with(multipartFormData)
   .with(enrichPathInfo)
