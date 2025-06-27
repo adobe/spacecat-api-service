@@ -60,7 +60,7 @@ describe('Preflight Controller', () => {
 
   const mockSite = {
     getId: () => 'test-site-123',
-    getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_EDGE,
+    getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
   };
 
   const mockDataAccess = {
@@ -468,10 +468,10 @@ describe('Preflight Controller', () => {
       expect(mockJob.remove).to.have.been.calledOnce;
     });
 
-    it('creates a preflight job with AEM_CS delivery type and includes promise token', async () => {
+    it('creates a preflight job with crosswalk authoring type and includes promise token', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
-        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
@@ -516,7 +516,7 @@ describe('Preflight Controller', () => {
     it('handles promise token error for AEM_CS site', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
-        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
@@ -555,7 +555,7 @@ describe('Preflight Controller', () => {
     it('handles promise token error for AEM_CS site with generic error', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
-        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 

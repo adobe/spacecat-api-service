@@ -29,6 +29,7 @@ import {
   isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import { SiteDto } from '../dto/site.js';
@@ -314,7 +315,7 @@ function SitesController(ctx, log, env) {
     }
 
     if (hasText(requestBody.organizationId)
-        && requestBody.organizationId !== site.getOrganizationId()) {
+      && requestBody.organizationId !== site.getOrganizationId()) {
       site.setOrganizationId(requestBody.organizationId);
       updates = true;
     }
@@ -330,13 +331,19 @@ function SitesController(ctx, log, env) {
     }
 
     if (requestBody.deliveryType !== site.getDeliveryType()
-        && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
+      && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
       site.setDeliveryType(requestBody.deliveryType);
       updates = true;
     }
 
+    if (requestBody.authoringType !== site.getAuthoringType()
+     && Object.values(SiteModel.AUTHORING_TYPES).includes(requestBody.authoringType)) {
+      site.setAuthoringType(requestBody.authoringType);
+      updates = true;
+    }
+
     if (isObject(requestBody.deliveryConfig)
-        && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
+      && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
       site.setDeliveryConfig(requestBody.deliveryConfig);
       updates = true;
     }
@@ -577,6 +584,42 @@ function SitesController(ctx, log, env) {
     return ok(metrics);
   };
 
+  const updateCdnLogsConfig = async (context) => {
+    const siteId = context.params?.siteId;
+    const { cdnLogsConfig } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isObject(cdnLogsConfig)) {
+      return badRequest('Cdn logs config required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can update its sites');
+    }
+
+    try {
+      const siteConfig = site.getConfig();
+      siteConfig.updateCdnLogsConfig(cdnLogsConfig);
+
+      const configObj = Config.toDynamoItem(siteConfig);
+      site.setConfig(configObj);
+
+      const updatedSite = await site.save();
+      return ok(SiteDto.toJSON(updatedSite));
+    } catch (error) {
+      log.error(`Error updating CDN logs config for site ${siteId}: ${error.message}`);
+      return badRequest('Failed to update CDN logs config');
+    }
+  };
+
   return {
     createSite,
     getAll,
@@ -589,6 +632,7 @@ function SitesController(ctx, log, env) {
     getByID,
     removeSite,
     updateSite,
+    updateCdnLogsConfig,
 
     // key events
     createKeyEvent,
