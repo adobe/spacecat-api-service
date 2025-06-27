@@ -111,7 +111,7 @@ function OnboardCommand(context) {
    * Onboards a single site.
    *
    * @param {string} baseURLInput - The site URL.
-   * @param {string} imsOrgID - The IMS Org ID.
+   * @param {string} imsOrganizationID - The IMS Org ID.
    * @param {object} configuration - The configuration object.
    * @param {string} profileName - The profile name.
    * @param {number} workflowWaitTime - Optional wait time in seconds.
@@ -120,7 +120,7 @@ function OnboardCommand(context) {
    */
   const onboardSingleSite = async (
     baseURLInput,
-    imsOrgID,
+    imsOrganizationID,
     configuration,
     profileName,
     workflowWaitTime,
@@ -130,6 +130,9 @@ function OnboardCommand(context) {
     const sfnClient = new SFNClient();
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
+
+    // Set default IMS Org ID if not provided
+    const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
 
     // Check if site is in LA_CUSTOMERS list
     const laCustomerCheck = await checkLACustomerRestriction(

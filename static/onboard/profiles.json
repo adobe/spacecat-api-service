@@ -75,7 +75,10 @@
 			"meta-tags": {},
 			"sitemap": {},
 			"cwv": {},
-			"alt-text": {}
+			"alt-text": {},
+			"broken-backlinks-auto-suggest": {},
+			"meta-tags-auto-suggest": {},
+			"broken-internal-links-auto-suggest": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
