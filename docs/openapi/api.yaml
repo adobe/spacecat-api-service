@@ -127,6 +127,8 @@ paths:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
     $ref: './brands-api.yaml#/brand-guidelines-by-site-id'
+  /sites/{siteId}/config/cdn-logs:
+    $ref: './site-api.yaml#/site-cdn-logs-config'
   /sites/{siteId}/opportunities:
     $ref: './site-opportunities.yaml#/site-opportunities'
   /sites/{siteId}/opportunities/by-status/{status}:

@@ -122,6 +122,7 @@ export default function getRouteHandlers(
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
+    'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
