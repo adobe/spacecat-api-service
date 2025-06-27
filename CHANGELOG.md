@@ -1,3 +1,10 @@
+# [1.127.0](https://github.com/adobe/spacecat-api-service/compare/v1.126.0...v1.127.0) (2025-06-27)
+
+
+### Features
+
+* introduce authoring type in sites ([#1022](https://github.com/adobe/spacecat-api-service/issues/1022)) ([b944aad](https://github.com/adobe/spacecat-api-service/commit/b944aad8cb744cfb47212f2873d40fea54585f34))
+
 # [1.126.0](https://github.com/adobe/spacecat-api-service/compare/v1.125.7...v1.126.0) (2025-06-27)
 
 
