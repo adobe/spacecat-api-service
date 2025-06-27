@@ -1,3 +1,10 @@
+# [1.126.0](https://github.com/adobe/spacecat-api-service/compare/v1.125.7...v1.126.0) (2025-06-27)
+
+
+### Features
+
+* add patch endpoint for cdn config ([#1020](https://github.com/adobe/spacecat-api-service/issues/1020)) ([804be40](https://github.com/adobe/spacecat-api-service/commit/804be4027eb996b1b90c19a56d8a0a1fcd81e172))
+
 ## [1.125.7](https://github.com/adobe/spacecat-api-service/compare/v1.125.6...v1.125.7) (2025-06-26)
 
 
