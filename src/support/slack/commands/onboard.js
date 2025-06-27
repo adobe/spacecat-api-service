@@ -15,6 +15,7 @@
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -26,8 +27,7 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerImportRun } from '../../utils.js';
-
+import { findDeliveryType, triggerImportRun, triggerAuditForSite } from '../../utils.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -47,10 +47,12 @@ function OnboardCommand(context) {
     name: 'Onboard Site(s)',
     description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
+    usageText: `${PHRASES[0]} {site} [imsOrgId] [profile] [workflowWaitTime]`,
   });
 
-  const { dataAccess, log, imsClient } = context;
+  const {
+    dataAccess, log, imsClient, env,
+  } = context;
   const { Configuration, Site, Organization } = dataAccess;
 
   const csvStringifier = createObjectCsvStringifier({
@@ -70,26 +72,82 @@ function OnboardCommand(context) {
   });
 
   /**
+   * Checks if a site is in the LA_CUSTOMERS list and returns appropriate response if it is.
+   *
+   * @param {string} baseURL - The site URL to check.
+   * @param {string} imsOrgID - The IMS Org ID.
+   * @param {string} profileName - The profile name.
+   * @param {Object} slackContext - Slack context with say function.
+   * @returns {Promise<Object|null>} - Returns a report line if site is restricted, null otherwise.
+   */
+  const checkLACustomerRestriction = async (baseURL, imsOrgID, profileName, slackContext) => {
+    const { say } = slackContext;
+
+    if (env.LA_CUSTOMERS) {
+      const laCustomers = env.LA_CUSTOMERS.split(',').map((url) => url.trim());
+      const isLACustomer = laCustomers.some(
+        (url) => baseURL.toLowerCase().endsWith(url.toLowerCase()),
+      );
+
+      if (isLACustomer) {
+        const message = `:warning: Cannot onboard site ${baseURL} - it's already onboarded and live!`;
+        log.warn(message);
+        await say(message);
+        return {
+          site: baseURL,
+          imsOrgId: imsOrgID,
+          profile: profileName,
+          errors: 'Site is a Live customer',
+          status: 'Failed',
+          existingSite: 'Yes',
+        };
+      }
+    }
+
+    return null;
+  };
+
+  /**
    * Onboards a single site.
    *
    * @param {string} baseURLInput - The site URL.
-   * @param {string} imsOrgID - The IMS Org ID.
+   * @param {string} imsOrganizationID - The IMS Org ID.
    * @param {object} configuration - The configuration object.
    * @param {string} profileName - The profile name.
+   * @param {number} workflowWaitTime - Optional wait time in seconds.
    * @param {Object} slackContext - Slack context.
    * @returns {Promise<Object>} - A report line containing execution details.
    */
   const onboardSingleSite = async (
     baseURLInput,
-    imsOrgID,
+    imsOrganizationID,
     configuration,
     profileName,
+    workflowWaitTime,
     slackContext,
   ) => {
     const { say } = slackContext;
+    const sfnClient = new SFNClient();
 
     const baseURL = extractURLFromSlackInput(baseURLInput);
 
+    // Set default IMS Org ID if not provided
+    const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
+
+    // Check if site is in LA_CUSTOMERS list
+    const laCustomerCheck = await checkLACustomerRestriction(
+      baseURL,
+      imsOrgID,
+      profileName,
+      slackContext,
+    );
+    if (laCustomerCheck) {
+      return laCustomerCheck;
+    }
+
+    log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
+    await say(`:gear:  Starting ${profileName} environment setup for site ${baseURL}`);
+    await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
     const reportLine = {
       site: baseURL,
       imsOrgId: imsOrgID,
@@ -97,8 +155,8 @@ function OnboardCommand(context) {
       siteId: '',
       profile: profileName,
       deliveryType: '',
-      audits: '',
       imports: '',
+      audits: '',
       errors: '',
       status: 'Success',
       existingSite: 'No',
@@ -119,6 +177,8 @@ function OnboardCommand(context) {
 
       // check if the organization with IMS Org ID already exists; create if it doesn't
       let organization = await Organization.findByImsOrgId(imsOrgID);
+      // TODO: remove this one as we do not want to create organization.
+      // Let user create organization. Just add a slack message.
       if (!organization) {
         let imsOrgDetails;
         try {
@@ -159,8 +219,10 @@ function OnboardCommand(context) {
 
         const siteOrgId = site.getOrganizationId();
         if (siteOrgId !== organizationId) {
-          site.setOrganizationId(organizationId);
-          log.info(`Site ${baseURL} organization ID updated to ${organizationId}`);
+          log.info(`:warning: :alert: Site ${baseURL} organization ID mismatch. Run below slack command to update site organization to ${organizationId}`);
+          log.info(`:fire: @spacecat set imsorg ${baseURL} ${organizationId}`);
+          // site.setOrganizationId(organizationId);
+          // log.info(`Site ${baseURL} organization ID updated to ${organizationId}`);
         }
       } else {
         log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
@@ -214,7 +276,7 @@ function OnboardCommand(context) {
       }
 
       const importTypes = Object.keys(profile.imports);
-      reportLine.imports = importTypes.join(',');
+      reportLine.imports = importTypes.join(', ');
       const siteConfig = site.getConfig();
       for (const importType of importTypes) {
         siteConfig.enableImport(importType);
@@ -255,8 +317,96 @@ function OnboardCommand(context) {
         configuration.enableHandlerForSite(auditType, site);
       });
 
-      reportLine.audits = auditTypes.join(',');
+      reportLine.audits = auditTypes.join(', ');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
+
+      await say(`:white_check_mark: *Enabled imports*: ${reportLine.imports} *and audits*: ${reportLine.audits}`);
+      // trigger audit runs
+      log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
+      await say(`:gear: Starting audits: ${auditTypes}`);
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        if (!configuration.isHandlerEnabledForSite(auditType, site)) {
+          await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
+        } else {
+          await triggerAuditForSite(
+            site,
+            auditType,
+            slackContext,
+            context,
+          );
+        }
+      }
+
+      // Opportunity status job
+      const opportunityStatusJob = {
+        type: 'opportunity-status-processor',
+        siteId: siteID,
+        siteUrl: baseURL,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
+          auditTypes,
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      };
+
+      // Disable imports and audits job
+      const disableImportAndAuditJob = {
+        type: 'disable-import-audit-processor',
+        siteId: siteID,
+        siteUrl: baseURL,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
+          importTypes,
+          auditTypes,
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      };
+
+      // Demo URL job
+      const demoURLJob = {
+        type: 'demo-url-processor',
+        siteId: siteID,
+        siteUrl: baseURL,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
+          experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      };
+
+      log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
+      log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
+      log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
+
+      // Prepare and start step function workflow with the necessary parameters
+      const workflowInput = {
+        opportunityStatusJob,
+        disableImportAndAuditJob,
+        demoURLJob,
+        workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
+      };
+
+      const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+
+      const startCommand = new StartExecutionCommand({
+        stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,
+        input: JSON.stringify(workflowInput),
+        name: workflowName,
+      });
+      await sfnClient.send(startCommand);
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -281,8 +431,6 @@ function OnboardCommand(context) {
       say, botToken, files, channelId, client, threadTs,
     } = slackContext;
 
-    await say(':spacecat: Mission Control, we are go for *onboarding*! :satellite:');
-
     try {
       if (isNonEmptyArray(files)) {
         // Ensure exactly one CSV file is uploaded
@@ -299,7 +447,7 @@ function OnboardCommand(context) {
           return;
         }
 
-        const profileName = args[0] || 'default';
+        const profileName = args[0] || 'demo';
 
         await say(`:gear: Processing CSV file with profile *${profileName}*...`);
 
@@ -327,6 +475,7 @@ function OnboardCommand(context) {
             imsOrgID,
             configuration,
             profileName,
+            env.WORKFLOW_WAIT_TIME_IN_SECONDS, // Use environment default wait time in batch mode
             slackContext,
           );
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
@@ -356,12 +505,14 @@ function OnboardCommand(context) {
 
         await say(':white_check_mark: Batch onboarding process finished successfully.');
       } else {
-        if (args.length < 2) {
-          await say(':warning: Missing required arguments. Please provide *Site URL* and *IMS Org ID*.');
+        if (args.length < 1) {
+          await say(':warning: Missing required argument. Please provide at least *Site URL*.');
           return;
         }
 
-        const [baseURLInput, imsOrgID, profileName = 'default'] = args;
+        const [baseURLInput, imsOrgID = env.DEMO_IMS_ORG, profileName = 'demo', workflowWaitTime] = args;
+        const parsedWaitTime = workflowWaitTime ? Number(workflowWaitTime) : undefined;
+
         const configuration = await Configuration.findLatest();
 
         const reportLine = await onboardSingleSite(
@@ -369,6 +520,7 @@ function OnboardCommand(context) {
           imsOrgID,
           configuration,
           profileName,
+          parsedWaitTime,
           slackContext,
         );
 
@@ -379,16 +531,16 @@ function OnboardCommand(context) {
         }
 
         const message = `
-        *:spacecat: :satellite: Onboarding complete for ${reportLine.site}*
         :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
         :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
         :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
         :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
         :question: *Already existing:* ${reportLine.existingSite}
         :gear: *Profile:* ${reportLine.profile}
+        :hourglass_flowing_sand: *Wait Time:* ${parsedWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS} seconds (${parsedWaitTime === env.WORKFLOW_WAIT_TIME_IN_SECONDS ? 'default' : 'custom'})
         :clipboard: *Audits:* ${reportLine.audits || 'None'}
         :inbox_tray: *Imports:* ${reportLine.imports || 'None'}
-        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : `:check: *Status:* ${reportLine.status}`}
+        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : ':hourglass_flowing_sand: *Status:* In-Progress'}
         `;
 
         await say(message);
