@@ -65,10 +65,10 @@ describe('Sites Controller', () => {
 
   const sites = [
     {
-      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', deliveryConfig: {}, config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {},
     },
     {
-      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {},
     },
   ].map((site) => new Site(
     {
@@ -81,6 +81,7 @@ describe('Sites Controller', () => {
                 name: { type: 'string', name: 'name', get: (value) => value },
                 config: { type: 'any', name: 'config', get: (value) => Config(value) },
                 deliveryType: { type: 'string', name: 'deliveryType', get: (value) => value },
+                authoringType: { type: 'string', name: 'authoringType', get: (value) => value },
                 gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
                 isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
                 organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
@@ -273,6 +274,7 @@ describe('Sites Controller', () => {
         organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
         isLive: false,
         deliveryType: 'other',
+        authoringType: 'cs',
         deliveryConfig: {
           programId: '12652',
           environmentId: '16854',
@@ -314,6 +316,7 @@ describe('Sites Controller', () => {
         organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
         isLive: false,
         deliveryType: 'other',
+        authoringType: 'cs',
         deliveryConfig: {
           programId: '12652',
           environmentId: '16854',

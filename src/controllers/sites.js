@@ -336,6 +336,12 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
+    if (requestBody.authoringType !== site.getAuthoringType()
+     && Object.values(SiteModel.AUTHORING_TYPES).includes(requestBody.authoringType)) {
+      site.setAuthoringType(requestBody.authoringType);
+      updates = true;
+    }
+
     if (isObject(requestBody.deliveryConfig)
       && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
       site.setDeliveryConfig(requestBody.deliveryConfig);
