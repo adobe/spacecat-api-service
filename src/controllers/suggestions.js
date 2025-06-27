@@ -43,7 +43,7 @@ function SuggestionsController(ctx, sqs, env) {
     throw new Error('Context required');
   }
 
-  const { dataAccess } = ctx;
+  const { dataAccess, log } = ctx;
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -511,30 +511,45 @@ function SuggestionsController(ctx, sqs, env) {
       }
     });
 
-    let suggestionGroups;
-    if (opportunity.getType() === 'broken-backlinks') {
-      suggestionGroups = [{
-        groupedSuggestions: validSuggestions,
-        url: null,
-      }];
-    } else {
-      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
-        const data = suggestion.getData();
-        const url = data?.url || data?.recommendations?.[0]?.pageUrl || data?.url_from;
+    const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+      const data = suggestion.getData();
+      let groupKey;
+
+      if (opportunity.getType() === 'broken-backlinks') {
+        groupKey = 'broken-backlinks';
+        // const urlEdited = data?.urlEdited || (data?.urlsSuggested && data.urlsSuggested[0]);
+        const urlEdited = data?.urlEdited || data?.urlsSuggested;
+        if (!urlEdited) return acc;
+
+        if (!acc[groupKey]) {
+          acc[groupKey] = {
+            url_to: data?.url_to,
+            urlEdited,
+            suggestions: [],
+          };
+        }
+        acc[groupKey].suggestions.push(suggestion);
+      } else {
+        const url = data?.url || data?.recommendations?.[0]?.pageUrl
+          || data?.url_from
+          || data?.urlFrom;
         if (!url) return acc;
 
         if (!acc[url]) {
-          acc[url] = [];
+          acc[url] = {
+            suggestions: [],
+          };
         }
-        acc[url].push(suggestion);
-        return acc;
-      }, {});
+        acc[url].suggestions.push(suggestion);
+      }
+      return acc;
+    }, {});
 
-      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
-        groupedSuggestions,
-        url,
-      }));
-    }
+    const suggestionGroups = Object.entries(suggestionsByUrl).map(([key, value]) => (
+      key === 'broken-backlinks' ? value : { url: key, suggestions: value.suggestions }
+    ));
+
+    log.info(`suggestionGroups: ${JSON.stringify(suggestionGroups)}`);
 
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
