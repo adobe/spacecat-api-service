@@ -81,7 +81,7 @@ function PaidController(ctx) {
       clickedSessions: item.clickedSessions,
       bounceRate: item.bounceRate,
       totalNumClicks: item.totalNumClicks,
-      source: item.source || '',
+      source: item.source,
     }));
 
     return ok(topPages);
