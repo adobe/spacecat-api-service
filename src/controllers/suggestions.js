@@ -520,7 +520,9 @@ function SuggestionsController(ctx, sqs, env) {
     } else {
       const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
         const data = suggestion.getData();
-        const url = data?.url || data?.recommendations?.[0]?.pageUrl || data?.url_from;
+        const url = data?.url || data?.recommendations?.[0]?.pageUrl
+            || data?.url_from
+            || data?.urlFrom;
         if (!url) return acc;
 
         if (!acc[url]) {
