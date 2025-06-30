@@ -43,7 +43,7 @@ function SuggestionsController(ctx, sqs, env) {
     throw new Error('Context required');
   }
 
-  const { dataAccess } = ctx;
+  const { dataAccess, log } = ctx;
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -547,6 +547,7 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestionGroups = Object.entries(suggestionsByUrl).map(([key, value]) => (
       key === 'broken-backlinks' ? value : { url: key, suggestions: value.suggestions }
     ));
+    log.info(`suggestionsGroups: ${JSON.stringify(suggestionGroups)}`);
 
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
