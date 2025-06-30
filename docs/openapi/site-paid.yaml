@@ -5,7 +5,7 @@ site-traffic-paid-top-pages:
     tags:
       - site
       - paid
-    summary: Get top pages by paid traffic for a site
+    summary: Get top pages by paid traffic source for a site
     description: Returns the top pages per traffic source receiving the most paid traffic for a given week.
     operationId: getPaidSiteTopPages
     responses:
