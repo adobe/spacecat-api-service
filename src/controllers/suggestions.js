@@ -39,7 +39,7 @@ import AccessControlUtil from '../support/access-control-util.js';
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(ctx, sqs, log, env) {
+function SuggestionsController(ctx, sqs, env, log) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -518,7 +518,7 @@ function SuggestionsController(ctx, sqs, log, env) {
 
       if (opportunity.getType() === 'broken-backlinks') {
         groupKey = 'broken-backlinks';
-        const url = data?.urlEdited || data?.urlsSuggested[0];
+        const url = data?.urlEdited || data?.urlsSuggested?.[0];
         if (!url) return acc;
 
         if (!acc[groupKey]) {
@@ -600,12 +600,12 @@ function SuggestionsController(ctx, sqs, log, env) {
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
     await Promise.all(
-      suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
+      suggestionGroups.map(({ suggestions: groupSuggestions, url }) => sendAutofixMessage(
         sqs,
         queueUrl,
         siteId,
         opportunityId,
-        groupedSuggestions.map((s) => s.getId()),
+        groupSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
         { url },
       )),
