@@ -186,10 +186,12 @@ CdnLogsConfig:
             type: string
           value:
             description: The value to filter
-            type: string
+            type: array
+            items:
+              type: string
   example:
     bucketName: 'test-bucket'
-    filters: [{ key: 'test-key', value: 'test-value' }]
+    filters: [{ key: 'test-key', value: ['test-value'] }]
     outputLocation: 'test-output-location'
 OrganizationConfig:
   allOf:
@@ -402,7 +404,7 @@ Site:
         index: 'example-index-name'
       cdnLogsConfig:
         bucketName: 'test-bucket'
-        filters: [{ key: 'test-key', value: 'test-value' }]
+        filters: [{ key: 'test-key', value: ['test-value'] }]
         outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
@@ -521,7 +523,7 @@ CdnLogsConfigUpdate:
     cdnLogsConfig:
       bucketName: 'test-bucket'
       outputLocation: 'test-output-location'
-      filters: [{ key: 'test-key', value: 'test-value' }]
+      filters: [{ key: 'test-key', value: ['test-value'] }]
 UpdateHandlerTypeConfig:
   type: object
   properties:
