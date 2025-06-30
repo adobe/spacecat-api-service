@@ -43,7 +43,7 @@ function SuggestionsController(ctx, sqs, env) {
     throw new Error('Context required');
   }
 
-  const { dataAccess, log } = ctx;
+  const { dataAccess } = ctx;
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -517,14 +517,13 @@ function SuggestionsController(ctx, sqs, env) {
 
       if (opportunity.getType() === 'broken-backlinks') {
         groupKey = 'broken-backlinks';
-        // const urlEdited = data?.urlEdited || (data?.urlsSuggested && data.urlsSuggested[0]);
-        const urlEdited = data?.urlEdited || data?.urlsSuggested;
-        if (!urlEdited) return acc;
+        const url = data?.urlEdited || data?.urlsSuggested[0];
+        if (!url) return acc;
 
         if (!acc[groupKey]) {
           acc[groupKey] = {
             url_to: data?.url_to,
-            urlEdited,
+            url,
             suggestions: [],
           };
         }
@@ -548,8 +547,6 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestionGroups = Object.entries(suggestionsByUrl).map(([key, value]) => (
       key === 'broken-backlinks' ? value : { url: key, suggestions: value.suggestions }
     ));
-
-    log.info(`suggestionGroups: ${JSON.stringify(suggestionGroups)}`);
 
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
