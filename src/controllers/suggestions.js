@@ -35,15 +35,16 @@ import AccessControlUtil from '../support/access-control-util.js';
  * @param {object} ctx - Context of the request.
  * @param {SQS} sqs - SQS client.
  * @param env
+ * @param log
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(ctx, sqs, env) {
+function SuggestionsController(ctx, sqs, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
 
-  const { dataAccess, log } = ctx;
+  const { dataAccess } = ctx;
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
