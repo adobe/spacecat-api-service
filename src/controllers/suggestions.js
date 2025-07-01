@@ -499,7 +499,10 @@ function SuggestionsController(ctx, sqs, env, log) {
     const failedSuggestions = [];
     suggestions.forEach((suggestion) => {
       if (suggestionIds.includes(suggestion.getId())) {
-        if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+        if (
+          isValidUUID(suggestion.getId())
+          && suggestion.getStatus() === SuggestionModel.STATUSES.NEW
+        ) {
           validSuggestions.push(suggestion);
         } else {
           failedSuggestions.push({
