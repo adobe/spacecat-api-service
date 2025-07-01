@@ -28,6 +28,7 @@ use(sinonChai);
 
 describe('Suggestions Controller', () => {
   const sandbox = sinon.createSandbox();
+
   const authContext = {
     attributes: {
       authInfo: new AuthInfo()
@@ -166,6 +167,7 @@ describe('Suggestions Controller', () => {
   let altTextSuggs;
   let context;
   let apikeyAuthAttributes;
+  let loggerStub;
 
   beforeEach(() => {
     context = {
@@ -177,6 +179,9 @@ describe('Suggestions Controller', () => {
           .withProfile({ is_admin: true, email: 'test@test.com' })
           .withAuthenticated(true),
       },
+    };
+    loggerStub = {
+      info: sandbox.stub().resolves(),
     };
     apikeyAuthAttributes = {
       attributes: {
@@ -217,6 +222,7 @@ describe('Suggestions Controller', () => {
         data: {
           info: 'sample data',
           url: 'https://example.com',
+          urlEdited: 'https://example.com/edited-link',
         },
         kpiDeltas: {
           conversionRate: 0.05,
@@ -248,6 +254,7 @@ describe('Suggestions Controller', () => {
         rank: 2,
         data: {
           info: 'broken back link data',
+          urlsSuggested: ['https://example.com/suggested-link'],
         },
         kpiDeltas: {
           conversionRate: 0.02,
@@ -351,7 +358,7 @@ describe('Suggestions Controller', () => {
       sendMessage: sandbox.stub().resolves(),
     };
 
-    suggestionsController = SuggestionsController({ dataAccess: mockSuggestionDataAccess, ...authContext }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    suggestionsController = SuggestionsController({ dataAccess: mockSuggestionDataAccess, ...authContext }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' }, loggerStub);
   });
 
   afterEach(() => {
@@ -1599,6 +1606,45 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
     });
+
+    it('filters out broken-backlinks suggestions with no valid URL from SQS groups', async () => {
+      const suggsWithMissingUrl = [
+        {
+          ...suggs[0],
+        },
+        {
+          ...suggs[1],
+          status: 'NEW',
+          data: {
+            info: 'broken back link data with no URL',
+          },
+        },
+      ];
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggsWithMissingUrl[0]),
+          mockSuggestionEntity(suggsWithMissingUrl[1])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggsWithMissingUrl[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggsWithMissingUrl[1], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
   });
 
   describe('auto-fix suggestions for CS', () => {
@@ -1636,7 +1682,7 @@ describe('Suggestions Controller', () => {
       suggestionsControllerWithIms = SuggestionsControllerWithIms({
         dataAccess: mockSuggestionDataAccess,
         ...authContext,
-      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' }, loggerStub);
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for CS', async () => {
@@ -1744,7 +1790,7 @@ describe('Suggestions Controller', () => {
       const suggestionsControllerWithFailedIms = SuggestionsControllerWithFailedIms({
         dataAccess: mockSuggestionDataAccess,
         ...authContext,
-      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' }, loggerStub);
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
