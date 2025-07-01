@@ -143,6 +143,7 @@ describe('Preflight Controller', () => {
             siteId: 'test-site-123',
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
+            enableAuthentication: true,
             checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
           },
           jobType: 'preflight',
@@ -161,6 +162,11 @@ describe('Preflight Controller', () => {
     });
 
     it('creates a preflight job with specific checks', async () => {
+      const headResponse = {
+        status: 401,
+      };
+      const fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves(headResponse);
       const context = {
         data: {
           urls: ['https://example.com/test.html'],
@@ -179,12 +185,14 @@ describe('Preflight Controller', () => {
             siteId: 'test-site-123',
             urls: ['https://example.com/test.html'],
             step: 'identify',
+            enableAuthentication: true,
             checks: ['canonical', 'metatags'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
         },
       });
+      fetchStub.restore();
     });
 
     it('returns 400 Bad Request for empty checks array', async () => {
@@ -276,6 +284,7 @@ describe('Preflight Controller', () => {
             siteId: 'test-site-123',
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
+            enableAuthentication: true,
             checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
           },
           jobType: 'preflight',
@@ -307,6 +316,11 @@ describe('Preflight Controller', () => {
     });
 
     it('handles errors during site lookup', async () => {
+      const headResponse = {
+        status: 401,
+      };
+      const fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves(headResponse);
       mockDataAccess.Site.findByPreviewURL.resolves(null);
 
       const context = {
@@ -323,6 +337,7 @@ describe('Preflight Controller', () => {
       expect(result).to.deep.equal({
         message: 'No site found for preview URL: https://non-registered-site.com',
       });
+      fetchStub.restore();
     });
 
     it('returns 400 Bad Request if data is missing', async () => {
@@ -469,6 +484,11 @@ describe('Preflight Controller', () => {
     });
 
     it('creates a preflight job with crosswalk authoring type and includes promise token', async () => {
+      const headResponse = {
+        status: 401,
+      };
+      const fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves(headResponse);
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
@@ -511,9 +531,15 @@ describe('Preflight Controller', () => {
           promiseToken: mockPromiseToken,
         },
       );
+      fetchStub.restore();
     });
 
     it('handles promise token error for AEM_CS site', async () => {
+      const headResponse = {
+        status: 401,
+      };
+      const fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves(headResponse);
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
@@ -550,9 +576,15 @@ describe('Preflight Controller', () => {
       expect(result).to.deep.equal({
         message: 'Missing Authorization header',
       });
+      fetchStub.restore();
     });
 
     it('handles promise token error for AEM_CS site with generic error', async () => {
+      const headResponse = {
+        status: 401,
+      };
+      const fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves(headResponse);
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
@@ -589,6 +621,7 @@ describe('Preflight Controller', () => {
       expect(result).to.deep.equal({
         message: 'Error getting promise token',
       });
+      fetchStub.restore();
     });
   });
 
