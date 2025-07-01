@@ -455,6 +455,7 @@ function SuggestionsController(ctx, sqs, env, log) {
     };
     return createResponse(fullResponse, 207);
   };
+
   const autofixSuggestions = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
@@ -498,17 +499,20 @@ function SuggestionsController(ctx, sqs, env, log) {
     const validSuggestions = [];
     const failedSuggestions = [];
     suggestions.forEach((suggestion) => {
-      if (suggestionIds.includes(suggestion.getId())) {
-        if (
-          isValidUUID(suggestion.getId())
-          && suggestion.getStatus() === SuggestionModel.STATUSES.NEW
-        ) {
+      const suggestionId = suggestion.getId();
+      if (suggestionIds.includes(suggestionId)) {
+        const isValidId = isValidUUID(suggestionId);
+        const hasStatusNew = suggestion.getStatus() === SuggestionModel.STATUSES.NEW;
+
+        if (isValidId && hasStatusNew) {
           validSuggestions.push(suggestion);
         } else {
           failedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Suggestion is not in NEW status',
+            uuid: suggestionId,
+            index: suggestionIds.indexOf(suggestionId),
+            message: !isValidId
+              ? 'Invalid suggestion ID format'
+              : 'Suggestion is not in NEW status',
             statusCode: 400,
           });
         }

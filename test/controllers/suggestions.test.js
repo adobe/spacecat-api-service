@@ -44,6 +44,7 @@ describe('Suggestions Controller', () => {
     'a4a6055c-de4b-4552-bc0c-01fdb45b98d5',
     '930f8070-508a-4d94-a46c-279d4de2adfb',
     'a9807173-8e8e-4e8c-96f7-0a22d9dc90b8',
+    'xyzabcdefghijk',
   ];
 
   const OPPORTUNITY_ID = 'a92e2a5e-7b3d-42f0-b3f0-6edd3746a932';
@@ -262,7 +263,22 @@ describe('Suggestions Controller', () => {
         updatedBy: 'test@test.com',
         updatedAt: new Date(),
       },
-
+      {
+        id: SUGGESTION_IDS[3],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'FIX_LINK',
+        status: 'IN_PROGRESS',
+        rank: 2,
+        data: {
+          info: 'broken back link data',
+          urlsSuggested: ['https://example.com/suggested-link'],
+        },
+        kpiDeltas: {
+          conversionRate: 0.02,
+        },
+        updatedBy: 'test@test.com',
+        updatedAt: new Date(),
+      },
     ];
 
     altTextSuggs = [
@@ -1580,31 +1596,36 @@ describe('Suggestions Controller', () => {
 
     it('autofix suggestion patches suggestion status fails passed suggestions not new', async () => {
       mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0]),
-        mockSuggestionEntity(suggs[1])]);
+        mockSuggestionEntity(suggs[1]),
+        mockSuggestionEntity(suggs[3])]);
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
         },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[3]] },
         ...context,
       });
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse).to.have.property('suggestions');
       expect(bulkPatchResponse).to.have.property('metadata');
-      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('total', 3);
       expect(bulkPatchResponse.metadata).to.have.property('success', 1);
-      expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
-      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 2);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 3);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
       expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+      expect(bulkPatchResponse.suggestions[2]).to.have.property('index', 2);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
       expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[2]).to.have.property('statusCode', 400);
       expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
+      expect(bulkPatchResponse.suggestions[2].suggestion).to.not.exist;
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
+      expect(bulkPatchResponse.suggestions[2]).to.have.property('message', 'Invalid suggestion ID format');
     });
 
     it('filters out broken-backlinks suggestions with no valid URL from SQS groups', async () => {
