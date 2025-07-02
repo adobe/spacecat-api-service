@@ -64,7 +64,9 @@ function isStaticRoute(routePattern) {
  * @param {Object} preflightController - The preflight controller.
  * @param {Object} demoController - The demo controller.
  * @param {Object} scrapeController - The scrape controller.
+ * @param {Object} scrapeJobController - The scrape job controller.
  * @param {Object} mcpController - The MCP controller.
+ * @param {Object} paidController - The paid controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -89,6 +91,7 @@ export default function getRouteHandlers(
   scrapeController,
   scrapeJobController,
   mcpController,
+  paidController,
   fixesController,
 ) {
   const staticRoutes = {};
@@ -154,6 +157,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
+    'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,

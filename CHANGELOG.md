@@ -1,3 +1,17 @@
+## [1.128.1](https://github.com/adobe/spacecat-api-service/compare/v1.128.0...v1.128.1) (2025-07-01)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.31.1 ([#1028](https://github.com/adobe/spacecat-api-service/issues/1028)) ([1a95c88](https://github.com/adobe/spacecat-api-service/commit/1a95c88438ab8580341415d37739bec339ea428b))
+
+# [1.128.0](https://github.com/adobe/spacecat-api-service/compare/v1.127.3...v1.128.0) (2025-06-30)
+
+
+### Features
+
+* 32824 new api for paid pages metrics ([#1023](https://github.com/adobe/spacecat-api-service/issues/1023)) ([c2446c9](https://github.com/adobe/spacecat-api-service/commit/c2446c99c47cb210debfc8bfe557d1442b84a5c3))
+
 ## [1.127.3](https://github.com/adobe/spacecat-api-service/compare/v1.127.2...v1.127.3) (2025-06-29)
 
 

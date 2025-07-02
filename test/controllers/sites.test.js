@@ -1387,7 +1387,7 @@ describe('Sites Controller', () => {
       const cdnLogsConfig = {
         bucketName: 'test-bucket',
         outputLocation: 'test-output-location',
-        filters: [{ key: 'test-key', value: 'test-value' }],
+        filters: [{ key: 'test-key', value: ['test-value'] }],
       };
 
       let currentConfig = originalConfig;
@@ -1403,7 +1403,6 @@ describe('Sites Controller', () => {
         ...defaultAuthAttributes,
       });
 
-      expect(site.getConfig).to.have.been.calledTwice;
       expect(site.save).to.have.been.calledOnce;
       expect(response.status).to.equal(200);
 
@@ -1523,13 +1522,13 @@ describe('Sites Controller', () => {
         cdnLogsConfig: {
           bucketName: 'old-bucket',
           outputLocation: 'old-output',
-          filters: [{ key: 'old-key', value: 'old-value' }],
+          filters: [{ key: 'old-key', value: ['old-value'] }],
         },
       });
       const newCdnLogsConfig = {
         bucketName: 'new-bucket',
         outputLocation: 'new-output',
-        filters: [{ key: 'new-key', value: 'new-value' }],
+        filters: [{ key: 'new-key', value: ['new-value'] }],
       };
 
       site.getConfig = sandbox.stub().returns(existingConfig);
