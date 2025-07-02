@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   version:
-    $ref: "../../package.json#/version"
+    $ref: '../../package.json#/version'
   title: SpaceCat API
   description: |
     The SpaceCat API is used to manage edge delivery site directory and obtain audit information.
@@ -9,21 +9,21 @@ info:
     ## Authentication
     <SecurityDefinitions />
 
-  termsOfService: "https://www.adobe.com/go/experiencecloudterms"
+  termsOfService: 'https://www.adobe.com/go/experiencecloudterms'
   contact:
     name: Spacecat Team
-    url: "https://github.com/adobe/spacecat-api-service"
+    url: 'https://github.com/adobe/spacecat-api-service'
   x-logo:
-    url: "https://solaris007.github.io/spacecat-ui/spacecat_logo_192.webp"
+    url: 'https://solaris007.github.io/spacecat-ui/spacecat_logo_192.webp'
     altText: SpaceCat logo
   license:
     name: Apache 2.0
-    url: "http://www.apache.org/licenses/LICENSE-2.0.html"
+    url: 'http://www.apache.org/licenses/LICENSE-2.0.html'
 
 servers:
-  - url: "https://spacecat.experiencecloud.live/api/ci"
+  - url: 'https://spacecat.experiencecloud.live/api/ci'
     description: Development server
-  - url: "https://spacecat.experiencecloud.live/api/v1"
+  - url: 'https://spacecat.experiencecloud.live/api/v1'
     description: Production server
 
 tags:
@@ -50,149 +50,147 @@ tags:
 
 paths:
   /audits/latest/{auditType}:
-    $ref: "./audits-api.yaml#/latest-audits"
+    $ref: './audits-api.yaml#/latest-audits'
   /auth/google/{siteId}:
-    $ref: "./auth-api.yaml#/google-auth"
+    $ref: './auth-api.yaml#/google-auth'
   /auth/google/{siteId}/status:
-    $ref: "./auth-api.yaml#/google-auth-status"
+    $ref: './auth-api.yaml#/google-auth-status'
   /auth/login:
-    $ref: "./auth-api.yaml#/login"
+    $ref: './auth-api.yaml#/login'
   /configurations:
-    $ref: "./configurations-api.yaml#/configurations"
+    $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
-    $ref: "./configuration-api.yaml#/latest-configuration"
+    $ref: './configuration-api.yaml#/latest-configuration'
   /configurations/{version}:
-    $ref: "./configuration-api.yaml#/configuration"
+    $ref: './configuration-api.yaml#/configuration'
   /configurations/sites/audits:
-    $ref: "./configurations-sites-audits-api.yaml#/configurations-sites-audits-toggle"
+    $ref: './configurations-sites-audits-api.yaml#/configurations-sites-audits-toggle'
   /event/fulfillment:
-    $ref: "./event-api.yaml#/process-fulfillment-events"
+    $ref: './event-api.yaml#/process-fulfillment-events'
   /hooks/site-detection/cdn/{hookSecret}:
-    $ref: "./hooks-api.yaml#/site-detection-cdn"
+    $ref: './hooks-api.yaml#/site-detection-cdn'
   /hooks/site-detection/rum/{hookSecret}:
-    $ref: "./hooks-api.yaml#/site-detection-rum"
+    $ref: './hooks-api.yaml#/site-detection-rum'
   /hooks/site-integration/analytics/{hookSecret}:
-    $ref: "./hooks-api.yaml#/site-integration-analytics"
+    $ref: './hooks-api.yaml#/site-integration-analytics'
   /organizations:
-    $ref: "./organizations-api.yaml#/organizations"
+    $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
-    $ref: "./organization-api.yaml#/organization"
+    $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:
-    $ref: "./brands-api.yaml#/brands-for-organization"
+    $ref: './brands-api.yaml#/brands-for-organization'
   /organizations/{organizationId}/sites:
-    $ref: "./sites-api.yaml#/sites-for-organization"
+    $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/by-ims-org-id/{imsOrgId}:
-    $ref: "./organization-api.yaml#/organization-by-ims-org-id"
+    $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
-    $ref: "./organization-api.yaml#/organization-slack-config-by-ims-org-id"
+    $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
   /preflight/jobs:
-    $ref: "./preflight-api.yaml#/preflight-jobs"
+    $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
-    $ref: "./preflight-api.yaml#/preflight-job-status"
+    $ref: './preflight-api.yaml#/preflight-job-status'
   /tools/scrape:
-    $ref: "./scrape-api.yaml#/create-scrape-job"
+    $ref: './scrape-api.yaml#/create-scrape-job'
   /tools/scrape/jobs/{jobId}:
-    $ref: "./scrape-api.yaml#/get-scrape-job-status"
+    $ref: './scrape-api.yaml#/get-scrape-job-status'
   /tools/scrape/jobs/{jobId}/results:
-    $ref: "./scrape-api.yaml#/get-scrape-job-url-results"
+    $ref: './scrape-api.yaml#/get-scrape-job-url-results'
   /tools/scrape/jobs/by-date-range/{startDate}/{endDate}/all-jobs:
-    $ref: "./scrape-api.yaml#/get-scrape-jobs-by-date-range"
+    $ref: './scrape-api.yaml#/get-scrape-jobs-by-date-range'
   /tools/scrape/jobs/by-base-url/{base64BaseUrl}:
-    $ref: "./scrape-api.yaml#/get-scrape-jobs-by-base-url"
+    $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url'
   /tools/scrape/jobs/by-base-url/{base64BaseUrl}/by-processingtype/{processingType}:
-    $ref: "./scrape-api.yaml#/get-scrape-jobs-by-base-url-and-processing-type"
+    $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url-and-processing-type'
   /sites:
-    $ref: "./sites-api.yaml#/sites"
+    $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:
-    $ref: "./sites-api.yaml#/sites-by-delivery-type"
+    $ref: './sites-api.yaml#/sites-by-delivery-type'
   /sites/by-base-url/{base64BaseUrl}:
-    $ref: "./site-api.yaml#/site-by-base-url"
+    $ref: './site-api.yaml#/site-by-base-url'
   /sites/with-latest-audit/{auditType}:
-    $ref: "./sites-api.yaml#/sites-with-latest-audit"
+    $ref: './sites-api.yaml#/sites-with-latest-audit'
   /sites/{siteId}/latest-metrics:
-    $ref: "./site-metrics-api.yaml#/site-metrics-latest"
+    $ref: './site-metrics-api.yaml#/site-metrics-latest'
   /sites/{siteId}:
-    $ref: "./site-api.yaml#/site"
+    $ref: './site-api.yaml#/site'
   /sites/{siteId}/audits:
-    $ref: "./audits-api.yaml#/audits-for-site"
+    $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/audits/{auditType}:
-    $ref: "./audits-api.yaml#/audits-for-site-and-type"
+    $ref: './audits-api.yaml#/audits-for-site-and-type'
   /sites/{siteId}/audits/{auditType}/{auditedAt}:
-    $ref: "./audit-api.yaml#/audit-for-site"
+    $ref: './audit-api.yaml#/audit-for-site'
   /sites/{siteId}/audits/latest:
-    $ref: "./audits-api.yaml#/audits-for-site"
+    $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/latest-audit/{auditType}:
-    $ref: "./audit-api.yaml#/latest-audit-for-site"
+    $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/{auditType}:
-    $ref: "./audit-api.yaml#/update-handler-type-config-for-site"
+    $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
-    $ref: "./brands-api.yaml#/brand-guidelines-by-site-id"
+    $ref: './brands-api.yaml#/brand-guidelines-by-site-id'
   /sites/{siteId}/config/cdn-logs:
-    $ref: "./site-api.yaml#/site-cdn-logs-config"
+    $ref: './site-api.yaml#/site-cdn-logs-config'
   /sites/{siteId}/opportunities:
-    $ref: "./site-opportunities.yaml#/site-opportunities"
+    $ref: './site-opportunities.yaml#/site-opportunities'
   /sites/{siteId}/opportunities/by-status/{status}:
-    $ref: "./site-opportunities.yaml#/site-opportunities-by-status"
+    $ref: './site-opportunities.yaml#/site-opportunities-by-status'
   /sites/{siteId}/opportunities/{opportunityId}:
-    $ref: "./site-opportunities.yaml#/site-opportunity"
+    $ref: './site-opportunities.yaml#/site-opportunity'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions:
-    $ref: "./site-opportunities.yaml#/site-opportunity-suggestions"
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/by-status/{status}:
-    $ref: "./site-opportunities.yaml#/site-opportunity-suggestions-by-status"
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-by-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}:
-    $ref: "./site-opportunities.yaml#/site-opportunity-suggestion"
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
-    $ref: "./site-opportunities.yaml#/site-opportunity-suggestions-status"
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
-    $ref: "./site-opportunities.yaml#/site-opportunity-suggestions-auto-fix"
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/key-events:
-    $ref: "./key-events-api.yaml#/key-events"
+    $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
-    $ref: "./key-event-api.yaml#/key-event"
+    $ref: './key-event-api.yaml#/key-event'
   /sites/{siteId}/scraped-content/{type}:
-    $ref: "./scrape-api.yaml#/get-scraped-content-list"
+    $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
-    $ref: "./scrape-api.yaml#/get-files"
+    $ref: './scrape-api.yaml#/get-files'
   /sites/{siteId}/top-pages:
-    $ref: "./site-top-pages-api.yaml#/site-top-pages"
+    $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
-    $ref: "./site-top-pages-api.yaml#/site-top-pages-by-source"
+    $ref: './site-top-pages-api.yaml#/site-top-pages-by-source'
   /sites/{siteId}/top-pages/{source}/{geo}:
-    $ref: "./site-top-pages-api.yaml#/site-top-pages-by-source-and-geo"
-  /sites/{siteId}/traffic/paid:
-    $ref: "./site-paid.yaml#/site-traffic-paid-top-pages"
+    $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
   /sites/{siteId}/metrics/{metric}/{source}:
-    $ref: "./site-metrics-api.yaml#/site-metrics-by-source"
+    $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
-    $ref: "./site-metrics-api.yaml#/page-metrics-by-source"
+    $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
-    $ref: "./experiments-api.yaml#/experiments"
+    $ref: './experiments-api.yaml#/experiments'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
-    $ref: "./site-opportunities.yaml#/site-opportunity-fixes"
+    $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
-    $ref: "./site-opportunities.yaml#/site-opportunity-fixes-by-status"
+    $ref: './site-opportunities.yaml#/site-opportunity-fixes-by-status'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}:
-    $ref: "./site-opportunities.yaml#/site-opportunity-fix"
+    $ref: './site-opportunities.yaml#/site-opportunity-fix'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}/suggestions:
-    $ref: "./site-opportunities.yaml#/site-opportunity-fix-suggestions"
+    $ref: './site-opportunities.yaml#/site-opportunity-fix-suggestions'
   /sites/{siteId}/opportunities/{opportunityId}/status:
-    $ref: "./site-opportunities.yaml#/site-opportunity-status"
+    $ref: './site-opportunities.yaml#/site-opportunity-status'
   /slack/channels/invite-by-user-id:
-    $ref: "./slack-api.yaml#/invite-by-user-id"
+    $ref: './slack-api.yaml#/invite-by-user-id'
   /trigger:
-    $ref: "./trigger-api.yaml#/trigger"
+    $ref: './trigger-api.yaml#/trigger'
   /tools/api-keys:
-    $ref: "./tools-api.yaml#/api-keys"
+    $ref: './tools-api.yaml#/api-keys'
   /tools/api-keys/{apiKeyId}:
-    $ref: "./tools-api.yaml#/api-key-deletion"
+    $ref: './tools-api.yaml#/api-key-deletion'
   /tools/import/jobs:
-    $ref: "./tools-api.yaml#/import"
+    $ref: './tools-api.yaml#/import'
   /tools/import/jobs/{jobId}:
-    $ref: "./tools-api.yaml#/import-job-status"
+    $ref: './tools-api.yaml#/import-job-status'
   /tools/import/jobs/{jobId}/progress:
-    $ref: "./tools-api.yaml#/import-job-progress"
+    $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
-    $ref: "./tools-api.yaml#/import-job-result"
+    $ref: './tools-api.yaml#/import-job-result'
 
 components:
   securitySchemes:
@@ -200,28 +198,28 @@ components:
       type: apiKey
       in: header
       name: x-api-key
-      description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read-only operations.)"
+      description: 'DEPRECATED, use scoped_api_key or ims_key. (Used for read-only operations.)'
     scoped_api_key:
       type: apiKey
       in: header
       name: x-api-key
-      description: "For endpoints which authenticate with scoped API keys"
+      description: 'For endpoints which authenticate with scoped API keys'
     ims_key:
       type: apiKey
       in: header
       name: authorization
-      description: "Value must be a valid IMS user token which will be offline-validated."
+      description: 'Value must be a valid IMS user token which will be offline-validated.'
     admin_key:
       type: apiKey
       in: header
       name: x-api-key
-      description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)"
+      description: 'DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)'
     cookie_auth:
       type: apiKey
       in: cookie
       name: sessionToken
-      description: "Authentication using session cookie"
+      description: 'Authentication using session cookie'
   schemas:
-    $ref: "./schemas.yaml"
+    $ref: './schemas.yaml'
   examples:
-    $ref: "./examples.yaml"
+    $ref: './examples.yaml'
