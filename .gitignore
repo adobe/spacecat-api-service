@@ -12,3 +12,5 @@ admin-idp-p*.json
 .idea
 .nvmrc
 *.code-workspace
+.prettierrc
+.vscode/settings.json
