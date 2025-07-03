@@ -18,6 +18,7 @@ import { createScrapeContentResources } from './registry/resources/scrape-conten
 import { createSiteTools } from './registry/tools/sites.js';
 import { createAuditTools } from './registry/tools/audits.js';
 import { createScrapeContentTools } from './registry/tools/scrape-content.js';
+import { createCdnAnalyticsTools } from './registry/tools/cdn-analytics.js';
 import utilTools from './registry/tools/utils.js';
 
 /**
@@ -43,6 +44,7 @@ export default function buildRegistry({
     ...createAuditTools(auditsController),
     ...createSiteTools(sitesController, context),
     ...createScrapeContentTools(scrapeController, context),
+    ...createCdnAnalyticsTools(sitesController, context),
   };
 
   const resources = {
