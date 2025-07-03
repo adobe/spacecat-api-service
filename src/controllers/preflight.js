@@ -137,6 +137,18 @@ function PreflightController(ctx, log, env) {
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
       const site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
+      let enableAuthentication = false;
+      // check head request for preview url
+      const headResponse = await fetch(`${previewBaseURL}`, {
+        method: 'HEAD',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      if (headResponse.status !== 200) {
+        enableAuthentication = true;
+      }
+
       if (!site) {
         throw new Error(`No site found for preview URL: ${previewBaseURL}`);
       }
@@ -164,6 +176,7 @@ function PreflightController(ctx, log, env) {
             urls: data.urls,
             step,
             checks: data.checks || AVAILABLE_CHECKS,
+            enableAuthentication,
           },
           jobType: 'preflight',
           tags: ['preflight'],
