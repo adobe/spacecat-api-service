@@ -35,10 +35,11 @@ import AccessControlUtil from '../support/access-control-util.js';
  * @param {object} ctx - Context of the request.
  * @param {SQS} sqs - SQS client.
  * @param env
+ * @param log
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(ctx, sqs, env) {
+function SuggestionsController(ctx, sqs, env, log) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -454,6 +455,7 @@ function SuggestionsController(ctx, sqs, env) {
     };
     return createResponse(fullResponse, 207);
   };
+
   const autofixSuggestions = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
@@ -497,41 +499,63 @@ function SuggestionsController(ctx, sqs, env) {
     const validSuggestions = [];
     const failedSuggestions = [];
     suggestions.forEach((suggestion) => {
-      if (suggestionIds.includes(suggestion.getId())) {
-        if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+      const suggestionId = suggestion.getId();
+      if (suggestionIds.includes(suggestionId)) {
+        const isValidId = isValidUUID(suggestionId);
+        const hasStatusNew = suggestion.getStatus() === SuggestionModel.STATUSES.NEW;
+
+        if (isValidId && hasStatusNew) {
           validSuggestions.push(suggestion);
         } else {
           failedSuggestions.push({
-            uuid: suggestion.getId(),
-            index: suggestionIds.indexOf(suggestion.getId()),
-            message: 'Suggestion is not in NEW status',
+            uuid: suggestionId,
+            index: suggestionIds.indexOf(suggestionId),
+            message: !isValidId
+              ? 'Invalid suggestion ID format'
+              : 'Suggestion is not in NEW status',
             statusCode: 400,
           });
         }
       }
     });
 
-    let suggestionGroups;
-    if (opportunity.getType() !== 'broken-backlinks') {
-      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
-        const data = suggestion.getData();
+    const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+      const data = suggestion.getData();
+      let groupKey;
+
+      if (opportunity.getType() === 'broken-backlinks') {
+        groupKey = 'broken-backlinks';
+        const url = data?.urlEdited || data?.urlsSuggested?.[0];
+        if (!url) return acc;
+
+        if (!acc[groupKey]) {
+          acc[groupKey] = {
+            url_to: data?.url_to,
+            url,
+            suggestions: [],
+          };
+        }
+        acc[groupKey].suggestions.push(suggestion);
+      } else {
         const url = data?.url || data?.recommendations?.[0]?.pageUrl
-            || data?.url_from
-            || data?.urlFrom;
+          || data?.url_from
+          || data?.urlFrom;
         if (!url) return acc;
 
         if (!acc[url]) {
-          acc[url] = [];
+          acc[url] = {
+            suggestions: [],
+          };
         }
-        acc[url].push(suggestion);
-        return acc;
-      }, {});
+        acc[url].suggestions.push(suggestion);
+      }
+      return acc;
+    }, {});
 
-      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
-        groupedSuggestions,
-        url,
-      }));
-    }
+    const suggestionGroups = Object.entries(suggestionsByUrl).map(([key, value]) => (
+      key === 'broken-backlinks' ? value : { url: key, suggestions: value.suggestions }
+    ));
+    log.info(`suggestionsGroups: ${JSON.stringify(suggestionGroups)}`);
 
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
@@ -582,28 +606,17 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
-    if (opportunity.getType() !== 'broken-backlinks') {
-      await Promise.all(
-        suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
-          sqs,
-          queueUrl,
-          siteId,
-          opportunityId,
-          groupedSuggestions.map((s) => s.getId()),
-          promiseTokenResponse,
-          { url },
-        )),
-      );
-    } else {
-      await sendAutofixMessage(
+    await Promise.all(
+      suggestionGroups.map(({ suggestions: groupSuggestions, url }) => sendAutofixMessage(
         sqs,
         queueUrl,
         siteId,
         opportunityId,
-        succeededSuggestions.map((s) => s.getId()),
+        groupSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
-      );
-    }
+        { url },
+      )),
+    );
 
     return createResponse(response, 207);
   };
