@@ -159,6 +159,10 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source'
   /sites/{siteId}/top-pages/{source}/{geo}:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
+  /sites/{siteId}/traffic/paid:
+    $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
+  /sites/{siteId}/traffic/paid/channel:
+    $ref: './site-paid.yaml#/site-traffic-paid-marketing-channel'
   /sites/{siteId}/metrics/{metric}/{source}:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:

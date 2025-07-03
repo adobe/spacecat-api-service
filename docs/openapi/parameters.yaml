@@ -216,3 +216,63 @@ processingType:
   required: true
   schema:
     type: string
+weekNumber:
+  name: weekNumber
+  description: The ISO week number (1-53)
+  in: query
+  required: false
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 53
+month:
+  name: month
+  description: The month number (1-12)
+  in: query
+  required: true
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 12
+    example: 5
+year:
+  name: year
+  description: The 4-digit year
+  in: query
+  required: true
+  schema:
+    type: integer
+    example: 2024
+channel:
+  name: channel
+  description: List of marketing channels (e.g., search, display, social)
+  in: query
+  required: false
+  schema:
+    type: array
+    items:
+      type: string
+    example: ["search", "display"]
+type:
+  name: type
+  description: The traffic type (owned, earned, or paid)
+  in: query
+  required: false
+  schema:
+    type: string
+    enum:
+      - owned
+      - earned
+      - paid
+    example: "paid"
+
+campaign:
+  name: campaign
+  description: List of campaign names or IDs
+  in: query
+  required: false
+  schema:
+    type: array
+    items:
+      type: string
+    example: ["spring-sale-2024", "summer-promo"]

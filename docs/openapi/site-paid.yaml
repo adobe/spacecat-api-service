@@ -1,3 +1,78 @@
+site-traffic-paid-marketing-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/type'
+    - $ref: './parameters.yaml#/channel'
+    - $ref: './parameters.yaml#/campaign'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data by channel, campaign, type, month, and year
+    description: Returns paid traffic data for a site, filtered by week number, month, year, traffic type (owned, earned, paid), and grouped by specified channels and campaigns.
+    operationId: getPaidTrafficDataByMarketingChannel
+    responses:
+      '200':
+        description: Paid traffic data by channel, campaign, type, month, and year
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    description: The traffic type (owned, earned, paid)
+                  platform:
+                    type: string
+                    description: The platform or channel (e.g., search, display, social)
+                  campaign:
+                    type: string
+                    description: The campaign name or ID
+                  pageviews:
+                    type: integer
+                    description: Number of pageviews
+                  pct_pageviews:
+                    type: number
+                    format: float
+                    description: Percentage of total pageviews
+                  click_rate:
+                    type: number
+                    format: float
+                    description: Click rate
+                  engagement:
+                    type: number
+                    format: float
+                    description: Engagement metric
+                  bounce_rate:
+                    type: number
+                    format: float
+                    description: Bounce rate
+                  p70_lcp:
+                    type: number
+                    format: float
+                    description: 70th percentile Largest Contentful Paint
+                  p70_cls:
+                    type: number
+                    format: float
+                    description: 70th percentile Cumulative Layout Shift
+                  p70_inp:
+                    type: number
+                    format: float
+                    description: 70th percentile Interaction to Next Paint
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-traffic-paid-top-pages:
   parameters:
     - $ref: './parameters.yaml#/siteId'
