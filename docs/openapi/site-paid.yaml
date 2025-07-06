@@ -1,0 +1,27 @@
+site-traffic-paid-top-pages:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get top pages by paid traffic source for a site
+    description: Returns the top pages per traffic source receiving the most paid traffic for a given week.
+    operationId: getPaidSiteTopPages
+    responses:
+      '200':
+        description: Top URLs by paid traffic
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PaidSiteTopPageList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+components: {}

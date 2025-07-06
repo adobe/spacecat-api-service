@@ -186,10 +186,12 @@ CdnLogsConfig:
             type: string
           value:
             description: The value to filter
-            type: string
+            type: array
+            items:
+              type: string
   example:
     bucketName: 'test-bucket'
-    filters: [{ key: 'test-key', value: 'test-value' }]
+    filters: [{ key: 'test-key', value: ['test-value'] }]
     outputLocation: 'test-output-location'
 OrganizationConfig:
   allOf:
@@ -402,7 +404,7 @@ Site:
         index: 'example-index-name'
       cdnLogsConfig:
         bucketName: 'test-bucket'
-        filters: [{ key: 'test-key', value: 'test-value' }]
+        filters: [{ key: 'test-key', value: ['test-value'] }]
         outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
@@ -521,7 +523,7 @@ CdnLogsConfigUpdate:
     cdnLogsConfig:
       bucketName: 'test-bucket'
       outputLocation: 'test-output-location'
-      filters: [{ key: 'test-key', value: 'test-value' }]
+      filters: [{ key: 'test-key', value: ['test-value'] }]
 UpdateHandlerTypeConfig:
   type: object
   properties:
@@ -3045,3 +3047,50 @@ FixStatusUpdateListResponse:
   required:
     - fixes
     - metadata
+
+PaidSiteTopPage:
+  type: object
+  required:
+    - url
+    - ctr
+    - avgClicksPerSession
+    - pageViews
+    - clickedSessions
+    - bounceRate
+    - totalNumClicks
+    - source
+  properties:
+    url:
+      type: string
+      format: uri
+    ctr:
+      type: number
+      format: float
+    avgClicksPerSession:
+      type: number
+      format: float
+    pageViews:
+      type: integer
+    clickedSessions:
+      type: integer
+    bounceRate:
+      type: number
+      format: float
+    totalNumClicks:
+      type: integer
+    source:
+      type: string
+      description: Paid traffic source (e.g., paid:search:google)
+  example:
+    url: "https://www.example.com/uk/"
+    ctr: 0.015
+    avgClicksPerSession: 1.82
+    pageViews: 6100
+    clickedSessions: 1800
+    bounceRate: 0.98
+    totalNumClicks: 5100
+    source: "paid:affiliate:"
+PaidSiteTopPageList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/PaidSiteTopPage'
