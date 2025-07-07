@@ -243,36 +243,18 @@ year:
   schema:
     type: integer
     example: 2024
-channel:
-  name: channel
-  description: List of marketing channels (e.g., search, display, social)
+    
+dimension:
+  name: dimension
+  description: List of dimensions to group by (type, channel, campaign)
   in: query
   required: false
   schema:
     type: array
     items:
       type: string
-    example: ["search", "display"]
-type:
-  name: type
-  description: The traffic type (owned, earned, or paid)
-  in: query
-  required: false
-  schema:
-    type: string
-    enum:
-      - owned
-      - earned
-      - paid
-    example: "paid"
-
-campaign:
-  name: campaign
-  description: List of campaign names or IDs
-  in: query
-  required: false
-  schema:
-    type: array
-    items:
-      type: string
-    example: ["spring-sale-2024", "summer-promo"]
+      enum:
+        - type
+        - channel
+        - campaign
+    example: ["type", "channel", "campaign"]

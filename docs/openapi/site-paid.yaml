@@ -4,19 +4,17 @@ site-traffic-paid-marketing-channel:
     - $ref: './parameters.yaml#/weekNumber'
     - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
-    - $ref: './parameters.yaml#/type'
-    - $ref: './parameters.yaml#/channel'
-    - $ref: './parameters.yaml#/campaign'
+    - $ref: './parameters.yaml#/dimension'
   get:
     tags:
       - site
       - paid
-    summary: Get paid traffic data by channel, campaign, type, month, and year
-    description: Returns paid traffic data for a site, filtered by week number, month, year, traffic type (owned, earned, paid), and grouped by specified channels and campaigns.
+    summary: Get channel performance by dimension (type, channel, campaign) for week, month, and year
+    description: Returns paid traffic data for a site, filtered by week number or month of year, and grouped by specified dimensions (type, channel, campaign).
     operationId: getPaidTrafficDataByMarketingChannel
     responses:
       '200':
-        description: Paid traffic data by channel, campaign, type, month, and year
+        description: Paid traffic data by dimension (type, channel, campaign), month, and year
         content:
           application/json:
             schema:
