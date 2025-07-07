@@ -44,7 +44,6 @@ describe('Suggestions Controller', () => {
     'a4a6055c-de4b-4552-bc0c-01fdb45b98d5',
     '930f8070-508a-4d94-a46c-279d4de2adfb',
     'a9807173-8e8e-4e8c-96f7-0a22d9dc90b8',
-    'xyzabcdefghijk',
   ];
 
   const OPPORTUNITY_ID = 'a92e2a5e-7b3d-42f0-b3f0-6edd3746a932';
@@ -224,6 +223,7 @@ describe('Suggestions Controller', () => {
           info: 'sample data',
           url: 'https://example.com',
           urlEdited: 'https://example.com/edited-link',
+          url_to: 'https://example.com/link1',
         },
         kpiDeltas: {
           conversionRate: 0.05,
@@ -256,6 +256,7 @@ describe('Suggestions Controller', () => {
         data: {
           info: 'broken back link data',
           urlsSuggested: ['https://example.com/suggested-link'],
+          url_to: 'https://example.com/link1',
         },
         kpiDeltas: {
           conversionRate: 0.02,

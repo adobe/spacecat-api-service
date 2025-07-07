@@ -526,16 +526,17 @@ function SuggestionsController(ctx, sqs, env, log) {
       if (opportunity.getType() === 'broken-backlinks') {
         groupKey = 'broken-backlinks';
         const url = data?.urlEdited || data?.urlsSuggested?.[0];
-        if (!url) return acc;
+        const urlTo = data?.url_to;
+        if (!url || !urlTo) return acc;
 
         if (!acc[groupKey]) {
-          acc[groupKey] = {
-            url_to: data?.url_to,
-            url,
-            suggestions: [],
-          };
+          acc[groupKey] = {};
         }
-        acc[groupKey].suggestions.push(suggestion);
+
+        if (!acc[groupKey][urlTo]) {
+          acc[groupKey][urlTo] = [];
+        }
+        acc[groupKey][urlTo].push(suggestion);
       } else {
         const url = data?.url || data?.recommendations?.[0]?.pageUrl
           || data?.url_from
@@ -552,10 +553,21 @@ function SuggestionsController(ctx, sqs, env, log) {
       return acc;
     }, {});
 
-    const suggestionGroups = Object.entries(suggestionsByUrl).map(([key, value]) => (
-      key === 'broken-backlinks' ? value : { url: key, suggestions: value.suggestions }
-    ));
-    log.info(`suggestionsGroups: ${JSON.stringify(suggestionGroups)}`);
+    const suggestionGroups = Object.entries(suggestionsByUrl).flatMap(([key, value]) => {
+      if (key === 'broken-backlinks') {
+        // eslint-disable-next-line no-shadow
+        return Object.entries(value).map(([urlTo, suggestions]) => ({
+          url: urlTo,
+          suggestions,
+        }));
+      } else {
+        return {
+          url: key,
+          suggestions: value.suggestions,
+        };
+      }
+    });
+    log.info(`suggestionGroups: ${JSON.stringify(suggestionGroups)}`);
 
     suggestionIds.forEach((suggestionId, index) => {
       if (!suggestions.find((s) => s.getId() === suggestionId)) {
