@@ -618,17 +618,33 @@ function SuggestionsController(ctx, sqs, env, log) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
-    await Promise.all(
-      suggestionGroups.map(({ suggestions: groupSuggestions, url }) => sendAutofixMessage(
+    if (opportunity.getType() === 'broken-backlinks') {
+      const mappedSuggestions = {};
+      suggestionGroups.forEach((group) => {
+        mappedSuggestions[group.url] = group.suggestions.map((s) => s.getId());
+      });
+
+      await sendAutofixMessage(
         sqs,
         queueUrl,
         siteId,
         opportunityId,
-        groupSuggestions.map((s) => s.getId()),
+        mappedSuggestions,
         promiseTokenResponse,
-        { url },
-      )),
-    );
+      );
+    } else {
+      await Promise.all(
+        suggestionGroups.map(({ suggestions: groupSuggestions, url }) => sendAutofixMessage(
+          sqs,
+          queueUrl,
+          siteId,
+          opportunityId,
+          groupSuggestions.map((s) => s.getId()),
+          promiseTokenResponse,
+          { url },
+        )),
+      );
+    }
 
     return createResponse(response, 207);
   };

@@ -580,7 +580,7 @@ describe('Suggestions Controller', () => {
   it('gets all suggestions for an opportunity by status returns not found if site ID passed does not match opportunity site id', async () => {
     const response = await suggestionsController.getByStatus({
       params: {
-        siteId: SITE_ID_NOT_ENABLED, // id does not exist
+        siteId: SITE_ID_NOT_ENABLED,
         opportunityId: OPPORTUNITY_ID,
         status: 'NEW',
       },
