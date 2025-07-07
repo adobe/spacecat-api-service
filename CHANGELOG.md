@@ -1,3 +1,10 @@
+## [1.128.5](https://github.com/adobe/spacecat-api-service/compare/v1.128.4...v1.128.5) (2025-07-07)
+
+
+### Bug Fixes
+
+* adding non auth sites ([#1031](https://github.com/adobe/spacecat-api-service/issues/1031)) ([47ce623](https://github.com/adobe/spacecat-api-service/commit/47ce62332dfd9128679228939694ab2e1508ff18))
+
 ## [1.128.4](https://github.com/adobe/spacecat-api-service/compare/v1.128.3...v1.128.4) (2025-07-06)
 
 

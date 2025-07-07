@@ -89,7 +89,7 @@ paths:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
     $ref: './preflight-api.yaml#/preflight-job-status'
-  /tools/scrape:
+  /tools/scrape/jobs:
     $ref: './scrape-api.yaml#/create-scrape-job'
   /tools/scrape/jobs/{jobId}:
     $ref: './scrape-api.yaml#/get-scrape-job-status'
