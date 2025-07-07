@@ -183,20 +183,15 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
   .with(dataAccess)
-  .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
+  .with(authWrapper, {
+    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+  })
   .with(bodyData)
   .with(multipartFormData)
   .with(enrichPathInfo)
   .with(sqs)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
+  .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(secrets, { name: resolveSecretsName })
-  .with(authWrapper, {
-    authHandlers: [
-      JwtHandler,
-      AdobeImsHandler,
-      ScopedApiKeyHandler,
-      LegacyApiKeyHandler,
-    ],
-  })
   .with(helixStatus);
