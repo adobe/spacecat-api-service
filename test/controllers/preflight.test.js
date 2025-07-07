@@ -60,7 +60,7 @@ describe('Preflight Controller', () => {
 
   const mockSite = {
     getId: () => 'test-site-123',
-    getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_EDGE,
+    getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
   };
 
   const mockDataAccess = {
@@ -117,6 +117,18 @@ describe('Preflight Controller', () => {
   });
 
   describe('createPreflightJob', () => {
+    let fetchStub;
+    const headResponse = { status: 401 };
+
+    beforeEach(() => {
+      fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves(headResponse);
+    });
+
+    afterEach(() => {
+      fetchStub.restore();
+    });
+
     it('creates a preflight job successfully in production environment', async () => {
       const context = {
         data: {
@@ -143,6 +155,54 @@ describe('Preflight Controller', () => {
             siteId: 'test-site-123',
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
+            enableAuthentication: true,
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          type: 'preflight',
+          siteId: 'test-site-123',
+        },
+      );
+    });
+
+    it('creates a preflight job successfully in production environment with authentication enabled', async () => {
+      fetchStub.restore();
+      fetchStub = sinon.stub(global, 'fetch').resolves({ status: 200 });
+
+      const context = {
+        data: {
+          urls: ['https://main--example-site.aem.page/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        jobId,
+        status: 'IN_PROGRESS',
+        createdAt: '2024-03-20T10:00:00Z',
+        pollUrl: `https://spacecat.experiencecloud.live/api/v1/preflight/jobs/${jobId}`,
+      });
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['https://main--example-site.aem.page/test.html'],
+            step: 'identify',
+            enableAuthentication: false,
             checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
           },
           jobType: 'preflight',
@@ -179,6 +239,7 @@ describe('Preflight Controller', () => {
             siteId: 'test-site-123',
             urls: ['https://example.com/test.html'],
             step: 'identify',
+            enableAuthentication: true,
             checks: ['canonical', 'metatags'],
           },
           jobType: 'preflight',
@@ -276,6 +337,7 @@ describe('Preflight Controller', () => {
             siteId: 'test-site-123',
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
+            enableAuthentication: true,
             checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
           },
           jobType: 'preflight',
@@ -468,10 +530,10 @@ describe('Preflight Controller', () => {
       expect(mockJob.remove).to.have.been.calledOnce;
     });
 
-    it('creates a preflight job with AEM_CS delivery type and includes promise token', async () => {
+    it('creates a preflight job with crosswalk authoring type and includes promise token', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
-        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
@@ -516,7 +578,7 @@ describe('Preflight Controller', () => {
     it('handles promise token error for AEM_CS site', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
-        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
@@ -555,7 +617,7 @@ describe('Preflight Controller', () => {
     it('handles promise token error for AEM_CS site with generic error', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
-        getDeliveryType: () => SiteModel.DELIVERY_TYPES.AEM_CS,
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
