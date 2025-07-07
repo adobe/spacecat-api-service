@@ -191,7 +191,6 @@ export const main = wrap(run)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(secrets, { name: resolveSecretsName })
-  .with(helixStatus)
   .with(authWrapper, {
     authHandlers: [
       JwtHandler,
@@ -199,4 +198,5 @@ export const main = wrap(run)
       ScopedApiKeyHandler,
       LegacyApiKeyHandler,
     ],
-  });
+  })
+  .with(helixStatus);
