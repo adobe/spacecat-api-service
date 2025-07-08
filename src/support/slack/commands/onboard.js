@@ -350,10 +350,6 @@ function OnboardCommand(context) {
           slackContext: {
             channelId: slackContext.channelId,
             threadTs: slackContext.threadTs,
-            slackBotToken: env.SLACK_BOT_TOKEN,
-            slackSigningSecret: env.SLACK_SIGNING_SECRET,
-            slackTokenWorkspaceInternal: env.SLACK_TOKEN_WORKSPACE_INTERNAL,
-            slackOpsChannelWorkspaceInternal: env.SLACK_OPS_CHANNEL_WORKSPACE_INTERNAL,
           },
         },
       };
@@ -371,10 +367,6 @@ function OnboardCommand(context) {
           slackContext: {
             channelId: slackContext.channelId,
             threadTs: slackContext.threadTs,
-            slackBotToken: env.SLACK_BOT_TOKEN,
-            slackSigningSecret: env.SLACK_SIGNING_SECRET,
-            slackTokenWorkspaceInternal: env.SLACK_TOKEN_WORKSPACE_INTERNAL,
-            slackOpsChannelWorkspaceInternal: env.SLACK_OPS_CHANNEL_WORKSPACE_INTERNAL,
           },
         },
       };
@@ -391,10 +383,6 @@ function OnboardCommand(context) {
           slackContext: {
             channelId: slackContext.channelId,
             threadTs: slackContext.threadTs,
-            slackBotToken: env.SLACK_BOT_TOKEN,
-            slackSigningSecret: env.SLACK_SIGNING_SECRET,
-            slackTokenWorkspaceInternal: env.SLACK_TOKEN_WORKSPACE_INTERNAL,
-            slackOpsChannelWorkspaceInternal: env.SLACK_OPS_CHANNEL_WORKSPACE_INTERNAL,
           },
         },
       };
