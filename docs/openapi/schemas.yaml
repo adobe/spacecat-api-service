@@ -157,12 +157,42 @@ Config:
     contentAiConfig:
       description: Optional. The ContentAi configuration
       $ref: '#/ContentAiConfig'
+    cdnLogsConfig:
+      description: Optional. The CDN logs configuration
+      $ref: '#/CdnLogsConfig'
 ContentAiConfig:
   type: object
   properties:
     index:
       description: Optional. The index name for website in the content AI service
       type: string
+CdnLogsConfig:
+  type: object
+  properties:
+    bucketName:
+      description: The name of the S3 bucket to store CDN logs
+      type: string
+    outputLocation:
+      description: The output location for sharepoint folder
+      type: string
+    filters:
+      description: The filters for CDN logs
+      type: array
+      items:
+        type: object
+        properties:
+          key:
+            description: The key to filter
+            type: string
+          value:
+            description: The value to filter
+            type: array
+            items:
+              type: string
+  example:
+    bucketName: 'test-bucket'
+    filters: [{ key: 'test-key', value: ['test-value'] }]
+    outputLocation: 'test-output-location'
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -372,6 +402,10 @@ Site:
                   type: string
       contentAiConfig:
         index: 'example-index-name'
+      cdnLogsConfig:
+        bucketName: 'test-bucket'
+        filters: [{ key: 'test-key', value: ['test-value'] }]
+        outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -477,6 +511,19 @@ SiteUpdate:
       authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
       siteId: '1234'
     goLiveDate: '2024-01-20T10:00:00Z'
+CdnLogsConfigUpdate:
+  type: object
+  required:
+    - cdnLogsConfig
+  properties:
+    cdnLogsConfig:
+      description: The CDN logs configuration to update
+      $ref: '#/CdnLogsConfig'
+  example:
+    cdnLogsConfig:
+      bucketName: 'test-bucket'
+      outputLocation: 'test-output-location'
+      filters: [{ key: 'test-key', value: ['test-value'] }]
 UpdateHandlerTypeConfig:
   type: object
   properties:
@@ -3032,3 +3079,50 @@ FixStatusUpdateListResponse:
   required:
     - fixes
     - metadata
+
+PaidSiteTopPage:
+  type: object
+  required:
+    - url
+    - ctr
+    - avgClicksPerSession
+    - pageViews
+    - clickedSessions
+    - bounceRate
+    - totalNumClicks
+    - source
+  properties:
+    url:
+      type: string
+      format: uri
+    ctr:
+      type: number
+      format: float
+    avgClicksPerSession:
+      type: number
+      format: float
+    pageViews:
+      type: integer
+    clickedSessions:
+      type: integer
+    bounceRate:
+      type: number
+      format: float
+    totalNumClicks:
+      type: integer
+    source:
+      type: string
+      description: Paid traffic source (e.g., paid:search:google)
+  example:
+    url: "https://www.example.com/uk/"
+    ctr: 0.015
+    avgClicksPerSession: 1.82
+    pageViews: 6100
+    clickedSessions: 1800
+    bounceRate: 0.98
+    totalNumClicks: 5100
+    source: "paid:affiliate:"
+PaidSiteTopPageList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/PaidSiteTopPage'
