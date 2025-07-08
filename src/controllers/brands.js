@@ -144,7 +144,7 @@ function BrandsController(ctx, log, env) {
       };
       log.info(`Brand ID mapping for site: ${siteId} is ${brandId}`);
       if (!hasText(brandId) || !hasText(userId)) {
-        return notFound(`Brand config missing brandId or userId for site ID: ${siteId}`);
+        return notFound(`Brand config is missing, brandId or userId for site ID: ${siteId}`);
       }
       const organizationId = site.getOrganizationId();
       const organization = await Organization.findById(organizationId);

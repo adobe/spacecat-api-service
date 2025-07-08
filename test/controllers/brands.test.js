@@ -365,7 +365,7 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(404);
       const error = await response.json();
-      expect(error).to.have.property('message', `Brand config missing brandId or userId for site ID: ${SITE_ID}`);
+      expect(error).to.have.property('message', `Brand config is missing, brandId or userId for site ID: ${SITE_ID}`);
     });
 
     it('returns unauthorized if IMS config is missing', async () => {
