@@ -67,6 +67,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} scrapeJobController - The scrape job controller.
  * @param {Object} mcpController - The MCP controller.
  * @param {Object} paidController - The paid controller.
+ * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -92,6 +93,7 @@ export default function getRouteHandlers(
   scrapeJobController,
   mcpController,
   paidController,
+  trafficController,
   fixesController,
 ) {
   const staticRoutes = {};
@@ -158,6 +160,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
+    'GET /sites/:siteId/traffic/paid/channel': trafficController.getPaidTrafficDataByMarketingChannel,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
