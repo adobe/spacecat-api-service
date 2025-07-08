@@ -243,18 +243,3 @@ year:
   schema:
     type: integer
     example: 2024
-    
-dimension:
-  name: dimension
-  description: List of dimensions to group by (type, channel, campaign)
-  in: query
-  required: false
-  schema:
-    type: array
-    items:
-      type: string
-      enum:
-        - type
-        - channel
-        - campaign
-    example: ["type", "channel", "campaign"]

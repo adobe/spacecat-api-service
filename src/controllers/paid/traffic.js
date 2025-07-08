@@ -73,6 +73,8 @@ function TrafficController(context, log, env) {
     const {
       siteKey, year, week, month,
     } = context.data || {};
+
+    // siteKey to be confirmed if we are using existing siteId guid or if we switch named key
     if (!siteKey || !year || !week) {
       throw new Error('siteKey, year, and week are required parameters');
     }
