@@ -1,67 +1,118 @@
-site-traffic-paid-marketing-channel:
+site-traffic-paid-type-channel-campaign:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
     - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
-    - $ref: './parameters.yaml#/dimension'
   get:
     tags:
       - site
       - paid
-    summary: Get channel performance by dimension (type, channel, campaign) for week, month, and year
-    description: Returns paid traffic data for a site, filtered by week number or month of year, and grouped by specified dimensions (type, channel, campaign).
-    operationId: getPaidTrafficDataByMarketingChannel
+    summary: Get paid traffic data grouped by type, channel, and campaign
+    description: Returns paid traffic data for a site, grouped by type, channel, and campaign for a given week, month, and year.
+    operationId: getPaidTrafficByTypeChannelCampaign
     responses:
       '200':
-        description: Paid traffic data by dimension (type, channel, campaign), month, and year
+        description: Paid traffic data by type, channel, and campaign
         content:
           application/json:
             schema:
               type: array
               items:
-                type: object
-                properties:
-                  type:
-                    type: string
-                    description: The traffic type (owned, earned, paid)
-                  platform:
-                    type: string
-                    description: The platform or channel (e.g., search, display, social)
-                  campaign:
-                    type: string
-                    description: The campaign name or ID
-                  pageviews:
-                    type: integer
-                    description: Number of pageviews
-                  pct_pageviews:
-                    type: number
-                    format: float
-                    description: Percentage of total pageviews
-                  click_rate:
-                    type: number
-                    format: float
-                    description: Click rate
-                  engagement:
-                    type: number
-                    format: float
-                    description: Engagement metric
-                  bounce_rate:
-                    type: number
-                    format: float
-                    description: Bounce rate
-                  p70_lcp:
-                    type: number
-                    format: float
-                    description: 70th percentile Largest Contentful Paint
-                  p70_cls:
-                    type: number
-                    format: float
-                    description: 70th percentile Cumulative Layout Shift
-                  p70_inp:
-                    type: number
-                    format: float
-                    description: 70th percentile Interaction to Next Paint
+                $ref: '#/PaidTrafficChannelCampaignResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-type-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by type and channel
+    description: Returns paid traffic data for a site, grouped by type and channel for a given week, month, and year.
+    operationId: getPaidTrafficByTypeChannel
+    responses:
+      '200':
+        description: Paid traffic data by type and channel
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/PaidTrafficChannelResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-type-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by type and campaign
+    description: Returns paid traffic data for a site, grouped by type and campaign for a given week, month, and year.
+    operationId: getPaidTrafficByTypeCampaign
+    responses:
+      '200':
+        description: Paid traffic data by type and campaign
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/PaidTrafficCampaignResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by type
+    description: Returns paid traffic data for a site, grouped by type for a given week, month, and year.
+    operationId: getPaidTrafficByType
+    responses:
+      '200':
+        description: Paid traffic data by type
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/PaidTrafficTypeResponse'
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -96,5 +147,169 @@ site-traffic-paid-top-pages:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+PaidTrafficChannelCampaignResponse:
+  type: object
+  properties:
+    type:
+      type: string
+      description: The traffic type (owned, earned, paid)
+    channel:
+      type: string
+      description: The platform or channel (e.g., search, display, social)
+    campaign:
+      type: string
+      description: The campaign name or ID
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+
+PaidTrafficChannelResponse:
+  type: object
+  properties:
+    type:
+      type: string
+      description: The traffic type (owned, earned, paid)
+    channel:
+      type: string
+      description: The platform or channel (e.g., search, display, social)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+
+PaidTrafficCampaignResponse:
+  type: object
+  properties:
+    type:
+      type: string
+      description: The traffic type (owned, earned, paid)
+    campaign:
+      type: string
+      description: The campaign name or ID
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+
+PaidTrafficTypeResponse:
+  type: object
+  properties:
+    type:
+      type: string
+      description: The traffic type (owned, earned, paid)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
 
 components: {}

@@ -171,15 +171,6 @@ async function run(request, context) {
       }
       context.params = params;
 
-      // --- Parse query parameters and merge into context.data ---
-      const url = new URL(request.url);
-      const query = {};
-      for (const [key, value] of url.searchParams.entries()) {
-        const allValues = url.searchParams.getAll(key);
-        query[key] = allValues.length > 1 ? allValues : value;
-      }
-      context.data = { ...query };
-
       return await handler(context);
     } else {
       const notFoundMessage = `no such route /${route}`;

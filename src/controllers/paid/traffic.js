@@ -45,8 +45,6 @@ function renderQuery(template, params) {
     .replace(/{{tableName}}/g, params.tableName);
 }
 
-const VALID_DIMENSIONS = ['type', 'channel', 'campaign'];
-
 function TrafficController(context, log, env) {
   if (!context || !context.dataAccess) {
     throw new Error('Context and dataAccess required');
@@ -54,20 +52,16 @@ function TrafficController(context, log, env) {
   const { dataAccess } = context;
   const { Site } = dataAccess;
 
-  const getPaidTrafficDataByMarketingChannel = async () => {
+  async function fetchPaidTrafficData(dimensions) {
     const siteId = context.params?.siteId;
-
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
-
     const accessControlUtil = AccessControlUtil.fromContext(context);
-
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can view paid traffic metrics');
     }
-
     const dbName = env.PAID_TRAFFIC_DATABASE;
     const tableName = env.PAID_TRAFFIC_TABLE_NAME;
     if (!dbName || !tableName) {
@@ -77,26 +71,14 @@ function TrafficController(context, log, env) {
     const resolvedS3Output = env.PAID_TRAFFIC_S3_OUTPUT;
     const athenaClient = AWSAthenaClient.fromContext(context, resolvedS3Output);
     const {
-      siteKey, year, week, dimension, month,
+      siteKey, year, week, month,
     } = context.data || {};
-    if (!siteId || !year || !week) {
+    if (!siteKey || !year || !week) {
       throw new Error('siteKey, year, and week are required parameters');
     }
-
-    let groupBy;
-    if (Array.isArray(dimension) && dimension.length > 0) {
-      // Only allow valid dimensions
-      groupBy = dimension.filter((d) => VALID_DIMENSIONS.includes(d));
-      if (groupBy.length === 0) {
-        throw new Error('At least one valid dimension (type, channel, campaign) must be specified');
-      }
-    } else {
-      groupBy = VALID_DIMENSIONS;
-    }
+    const groupBy = dimensions;
     const dimensionColumns = groupBy.join(', ');
-    const dimensionColumnsPrefixed = groupBy.length > 0
-      ? `${groupBy.map((col) => `a.${col}`).join(', ')}, `
-      : '';
+    const dimensionColumnsPrefixed = groupBy.length > 0 ? `${groupBy.map((col) => `a.${col}`).join(', ')}, ` : '';
     const query = renderQuery(channelQueryTemplate, {
       siteKey,
       year,
@@ -107,26 +89,29 @@ function TrafficController(context, log, env) {
       dimensionColumnsPrefixed,
       tableName: fullTableName,
     });
-
     const description = `Fetch paid channel data | db: ${dbName} | siteKey: ${siteKey} | year: ${year} | month: ${month} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
-
     log.info(`Fetching Athena data with query ${query}`);
-
     const results = await athenaClient.query(
       query,
       dbName,
       description,
     );
-
     const resultJson = Array.isArray(results)
       ? results.map(MarketingChannelResponseDto.toJSON)
       : [];
-
     return ok(resultJson);
-  };
+  }
+
+  const getPaidTrafficByTypeChannelCampaign = async () => fetchPaidTrafficData(['type', 'channel', 'campaign']);
+  const getPaidTrafficByTypeChannel = async () => fetchPaidTrafficData(['type', 'channel']);
+  const getPaidTrafficByTypeCampaign = async () => fetchPaidTrafficData(['type', 'campaign']);
+  const getPaidTrafficByType = async () => fetchPaidTrafficData(['type']);
 
   return {
-    getPaidTrafficDataByMarketingChannel,
+    getPaidTrafficByTypeChannelCampaign,
+    getPaidTrafficByTypeChannel,
+    getPaidTrafficByTypeCampaign,
+    getPaidTrafficByType,
   };
 }
 

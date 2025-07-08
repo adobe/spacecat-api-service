@@ -161,8 +161,14 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
-  /sites/{siteId}/traffic/paid/channel:
-    $ref: './site-paid.yaml#/site-traffic-paid-marketing-channel'
+  /sites/{siteId}/traffic/paid/type-channel:
+    $ref: './site-paid.yaml#/site-traffic-paid-type-channel'
+  /sites/{siteId}/traffic/paid/type-channel-campaign:
+    $ref: './site-paid.yaml#/site-traffic-paid-type-channel-campaign'
+  /sites/{siteId}/traffic/paid/type-campaign:
+    $ref: './site-paid.yaml#/site-traffic-paid-type-campaign'
+  /sites/{siteId}/traffic/paid/type:
+    $ref: './site-paid.yaml#/site-traffic-paid-type'
   /sites/{siteId}/metrics/{metric}/{source}:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
