@@ -525,9 +525,8 @@ function SuggestionsController(ctx, sqs, env, log) {
 
       if (opportunity.getType() === 'broken-backlinks') {
         groupKey = 'broken-backlinks';
-        const url = data?.urlEdited || data?.urlsSuggested?.[0];
         const urlTo = data?.url_to;
-        if (!url || !urlTo) return acc;
+        if (!urlTo) return acc;
 
         if (!acc[groupKey]) {
           acc[groupKey] = {};

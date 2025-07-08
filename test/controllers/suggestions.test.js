@@ -222,7 +222,6 @@ describe('Suggestions Controller', () => {
         data: {
           info: 'sample data',
           url: 'https://example.com',
-          urlEdited: 'https://example.com/edited-link',
           url_to: 'https://example.com/link1',
         },
         kpiDeltas: {
@@ -1632,23 +1631,19 @@ describe('Suggestions Controller', () => {
     it('filters out broken-backlinks suggestions with no valid URL from SQS groups', async () => {
       const suggsWithMissingUrl = [
         {
-          ...suggs[0],
-        },
-        {
           ...suggs[1],
           status: 'NEW',
           data: {
             info: 'broken back link data with no URL',
+            url_to: null,
           },
         },
       ];
       mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggsWithMissingUrl[0]),
-          mockSuggestionEntity(suggsWithMissingUrl[1])],
+        [mockSuggestionEntity(suggsWithMissingUrl[0])],
       );
       mockSuggestion.bulkUpdateStatus.resolves([
         mockSuggestionEntity({ ...suggsWithMissingUrl[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggsWithMissingUrl[1], status: 'IN_PROGRESS' }),
       ]);
 
       const response = await suggestionsController.autofixSuggestions({
@@ -1656,16 +1651,16 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
         },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        data: { suggestionIds: [SUGGESTION_IDS[1]] },
         ...context,
       });
 
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
-      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
-      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
-      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
-      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      expect(bulkPatchResponse.metadata).to.have.property('total', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 0);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
     });
   });
 
