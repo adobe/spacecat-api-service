@@ -120,6 +120,7 @@ function PreflightController(ctx, log, env) {
    */
   const createPreflightJob = async (context) => {
     const { data } = context;
+    const CS_TYPES = [SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW];
     try {
       validateRequestData(data);
     } catch (error) {
@@ -136,12 +137,24 @@ function PreflightController(ctx, log, env) {
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
       const site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
+      let enableAuthentication = false;
+      // check head request for preview url
+      const headResponse = await fetch(`${previewBaseURL}`, {
+        method: 'HEAD',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      if (headResponse.status !== 200) {
+        enableAuthentication = true;
+      }
+
       if (!site) {
         throw new Error(`No site found for preview URL: ${previewBaseURL}`);
       }
 
       let promiseTokenResponse;
-      if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+      if (CS_TYPES.includes(site.getAuthoringType())) {
         try {
           promiseTokenResponse = await getCSPromiseToken(context);
           log.info('Successfully got promise token');
@@ -163,6 +176,7 @@ function PreflightController(ctx, log, env) {
             urls: data.urls,
             step,
             checks: data.checks || AVAILABLE_CHECKS,
+            enableAuthentication,
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -176,7 +190,7 @@ function PreflightController(ctx, log, env) {
           siteId: site.getId(),
           type: 'preflight',
         };
-        if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
+        if (CS_TYPES.includes(site.getAuthoringType())) {
           sqsMessage.promiseToken = promiseTokenResponse;
         }
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);

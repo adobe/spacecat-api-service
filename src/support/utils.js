@@ -69,8 +69,10 @@ export const sentRunScraperMessage = async (
   jobId,
   urls,
   slackContext,
+  allowCache = false,
 ) => sqs.sendMessage(queueUrl, {
   processingType: 'default',
+  allowCache,
   jobId,
   urls: [...urls],
   slackContext,
@@ -207,6 +209,7 @@ export const triggerScraperRun = async (
   urls,
   slackContext,
   lambdaContext,
+  allowCache = false,
 ) => sentRunScraperMessage(
   lambdaContext.sqs,
   lambdaContext.env.SCRAPING_JOBS_QUEUE_URL,
@@ -216,6 +219,7 @@ export const triggerScraperRun = async (
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,
   },
+  allowCache,
 );
 // todo: prototype - untested
 /* c8 ignore start */
