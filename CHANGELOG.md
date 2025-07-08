@@ -1,3 +1,10 @@
+# [1.129.0](https://github.com/adobe/spacecat-api-service/compare/v1.128.6...v1.129.0) (2025-07-08)
+
+
+### Features
+
+* Onboard automation using step functions ([#891](https://github.com/adobe/spacecat-api-service/issues/891)) ([4d53954](https://github.com/adobe/spacecat-api-service/commit/4d539540250594683760fdaaf8390fe5c4227792))
+
 ## [1.128.6](https://github.com/adobe/spacecat-api-service/compare/v1.128.5...v1.128.6) (2025-07-08)
 
 
