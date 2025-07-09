@@ -1,3 +1,17 @@
+# [1.129.0](https://github.com/adobe/spacecat-api-service/compare/v1.128.6...v1.129.0) (2025-07-08)
+
+
+### Features
+
+* Onboard automation using step functions ([#891](https://github.com/adobe/spacecat-api-service/issues/891)) ([4d53954](https://github.com/adobe/spacecat-api-service/commit/4d539540250594683760fdaaf8390fe5c4227792))
+
+## [1.128.6](https://github.com/adobe/spacecat-api-service/compare/v1.128.5...v1.128.6) (2025-07-08)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.33.2 ([#1044](https://github.com/adobe/spacecat-api-service/issues/1044)) ([6501a30](https://github.com/adobe/spacecat-api-service/commit/6501a30c2d85c1112e3aef0a1b59fb6ed306f970))
+
 ## [1.128.5](https://github.com/adobe/spacecat-api-service/compare/v1.128.4...v1.128.5) (2025-07-07)
 
 
