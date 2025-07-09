@@ -506,7 +506,7 @@ describe('ImportController tests', () => {
         baseContext.multipartFormData.options = { type: 'invalid' };
         const response = await importController.createImportJob(baseContext);
         expect(response.status).to.equal(400);
-        expect(response.headers.get('x-error')).to.equal('Invalid request: type must be either doc, xwalk or da.');
+        expect(response.headers.get('x-error')).to.equal('Invalid request: type must be either doc, xwalk or da');
       });
 
       // it should not fail if type is not provided
