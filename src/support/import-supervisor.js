@@ -156,6 +156,8 @@ function ImportSupervisor(services, config) {
       processingType = 'import';
     } else if (options.type === ImportJobModel.ImportOptionTypes.XWALK) {
       processingType = 'import-xwalk';
+    } else if (options.type === ImportJobModel.ImportOptionTypes.DA) {
+      processingType = 'import-da';
     }
 
     // Send a single message containing all URLs and the new job ID

@@ -1613,6 +1613,10 @@ DocImportData:
   title: "Doc Import"
   description: "There are no data properties available for doc based imports."
   properties: {}
+DAImportData:
+  title: "DA Import"
+  description: "There are no data properties available for DA based imports."
+  properties: {}
 XWalkImportData:
   title: "Xwalk Import"
   properties:
@@ -1653,8 +1657,8 @@ ImportOptions:
     - $ref: '#/ImportOptionsBase'
   properties:
     type:
-      enum: ['doc', 'xwalk']
-      description: The type of import job. Options are 'doc' or 'xwalk'.
+      enum: ['doc', 'xwalk', 'da']
+      description: The type of import job. Valid options are 'doc', 'da' or 'xwalk'.
       type: string
       default: 'doc'
     data:
@@ -1663,6 +1667,7 @@ ImportOptions:
       oneOf:
         - $ref: '#/DocImportData'
         - $ref: '#/XWalkImportData'
+        - $ref: '#/DAImportData'
 
 ImportJobRequest:
   type: object
