@@ -636,13 +636,15 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can view its top pages');
     }
 
+    const { SiteTopPage } = dataAccess;
+
     let topPages = [];
     if (hasText(source) && hasText(geo)) {
-      topPages = await site.getSiteTopPagesBySourceAndGeo(source, geo);
+      topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, source, geo);
     } else if (hasText(source)) {
-      topPages = await site.getSiteTopPagesBySource(source);
+      topPages = await SiteTopPage.allBySiteIdAndSource(siteId, source);
     } else {
-      topPages = await site.getTopPages();
+      topPages = await SiteTopPage.allBySiteId(siteId);
     }
 
     return ok(topPages);
