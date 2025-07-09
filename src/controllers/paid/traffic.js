@@ -19,8 +19,14 @@ import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { MarketingChannelResponseDto } from '../../dto/marketing-channel-response.js';
+import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { MarketingChannelResponseDto } from '../../dto/marketing-channel-response.js';
+import {
+  parseCsvToJson,
+  getS3CachedResult,
+  copyFirstCsvToCache,
+} from './caching-helper.js';
 
 const filename = fileURLToPath(import.meta.url);
 const dirname = path.dirname(filename);
@@ -45,6 +51,22 @@ function renderQuery(template, params) {
     .replace(/{{tableName}}/g, params.tableName);
 }
 
+async function tryGetCacheResult(s3, cacheBucket, query, log) {
+  if (!cacheBucket) return { resultJson: null, cacheKey: null };
+  const outPrefix = `${crypto.createHash('md5').update(query).digest('hex')}`;
+  const cacheKey = `${cacheBucket}/${outPrefix}.csv`;
+  const cached = await getS3CachedResult(s3, cacheKey, log);
+  if (cached) {
+    log.info(`Found cached result. Returning cached Athena result from S3: ${cacheKey}`);
+    const parsed = await parseCsvToJson(cached);
+    const resultJson = Array.isArray(parsed)
+      ? parsed.map(MarketingChannelResponseDto.toJSON)
+      : [];
+    return { resultJson, cacheKey, outPrefix };
+  }
+  return { resultJson: null, cacheKey, outPrefix };
+}
+
 function TrafficController(context, log, env) {
   if (!context || !context.dataAccess) {
     throw new Error('Context and dataAccess required');
@@ -67,20 +89,21 @@ function TrafficController(context, log, env) {
     if (!dbName || !tableName) {
       throw new Error('PAID_TRAFFIC_DATABASE and PAID_TRAFFIC_TABLE_NAME are requited');
     }
-    const fullTableName = `${dbName}.${tableName}`;
-    const resolvedS3Output = env.PAID_TRAFFIC_S3_OUTPUT;
-    const athenaClient = AWSAthenaClient.fromContext(context, resolvedS3Output);
+
     const {
       siteKey, year, week, month,
     } = context.data || {};
-
-    // siteKey to be confirmed if we are using existing siteId guid or if we switch named key
-    if (!siteKey || !year || !week) {
-      throw new Error('siteKey, year, and week are required parameters');
+    if (!siteKey || !year || !week || !month) {
+      throw new Error('siteKey, year, month and week are required parameters');
     }
+    const fullTableName = `${dbName}.${tableName}`;
+    const outputFolder = env.PAID_TRAFFIC_S3_OUTPUT_URI;
+
     const groupBy = dimensions;
     const dimensionColumns = groupBy.join(', ');
     const dimensionColumnsPrefixed = groupBy.length > 0 ? `${groupBy.map((col) => `a.${col}`).join(', ')}, ` : '';
+    const description = `fetch paid channel data | db: ${dbName} | siteKey: ${siteKey} | year: ${year} | month: ${month} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
+    log.info(`Processing query: ${description}`);
     const query = renderQuery(channelQueryTemplate, {
       siteKey,
       year,
@@ -91,17 +114,41 @@ function TrafficController(context, log, env) {
       dimensionColumnsPrefixed,
       tableName: fullTableName,
     });
-    const description = `Fetch paid channel data | db: ${dbName} | siteKey: ${siteKey} | year: ${year} | month: ${month} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
-    log.info(`Fetching Athena data with query ${query}`);
+
+    log.debug(`Fetching paid data with query ${query}`);
+
+    const cacheBucket = env.PAID_TRAFFIC_S3_CACHE_BUCKET_URI;
+    if (!cacheBucket) {
+      log.warn('PAID_TRAFFIC_S3_CACHE_BUCKET_URI is not supplied, all queries will be executed without cache');
+    }
+    const s3 = context.s3?.s3Client;
+    const {
+      resultJson,
+      cacheKey,
+      outPrefix,
+    } = await tryGetCacheResult(s3, cacheBucket, query, log);
+    if (resultJson) {
+      return ok(resultJson);
+    }
+
+    const resultLocation = `${outputFolder}/${outPrefix}`;
+    const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
+
+    log.info(`Fetching paid data directly from athena bucket ${outputFolder} and table ${fullTableName}`);
     const results = await athenaClient.query(
       query,
       dbName,
       description,
     );
-    const resultJson = Array.isArray(results)
+    const resultJsonFresh = Array.isArray(results)
       ? results.map(MarketingChannelResponseDto.toJSON)
       : [];
-    return ok(resultJson);
+
+    if (cacheBucket) {
+      const isCached = await copyFirstCsvToCache(s3, resultLocation, cacheKey, log);
+      log.info(`Is Copy Athena result CSV to S3 cache: ${cacheKey} succesful was : ${isCached}`);
+    }
+    return ok(resultJsonFresh);
   }
 
   const getPaidTrafficByTypeChannelCampaign = async () => fetchPaidTrafficData(['type', 'channel', 'campaign']);
