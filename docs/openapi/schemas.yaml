@@ -1658,7 +1658,7 @@ ImportOptions:
   properties:
     type:
       enum: ['doc', 'xwalk', 'da']
-      description: The type of import job. Options are 'doc' or 'da' or 'xwalk'.
+      description: The type of import job. Valid options are 'doc', 'da' or 'xwalk'.
       type: string
       default: 'doc'
     data:
