@@ -69,6 +69,7 @@
 	},
 	"demo":  {
 		"audits": {
+			"scrape-top-pages": {},
 			"broken-backlinks": {},
 			"broken-internal-links": {},
 			"experimentation-opportunities": {},
