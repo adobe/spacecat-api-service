@@ -620,6 +620,34 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const getTopPages = async (context) => {
+    const { siteId, source, geo } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its top pages');
+    }
+
+    let topPages = [];
+    if (hasText(source) && hasText(geo)) {
+      topPages = await site.getSiteTopPagesBySourceAndGeo(source, geo);
+    } else if (hasText(source)) {
+      topPages = await site.getSiteTopPagesBySource(source);
+    } else {
+      topPages = await site.getTopPages();
+    }
+
+    return ok(topPages);
+  };
+
   return {
     createSite,
     getAll,
@@ -633,6 +661,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getTopPages,
 
     // key events
     createKeyEvent,
