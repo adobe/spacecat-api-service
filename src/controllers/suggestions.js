@@ -516,9 +516,6 @@ function SuggestionsController(ctx, sqs, env, log) {
             case !isValidId:
               message = 'Invalid suggestion ID format';
               break;
-            // case !hasStatusNew:
-            //   message = 'Suggestion is not in NEW status';
-            //   break;
             case opportunity.getType() === 'broken-backlinks' && !hasUrlTo:
               message = 'Missing mandatory field: url_to';
               break;
