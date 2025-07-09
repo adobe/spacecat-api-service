@@ -239,6 +239,7 @@ describe('Suggestions Controller', () => {
         data: {
           url_from: 'https://example.com/old-link',
           info: 'broken back link data',
+          url_to: 'https://example.com/link1',
         },
         kpiDeltas: {
           conversionRate: 0.02,
@@ -1628,22 +1629,22 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[2]).to.have.property('message', 'Invalid suggestion ID format');
     });
 
-    it('filters out broken-backlinks suggestions with no valid URL from SQS groups', async () => {
-      const suggsWithMissingUrl = [
+    it('should skip broken-backlinks suggestion if no urlTo', async () => {
+      const suggsWithMissingUrlTo = [
         {
           ...suggs[1],
           status: 'NEW',
           data: {
-            info: 'broken back link data with no URL',
+            info: 'broken back link data with no urlTo',
             url_to: null,
           },
         },
       ];
       mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggsWithMissingUrl[0])],
+        [mockSuggestionEntity(suggsWithMissingUrlTo[0])],
       );
       mockSuggestion.bulkUpdateStatus.resolves([
-        mockSuggestionEntity({ ...suggsWithMissingUrl[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggsWithMissingUrlTo[0], status: 'IN_PROGRESS' }),
       ]);
 
       const response = await suggestionsController.autofixSuggestions({
@@ -1657,9 +1658,15 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
       expect(bulkPatchResponse.metadata).to.have.property('total', 1);
       expect(bulkPatchResponse.metadata).to.have.property('success', 0);
       expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 1);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Missing mandatory field: url_to');
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
   });

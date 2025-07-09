@@ -503,16 +503,33 @@ function SuggestionsController(ctx, sqs, env, log) {
       if (suggestionIds.includes(suggestionId)) {
         const isValidId = isValidUUID(suggestionId);
         const hasStatusNew = suggestion.getStatus() === SuggestionModel.STATUSES.NEW;
+        const data = suggestion.getData();
+        const hasUrlTo = data?.url_to;
 
-        if (isValidId && hasStatusNew) {
+        if (isValidId && hasStatusNew && opportunity.getType() !== 'broken-backlinks') {
+          validSuggestions.push(suggestion);
+        } else if (isValidId && hasStatusNew && opportunity.getType() === 'broken-backlinks' && hasUrlTo) {
           validSuggestions.push(suggestion);
         } else {
+          let message;
+          switch (true) {
+            case !isValidId:
+              message = 'Invalid suggestion ID format';
+              break;
+            // case !hasStatusNew:
+            //   message = 'Suggestion is not in NEW status';
+            //   break;
+            case opportunity.getType() === 'broken-backlinks' && !hasUrlTo:
+              message = 'Missing mandatory field: url_to';
+              break;
+            default:
+              message = 'Suggestion is not in NEW status';
+          }
+
           failedSuggestions.push({
             uuid: suggestionId,
             index: suggestionIds.indexOf(suggestionId),
-            message: !isValidId
-              ? 'Invalid suggestion ID format'
-              : 'Suggestion is not in NEW status',
+            message,
             statusCode: 400,
           });
         }
@@ -526,7 +543,6 @@ function SuggestionsController(ctx, sqs, env, log) {
       if (opportunity.getType() === 'broken-backlinks') {
         groupKey = 'broken-backlinks';
         const urlTo = data?.url_to;
-        if (!urlTo) return acc;
 
         if (!acc[groupKey]) {
           acc[groupKey] = {};
@@ -617,32 +633,34 @@ function SuggestionsController(ctx, sqs, env, log) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
-    if (opportunity.getType() === 'broken-backlinks') {
-      const mappedSuggestions = {};
-      suggestionGroups.forEach((group) => {
-        mappedSuggestions[group.url] = group.suggestions.map((s) => s.getId());
-      });
+    if (isNonEmptyArray(suggestionGroups)) {
+      if (opportunity.getType() === 'broken-backlinks') {
+        const mappedSuggestions = {};
+        suggestionGroups.forEach((group) => {
+          mappedSuggestions[group.url] = group.suggestions.map((s) => s.getId());
+        });
 
-      await sendAutofixMessage(
-        sqs,
-        queueUrl,
-        siteId,
-        opportunityId,
-        mappedSuggestions,
-        promiseTokenResponse,
-      );
-    } else {
-      await Promise.all(
-        suggestionGroups.map(({ suggestions: groupSuggestions, url }) => sendAutofixMessage(
+        await sendAutofixMessage(
           sqs,
           queueUrl,
           siteId,
           opportunityId,
-          groupSuggestions.map((s) => s.getId()),
+          mappedSuggestions,
           promiseTokenResponse,
-          { url },
-        )),
-      );
+        );
+      } else {
+        await Promise.all(
+          suggestionGroups.map(({ suggestions: groupSuggestions, url }) => sendAutofixMessage(
+            sqs,
+            queueUrl,
+            siteId,
+            opportunityId,
+            groupSuggestions.map((s) => s.getId()),
+            promiseTokenResponse,
+            { url },
+          )),
+        );
+      }
     }
 
     return createResponse(response, 207);
