@@ -59,7 +59,11 @@ async function copyFirstCsvToCache(s3, outLocation, cacheKey, log) {
     const { bucket, prefix } = parseS3Uri(outLocation);
     const listCmd = new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, MaxKeys: 1 });
     const listed = await s3.send(listCmd);
-    const csvObj = (listed.Contents || []).find((obj) => obj.Key.endsWith('.csv'));
+    const csvObj = (listed.Contents || [])
+      .filter((obj) => obj.Key.endsWith('.csv'))
+      .reduce((latest, file) => (
+        !latest || file.LastModified > latest.LastModified ? file : latest
+      ), null);
     if (!csvObj) throw new Error('No CSV result found in Athena output');
     const { bucket: destBucket, prefix: destKey } = parseS3Uri(cacheKey);
     const copyCmd = new CopyObjectCommand({
