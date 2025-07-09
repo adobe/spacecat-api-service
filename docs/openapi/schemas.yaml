@@ -1668,6 +1668,7 @@ ImportOptions:
         - $ref: '#/DocImportData'
         - $ref: '#/XWalkImportData'
         - $ref: '#/DAImportData'
+
 ImportJobRequest:
   type: object
   required:
