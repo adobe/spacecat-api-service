@@ -1,3 +1,10 @@
+# [1.130.0](https://github.com/adobe/spacecat-api-service/compare/v1.129.0...v1.130.0) (2025-07-09)
+
+
+### Features
+
+* support da in spacecat-api-service ([#1047](https://github.com/adobe/spacecat-api-service/issues/1047)) ([b02f797](https://github.com/adobe/spacecat-api-service/commit/b02f797218f3be66148855f0a8a3c562935c51b2))
+
 # [1.129.0](https://github.com/adobe/spacecat-api-service/compare/v1.128.6...v1.129.0) (2025-07-08)
 
 
