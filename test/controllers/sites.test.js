@@ -190,6 +190,11 @@ describe('Sites Controller', () => {
         findByBaseURL: sandbox.stub().resolves(sites[0]),
         findById: sandbox.stub().resolves(sites[0]),
       },
+      SiteTopPage: {
+        allBySiteId: sandbox.stub().resolves([]),
+        allBySiteIdAndSource: sandbox.stub().resolves([]),
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves([]),
+      },
     };
 
     context = {
@@ -1607,6 +1612,82 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Failed to update CDN logs config');
+    });
+  });
+
+  describe('getTopPages', () => {
+    it('returns bad request when site ID is missing', async () => {
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: undefined,
+        },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+        },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its top pages');
+    });
+
+    it('returns not found when the site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+        },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('retrieves top pages for a site', async () => {
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+        },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array');
+      expect(mockDataAccess.SiteTopPage.allBySiteId).to.have.been.calledWith(SITE_IDS[0]);
+    });
+
+    it('retrieves top pages by source for a site', async () => {
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+          source: 'ahrefs',
+        },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSource).to.have.been.calledWith(SITE_IDS[0], 'ahrefs');
+    });
+
+    it('retrieves top pages by source and geo for a site', async () => {
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+          source: 'ahrefs',
+          geo: 'US',
+        },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'ahrefs', 'US');
     });
   });
 });
