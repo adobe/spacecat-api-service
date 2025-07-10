@@ -137,14 +137,9 @@ function BrandsController(ctx, log, env) {
       }
 
       const brandId = site.getConfig()?.getBrandConfig()?.brandId;
-      const userId = site.getConfig()?.getBrandConfig()?.userId;
-      const brandConfig = {
-        brandId,
-        userId,
-      };
       log.info(`Brand ID mapping for site: ${siteId} is ${brandId}`);
-      if (!hasText(brandId) || !hasText(userId)) {
-        return notFound(`Brand config is missing, brandId or userId for site ID: ${siteId}`);
+      if (!hasText(brandId)) {
+        return notFound(`Brand mapping not found for site ID: ${siteId}`);
       }
       const organizationId = site.getOrganizationId();
       const organization = await Organization.findById(organizationId);
@@ -152,11 +147,7 @@ function BrandsController(ctx, log, env) {
       log.info(`IMS Org ID for site: ${siteId} is ${imsOrgId}`);
       const imsConfig = getImsConfig();
       const brandClient = BrandClient.createFrom(context);
-      const brandGuidelines = await brandClient.getBrandGuidelines(
-        brandConfig,
-        imsOrgId,
-        imsConfig,
-      );
+      const brandGuidelines = await brandClient.getBrandGuidelines(brandId, imsOrgId, imsConfig);
       log.info(`Found brand guidelines for site: ${siteId}`);
       return ok(brandGuidelines);
     } catch (error) {
