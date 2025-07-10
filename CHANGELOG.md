@@ -1,3 +1,17 @@
+# [1.131.0](https://github.com/adobe/spacecat-api-service/compare/v1.130.3...v1.131.0) (2025-07-10)
+
+
+### Features
+
+* Implement top pages API ([#1048](https://github.com/adobe/spacecat-api-service/issues/1048)) ([736d12b](https://github.com/adobe/spacecat-api-service/commit/736d12bda7608bac669d26c9d39f0d78f9bfe570))
+
+## [1.130.3](https://github.com/adobe/spacecat-api-service/compare/v1.130.2...v1.130.3) (2025-07-10)
+
+
+### Bug Fixes
+
+* empty commit to force release ([#1051](https://github.com/adobe/spacecat-api-service/issues/1051)) ([07b6fb9](https://github.com/adobe/spacecat-api-service/commit/07b6fb9f8d1be5912e8d71348862e135d071caa3))
+
 ## [1.130.2](https://github.com/adobe/spacecat-api-service/compare/v1.130.1...v1.130.2) (2025-07-10)
 
 
