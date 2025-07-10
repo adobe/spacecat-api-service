@@ -70,7 +70,6 @@ function runInternalReportCommand(context) {
       await triggerInternalReportRun(
         config,
         reportType,
-        slackContext,
         context,
       );
 

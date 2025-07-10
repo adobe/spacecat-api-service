@@ -131,10 +131,8 @@ export const sendInternalReportRunMessage = async (
   sqs,
   queueUrl,
   ReportType,
-  slackContext,
 ) => sqs.sendMessage(queueUrl, {
   type: ReportType,
-  slackContext,
 });
 
 /**
@@ -262,16 +260,11 @@ export const triggerImportRun = async (
 export const triggerInternalReportRun = async (
   config,
   reportType,
-  slackContext,
   lambdaContext,
 ) => sendInternalReportRunMessage(
   lambdaContext.sqs,
   config.getQueues().reports,
   reportType,
-  {
-    channelId: slackContext.channelId,
-    threadTs: slackContext.threadTs,
-  },
 );
 
 /**
