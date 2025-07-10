@@ -1,3 +1,10 @@
+## [1.130.2](https://github.com/adobe/spacecat-api-service/compare/v1.130.1...v1.130.2) (2025-07-10)
+
+
+### Bug Fixes
+
+* userId support for brand config ([#1042](https://github.com/adobe/spacecat-api-service/issues/1042)) ([1f34679](https://github.com/adobe/spacecat-api-service/commit/1f34679bfc6a183babb9c3aaca6019d922892cc5))
+
 ## [1.130.1](https://github.com/adobe/spacecat-api-service/compare/v1.130.0...v1.130.1) (2025-07-09)
 
 
