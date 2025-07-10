@@ -19,7 +19,7 @@ site-traffic-paid-type-channel-campaign:
             schema:
               type: array
               items:
-                $ref: '#/PaidTrafficChannelCampaignResponse'
+                $ref: '#/PaidTrafficTypeChannelCampaignData'
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -50,7 +50,7 @@ site-traffic-paid-type-channel:
             schema:
               type: array
               items:
-                $ref: '#/PaidTrafficChannelResponse'
+                $ref: '#/PaidTrafficTypeChannelData'
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -81,7 +81,7 @@ site-traffic-paid-type-campaign:
             schema:
               type: array
               items:
-                $ref: '#/PaidTrafficCampaignResponse'
+                $ref: '#/PaidTrafficTypeCampaignData'
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -112,7 +112,7 @@ site-traffic-paid-type:
             schema:
               type: array
               items:
-                $ref: '#/PaidTrafficTypeResponse'
+                $ref: '#/PaidTrafficTypeData'
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -148,7 +148,7 @@ site-traffic-paid-top-pages:
     security:
       - api_key: [ ]
 
-PaidTrafficChannelCampaignResponse:
+PaidTrafficTypeChannelCampaignData:
   type: object
   properties:
     type:
@@ -156,7 +156,7 @@ PaidTrafficChannelCampaignResponse:
       description: The traffic type (owned, earned, paid)
     channel:
       type: string
-      description: The platform or channel (e.g., search, display, social)
+      description: The channel (e.g., search, display, social)
     campaign:
       type: string
       description: The campaign name or ID
@@ -171,7 +171,7 @@ PaidTrafficChannelCampaignResponse:
       type: number
       format: float
       description: Click rate
-    engagement:
+    engagement_rate:
       type: number
       format: float
       description: Engagement metric
@@ -179,20 +179,8 @@ PaidTrafficChannelCampaignResponse:
       type: number
       format: float
       description: Bounce rate
-    p70_lcp:
-      type: number
-      format: float
-      description: 70th percentile Largest Contentful Paint
-    p70_cls:
-      type: number
-      format: float
-      description: 70th percentile Cumulative Layout Shift
-    p70_inp:
-      type: number
-      format: float
-      description: 70th percentile Interaction to Next Paint
 
-PaidTrafficChannelResponse:
+PaidTrafficTypeChannelData:
   type: object
   properties:
     type:
@@ -200,7 +188,7 @@ PaidTrafficChannelResponse:
       description: The traffic type (owned, earned, paid)
     channel:
       type: string
-      description: The platform or channel (e.g., search, display, social)
+      description: The channel (e.g., search, display, social)
     pageviews:
       type: integer
       description: Number of pageviews
@@ -220,20 +208,8 @@ PaidTrafficChannelResponse:
       type: number
       format: float
       description: Bounce rate
-    p70_lcp:
-      type: number
-      format: float
-      description: 70th percentile Largest Contentful Paint
-    p70_cls:
-      type: number
-      format: float
-      description: 70th percentile Cumulative Layout Shift
-    p70_inp:
-      type: number
-      format: float
-      description: 70th percentile Interaction to Next Paint
 
-PaidTrafficCampaignResponse:
+PaidTrafficTypeCampaignData:
   type: object
   properties:
     type:
@@ -261,20 +237,8 @@ PaidTrafficCampaignResponse:
       type: number
       format: float
       description: Bounce rate
-    p70_lcp:
-      type: number
-      format: float
-      description: 70th percentile Largest Contentful Paint
-    p70_cls:
-      type: number
-      format: float
-      description: 70th percentile Cumulative Layout Shift
-    p70_inp:
-      type: number
-      format: float
-      description: 70th percentile Interaction to Next Paint
 
-PaidTrafficTypeResponse:
+PaidTrafficTypeData:
   type: object
   properties:
     type:
@@ -299,17 +263,5 @@ PaidTrafficTypeResponse:
       type: number
       format: float
       description: Bounce rate
-    p70_lcp:
-      type: number
-      format: float
-      description: 70th percentile Largest Contentful Paint
-    p70_cls:
-      type: number
-      format: float
-      description: 70th percentile Cumulative Layout Shift
-    p70_inp:
-      type: number
-      format: float
-      description: 70th percentile Interaction to Next Paint
 
 components: {}

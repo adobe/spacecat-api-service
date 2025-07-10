@@ -15,62 +15,35 @@ import {
   notFound,
   forbidden,
 } from '@adobe/spacecat-shared-http-utils';
-import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { MarketingChannelResponseDto } from '../../dto/marketing-channel-response.js';
+import { QueryRegistry } from './query-registry.js';
 import {
   parseCsvToJson,
   getS3CachedResult,
   copyFirstCsvToCache,
 } from './caching-helper.js';
 
-const filename = fileURLToPath(import.meta.url);
-const dirname = path.dirname(filename);
+const queryRegistry = new QueryRegistry();
 
-let channelQueryTemplate = '';
+queryRegistry.loadTemplate();
 
-// Load the SQL template at startup
-(async () => {
-  const templatePath = path.join(dirname, 'channel-query.sql.tpl');
-  channelQueryTemplate = await fs.readFile(templatePath, 'utf-8');
-})();
-
-function renderQuery(template, params) {
-  return template
-    .replace(/{{siteId}}/g, params.siteKey)
-    .replace(/{{year}}/g, params.year)
-    .replace(/{{month}}/g, params.month)
-    .replace(/{{week}}/g, params.week)
-    .replace(/{{groupBy}}/g, params.groupBy)
-    .replace(/{{dimensionColumns}}/g, params.dimensionColumns)
-    .replace(/{{dimensionColumnsPrefixed}}/g, params.dimensionColumnsPrefixed)
-    .replace(/{{tableName}}/g, params.tableName);
-}
-
-async function tryGetCacheResult(s3, cacheBucket, query, log) {
+async function tryGetCacheResult(siteid, s3, cacheBucket, query, log) {
   if (!cacheBucket) return { resultJson: null, cacheKey: null };
   const outPrefix = `${crypto.createHash('md5').update(query).digest('hex')}`;
-  const cacheKey = `${cacheBucket}/${outPrefix}.csv`;
+  const cacheKey = `${cacheBucket}/${siteid}/${outPrefix}.csv`;
   const cached = await getS3CachedResult(s3, cacheKey, log);
   if (cached) {
     log.info(`Found cached result. Returning cached Athena result from S3: ${cacheKey}`);
     const parsed = await parseCsvToJson(cached);
-    const resultJson = Array.isArray(parsed)
-      ? parsed.map(MarketingChannelResponseDto.toJSON)
-      : [];
+    const resultJson = parsed.map(MarketingChannelResponseDto.toJSON);
     return { resultJson, cacheKey, outPrefix };
   }
   return { resultJson: null, cacheKey, outPrefix };
 }
 
 function TrafficController(context, log, env) {
-  if (!context || !context.dataAccess) {
-    throw new Error('Context and dataAccess required');
-  }
   const { dataAccess } = context;
   const { Site } = dataAccess;
 
@@ -92,7 +65,7 @@ function TrafficController(context, log, env) {
 
     const {
       siteKey, year, week, month,
-    } = context.data || {};
+    } = context.data;
     if (!siteKey || !year || !week || !month) {
       throw new Error('siteKey, year, month and week are required parameters');
     }
@@ -101,10 +74,11 @@ function TrafficController(context, log, env) {
 
     const groupBy = dimensions;
     const dimensionColumns = groupBy.join(', ');
-    const dimensionColumnsPrefixed = groupBy.length > 0 ? `${groupBy.map((col) => `a.${col}`).join(', ')}, ` : '';
+    const dimensionColumnsPrefixed = `${groupBy.map((col) => `a.${col}`).join(', ')}, `;
     const description = `fetch paid channel data | db: ${dbName} | siteKey: ${siteKey} | year: ${year} | month: ${month} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
     log.info(`Processing query: ${description}`);
-    const query = renderQuery(channelQueryTemplate, {
+
+    const query = await queryRegistry.renderQuery({
       siteKey,
       year,
       month,
@@ -126,13 +100,13 @@ function TrafficController(context, log, env) {
       resultJson,
       cacheKey,
       outPrefix,
-    } = await tryGetCacheResult(s3, cacheBucket, query, log);
+    } = await tryGetCacheResult(siteId, s3, cacheBucket, query, log);
     if (resultJson) {
       return ok(resultJson);
     }
 
     const resultLocation = `${outputFolder}/${outPrefix}`;
-    const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
+    const athenaClient = context.athenaClientFactory(resultLocation);
 
     log.info(`Fetching paid data directly from athena bucket ${outputFolder} and table ${fullTableName}`);
     const results = await athenaClient.query(
@@ -140,9 +114,8 @@ function TrafficController(context, log, env) {
       dbName,
       description,
     );
-    const resultJsonFresh = Array.isArray(results)
-      ? results.map(MarketingChannelResponseDto.toJSON)
-      : [];
+
+    const resultJsonFresh = results.map(MarketingChannelResponseDto.toJSON);
 
     if (cacheBucket) {
       const isCached = await copyFirstCsvToCache(s3, resultLocation, cacheKey, log);

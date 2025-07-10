@@ -16,10 +16,9 @@ import {
 
 function parseS3Uri(s3Uri) {
   const match = s3Uri.match(/^s3:\/\/([^/]+)\/?(.*)$/);
-  if (!match) throw new Error(`Invalid S3 URI: ${s3Uri}`);
   return {
     bucket: match[1],
-    prefix: match[2] || '',
+    prefix: match[2],
   };
 }
 
@@ -36,8 +35,8 @@ async function getS3CachedResult(s3, key, log) {
   try {
     log.info(`Checking for cached result key: ${key}`);
     const { bucket, prefix } = parseS3Uri(key);
-    const command = new GetObjectCommand({ Bucket: bucket, Key: prefix });
-    const response = await s3.send(command);
+    const getCachedFile = new GetObjectCommand({ Bucket: bucket, Key: prefix });
+    const response = await s3.send(getCachedFile);
     const stream = response.Body;
     const chunks = [];
     for await (const chunk of stream) {
@@ -46,7 +45,7 @@ async function getS3CachedResult(s3, key, log) {
     const data = Buffer.concat(chunks).toString('utf-8');
     return data;
   } catch (err) {
-    if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
+    if (err.name === 'NoSuchKey') {
       return null;
     }
     log.error(`Unepected exception when trying to fetch cached results on key: ${key}. Ignoring error and continuing with normal query. Exception was ${err}`);

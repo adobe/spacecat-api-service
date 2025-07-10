@@ -20,16 +20,12 @@ export const MarketingChannelResponseDto = {
    * @returns {{
    *   type: string,
    *   channel: string,
-   *   platform: string,
    *   campaign: string,
    *   pageviews: number,
    *   pct_pageviews: number,
    *   click_rate: number,
-   *   engagement: number,
+   *   engagement_rate: number,
    *   bounce_rate: number,
-   *   p70_lcp: number,
-   *   p70_cls: number,
-   *   p70_inp: number
    * }} JSON object.
    */
   toJSON: (data) => ({
@@ -40,10 +36,7 @@ export const MarketingChannelResponseDto = {
     pageviews: data.pageviews,
     pct_pageviews: data.pct_pageviews,
     click_rate: data.click_rate,
-    engagement: data.engagement_rate,
+    engagement_rate: data.engagement_rate,
     bounce_rate: data.bounce_rate,
-    p70_lcp: data.p70_lcp,
-    p70_cls: data.p70_cls,
-    p70_inp: data.p70_inp,
   }),
 };
