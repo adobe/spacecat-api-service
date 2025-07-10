@@ -620,6 +620,36 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const getTopPages = async (context) => {
+    const { siteId, source, geo } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its top pages');
+    }
+
+    const { SiteTopPage } = dataAccess;
+
+    let topPages = [];
+    if (hasText(source) && hasText(geo)) {
+      topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, source, geo);
+    } else if (hasText(source)) {
+      topPages = await SiteTopPage.allBySiteIdAndSource(siteId, source);
+    } else {
+      topPages = await SiteTopPage.allBySiteId(siteId);
+    }
+
+    return ok(topPages);
+  };
+
   return {
     createSite,
     getAll,
@@ -633,6 +663,7 @@ function SitesController(ctx, log, env) {
     removeSite,
     updateSite,
     updateCdnLogsConfig,
+    getTopPages,
 
     // key events
     createKeyEvent,
