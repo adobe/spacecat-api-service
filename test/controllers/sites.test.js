@@ -65,10 +65,10 @@ describe('Sites Controller', () => {
 
   const sites = [
     {
-      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', deliveryConfig: {}, config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {},
     },
     {
-      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {},
     },
   ].map((site) => new Site(
     {
@@ -81,6 +81,7 @@ describe('Sites Controller', () => {
                 name: { type: 'string', name: 'name', get: (value) => value },
                 config: { type: 'any', name: 'config', get: (value) => Config(value) },
                 deliveryType: { type: 'string', name: 'deliveryType', get: (value) => value },
+                authoringType: { type: 'string', name: 'authoringType', get: (value) => value },
                 gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
                 isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
                 organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
@@ -150,11 +151,13 @@ describe('Sites Controller', () => {
     'getByID',
     'removeSite',
     'updateSite',
+    'updateCdnLogsConfig',
     'createKeyEvent',
     'getKeyEventsBySiteID',
     'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
+    'getTopPages',
   ];
 
   let mockDataAccess;
@@ -186,6 +189,11 @@ describe('Sites Controller', () => {
         create: sandbox.stub().resolves(sites[0]),
         findByBaseURL: sandbox.stub().resolves(sites[0]),
         findById: sandbox.stub().resolves(sites[0]),
+      },
+      SiteTopPage: {
+        allBySiteId: sandbox.stub().resolves([]),
+        allBySiteIdAndSource: sandbox.stub().resolves([]),
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves([]),
       },
     };
 
@@ -272,6 +280,7 @@ describe('Sites Controller', () => {
         organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
         isLive: false,
         deliveryType: 'other',
+        authoringType: 'cs',
         deliveryConfig: {
           programId: '12652',
           environmentId: '16854',
@@ -313,6 +322,7 @@ describe('Sites Controller', () => {
         organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
         isLive: false,
         deliveryType: 'other',
+        authoringType: 'cs',
         deliveryConfig: {
           programId: '12652',
           environmentId: '16854',
@@ -1374,5 +1384,310 @@ describe('Sites Controller', () => {
     const updatedSite = await response.json();
     expect(updatedSite).to.have.property('id', SITE_IDS[0]);
     expect(updatedSite).to.have.property('name', 'new-name');
+  });
+
+  describe('updateCdnLogsConfig', () => {
+    it('updates CDN logs config successfully', async () => {
+      const site = sites[0];
+      const originalConfig = Config({ existingConfig: 'value' });
+      const cdnLogsConfig = {
+        bucketName: 'test-bucket',
+        outputLocation: 'test-output-location',
+        filters: [{ key: 'test-key', value: ['test-value'] }],
+      };
+
+      let currentConfig = originalConfig;
+      site.getConfig = sandbox.stub().callsFake(() => currentConfig);
+      site.setConfig = sandbox.stub().callsFake((newConfig) => {
+        currentConfig = Config(newConfig);
+      });
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+
+      const updatedSite = await response.json();
+      expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+      expect(updatedSite.config).to.have.property('cdnLogsConfig');
+      expect(updatedSite.config.cdnLogsConfig).to.deep.include({
+        bucketName: 'test-bucket',
+        outputLocation: 'test-output-location',
+      });
+    });
+
+    it('returns bad request when site ID is not provided', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: {},
+        data: { cdnLogsConfig: { enabled: true } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request when site ID is invalid', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: 'invalid-uuid' },
+        data: { cdnLogsConfig: { enabled: true } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request when cdnLogsConfig is not provided', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Cdn logs config required');
+    });
+
+    it('returns bad request when cdnLogsConfig is not an object', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: 'not-an-object' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Cdn logs config required');
+    });
+
+    it('returns bad request when cdnLogsConfig is null', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: null },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Cdn logs config required');
+    });
+
+    it('returns not found when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: { bucketName: 'test-bucket' } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('merges cdnLogsConfig with existing config', async () => {
+      const site = sites[0];
+      const existingConfig = Config({
+        existingField: 'value',
+        anotherField: 'another-value',
+      });
+      const cdnLogsConfig = {
+        bucketName: 'my-bucket',
+        outputLocation: 'my-output',
+      };
+
+      site.getConfig = sandbox.stub().returns(existingConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setConfig).to.have.been.calledOnce;
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('overwrites existing cdnLogsConfig when updating', async () => {
+      const site = sites[0];
+      const existingConfig = Config({
+        existingField: 'value',
+        cdnLogsConfig: {
+          bucketName: 'old-bucket',
+          outputLocation: 'old-output',
+          filters: [{ key: 'old-key', value: ['old-value'] }],
+        },
+      });
+      const newCdnLogsConfig = {
+        bucketName: 'new-bucket',
+        outputLocation: 'new-output',
+        filters: [{ key: 'new-key', value: ['new-value'] }],
+      };
+
+      site.getConfig = sandbox.stub().returns(existingConfig);
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: newCdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setConfig).to.have.been.calledOnce;
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig: { enabled: true } },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only users belonging to the organization can update its sites');
+    });
+
+    it('handles missing context data gracefully', async () => {
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        // No data property
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Cdn logs config required');
+    });
+
+    it('handles errors during config update', async () => {
+      const site = sites[0];
+      const cdnLogsConfig = { bucketName: 'test-bucket' };
+
+      site.getConfig = sandbox.stub().throws(new Error('Config update failed'));
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Failed to update CDN logs config');
+    });
+
+    it('handles errors during site save', async () => {
+      const site = sites[0];
+      const cdnLogsConfig = { bucketName: 'test-bucket' };
+
+      site.getConfig = sandbox.stub().returns(Config({}));
+      site.setConfig = sandbox.stub();
+      site.save = sandbox.stub().rejects(new Error('Save failed'));
+
+      const response = await sitesController.updateCdnLogsConfig({
+        params: { siteId: SITE_IDS[0] },
+        data: { cdnLogsConfig },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Failed to update CDN logs config');
+    });
+  });
+
+  describe('getTopPages', () => {
+    it('returns bad request when site ID is missing', async () => {
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: undefined,
+        },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns forbidden when user does not have access to the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+        },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its top pages');
+    });
+
+    it('returns not found when the site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+        },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('retrieves top pages for a site', async () => {
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+        },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array');
+      expect(mockDataAccess.SiteTopPage.allBySiteId).to.have.been.calledWith(SITE_IDS[0]);
+    });
+
+    it('retrieves top pages by source for a site', async () => {
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+          source: 'ahrefs',
+        },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSource).to.have.been.calledWith(SITE_IDS[0], 'ahrefs');
+    });
+
+    it('retrieves top pages by source and geo for a site', async () => {
+      const result = await sitesController.getTopPages({
+        params: {
+          siteId: SITE_IDS[0],
+          source: 'ahrefs',
+          geo: 'US',
+        },
+      });
+      const response = await result.json();
+      expect(result.status).to.equal(200);
+      expect(response).to.be.an('array');
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'ahrefs', 'US');
+    });
   });
 });
