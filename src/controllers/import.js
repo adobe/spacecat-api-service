@@ -105,7 +105,7 @@ function ImportController(context) {
     const types = Object.values(ImportJobModel.ImportOptionTypes);
     // the type property is optional for backwards compatibility, if it is provided it must be valid
     if (data.options?.type && !types.includes(data.options.type)) {
-      throw new ErrorWithStatusCode(`Invalid request: type must be either ${types.join(' or ')}`, STATUS_BAD_REQUEST);
+      throw new ErrorWithStatusCode(`Invalid request: type must be either ${types.slice(0, -1).join(', ')} or ${types[types.length - 1]}.`, STATUS_BAD_REQUEST);
     }
 
     if (data.options?.type === ImportJobModel.ImportOptionTypes.XWALK) {

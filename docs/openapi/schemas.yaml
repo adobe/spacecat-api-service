@@ -1613,6 +1613,10 @@ DocImportData:
   title: "Doc Import"
   description: "There are no data properties available for doc based imports."
   properties: {}
+DAImportData:
+  title: "DA Import"
+  description: "There are no data properties available for DA based imports."
+  properties: {}
 XWalkImportData:
   title: "Xwalk Import"
   properties:
@@ -1623,44 +1627,38 @@ XWalkImportData:
   required:
     - siteName
     - assetFolder
-ImportOptionsBase:
+
+BrowserOptions:
+  description: Common browser options for page loading operations
   properties:
-    enableJavascript:
-      description: Whether to enable JavaScript on the page
-      type: boolean
-    hideConsentBanners:
-      description: Whether to hide consent banners on the page
-      type: boolean
     pageLoadTimeout:
       description: The time in milliseconds to wait for the page to load
       type: integer
-    waitForSelector:
-      description: The selector to wait for before considering the page loaded
-      type: string
-    sectionLoadWaitTime:
-      description: The time in milliseconds to wait for the section to load
-      type: integer
-    screenshotTypes:
-      description: The types of screenshots to take
-      type: array
-      items:
-        type: string
-        enum:
-          - 'fullPage'
-          - 'thumbnail'
-          - 'section'
-          - 'block'
-          - 'scroll'
+    enableJavascript:
+      description: Whether to enable JavaScript on the page
+      type: boolean
+      default: true
   example:
     pageLoadTimeout: 200
     enableJavascript: true
+
+ImportOptionsBase:
+  description: Base options for import operations, extends BrowserOptions with import-specific features
+  allOf:
+    - $ref: '#/BrowserOptions'
+    - type: object
+      properties: {}
+  example:
+    pageLoadTimeout: 200
+    enableJavascript: true
+
 ImportOptions:
   allOf: #/ImportOptionsBase
     - $ref: '#/ImportOptionsBase'
   properties:
     type:
-      enum: ['doc', 'xwalk']
-      description: The type of import job. Options are 'doc' or 'xwalk'.
+      enum: ['doc', 'xwalk', 'da']
+      description: The type of import job. Valid options are 'doc', 'da' or 'xwalk'.
       type: string
       default: 'doc'
     data:
@@ -1669,6 +1667,8 @@ ImportOptions:
       oneOf:
         - $ref: '#/DocImportData'
         - $ref: '#/XWalkImportData'
+        - $ref: '#/DAImportData'
+
 ImportJobRequest:
   type: object
   required:
@@ -1772,6 +1772,43 @@ ImportJobArchive:
   example:
     jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
     downloadUrl: 'https://spacecat-example-bucket.s3.example-region.amazonaws.com/import/12d6ac8e-d5e4-4788-90eb-b69e10e745fd/import-result.zip?X-Amz-Algorithm=AWS...'
+ScrapeOptions:
+  description: Options specific to scraping operations, extends BrowserOptions with scraping-specific features
+  allOf:
+    - $ref: '#/BrowserOptions'
+    - type: object
+      properties:
+        hideConsentBanners:
+          description: Whether to hide consent banners on the page
+          type: boolean
+          default: false
+        waitForSelector:
+          description: The selector to wait for before considering the page loaded
+          type: string
+          pattern: '^[.#]?[a-zA-Z][a-zA-Z0-9_-]*(\.[a-zA-Z][a-zA-Z0-9_-]*)*$'
+        sectionLoadWaitTime:
+          description: The time in milliseconds to wait for the section to load
+          type: integer
+          minimum: 0
+          maximum: 30000
+          default: 2000
+        screenshotTypes:
+          description: The types of screenshots to take
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: string
+            enum:
+              - 'fullPage'
+              - 'thumbnail'
+              - 'section'
+              - 'block'
+              - 'scroll'
+  example:
+    pageLoadTimeout: 200
+    enableJavascript: true
+    hideConsentBanners: true
 ScrapeRequest:
   type: object
   required:
@@ -1784,7 +1821,7 @@ ScrapeRequest:
       default: 'default'
     options:
       description: Optional configuration params, defined as a JSON object
-      $ref: '#/ImportOptionsBase'
+      $ref: '#/ScrapeOptions'
     customHeaders:
       description: Optional custom headers to send with each HTTP request
       type: object
