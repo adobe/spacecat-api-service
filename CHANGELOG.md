@@ -1,3 +1,24 @@
+## [1.130.3](https://github.com/adobe/spacecat-api-service/compare/v1.130.2...v1.130.3) (2025-07-10)
+
+
+### Bug Fixes
+
+* empty commit to force release ([#1051](https://github.com/adobe/spacecat-api-service/issues/1051)) ([07b6fb9](https://github.com/adobe/spacecat-api-service/commit/07b6fb9f8d1be5912e8d71348862e135d071caa3))
+
+## [1.130.2](https://github.com/adobe/spacecat-api-service/compare/v1.130.1...v1.130.2) (2025-07-10)
+
+
+### Bug Fixes
+
+* userId support for brand config ([#1042](https://github.com/adobe/spacecat-api-service/issues/1042)) ([1f34679](https://github.com/adobe/spacecat-api-service/commit/1f34679bfc6a183babb9c3aaca6019d922892cc5))
+
+## [1.130.1](https://github.com/adobe/spacecat-api-service/compare/v1.130.0...v1.130.1) (2025-07-09)
+
+
+### Bug Fixes
+
+* add scrape-top-pages to demo profile ([#1049](https://github.com/adobe/spacecat-api-service/issues/1049)) ([f89b85e](https://github.com/adobe/spacecat-api-service/commit/f89b85ee95217b1049011d1fa5665998febe6ceb))
+
 # [1.130.0](https://github.com/adobe/spacecat-api-service/compare/v1.129.0...v1.130.0) (2025-07-09)
 
 
