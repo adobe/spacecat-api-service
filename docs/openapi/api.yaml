@@ -89,17 +89,17 @@ paths:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
     $ref: './preflight-api.yaml#/preflight-job-status'
-  /scrape:
+  /tools/scrape/jobs:
     $ref: './scrape-api.yaml#/create-scrape-job'
-  /scrape/jobs/{jobId}:
+  /tools/scrape/jobs/{jobId}:
     $ref: './scrape-api.yaml#/get-scrape-job-status'
-  /scrape/jobs/{jobId}/results:
+  /tools/scrape/jobs/{jobId}/results:
     $ref: './scrape-api.yaml#/get-scrape-job-url-results'
-  /scrape/jobs/by-date-range/{startDate}/{endDate}/all-jobs:
+  /tools/scrape/jobs/by-date-range/{startDate}/{endDate}/all-jobs:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-date-range'
-  /scrape/jobs/by-base-url/{base64BaseUrl}:
+  /tools/scrape/jobs/by-base-url/{base64BaseUrl}:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url'
-  /scrape/jobs/by-base-url/{base64BaseUrl}/by-processingtype/{processingType}:
+  /tools/scrape/jobs/by-base-url/{base64BaseUrl}/by-processingtype/{processingType}:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url-and-processing-type'
   /sites:
     $ref: './sites-api.yaml#/sites'
@@ -152,15 +152,13 @@ paths:
   /sites/{siteId}/scraped-content/{type}:
     $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
-     $ref: './scrape-api.yaml#/get-files'
+    $ref: './scrape-api.yaml#/get-files'
   /sites/{siteId}/top-pages:
     $ref: './site-top-pages-api.yaml#/site-top-pages'
   /sites/{siteId}/top-pages/{source}:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source'
   /sites/{siteId}/top-pages/{source}/{geo}:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
-  /sites/{siteId}/traffic/paid:
-    $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/metrics/{metric}/{source}:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
@@ -200,27 +198,27 @@ components:
       type: apiKey
       in: header
       name: x-api-key
-      description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read-only operations.)"
+      description: 'DEPRECATED, use scoped_api_key or ims_key. (Used for read-only operations.)'
     scoped_api_key:
       type: apiKey
       in: header
       name: x-api-key
-      description: "For endpoints which authenticate with scoped API keys"
+      description: 'For endpoints which authenticate with scoped API keys'
     ims_key:
       type: apiKey
       in: header
       name: authorization
-      description: "Value must be a valid IMS user token which will be offline-validated."
+      description: 'Value must be a valid IMS user token which will be offline-validated.'
     admin_key:
       type: apiKey
       in: header
       name: x-api-key
-      description: "DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)"
+      description: 'DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)'
     cookie_auth:
       type: apiKey
       in: cookie
       name: sessionToken
-      description: "Authentication using session cookie"
+      description: 'Authentication using session cookie'
   schemas:
     $ref: './schemas.yaml'
   examples:
