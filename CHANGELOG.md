@@ -1,3 +1,10 @@
+## [1.130.3](https://github.com/adobe/spacecat-api-service/compare/v1.130.2...v1.130.3) (2025-07-10)
+
+
+### Bug Fixes
+
+* empty commit to force release ([#1051](https://github.com/adobe/spacecat-api-service/issues/1051)) ([07b6fb9](https://github.com/adobe/spacecat-api-service/commit/07b6fb9f8d1be5912e8d71348862e135d071caa3))
+
 ## [1.130.2](https://github.com/adobe/spacecat-api-service/compare/v1.130.1...v1.130.2) (2025-07-10)
 
 
