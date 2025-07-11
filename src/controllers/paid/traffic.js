@@ -14,6 +14,7 @@ import {
   ok,
   notFound,
   forbidden,
+  badRequest,
 } from '@adobe/spacecat-shared-http-utils';
 import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -57,21 +58,18 @@ function TrafficController(context, log, env) {
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can view paid traffic metrics');
     }
-    const dbName = env.PAID_TRAFFIC_DATABASE;
-    const tableName = env.PAID_TRAFFIC_TABLE_NAME;
-    if (!dbName || !tableName) {
-      throw new Error('PAID_TRAFFIC_DATABASE and PAID_TRAFFIC_TABLE_NAME are requited');
-    }
 
     const {
       siteKey, year, week, month,
     } = context.data;
     if (!siteKey || !year || !week || !month) {
-      throw new Error('siteKey, year, month and week are required parameters');
+      const badReqMessagge = 'siteKey, year, month and week are required parameters';
+      log.info(badReqMessagge);
+      return badRequest(badReqMessagge);
     }
+    const dbName = env.PAID_TRAFFIC_DATABASE ?? 'cdn_logs_wknd_site';
+    const tableName = env.PAID_TRAFFIC_TABLE_NAME ?? 'rum_segments_data';
     const fullTableName = `${dbName}.${tableName}`;
-    const outputFolder = env.PAID_TRAFFIC_S3_OUTPUT_URI;
-
     const groupBy = dimensions;
     const dimensionColumns = groupBy.join(', ');
     const dimensionColumnsPrefixed = `${groupBy.map((col) => `a.${col}`).join(', ')}, `;
@@ -90,11 +88,8 @@ function TrafficController(context, log, env) {
     });
 
     log.debug(`Fetching paid data with query ${query}`);
-
-    const cacheBucket = env.PAID_TRAFFIC_S3_CACHE_BUCKET_URI;
-    if (!cacheBucket) {
-      log.warn('PAID_TRAFFIC_S3_CACHE_BUCKET_URI is not supplied, all queries will be executed without cache');
-    }
+    const outputFolder = env.PAID_TRAFFIC_S3_OUTPUT_URI ?? 's3://spacecat-dev-segments/temp/out';
+    const cacheBucket = env.PAID_TRAFFIC_S3_CACHE_BUCKET_URI ?? 's3://spacecat-dev-segments/cache';
     const s3 = context.s3?.s3Client;
     const {
       resultJson,
@@ -117,7 +112,7 @@ function TrafficController(context, log, env) {
 
     const resultJsonFresh = results.map(MarketingChannelResponseDto.toJSON);
 
-    if (cacheBucket) {
+    if (resultJsonFresh) {
       const isCached = await copyFirstCsvToCache(s3, resultLocation, cacheKey, log);
       log.info(`Is Copy Athena result CSV to S3 cache: ${cacheKey} succesful was : ${isCached}`);
     }

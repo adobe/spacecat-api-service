@@ -254,17 +254,7 @@ describe('Paid TrafficController', async () => {
       expect(res.status).to.equal(403);
     });
 
-    it('throws error if PAID_TRAFFIC_DATABASE or PAID_TRAFFIC_TABLE_NAME is missing', async () => {
-      const envMissingDb = { ...mockEnv, PAID_TRAFFIC_DATABASE: undefined };
-      const controller = TrafficController(mockContext, mockLog, envMissingDb);
-      await expect(controller.getPaidTrafficByTypeChannelCampaign()).to.be.rejectedWith('PAID_TRAFFIC_DATABASE and PAID_TRAFFIC_TABLE_NAME are requited');
-
-      const envMissingTable = { ...mockEnv, PAID_TRAFFIC_TABLE_NAME: undefined };
-      const controller2 = TrafficController(mockContext, mockLog, envMissingTable);
-      await expect(controller2.getPaidTrafficByTypeChannelCampaign()).to.be.rejectedWith('PAID_TRAFFIC_DATABASE and PAID_TRAFFIC_TABLE_NAME are requited');
-    });
-
-    it('throws error if siteKey, year, month, or week is missing', async () => {
+    it('returns 400 with msg if siteKey, year, month, or week is missing', async () => {
       const requiredFields = ['siteKey', 'year', 'month', 'week'];
       for (const field of requiredFields) {
         const badData = { ...mockContext.data };
@@ -272,7 +262,11 @@ describe('Paid TrafficController', async () => {
         const badContext = { ...mockContext, data: badData };
         const controller = TrafficController(badContext, mockLog, mockEnv);
         // eslint-disable-next-line no-await-in-loop
-        await expect(controller.getPaidTrafficByTypeChannelCampaign()).to.be.rejectedWith('siteKey, year, month and week are required parameters');
+        const rest = await controller.getPaidTrafficByTypeChannelCampaign();
+        expect(rest.status).to.equal(400);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await rest.json();
+        expect(body.message).to.equal('siteKey, year, month and week are required parameters');
       }
     });
 
