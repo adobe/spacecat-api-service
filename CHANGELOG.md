@@ -1,3 +1,10 @@
+# [1.132.0](https://github.com/adobe/spacecat-api-service/compare/v1.131.2...v1.132.0) (2025-07-11)
+
+
+### Features
+
+* add get paid traffic data by marketing channel endpoints ([#1041](https://github.com/adobe/spacecat-api-service/issues/1041)) ([b1bc89f](https://github.com/adobe/spacecat-api-service/commit/b1bc89fcc94350ba3924ed2b7f96ed1d87628d4d))
+
 ## [1.131.2](https://github.com/adobe/spacecat-api-service/compare/v1.131.1...v1.131.2) (2025-07-11)
 
 

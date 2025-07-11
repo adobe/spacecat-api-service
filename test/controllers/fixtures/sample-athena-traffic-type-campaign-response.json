@@ -1,0 +1,74 @@
+[
+    {
+        "type": "owned",
+        "pageviews": "1965521",
+        "pct_pageviews": "0.5697292778588263",
+        "click_rate": "0.5091057075999593",
+        "engagement": "0.5298097466680232",
+        "bounce_rate": "0.47019014333197684",
+        "p70_lcp": "2753",
+        "p70_cls": "0.04713613209484144",
+        "p70_inp": "121"
+    },
+    {
+        "type": "paid",
+        "pageviews": "47700111",
+        "pct_pageviews": "0.12977108751185898",
+        "click_rate": "0.8012061648414285",
+        "engagement": "0.814776189411453",
+        "bounce_rate": "0.17422381058744696",
+        "p70_lcp": "2299",
+        "p70_cls": "0.06076743316653127",
+        "p70_inp": "133"
+    },
+    {
+        "type": "paid",
+        "campaign": "Sample-Sale",
+        "pageviews": "360300",
+        "pct_pageviews": "0.1044371740686236",
+        "click_rate": "0.028309741881765195",
+        "engagement": "0.05578684429641965",
+        "bounce_rate": "0.9442131557035803",
+        "p70_lcp": "13762",
+        "p70_cls": "0.05488573618297385",
+        "p70_inp": "120"
+    },
+    {
+        "type": "earned",
+        "pageviews": "745",
+        "pct_pageviews": "0.0215946973858242",
+        "click_rate": "0.7516778523489933",
+        "engagement": "0.7771812080536913",
+        "bounce_rate": "0.22281879194630871",
+        "p70_lcp": "1973",
+        "p70_cls": "0.04530538764634877",
+        "p70_inp": "108"
+    },
+    {
+        "type": "paid",
+        "campaign": "84119",
+        "pageviews": "100",
+        "pct_pageviews": "2.8986170987683485E-5",
+        "click_rate": "0.0",
+        "engagement": "0.0",
+        "bounce_rate": "1.0"
+    },
+    {
+        "type": "paid",
+        "campaign": "26311963",
+        "pageviews": "100",
+        "pct_pageviews": "2.8986170987683485E-5",
+        "click_rate": "1.0",
+        "engagement": "1.0",
+        "bounce_rate": "0.0"
+    },
+    {
+        "type": "owned",
+        "campaign": "IT-FOCUSED",
+        "pageviews": "100",
+        "pct_pageviews": "2.8986170987683485E-5",
+        "click_rate": "1.0",
+        "engagement": "1.0",
+        "bounce_rate": "0.0"
+    }
+]

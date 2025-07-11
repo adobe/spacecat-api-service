@@ -17,8 +17,8 @@ import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import PaidController from '../../src/controllers/paid.js';
-import AccessControlUtil from '../../src/support/access-control-util.js';
+import PaidController from '../../../src/controllers/paid.js';
+import AccessControlUtil from '../../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
