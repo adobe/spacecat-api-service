@@ -499,7 +499,7 @@ describe('ImportController tests', () => {
      * Test the xwalk createImportJob use case.
      */
     describe('xwalk createImportJob', () => {
-      it('should create an import job with the option.type of doc or xwalk', async () => {
+      it('should create an import job with the option.type of doc or xwalk or da', async () => {
         baseContext.multipartFormData.options = { type: 'doc' };
         const response = await importController.createImportJob(baseContext);
         expect(response.status).to.equal(202);
@@ -507,14 +507,18 @@ describe('ImportController tests', () => {
         Object.assign(baseContext.multipartFormData, xwalkMultipartArgs);
         const response2 = await importController.createImportJob(baseContext);
         expect(response2.status).to.equal(202);
+
+        baseContext.multipartFormData.options = { type: 'da' };
+        const response3 = await importController.createImportJob(baseContext);
+        expect(response3.status).to.equal(202);
       });
 
-      it('should fail when the option.type is not doc or xwalk', async () => {
+      it('should fail when the option.type is not doc or xwalk or da', async () => {
         baseContext.multipartFormData.urls = urls;
         baseContext.multipartFormData.options = { type: 'invalid' };
         const response = await importController.createImportJob(baseContext);
         expect(response.status).to.equal(400);
-        expect(response.headers.get('x-error')).to.equal('Invalid request: type must be either doc or xwalk');
+        expect(response.headers.get('x-error')).to.equal('Invalid request: type must be either doc, xwalk or da.');
       });
 
       // it should not fail if type is not provided

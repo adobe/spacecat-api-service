@@ -66,5 +66,28 @@
 		},
 		"config": {},
 		"integrations": {}
+	},
+	"demo":  {
+		"audits": {
+			"scrape-top-pages": {},
+			"broken-backlinks": {},
+			"broken-internal-links": {},
+			"experimentation-opportunities": {},
+			"meta-tags": {},
+			"sitemap": {},
+			"cwv": {},
+			"alt-text": {},
+			"broken-backlinks-auto-suggest": {},
+			"meta-tags-auto-suggest": {},
+			"broken-internal-links-auto-suggest": {}
+		},
+		"imports": {
+			"organic-traffic" : {},
+			"top-pages" : {},
+			"organic-keywords" :{},
+			"all-traffic": {}
+		},
+		"config": {},
+		"integrations": {}
 	}	
 }

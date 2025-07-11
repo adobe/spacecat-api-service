@@ -13,7 +13,7 @@ import:
       will receive a 429 Too Many Requests response.
   
       An import job may include a type, specifying the kind of job to create. The available options 
-      are 'doc' and 'xwalk', with 'doc' as the default if no type is provided.
+      are 'doc', 'da' and 'xwalk', with 'doc' as the default if no type is provided.
     operationId: startImportJob
     security:
       - scoped_api_key: [ ]
