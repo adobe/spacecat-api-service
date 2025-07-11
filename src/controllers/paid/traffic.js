@@ -16,6 +16,7 @@ import {
   forbidden,
   badRequest,
 } from '@adobe/spacecat-shared-http-utils';
+import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { MarketingChannelResponseDto } from '../../dto/marketing-channel-response.js';
@@ -100,7 +101,7 @@ function TrafficController(context, log, env) {
     }
 
     const resultLocation = `${outputFolder}/${outPrefix}`;
-    const athenaClient = context.athenaClientFactory(resultLocation);
+    const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
     log.info(`Fetching paid data directly from athena bucket ${outputFolder} and table ${fullTableName}`);
     const results = await athenaClient.query(

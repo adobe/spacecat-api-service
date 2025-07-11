@@ -91,7 +91,7 @@ describe('Paid TrafficController', async () => {
       },
       dataAccess: { Site: { findById: sandbox.stub().resolves(mockSite) } },
       s3: { s3Client: mockS3 },
-      athenaClientFactory: sinon.stub().callsFake(() => mockAthena),
+      athenaClient: mockAthena,
     };
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
 
