@@ -23,7 +23,7 @@ import { QueryRegistry } from './query-registry.js';
 import {
   parseCsvToJson,
   getS3CachedResult,
-  copyFirstCsvToCache,
+  copyOneNewestCsvToCache,
 } from './caching-helper.js';
 
 const queryRegistry = new QueryRegistry();
@@ -112,7 +112,7 @@ function TrafficController(context, log, env) {
     const resultJsonFresh = results.map(MarketingChannelResponseDto.toJSON);
 
     if (resultJsonFresh) {
-      const isCached = await copyFirstCsvToCache(s3, resultLocation, cacheKey, log);
+      const isCached = await copyOneNewestCsvToCache(s3, resultLocation, cacheKey, log);
       log.info(`Is Copy Athena result CSV to S3 cache: ${cacheKey} succesful was : ${isCached}`);
     }
     return ok(resultJsonFresh);

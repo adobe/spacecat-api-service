@@ -53,7 +53,7 @@ async function getS3CachedResult(s3, key, log) {
   }
 }
 
-async function copyFirstCsvToCache(s3, outLocation, cacheKey, log) {
+async function copyOneNewestCsvToCache(s3, outLocation, cacheKey, log) {
   try {
     const { bucket, prefix } = parseS3Uri(outLocation);
     const listCmd = new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, MaxKeys: 1 });
@@ -83,5 +83,5 @@ export {
   parseS3Uri,
   parseCsvToJson,
   getS3CachedResult,
-  copyFirstCsvToCache,
+  copyOneNewestCsvToCache,
 };
