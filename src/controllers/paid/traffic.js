@@ -31,7 +31,6 @@ const queryRegistry = new QueryRegistry();
 queryRegistry.loadTemplate();
 
 async function tryGetCacheResult(siteid, s3, cacheBucket, query, log) {
-  if (!cacheBucket) return { resultJson: null, cacheKey: null };
   const outPrefix = `${crypto.createHash('md5').update(query).digest('hex')}`;
   const cacheKey = `${cacheBucket}/${siteid}/${outPrefix}.csv`;
   const cached = await getS3CachedResult(s3, cacheKey, log);
@@ -67,8 +66,8 @@ function TrafficController(context, log, env) {
       log.info(badReqMessagge);
       return badRequest(badReqMessagge);
     }
-    const dbName = env.PAID_TRAFFIC_DATABASE ?? 'cdn_logs_wknd_site';
-    const tableName = env.PAID_TRAFFIC_TABLE_NAME ?? 'rum_segments_data';
+    const dbName = env.PAID_TRAFFIC_DATABASE || 'cdn_logs_wknd_site';
+    const tableName = env.PAID_TRAFFIC_TABLE_NAME || 'rum_segments_data';
     const fullTableName = `${dbName}.${tableName}`;
     const groupBy = dimensions;
     const dimensionColumns = groupBy.join(', ');
@@ -88,8 +87,8 @@ function TrafficController(context, log, env) {
     });
 
     log.debug(`Fetching paid data with query ${query}`);
-    const outputFolder = env.PAID_TRAFFIC_S3_OUTPUT_URI ?? 's3://spacecat-dev-segments/temp/out';
-    const cacheBucket = env.PAID_TRAFFIC_S3_CACHE_BUCKET_URI ?? 's3://spacecat-dev-segments/cache';
+    const outputFolder = env.PAID_TRAFFIC_S3_OUTPUT_URI || 's3://spacecat-dev-segments/temp/out';
+    const cacheBucket = env.PAID_TRAFFIC_S3_CACHE_BUCKET_URI || 's3://spacecat-dev-segments/cache';
     const s3 = context.s3?.s3Client;
     const {
       resultJson,

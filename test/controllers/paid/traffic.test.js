@@ -278,5 +278,43 @@ describe('Paid TrafficController', async () => {
       const body = await res.json();
       expect(body).to.deep.equal([]);
     });
+
+    it('uses default db, table, and S3 urls if env vars are missing', async () => {
+      const envNoDbTableS3 = { ...mockEnv };
+      delete envNoDbTableS3.PAID_TRAFFIC_DATABASE;
+      delete envNoDbTableS3.PAID_TRAFFIC_TABLE_NAME;
+      delete envNoDbTableS3.PAID_TRAFFIC_S3_OUTPUT_URI;
+      delete envNoDbTableS3.PAID_TRAFFIC_S3_CACHE_BUCKET_URI;
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(mockContext, mockLog, envNoDbTableS3);
+      await controller.getPaidTrafficByTypeChannel();
+      // Validate the query passed to Athena uses the default db and table
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const queryArg = athenaCall.args[0];
+      expect(queryArg).to.include('cdn_logs_wknd_site.rum_segments_data');
+      // Validate S3 output and cache URLs were used in S3 calls
+      const s3Calls = mockS3.send.getCalls();
+      const outputUsed = s3Calls.some((call) => {
+        const input = call.args[0]?.input || call.args[0];
+        return input
+    && input.Bucket
+    && input.Bucket.includes('spacecat-dev-segments')
+    && input.Prefix
+    && input.Prefix.includes('temp/out');
+      });
+
+      const cacheUsed = s3Calls.some((call) => {
+        const input = call.args[0]?.input || call.args[0];
+        return input
+    && input.Bucket
+    && input.Bucket.includes('spacecat-dev-segments')
+    && input.Key
+    && input.Key.includes('cache');
+      });
+
+      expect(outputUsed).to.be.true;
+      expect(cacheUsed).to.be.true;
+    });
   });
 });
