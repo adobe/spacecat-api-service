@@ -18,18 +18,18 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
+import { getStaticContent } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { MarketingChannelResponseDto } from '../../dto/marketing-channel-response.js';
-import { QueryRegistry } from './query-registry.js';
 import {
   parseCsvToJson,
   getS3CachedResult,
   copyOneNewestCsvToCache,
 } from './caching-helper.js';
 
-const queryRegistry = new QueryRegistry();
-
-queryRegistry.loadTemplate();
+async function loadSql(variables) {
+  return getStaticContent(variables, './src/controllers/paid/channel-query.sql.tpl');
+}
 
 async function tryGetCacheResult(siteid, s3, cacheBucket, query, log) {
   const outPrefix = `${crypto.createHash('md5').update(query).digest('hex')}`;
@@ -76,12 +76,12 @@ function TrafficController(context, log, env) {
     const description = `fetch paid channel data | db: ${dbName} | siteKey: ${siteKey} | year: ${year} | month: ${month} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
     log.info(`Processing query: ${description}`);
 
-    const query = await queryRegistry.renderQuery({
-      siteKey,
+    const query = await loadSql({
+      siteId: siteKey,
       year,
       month,
       week,
-      groupBy: groupBy.join(', '),
+      groupBy,
       dimensionColumns,
       dimensionColumnsPrefixed,
       tableName: fullTableName,
