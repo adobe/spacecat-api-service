@@ -66,7 +66,6 @@ import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
-import RolesController from './controllers/roles-controller.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -120,7 +119,6 @@ async function run(request, context) {
     const scrapeController = ScrapeController(context);
     const scrapeJobController = ScrapeJobController(context);
     const fixesController = new FixesController(context);
-    const rolesController = RolesController(context);
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
       auditsController,
@@ -153,7 +151,6 @@ async function run(request, context) {
       mcpController,
       paidController,
       fixesController,
-      rolesController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

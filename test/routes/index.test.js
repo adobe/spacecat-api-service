@@ -149,10 +149,6 @@ describe('getRouteHandlers', () => {
     removeFix: () => null,
   };
 
-  const mockRolesController = {
-    createRole: sinon.stub(),
-  };
-
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -177,7 +173,6 @@ describe('getRouteHandlers', () => {
       mockMcpController,
       mockPaidController,
       mockFixesController,
-      mockRolesController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -205,7 +200,6 @@ describe('getRouteHandlers', () => {
       'POST /screenshots',
       'GET /mcp',
       'POST /mcp',
-      'POST /roles',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -225,7 +219,6 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
     expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
-    expect(staticRoutes['POST /roles']).to.equal(mockRolesController.createRole);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
