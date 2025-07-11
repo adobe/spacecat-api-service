@@ -81,7 +81,7 @@ function TrafficController(context, log, env) {
       year,
       month,
       week,
-      groupBy,
+      groupBy: groupBy.join(', '),
       dimensionColumns,
       dimensionColumnsPrefixed,
       tableName: fullTableName,
