@@ -66,7 +66,7 @@
   "dependencies": {
     "@adobe/fetch": "4.2.2",
     "@adobe/helix-shared-body-data": "2.1.11",
-    "@adobe/helix-shared-bounce": "2.0.26",
+    "@adobe/helix-shared-bounce": "2.0.27",
     "@adobe/helix-shared-secrets": "2.2.10",
     "@adobe/helix-shared-utils": "3.0.2",
     "@adobe/helix-shared-wrap": "2.0.2",
@@ -78,7 +78,7 @@
     "@adobe/spacecat-shared-gpt-client": "1.5.15",
     "@adobe/spacecat-shared-http-utils": "1.14.3",
     "@adobe/spacecat-shared-ims-client": "1.8.3",
-    "@adobe/spacecat-shared-rum-api-client": "2.31.1",
+    "@adobe/spacecat-shared-rum-api-client": "2.32.0",
     "@adobe/spacecat-shared-scrape-client": "1.0.0",
     "@adobe/spacecat-shared-slack-client": "1.5.18",
     "@adobe/spacecat-shared-utils": "1.42.2",
