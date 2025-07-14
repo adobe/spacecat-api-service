@@ -65,10 +65,10 @@ describe('Sites Controller', () => {
 
   const sites = [
     {
-      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {}, isSandbox: false,
     },
     {
-      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {}, isSandbox: false,
     },
   ].map((site) => new Site(
     {
@@ -84,6 +84,7 @@ describe('Sites Controller', () => {
                 authoringType: { type: 'string', name: 'authoringType', get: (value) => value },
                 gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
                 isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
+                isSandbox: { type: 'boolean', name: 'isSandbox', get: (value) => value },
                 organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
                 hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
                 deliveryConfig: { type: 'any', name: 'deliveryConfig', get: (value) => value },
@@ -1384,6 +1385,87 @@ describe('Sites Controller', () => {
     const updatedSite = await response.json();
     expect(updatedSite).to.have.property('id', SITE_IDS[0]);
     expect(updatedSite).to.have.property('name', 'new-name');
+  });
+
+  it('updates a site isSandbox to true', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        isSandbox: true,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('isSandbox', true);
+  });
+
+  it('updates a site isSandbox to false', async () => {
+    const site = sites[0];
+    // Set the initial isSandbox value to true so we can test changing it to false
+    site.setIsSandbox(true);
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        isSandbox: false,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('isSandbox', false);
+  });
+
+  it('does not update site when isSandbox is the same', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        isSandbox: false, // Same as initial value
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'No updates provided');
+  });
+
+  it('updates site with isSandbox and other fields', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        isSandbox: true,
+        name: 'updated-name',
+        isLive: true,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('isSandbox', true);
+    expect(updatedSite).to.have.property('name', 'updated-name');
+    expect(updatedSite).to.have.property('isLive', true);
   });
 
   describe('updateCdnLogsConfig', () => {
