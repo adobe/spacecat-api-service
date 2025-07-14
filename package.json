@@ -74,7 +74,7 @@
     "@adobe/helix-universal-logger": "3.0.27",
     "@adobe/spacecat-shared-athena-client": "1.0.3",
     "@adobe/spacecat-shared-brand-client": "1.1.16",
-    "@adobe/spacecat-shared-data-access": "2.33.6",
+    "@adobe/spacecat-shared-data-access": "https://gitpkg.vercel.app/adobe/spacecat-shared/packages/spacecat-shared-data-access?sites-33446",
     "@adobe/spacecat-shared-gpt-client": "1.5.16",
     "@adobe/spacecat-shared-http-utils": "1.14.4",
     "@adobe/spacecat-shared-ims-client": "1.8.4",
