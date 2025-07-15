@@ -1,3 +1,10 @@
+## [1.133.1](https://github.com/adobe/spacecat-api-service/compare/v1.133.0...v1.133.1) (2025-07-15)
+
+
+### Bug Fixes
+
+* bump sas uri timeout to 24 hours ([#1064](https://github.com/adobe/spacecat-api-service/issues/1064)) ([2409570](https://github.com/adobe/spacecat-api-service/commit/2409570dea24c9e9260f9e4f6395ea6db4093862))
+
 # [1.133.0](https://github.com/adobe/spacecat-api-service/compare/v1.132.5...v1.133.0) (2025-07-15)
 
 
