@@ -161,6 +161,14 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
+  /sites/{siteId}/traffic/paid/campaign-url-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-campaign-url-device'
+  /sites/{siteId}/traffic/paid/campaign-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-campaign-device'
+  /sites/{siteId}/traffic/paid/campaign-url:
+    $ref: './site-paid.yaml#/site-traffic-paid-campaign-url'
+  /sites/{siteId}/traffic/paid/campaign:
+    $ref: './site-paid.yaml#/site-traffic-paid-campaign'
   /sites/{siteId}/traffic/paid/type-channel:
     $ref: './site-paid.yaml#/site-traffic-paid-type-channel'
   /sites/{siteId}/traffic/paid/type-channel-campaign:

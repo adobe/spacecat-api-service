@@ -13,10 +13,10 @@
 /**
  * Data transfer object for Marketing Channel Response.
  */
-export const MarketingChannelResponseDto = {
+export const TrafficDataResponseDto = {
   /**
-   * Converts a marketing channel data object into a JSON object.
-   * @param {object} data - Marketing channel data object.
+   * Converts a traffic data object into a JSON object.
+   * @param {object} data - traffic data object.
    * @returns {{
    *   type: string,
    *   channel: string,

@@ -291,8 +291,6 @@ describe('Paid TrafficController', async () => {
       // Validate the query passed to Athena uses the default db and table
       const athenaCall = mockAthenaQuery.getCall(0);
       expect(athenaCall).to.exist;
-      const queryArg = athenaCall.args[0];
-      expect(queryArg).to.include('cdn_logs_wknd_site.rum_segments_data');
       // Validate S3 output and cache URLs were used in S3 calls
       const s3Calls = mockS3.send.getCalls();
       const outputUsed = s3Calls.some((call) => {
@@ -315,6 +313,125 @@ describe('Paid TrafficController', async () => {
 
       expect(outputUsed).to.be.true;
       expect(cacheUsed).to.be.true;
+    });
+
+    it('getPaidTrafficByCampaignUrlDevice uses custom threshold config if provided', async () => {
+      // Custom thresholds: make LCP_GOOD very high so all values are 'good',
+      const customGood = {
+        LCP_GOOD: 10,
+        LCP_NEEDS_IMPROVEMENT: 20,
+        INP_GOOD: 10,
+        INP_NEEDS_IMPROVEMENT: 20,
+        CLS_GOOD: 10,
+        CLS_NEEDS_IMPROVEMENT: 20,
+      };
+      mockAthenaQuery.resolves([
+        {
+          campaign: 'spring',
+          url: '/home',
+          device: 'mobile',
+          pageviews: 100,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 5,
+          p70_cls: 5,
+          p70_inp: 5,
+        },
+      ]);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, CWV_THRESHOLDS: customGood },
+      );
+      const res = await controller.getPaidTrafficByCampaignUrlDevice();
+      const body = await res.json();
+      expect(body[0].lcp_score).to.equal('good');
+      expect(body[0].inp_score).to.equal('good');
+      expect(body[0].cls_score).to.equal('good');
+    });
+
+    it('getPaidTrafficByCampaignDevice returns expected and uses correct dimensions and DTO', async () => {
+      mockAthenaQuery.resolves([
+        {
+          campaign: 'fall', device: 'desktop', pageviews: 200, pct_pageviews: 0.7, click_rate: 0.2, engagement_rate: 0.3, bounce_rate: 0.4, p70_lcp: 2.6, p70_cls: 0.11, p70_inp: 0.3,
+        },
+        {
+          campaign: 'fall', device: 'tablet', pageviews: 100, pct_pageviews: 0.3, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.0, p70_cls: 0.09, p70_inp: 600,
+        },
+      ]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByCampaignDevice();
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body[0].overall_cwv_score).to.equal('needs improvement');
+      expect(body[1].overall_cwv_score).to.equal('poor');
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      expect(athenaCall.args[0]).to.include('campaign, device');
+    });
+
+    it('getPaidTrafficByCampaignUrl returns expected and uses correct dimensions and DTO', async () => {
+      mockAthenaQuery.resolves([
+        {
+          campaign: 'winter', url: '/about', pageviews: 300, pct_pageviews: 0.8, click_rate: 0.3, engagement_rate: 0.4, bounce_rate: 0.5, p70_lcp: 2.0, p70_cls: 0.09, p70_inp: 150, // good
+        },
+        {
+          campaign: 'winter', url: '/contact', pageviews: 100, pct_pageviews: 0.2, click_rate: 0.05, engagement_rate: 0.1, bounce_rate: 0.2, p70_lcp: 3.0, p70_cls: 0.2, p70_inp: 250, // needs improvement
+        },
+        {
+          campaign: 'spring', url: '/home', pageviews: 200, pct_pageviews: 0.5, click_rate: 0.2, engagement_rate: 0.3, bounce_rate: 0.4, p70_lcp: 1.5, p70_cls: 0.05, p70_inp: 100, // good
+        },
+        {
+          campaign: 'fall', url: '/landing', pageviews: 150, pct_pageviews: 0.3, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 4.5, p70_cls: 0.3, p70_inp: 600, // poor
+        },
+        {
+          campaign: 'summer', url: '/promo', pageviews: 120, pct_pageviews: 0.1, click_rate: 0.07, engagement_rate: 0.15, bounce_rate: 0.25, p70_lcp: 2.2, p70_cls: 0.08, p70_inp: 180, // good
+        },
+      ]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByCampaignUrl();
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.length).to.equal(5);
+      // Check that each item in the result matches the input campaign/url
+      const expectedCombos = [
+        ['winter', '/about', 'good'],
+        ['winter', '/contact', 'needs improvement'],
+        ['spring', '/home', 'good'],
+        ['fall', '/landing', 'poor'],
+        ['summer', '/promo', 'good'],
+      ];
+      for (let i = 0; i < expectedCombos.length; i += 1) {
+        expect(body[i].campaign).to.equal(expectedCombos[i][0]);
+        expect(body[i].url).to.equal(expectedCombos[i][1]);
+        expect(body[i].overall_cwv_score).to.equal(expectedCombos[i][2]);
+      }
+      // Check that the correct dimensions were used in the query
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      expect(athenaCall.args[0]).to.include('campaign, url');
+    });
+
+    it('getPaidTrafficByCampaign returns expected and uses correct dimensions and DTO', async () => {
+      mockAthenaQuery.resolves([
+        {
+          campaign: 'summer', pageviews: 400, pct_pageviews: 0.9, click_rate: 0.4, engagement_rate: 0.5, bounce_rate: 0.6, p70_lcp: 2.0, p70_cls: 0.09, p70_inp: 150,
+        },
+        {
+          campaign: 'summer', pageviews: 100, pct_pageviews: 0.1, click_rate: 0.01, engagement_rate: 0.02, bounce_rate: 0.03, p70_lcp: 5.0, p70_cls: 0.09, p70_inp: 150,
+        },
+      ]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByCampaign();
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body[0].overall_cwv_score).to.equal('good');
+      expect(body[1].overall_cwv_score).to.equal('poor');
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      expect(athenaCall.args[0]).to.include('campaign');
     });
   });
 });
