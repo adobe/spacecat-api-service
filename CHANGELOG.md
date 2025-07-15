@@ -1,3 +1,24 @@
+## [1.133.1](https://github.com/adobe/spacecat-api-service/compare/v1.133.0...v1.133.1) (2025-07-15)
+
+
+### Bug Fixes
+
+* bump sas uri timeout to 24 hours ([#1064](https://github.com/adobe/spacecat-api-service/issues/1064)) ([2409570](https://github.com/adobe/spacecat-api-service/commit/2409570dea24c9e9260f9e4f6395ea6db4093862))
+
+# [1.133.0](https://github.com/adobe/spacecat-api-service/compare/v1.132.5...v1.133.0) (2025-07-15)
+
+
+### Features
+
+* add second report api ([#1062](https://github.com/adobe/spacecat-api-service/issues/1062)) ([00da6ff](https://github.com/adobe/spacecat-api-service/commit/00da6ff56f61974afcd51c4f1f8fd7cf8aaad351))
+
+## [1.132.5](https://github.com/adobe/spacecat-api-service/compare/v1.132.4...v1.132.5) (2025-07-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.34.0 ([#1061](https://github.com/adobe/spacecat-api-service/issues/1061)) ([7d9fd68](https://github.com/adobe/spacecat-api-service/commit/7d9fd687fc555133843b0a1836e9f6886e6e99dc))
+
 ## [1.132.4](https://github.com/adobe/spacecat-api-service/compare/v1.132.3...v1.132.4) (2025-07-13)
 
 
