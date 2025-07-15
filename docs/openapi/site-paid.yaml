@@ -148,6 +148,130 @@ site-traffic-paid-top-pages:
     security:
       - api_key: [ ]
 
+site-traffic-paid-campaign-url-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by campaign, url, and device
+    description: Returns paid traffic data for a site, grouped by campaign, url, and device for a given week, month, and year.
+    operationId: getPaidTrafficByCampaignUrlDevice
+    responses:
+      '200':
+        description: Paid traffic data by campaign, url, and device
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/PaidTrafficCampaignUrlDeviceData'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by campaign and device
+    description: Returns paid traffic data for a site, grouped by campaign and device for a given week, month, and year.
+    operationId: getPaidTrafficByCampaignDevice
+    responses:
+      '200':
+        description: Paid traffic data by campaign and device
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/PaidTrafficCampaignDeviceData'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-campaign-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by campaign and url
+    description: Returns paid traffic data for a site, grouped by campaign and url for a given week, month, and year.
+    operationId: getPaidTrafficByCampaignUrl
+    responses:
+      '200':
+        description: Paid traffic data by campaign and url
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/PaidTrafficCampaignUrlData'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by campaign
+    description: Returns paid traffic data for a site, grouped by campaign for a given week, month, and year.
+    operationId: getPaidTrafficByCampaign
+    responses:
+      '200':
+        description: Paid traffic data by campaign
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/PaidTrafficCampaignData'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 PaidTrafficTypeChannelCampaignData:
   type: object
   properties:
@@ -265,3 +389,215 @@ PaidTrafficTypeData:
       description: Bounce rate
 
 components: {}
+
+PaidTrafficCampaignUrlDeviceData:
+  type: object
+  properties:
+    campaign:
+      type: string
+      description: The campaign name or ID
+    url:
+      type: string
+      description: The URL
+    device:
+      type: string
+      description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficCampaignDeviceData:
+  type: object
+  properties:
+    campaign:
+      type: string
+      description: The campaign name or ID
+    device:
+      type: string
+      description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficCampaignUrlData:
+  type: object
+  properties:
+    campaign:
+      type: string
+      description: The campaign name or ID
+    url:
+      type: string
+      description: The URL
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficCampaignData:
+  type: object
+  properties:
+    campaign:
+      type: string
+      description: The campaign name or ID
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)

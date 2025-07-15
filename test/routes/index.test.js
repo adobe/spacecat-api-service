@@ -139,6 +139,10 @@ describe('getRouteHandlers', () => {
   };
 
   const mockTrafficController = {
+    getPaidTrafficByCampaignUrlDevice: sinon.stub(),
+    getPaidTrafficByCampaignDevice: sinon.stub(),
+    getPaidTrafficByCampaignUrl: sinon.stub(),
+    getPaidTrafficByCampaign: sinon.stub(),
     getPaidTrafficByTypeChannelCampaign: sinon.stub(),
     getPaidTrafficByTypeChannel: sinon.stub(),
     getPaidTrafficByTypeCampaign: sinon.stub(),
@@ -297,6 +301,10 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'GET /sites/:siteId/traffic/paid',
+      'GET /sites/:siteId/traffic/paid/campaign',
+      'GET /sites/:siteId/traffic/paid/campaign-url-device',
+      'GET /sites/:siteId/traffic/paid/campaign-device',
+      'GET /sites/:siteId/traffic/paid/campaig-url',
       'GET /sites/:siteId/traffic/paid/type',
       'GET /sites/:siteId/traffic/paid/type-channel-campaign',
       'GET /sites/:siteId/traffic/paid/type-channel',
