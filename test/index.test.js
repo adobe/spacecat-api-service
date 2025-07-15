@@ -63,6 +63,10 @@ describe('Index Tests', () => {
       },
       pathInfo: {
         suffix: '',
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey,
+        },
       },
       env: {
         USER_API_KEY: apiKey,
@@ -76,6 +80,27 @@ describe('Index Tests', () => {
         IMS_CLIENT_CODE: 'mock-client-code',
         IMS_CLIENT_SECRET: 'mock-client-secret',
         IMPORT_CONFIGURATION: '{}',
+      },
+      attributes: {
+        authInfo: {
+          getType: () => 'apikey',
+          isAdmin: () => true,
+          hasOrganization: () => true,
+          hasScope: () => true,
+          getScopes: () => [{ name: 'admin' }],
+          isAuthenticated: () => true,
+          rbac: () => ({
+            acls: [],
+            aclEntities: {
+              exclude: [
+                'site', 'apiKey', 'audit', 'configuration', 'experiment',
+                'importJob', 'importUrl', 'keyEvent', 'latestAudit',
+                'opportunity', 'siteCandidate', 'siteTopPage', 'suggestion',
+                'asyncJob', 'scrapeJob', 'scrapeUrl', 'fixEntity', 'organization',
+              ],
+            },
+          }),
+        },
       },
       dataAccess: {
         Audit: {
@@ -99,10 +124,18 @@ describe('Index Tests', () => {
           allWithLatestAudit: sinon.stub().resolves([]),
           findById: sinon.stub().resolves({
             id: 'site-id',
+            getId: () => 'site-id',
+            getLatestAuditByAuditType: () => mockAuditData,
           }),
         },
         Opportunity: {},
         Suggestion: {},
+      },
+      rbacDataAccess: {
+        Role: {
+          create: sinon.stub(),
+          findById: sinon.stub(),
+        },
       },
       s3Client: {
         send: sinon.stub(),
@@ -133,6 +166,8 @@ describe('Index Tests', () => {
 
   it('handles options request', async () => {
     context.pathInfo.suffix = '/test';
+    context.pathInfo.method = 'OPTIONS';
+    context.pathInfo.headers = { 'x-api-key': apiKey };
 
     request = new Request(baseUrl, { method: 'OPTIONS', headers: { 'x-api-key': apiKey } });
 
@@ -197,7 +232,7 @@ describe('Index Tests', () => {
     const resp = await main(request, context);
 
     expect(resp.status).to.equal(500);
-    expect(resp.headers.plain()['x-error']).to.equal('site.getId is not a function');
+    expect(resp.headers.plain()['x-error']).to.equal('site.getBaseURL is not a function');
   });
 
   it('handles dynamic route', async () => {

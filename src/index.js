@@ -121,7 +121,6 @@ async function run(request, context) {
     const scrapeController = ScrapeController(context);
     const scrapeJobController = ScrapeJobController(context);
     const fixesController = new FixesController(context);
-
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
       auditsController,
@@ -187,10 +186,10 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 export const main = wrap(run)
+  .with(dataAccess)
   .with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   })
-  .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)
   .with(enrichPathInfo)
