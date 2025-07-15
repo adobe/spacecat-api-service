@@ -1,3 +1,10 @@
+# [1.133.0](https://github.com/adobe/spacecat-api-service/compare/v1.132.5...v1.133.0) (2025-07-15)
+
+
+### Features
+
+* add second report api ([#1062](https://github.com/adobe/spacecat-api-service/issues/1062)) ([00da6ff](https://github.com/adobe/spacecat-api-service/commit/00da6ff56f61974afcd51c4f1f8fd7cf8aaad351))
+
 ## [1.132.5](https://github.com/adobe/spacecat-api-service/compare/v1.132.4...v1.132.5) (2025-07-15)
 
 
