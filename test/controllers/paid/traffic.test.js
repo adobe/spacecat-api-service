@@ -417,10 +417,10 @@ describe('Paid TrafficController', async () => {
     it('getPaidTrafficByCampaign returns expected and uses correct dimensions and DTO', async () => {
       mockAthenaQuery.resolves([
         {
-          campaign: 'summer', pageviews: 400, pct_pageviews: 0.9, click_rate: 0.4, engagement_rate: 0.5, bounce_rate: 0.6, p70_lcp: 2.0, p70_cls: 0.09, p70_inp: 150,
+          campaign: 'summer', pageviews: 400, pct_pageviews: 0.9, click_rate: 0.4, engagement_rate: 0.5, bounce_rate: 0.6, p70_lcp: 2000, p70_cls: 0.09, p70_inp: 150,
         },
         {
-          campaign: 'summer', pageviews: 100, pct_pageviews: 0.1, click_rate: 0.01, engagement_rate: 0.02, bounce_rate: 0.03, p70_lcp: 5.0, p70_cls: 0.09, p70_inp: 150,
+          campaign: 'summer', pageviews: 100, pct_pageviews: 0.1, click_rate: 0.01, engagement_rate: 0.02, bounce_rate: 0.03, p70_lcp: 5000, p70_cls: 0.09, p70_inp: 150,
         },
       ]);
       const controller = TrafficController(mockContext, mockLog, mockEnv);

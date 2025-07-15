@@ -14,8 +14,8 @@
 import { TrafficDataResponseDto } from './traffic-data-base-response.js';
 
 const DEFAULT_THRESHOLDS = {
-  LCP_GOOD: 2.5,
-  LCP_NEEDS_IMPROVEMENT: 4.0,
+  LCP_GOOD: 2500,
+  LCP_NEEDS_IMPROVEMENT: 4000,
   INP_GOOD: 200,
   INP_NEEDS_IMPROVEMENT: 500,
   CLS_GOOD: 0.1,
