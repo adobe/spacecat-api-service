@@ -70,7 +70,7 @@ describe('LLMO Controller', () => {
       expect(result).to.have.property('status', 200);
       expect(body).to.deep.equal(mockData);
       expect(fetchStub.calledOnce).to.be.true;
-      expect(fetchStub.firstCall.args[0]).to.equal('https://d1vm7168yg1w6d.cloudfront.net/adobe/brandpresence-all-w28-2025.json');
+      expect(fetchStub.firstCall.args[0]).to.equal('https://main--gw25--vivesing.aem.live/readme.json');
       expect(fetchStub.firstCall.args[1].headers).to.have.property('Referer', 'https://dev.d2ikwb7s634epv.amplifyapp.com/');
       expect(mockContext.log.info.calledOnce).to.be.true;
     });
