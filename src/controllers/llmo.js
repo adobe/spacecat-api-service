@@ -19,7 +19,7 @@ function LlmoController() {
 
     try {
       // Fetch data from the external endpoint
-      const response = await fetch('https://d1vm7168yg1w6d.cloudfront.net/adobe/brandpresence-all-w28-2025.json', {
+      const response = await fetch(`https://d1vm7168yg1w6d.cloudfront.net/adobe/${dataSource}.json`, {
         headers: {
           Referer: 'https://dev.d2ikwb7s634epv.amplifyapp.com/',
           'User-Agent': 'SpaceCat-API-Service/1.0',

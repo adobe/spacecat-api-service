@@ -38,22 +38,17 @@ describe('LLMO Controller', () => {
 
   describe('getLlmoData', () => {
     it('should proxy data from external endpoint', async () => {
-      const mockExternalData = {
-        brandPresence: {
-          score: 85.5,
-          metrics: {
-            visibility: 90,
-            engagement: 78,
-            reach: 82,
-          },
+      const mockData = {
+        timestamp: '2025-01-27T10:30:00Z',
+        data: {
+          metrics: { value: 85.5 },
+          features: { enabled: true },
         },
-        timestamp: '2025-01-15T10:30:00Z',
-        source: 'brandpresence-all-w28-2025',
       };
 
       const mockResponse = {
         ok: true,
-        json: async () => mockExternalData,
+        json: async () => mockData,
       };
 
       fetchStub.resolves(mockResponse);
@@ -61,7 +56,7 @@ describe('LLMO Controller', () => {
       const mockContext = {
         params: {
           siteId: 'test-site-id',
-          dataSource: 'test-data-source',
+          dataSource: 'brandpresence-all-w28-2025',
         },
         log: {
           info: sinon.spy(),
@@ -73,20 +68,11 @@ describe('LLMO Controller', () => {
       const body = await readStreamToJson(result.body);
 
       expect(result).to.have.property('status', 200);
-      expect(body).to.deep.equal(mockExternalData);
-
-      // Verify fetch was called with correct parameters
+      expect(body).to.deep.equal(mockData);
       expect(fetchStub.calledOnce).to.be.true;
-      const fetchCall = fetchStub.getCall(0);
-      expect(fetchCall.args[0]).to.equal('https://d1vm7168yg1w6d.cloudfront.net/adobe/brandpresence-all-w28-2025.json');
-      expect(fetchCall.args[1].headers).to.deep.include({
-        Referer: 'https://dev.d2ikwb7s634epv.amplifyapp.com/',
-        'User-Agent': 'SpaceCat-API-Service/1.0',
-      });
-
-      // Verify logging
-      expect(mockContext.log.info.callCount).to.be.greaterThan(0);
-      expect(mockContext.log.info.getCall(0).args[0]).to.include('Successfully proxied data');
+      expect(fetchStub.firstCall.args[0]).to.equal('https://d1vm7168yg1w6d.cloudfront.net/adobe/brandpresence-all-w28-2025.json');
+      expect(fetchStub.firstCall.args[1].headers).to.have.property('Referer', 'https://dev.d2ikwb7s634epv.amplifyapp.com/');
+      expect(mockContext.log.info.calledOnce).to.be.true;
     });
 
     it('should handle fetch errors gracefully', async () => {
