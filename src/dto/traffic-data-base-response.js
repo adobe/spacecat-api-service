@@ -29,10 +29,10 @@ export const TrafficDataResponseDto = {
    * }} JSON object.
    */
   toJSON: (data) => ({
-    type: data.type,
-    channel: data.channel,
+    type: data.trf_type,
+    channel: data.trf_channel,
     platform: data.platform,
-    campaign: data.campaign,
+    campaign: data.utm_campaign,
     pageviews: data.pageviews,
     pct_pageviews: data.pct_pageviews,
     click_rate: data.click_rate,

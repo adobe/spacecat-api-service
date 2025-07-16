@@ -1,9 +1,10 @@
 WITH raw AS (
     SELECT
-        type,
-        url,
-        channel,
-        campaign,
+        trf_type,
+        path,
+        trf_channel,
+        utm_campaign,
+        trf_platform
         device,
         pageviews,
         clicked,
@@ -13,8 +14,8 @@ WITH raw AS (
         inp
     FROM {{tableName}}
     WHERE siteid = '{{siteId}}'
-        AND year = {{year}}
-        -- AND month = {{month}}  -- Uncomment to filter by month
+        AND year IN ({{years}})
+        AND month IN ({{months}})
         AND week = {{week}}
 ),
   
