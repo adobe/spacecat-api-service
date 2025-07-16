@@ -2,24 +2,23 @@ site-traffic-paid-type-channel-campaign:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by type, channel, and campaign
-    description: Returns paid traffic data for a site, grouped by type, channel, and campaign for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by type, channel, and campaign for a given week and year.
     operationId: getPaidTrafficByTypeChannelCampaign
     responses:
-      '200':
-        description: Paid traffic data by type, channel, and campaign
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficTypeChannelCampaignData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficTypeChannelCampaignData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -33,24 +32,23 @@ site-traffic-paid-type-channel:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by type and channel
-    description: Returns paid traffic data for a site, grouped by type and channel for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by type and channel for a given week and year.
     operationId: getPaidTrafficByTypeChannel
     responses:
-      '200':
-        description: Paid traffic data by type and channel
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficTypeChannelData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficTypeChannelData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -64,24 +62,23 @@ site-traffic-paid-type-campaign:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by type and campaign
-    description: Returns paid traffic data for a site, grouped by type and campaign for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by type and campaign for a given week and year.
     operationId: getPaidTrafficByTypeCampaign
     responses:
-      '200':
-        description: Paid traffic data by type and campaign
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficTypeCampaignData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficTypeCampaignData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -95,24 +92,23 @@ site-traffic-paid-type:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by type
-    description: Returns paid traffic data for a site, grouped by type for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by type for a given week and year.
     operationId: getPaidTrafficByType
     responses:
-      '200':
-        description: Paid traffic data by type
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficTypeData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficTypeData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -152,24 +148,23 @@ site-traffic-paid-campaign-url-device:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by campaign, url, and device
-    description: Returns paid traffic data for a site, grouped by campaign, url, and device for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by campaign, url, and device for a given week and year.
     operationId: getPaidTrafficByCampaignUrlDevice
     responses:
-      '200':
-        description: Paid traffic data by campaign, url, and device
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficCampaignUrlDeviceData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficCampaignUrlDeviceData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -183,24 +178,23 @@ site-traffic-paid-campaign-device:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by campaign and device
-    description: Returns paid traffic data for a site, grouped by campaign and device for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by campaign and device for a given week and year.
     operationId: getPaidTrafficByCampaignDevice
     responses:
-      '200':
-        description: Paid traffic data by campaign and device
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficCampaignDeviceData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficCampaignDeviceData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -214,24 +208,23 @@ site-traffic-paid-campaign-url:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by campaign and url
-    description: Returns paid traffic data for a site, grouped by campaign and url for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by campaign and url for a given week and year.
     operationId: getPaidTrafficByCampaignUrl
     responses:
-      '200':
-        description: Paid traffic data by campaign and url
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficCampaignUrlData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficCampaignUrlData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -245,24 +238,23 @@ site-traffic-paid-campaign:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by campaign
-    description: Returns paid traffic data for a site, grouped by campaign for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by campaign for a given week and year.
     operationId: getPaidTrafficByCampaign
     responses:
-      '200':
-        description: Paid traffic data by campaign
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficCampaignData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficCampaignData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':

@@ -83,7 +83,6 @@ export const TrafficDataWithCWVDto = {
       ...TrafficDataResponseDto.toJSON(data),
       url: data.path,
       device: data.device,
-      campaign: data.utm_campaign,
       p70_lcp: lcp,
       p70_cls: cls,
       p70_inp: inp,

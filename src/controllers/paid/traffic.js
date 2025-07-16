@@ -65,9 +65,13 @@ function getWeekMonthsAndYears(year, week) {
   };
 }
 
-async function tryGetCacheResult(siteid, s3, cacheBucket, query, log) {
+async function tryGetCacheResult(siteid, s3, cacheBucket, query, log, noCache = false) {
   const outPrefix = `${crypto.createHash('md5').update(query).digest('hex')}`;
   const cacheKey = `${cacheBucket}/${siteid}/${outPrefix}.json`;
+  if (noCache === true) {
+    log.info(`Skipping cache fetch for Athena result from S3: ${cacheKey} because user requested noCache`);
+    return { cachedResultUrl: null, cacheKey, outPrefix };
+  }
   const hasCache = await fileExists(s3, cacheKey, log);
   if (hasCache === true) {
     log.info(`Found cached result. Fetching signed url for cached Athena result from S3: ${cacheKey}`);
@@ -92,7 +96,7 @@ function TrafficController(context, log, env) {
       return forbidden('Only users belonging to the organization can view paid traffic metrics');
     }
 
-    const { year, week } = context.data;
+    const { year, week, noCache } = context.data;
     if (!year || !week) {
       const badReqMessagge = 'year and week are required parameters';
       log.info(badReqMessagge);
@@ -127,7 +131,7 @@ function TrafficController(context, log, env) {
       cachedResultUrl,
       cacheKey,
       outPrefix,
-    } = await tryGetCacheResult(siteId, s3, cacheBucket, query, log);
+    } = await tryGetCacheResult(siteId, s3, cacheBucket, query, log, noCache);
     const thresholdConfig = env.CWV_THRESHOLDS || {};
     if (cachedResultUrl) {
       log.info(`Succesfully fetched presigned url for result file ${cacheKey} from cache`);
