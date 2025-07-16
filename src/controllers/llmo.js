@@ -15,53 +15,33 @@ import { ok } from '@adobe/spacecat-shared-http-utils';
 function LlmoController() {
   const getLlmoData = async (context) => {
     const { siteId, dataSource } = context.params;
-    const now = new Date();
+    const { log } = context;
 
-    // Generate dummy agentic values
-    const dummyAgenticData = {
-      timestamp: now.toISOString(),
-      currentDate: now.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      }),
-      currentTime: now.toLocaleTimeString('en-US', {
-        hour12: false,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      }),
-      siteId,
-      dataSource,
-      agenticMetrics: {
-        userEngagement: Math.random() * 100,
-        contentRelevance: Math.random() * 100,
-        searchAccuracy: Math.random() * 100,
-        responseTime: Math.random() * 2000 + 100,
-        satisfactionScore: Math.random() * 5 + 1,
-      },
-      agenticFeatures: {
-        personalizedRecommendations: Math.random() > 0.5,
-        intelligentSearch: Math.random() > 0.5,
-        predictiveAnalytics: Math.random() > 0.5,
-        automatedInsights: Math.random() > 0.5,
-        contextualAssistance: Math.random() > 0.5,
-      },
-      performanceMetrics: {
-        accuracy: (Math.random() * 20 + 80).toFixed(2),
-        precision: (Math.random() * 15 + 85).toFixed(2),
-        recall: (Math.random() * 10 + 90).toFixed(2),
-        f1Score: (Math.random() * 10 + 90).toFixed(2),
-      },
-      systemStatus: {
-        status: 'operational',
-        lastUpdated: now.toISOString(),
-        uptime: `${Math.floor(Math.random() * 100)}%`,
-        activeUsers: Math.floor(Math.random() * 10000) + 1000,
-      },
-    };
+    try {
+      // Fetch data from the external endpoint
+      const response = await fetch('https://d1vm7168yg1w6d.cloudfront.net/adobe/brandpresence-all-w28-2025.json', {
+        headers: {
+          Referer: 'https://dev.d2ikwb7s634epv.amplifyapp.com/',
+          'User-Agent': 'SpaceCat-API-Service/1.0',
+        },
+      });
 
-    return ok(dummyAgenticData);
+      if (!response.ok) {
+        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the response data
+      const data = await response.json();
+
+      log.info(`Successfully proxied data for siteId: ${siteId}, dataSource: ${dataSource}`);
+
+      // Return the response as-is
+      return ok(data);
+    } catch (error) {
+      log.error(`Error proxying data for siteId: ${siteId}, dataSource: ${dataSource}`, error);
+      throw error;
+    }
   };
 
   return {

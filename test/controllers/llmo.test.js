@@ -12,6 +12,7 @@
 /* eslint-env mocha */
 
 import { expect } from 'chai';
+import sinon from 'sinon';
 import LlmoController from '../../src/controllers/llmo.js';
 
 async function readStreamToJson(stream) {
@@ -24,17 +25,47 @@ async function readStreamToJson(stream) {
 
 describe('LLMO Controller', () => {
   let llmoController;
+  let fetchStub;
 
   beforeEach(() => {
     llmoController = LlmoController();
+    fetchStub = sinon.stub(global, 'fetch');
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
   });
 
   describe('getLlmoData', () => {
-    it('should return dummy agentic data with current date and time', async () => {
+    it('should proxy data from external endpoint', async () => {
+      const mockExternalData = {
+        brandPresence: {
+          score: 85.5,
+          metrics: {
+            visibility: 90,
+            engagement: 78,
+            reach: 82,
+          },
+        },
+        timestamp: '2025-01-15T10:30:00Z',
+        source: 'brandpresence-all-w28-2025',
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: async () => mockExternalData,
+      };
+
+      fetchStub.resolves(mockResponse);
+
       const mockContext = {
         params: {
           siteId: 'test-site-id',
           dataSource: 'test-data-source',
+        },
+        log: {
+          info: sinon.spy(),
+          error: sinon.spy(),
         },
       };
 
@@ -42,77 +73,76 @@ describe('LLMO Controller', () => {
       const body = await readStreamToJson(result.body);
 
       expect(result).to.have.property('status', 200);
-      expect(body).to.have.property('timestamp');
-      expect(body).to.have.property('currentDate');
-      expect(body).to.have.property('currentTime');
-      expect(body).to.have.property('siteId', 'test-site-id');
-      expect(body).to.have.property('dataSource', 'test-data-source');
-      expect(body).to.have.property('agenticMetrics');
-      expect(body).to.have.property('agenticFeatures');
-      expect(body).to.have.property('performanceMetrics');
-      expect(body).to.have.property('systemStatus');
+      expect(body).to.deep.equal(mockExternalData);
 
-      // Verify agenticMetrics structure
-      expect(body.agenticMetrics).to.have.property('userEngagement');
-      expect(body.agenticMetrics).to.have.property('contentRelevance');
-      expect(body.agenticMetrics).to.have.property('searchAccuracy');
-      expect(body.agenticMetrics).to.have.property('responseTime');
-      expect(body.agenticMetrics).to.have.property('satisfactionScore');
+      // Verify fetch was called with correct parameters
+      expect(fetchStub.calledOnce).to.be.true;
+      const fetchCall = fetchStub.getCall(0);
+      expect(fetchCall.args[0]).to.equal('https://d1vm7168yg1w6d.cloudfront.net/adobe/brandpresence-all-w28-2025.json');
+      expect(fetchCall.args[1].headers).to.deep.include({
+        Referer: 'https://dev.d2ikwb7s634epv.amplifyapp.com/',
+        'User-Agent': 'SpaceCat-API-Service/1.0',
+      });
 
-      // Verify agenticFeatures structure
-      expect(body.agenticFeatures).to.have.property('personalizedRecommendations');
-      expect(body.agenticFeatures).to.have.property('intelligentSearch');
-      expect(body.agenticFeatures).to.have.property('predictiveAnalytics');
-      expect(body.agenticFeatures).to.have.property('automatedInsights');
-      expect(body.agenticFeatures).to.have.property('contextualAssistance');
-
-      // Verify performanceMetrics structure
-      expect(body.performanceMetrics).to.have.property('accuracy');
-      expect(body.performanceMetrics).to.have.property('precision');
-      expect(body.performanceMetrics).to.have.property('recall');
-      expect(body.performanceMetrics).to.have.property('f1Score');
-
-      // Verify systemStatus structure
-      expect(body.systemStatus).to.have.property('status', 'operational');
-      expect(body.systemStatus).to.have.property('lastUpdated');
-      expect(body.systemStatus).to.have.property('uptime');
-      expect(body.systemStatus).to.have.property('activeUsers');
-
-      // Verify data types
-      expect(body.agenticMetrics.userEngagement).to.be.a('number');
-      expect(body.agenticMetrics.contentRelevance).to.be.a('number');
-      expect(body.agenticMetrics.searchAccuracy).to.be.a('number');
-      expect(body.agenticMetrics.responseTime).to.be.a('number');
-      expect(body.agenticMetrics.satisfactionScore).to.be.a('number');
-
-      expect(body.agenticFeatures.personalizedRecommendations).to.be.a('boolean');
-      expect(body.agenticFeatures.intelligentSearch).to.be.a('boolean');
-      expect(body.agenticFeatures.predictiveAnalytics).to.be.a('boolean');
-      expect(body.agenticFeatures.automatedInsights).to.be.a('boolean');
-      expect(body.agenticFeatures.contextualAssistance).to.be.a('boolean');
-
-      expect(body.performanceMetrics.accuracy).to.be.a('string');
-      expect(body.performanceMetrics.precision).to.be.a('string');
-      expect(body.performanceMetrics.recall).to.be.a('string');
-      expect(body.performanceMetrics.f1Score).to.be.a('string');
-
-      expect(body.systemStatus.uptime).to.be.a('string');
-      expect(body.systemStatus.activeUsers).to.be.a('number');
+      // Verify logging
+      expect(mockContext.log.info.callCount).to.be.greaterThan(0);
+      expect(mockContext.log.info.getCall(0).args[0]).to.include('Successfully proxied data');
     });
 
-    it('should handle different siteId and dataSource parameters', async () => {
+    it('should handle fetch errors gracefully', async () => {
+      const mockError = new Error('Network error');
+      fetchStub.rejects(mockError);
+
       const mockContext = {
         params: {
-          siteId: 'different-site-id',
-          dataSource: 'different-data-source',
+          siteId: 'test-site-id',
+          dataSource: 'test-data-source',
+        },
+        log: {
+          info: sinon.spy(),
+          error: sinon.spy(),
         },
       };
 
-      const result = await llmoController.getLlmoData(mockContext);
-      const body = await readStreamToJson(result.body);
+      try {
+        await llmoController.getLlmoData(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.equal('Network error');
+        expect(mockContext.log.error.callCount).to.be.greaterThan(0);
+      }
+    });
 
-      expect(body).to.have.property('siteId', 'different-site-id');
-      expect(body).to.have.property('dataSource', 'different-data-source');
+    it('should handle non-ok response status', async () => {
+      const mockResponse = {
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        json: async () => ({ error: 'Not Found' }),
+      };
+
+      fetchStub.resolves(mockResponse);
+
+      const mockContext = {
+        params: {
+          siteId: 'test-site-id',
+          dataSource: 'test-data-source',
+        },
+        log: {
+          info: sinon.spy(),
+          error: sinon.spy(),
+        },
+      };
+
+      try {
+        await llmoController.getLlmoData(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('External API returned 404');
+        expect(mockContext.log.error.callCount).to.be.greaterThan(0);
+        const errorCallArgs = mockContext.log.error.getCall(0).args[0];
+        expect(errorCallArgs).to.include('Failed to fetch data from external endpoint: 404 Not Found');
+      }
     });
   });
 });
