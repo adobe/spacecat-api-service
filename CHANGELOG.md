@@ -1,3 +1,17 @@
+## [1.133.2](https://github.com/adobe/spacecat-api-service/compare/v1.133.1...v1.133.2) (2025-07-16)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1065](https://github.com/adobe/spacecat-api-service/issues/1065)) ([9936d15](https://github.com/adobe/spacecat-api-service/commit/9936d1521c5b13f0b4b5a04a43034fb3f3fcc465))
+
+## [1.133.1](https://github.com/adobe/spacecat-api-service/compare/v1.133.0...v1.133.1) (2025-07-15)
+
+
+### Bug Fixes
+
+* bump sas uri timeout to 24 hours ([#1064](https://github.com/adobe/spacecat-api-service/issues/1064)) ([2409570](https://github.com/adobe/spacecat-api-service/commit/2409570dea24c9e9260f9e4f6395ea6db4093862))
+
 # [1.133.0](https://github.com/adobe/spacecat-api-service/compare/v1.132.5...v1.133.0) (2025-07-15)
 
 
