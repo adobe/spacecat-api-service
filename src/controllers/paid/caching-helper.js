@@ -9,10 +9,12 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { parse } from 'csv';
+
 import {
-  GetObjectCommand, ListObjectsV2Command, CopyObjectCommand,
+  GetObjectCommand, PutObjectCommand, HeadObjectCommand,
 } from '@aws-sdk/client-s3';
+
+const PRE_SIGNED_MAX_AGE_SECONDS = 6 * 60 * 60; // 6 hours
 
 function parseS3Uri(s3Uri) {
   const match = s3Uri.match(/^s3:\/\/([^/]+)\/?(.*)$/);
@@ -22,28 +24,35 @@ function parseS3Uri(s3Uri) {
   };
 }
 
-async function parseCsvToJson(csvString) {
-  return new Promise((resolve, reject) => {
-    parse(csvString, { columns: true, skip_empty_lines: true }, (err, output) => {
-      if (err) return reject(err);
-      return resolve(output);
-    });
-  });
+async function fileExists(s3, key, log) {
+  try {
+    log.info(`Checking if cached result exists with key: ${key}`);
+    const { bucket, prefix } = parseS3Uri(key);
+    await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: prefix }));
+    return true;
+  } catch (err) {
+    if (err.name === 'NotFound') {
+      return false;
+    }
+    log.error(`Unexpected error when checking if cached result exists: ${err}. Continuing execution without using cache`);
+    return false;
+  }
 }
 
 async function getS3CachedResult(s3, key, log) {
   try {
-    log.info(`Checking for cached result key: ${key}`);
+    log.info(`Fetching cached result key: ${key}`);
     const { bucket, prefix } = parseS3Uri(key);
+
     const getCachedFile = new GetObjectCommand({ Bucket: bucket, Key: prefix });
-    const response = await s3.send(getCachedFile);
-    const stream = response.Body;
-    const chunks = [];
-    for await (const chunk of stream) {
-      chunks.push(chunk);
-    }
-    const data = Buffer.concat(chunks).toString('utf-8');
-    return data;
+    const { s3Client, getSignedUrl } = s3;
+
+    const presignedUrl = await getSignedUrl(
+      s3Client,
+      getCachedFile,
+      { expiresIn: PRE_SIGNED_MAX_AGE_SECONDS },
+    );
+    return presignedUrl;
   } catch (err) {
     if (err.name === 'NoSuchKey') {
       return null;
@@ -53,35 +62,26 @@ async function getS3CachedResult(s3, key, log) {
   }
 }
 
-async function copyOneNewestCsvToCache(s3, outLocation, cacheKey, log) {
+async function addResultJsonToCache(s3, cacheKey, result, log) {
   try {
-    const { bucket, prefix } = parseS3Uri(outLocation);
-    const listCmd = new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, MaxKeys: 1 });
-    const listed = await s3.send(listCmd);
-    const csvObj = (listed.Contents || [])
-      .filter((obj) => obj.Key.endsWith('.csv'))
-      .reduce((latest, file) => (
-        !latest || file.LastModified > latest.LastModified ? file : latest
-      ), null);
-    if (!csvObj) throw new Error('No CSV result found in Athena output');
     const { bucket: destBucket, prefix: destKey } = parseS3Uri(cacheKey);
-    const copyCmd = new CopyObjectCommand({
+    const putCmd = new PutObjectCommand({
       Bucket: destBucket,
       Key: destKey,
-      CopySource: `${bucket}/${csvObj.Key}`,
-      ContentType: 'text/csv',
+      Body: JSON.stringify(result),
+      ContentType: 'application/json',
     });
-    await s3.send(copyCmd);
+    await s3.s3Client.send(putCmd);
     return true;
   } catch (error) {
-    log.error(`Failed to copy query result to cache ${cacheKey} from: ${outLocation} with error ${error}. Continuing with excecution without caching`);
+    log.error(`Failed to add result json to cache ${cacheKey}. Error was ${error}`);
     return false;
   }
 }
 
 export {
+  fileExists,
   parseS3Uri,
-  parseCsvToJson,
   getS3CachedResult,
-  copyOneNewestCsvToCache,
+  addResultJsonToCache,
 };

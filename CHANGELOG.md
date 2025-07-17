@@ -1,3 +1,17 @@
+## [1.134.1](https://github.com/adobe/spacecat-api-service/compare/v1.134.0...v1.134.1) (2025-07-17)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1068](https://github.com/adobe/spacecat-api-service/issues/1068)) ([208fa86](https://github.com/adobe/spacecat-api-service/commit/208fa86b0db6f0283ccdacfd66c19e6aec96559c))
+
+# [1.134.0](https://github.com/adobe/spacecat-api-service/compare/v1.133.2...v1.134.0) (2025-07-17)
+
+
+### Features
+
+* traffic-analyzer return link to file with redirect  ([#1067](https://github.com/adobe/spacecat-api-service/issues/1067)) ([7eda727](https://github.com/adobe/spacecat-api-service/commit/7eda727de641de4b4dafa6b0971317777c46538e))
+
 ## [1.133.2](https://github.com/adobe/spacecat-api-service/compare/v1.133.1...v1.133.2) (2025-07-16)
 
 
