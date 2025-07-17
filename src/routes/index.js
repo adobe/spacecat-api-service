@@ -212,7 +212,9 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
-    'GET /llmo/:siteId/:dataSource': llmoController.getLlmoData,
+
+    // LLMO Specific Routes
+    'GET /llmo/:siteId/sheet-data/:dataSource(.*)': llmoController.getLlmoData,
   };
 
   // Initialization of static and dynamic routes
