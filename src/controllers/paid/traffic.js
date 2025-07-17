@@ -28,41 +28,17 @@ import {
   addResultJsonToCache,
   fileExists,
 } from './caching-helper.js';
+import { getDateRanges } from '../../../test/controllers/paid/calendar-week-helper.js';
 
 async function loadSql(variables) {
   return getStaticContent(variables, './src/controllers/paid/channel-query.sql.tpl');
 }
 
-function getDateOfISOWeekStart(year, week) {
-  const simple = new Date(year, 0, 1 + (week - 1) * 7);
-  const day = simple.getDay();
-  const isoWeekStart = new Date(simple);
-  if (day <= 4) {
-    isoWeekStart.setDate(simple.getDate() - day + 1);
-  } else {
-    isoWeekStart.setDate(simple.getDate() + 8 - day);
-  }
-  return isoWeekStart;
-}
-
 function getWeekMonthsAndYears(year, week) {
-  const startOfWeek = getDateOfISOWeekStart(year, week);
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 6);
-
-  const startMonth = startOfWeek.getMonth() + 1;
-  const endMonth = endOfWeek.getMonth() + 1;
-
-  const startYear = startOfWeek.getFullYear();
-  const endYear = endOfWeek.getFullYear();
-
-  const monthArr = startMonth === endMonth ? [startMonth] : [startMonth, endMonth];
-  const yearsArr = startYear === endYear ? [startYear] : [startYear, endYear];
-
-  return {
-    months: monthArr.join(', '),
-    years: yearsArr.join(', '),
-  };
+  const ranges = getDateRanges(week, year);
+  const months = [...new Set(ranges.map((r) => r.month))].join(', ');
+  const years = [...new Set(ranges.map((r) => r.year))].join(', ');
+  return { months, years };
 }
 
 async function tryGetCacheResult(siteid, s3, cacheBucket, query, log, noCache = false) {
