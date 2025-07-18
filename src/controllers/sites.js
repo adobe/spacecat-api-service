@@ -314,6 +314,11 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
+    if (isBoolean(requestBody.isSandbox) && requestBody.isSandbox !== site.getIsSandbox()) {
+      site.setIsSandbox(requestBody.isSandbox);
+      updates = true;
+    }
+
     if (hasText(requestBody.organizationId)
       && requestBody.organizationId !== site.getOrganizationId()) {
       site.setOrganizationId(requestBody.organizationId);
