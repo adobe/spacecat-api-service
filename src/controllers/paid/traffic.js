@@ -58,7 +58,7 @@ function TrafficController(context, log, env) {
   } = env;
 
   // constants
-  const ATHENA_TEMP_FOLDER = `s3://${bucketName}`;
+  const ATHENA_TEMP_FOLDER = `s3://${bucketName}/temp/out`;
   const CACHE_LOCATION = `s3://${bucketName}/cache`;
 
   async function tryGetCacheResult(siteId, query) {
