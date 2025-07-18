@@ -436,6 +436,7 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
+      console.log(athenaCall.args[0]);
       expect(athenaCall).to.exist;
       expect(athenaCall.args[0]).to.includes('AND ((year=2020 AND month=12 AND week=53) OR (year=2021 AND month=1 AND week=53))'); // months
     });
