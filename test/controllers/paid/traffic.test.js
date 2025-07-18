@@ -19,11 +19,14 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { describe } from 'mocha';
+import { gunzip } from 'zlib';
+import { promisify } from 'util';
 import TrafficController from '../../../src/controllers/paid/traffic.js';
 import AccessControlUtil from '../../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
+const gunzipAsync = promisify(gunzip);
 
 const FIXTURES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../controllers/fixtures');
 const SITE_ID = 'site-id';
@@ -107,7 +110,8 @@ describe('Paid TrafficController', async () => {
       const res = await controller.getPaidTrafficByTypeChannel();
       expect(res.status).to.equal(200); // <-- CHANGED FROM 302 to 200
       expect(lastPutObject).to.exist;
-      const putBody = JSON.parse(lastPutObject.input.Body);
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(trafficTypeExpected);
     });
 
@@ -136,7 +140,8 @@ describe('Paid TrafficController', async () => {
       expect(res.status).to.equal(200);
       // Validate the object put to S3
       expect(lastPutObject).to.exist;
-      const putBody = JSON.parse(lastPutObject.input.Body);
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(trafficTypeExpected);
       expect(mockLog.error).to.have.been.calledWithMatch(/Failed to cache result to S3 with key/);
       expect(mockAthenaQuery).to.have.been.calledOnce;
@@ -158,9 +163,7 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, envNoCache);
       const res = await controller.getPaidTrafficByTypeChannelCampaign();
       expect(res.status).to.equal(200);
-      const putBody = JSON.parse(lastPutObject.input.Body);
-
-      const expetedOutput = [
+      const expectedOutput = [
         {
           type: 'search', channel: 'google', campaign: 'summer',
         },
@@ -168,7 +171,9 @@ describe('Paid TrafficController', async () => {
           type: 'display', channel: 'facebook', campaign: 'fall',
         },
       ];
-      expect(putBody).to.deep.equal(expetedOutput);
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
+      expect(putBody).to.deep.equal(expectedOutput);
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
@@ -209,7 +214,8 @@ describe('Paid TrafficController', async () => {
       expect(res.status).to.equal(200);
       // Validate the object put to S3
       expect(lastPutObject).to.exist;
-      const putBody = JSON.parse(lastPutObject.input.Body);
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal([]);
     });
 
@@ -244,7 +250,8 @@ describe('Paid TrafficController', async () => {
         { ...mockEnv, CWV_THRESHOLDS: customGood },
       );
       await controller.getPaidTrafficByCampaignUrlDevice();
-      const putBody = JSON.parse(lastPutObject.input.Body)[0];
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString())[0];
       expect(putBody.lcp_score).to.equal('good');
       expect(putBody.inp_score).to.equal('good');
       expect(putBody.cls_score).to.equal('good');
@@ -262,7 +269,8 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByCampaignDevice();
       expect(res.status).to.equal(200);
-      const putBody = JSON.parse(lastPutObject.input.Body);
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
       expect(putBody[0].overall_cwv_score).to.equal('needs improvement');
       expect(putBody[1].overall_cwv_score).to.equal('poor');
       const athenaCall = mockAthenaQuery.getCall(0);
@@ -291,7 +299,8 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByCampaignUrl();
       expect(res.status).to.equal(200);
-      const putBody = JSON.parse(lastPutObject.input.Body);
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
       expect(putBody.length).to.equal(5);
       // Check that each item in the result matches the input campaign/url
       const expectedCombos = [
@@ -324,7 +333,8 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByCampaign();
       expect(res.status).to.equal(200);
-      const putBody = JSON.parse(lastPutObject.input.Body);
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
       expect(putBody[0].overall_cwv_score).to.equal('needs improvement');
       expect(putBody[1].overall_cwv_score).to.equal('poor');
       const athenaCall = mockAthenaQuery.getCall(0);

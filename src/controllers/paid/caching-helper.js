@@ -13,6 +13,10 @@
 import {
   GetObjectCommand, PutObjectCommand, HeadObjectCommand,
 } from '@aws-sdk/client-s3';
+import { gzip } from 'zlib';
+import { promisify } from 'util';
+
+const gzipAsync = promisify(gzip);
 
 const PRE_SIGNED_MAX_AGE_SECONDS = 6 * 60 * 60; // 6 hours
 
@@ -65,12 +69,17 @@ async function getS3CachedResult(s3, key, log) {
 async function addResultJsonToCache(s3, cacheKey, result, log) {
   try {
     const { bucket: destBucket, prefix: destKey } = parseS3Uri(cacheKey);
+
+    const compressedBody = await gzipAsync(JSON.stringify(result));
+
     const putCmd = new PutObjectCommand({
       Bucket: destBucket,
       Key: destKey,
-      Body: JSON.stringify(result),
+      Body: compressedBody,
       ContentType: 'application/json',
+      ContentEncoding: 'gzip',
     });
+
     await s3.s3Client.send(putCmd);
     return true;
   } catch (error) {
