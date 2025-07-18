@@ -135,13 +135,6 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    // if cached, return pre-signed url, else return direct response
-    if (isCached) {
-      log.info(`Fetching signed URL from: ${cacheKey}`);
-      const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
-      return found(cachedUrl);
-    }
-
     log.error(`Failed to cache result to S3 with key ${CACHE_LOCATION}. Returning response directly.`);
     return ok(response);
   }

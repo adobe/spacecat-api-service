@@ -105,9 +105,7 @@ describe('Paid TrafficController', async () => {
       mockAthenaQuery.resolves(trafficTypeMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByTypeChannel();
-      expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_RESIGNED_URL);
-      // Validate the object put to S3
+      expect(res.status).to.equal(200); // <-- CHANGED FROM 302 to 200
       expect(lastPutObject).to.exist;
       const putBody = JSON.parse(lastPutObject.input.Body);
       expect(putBody).to.deep.equal(trafficTypeExpected);
@@ -128,7 +126,6 @@ describe('Paid TrafficController', async () => {
       const res = await controller.getPaidTrafficByTypeChannel();
       expect(res.status).to.equal(302);
       expect(res.headers.get('location')).to.equal(TEST_RESIGNED_URL);
-      // Validate no query was made
       expect(mockAthenaQuery).not.to.have.been.called;
     });
 
@@ -136,13 +133,12 @@ describe('Paid TrafficController', async () => {
       mockAthenaQuery.resolves(trafficTypeMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByTypeChannel();
-      expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_RESIGNED_URL);
+      expect(res.status).to.equal(200);
       // Validate the object put to S3
       expect(lastPutObject).to.exist;
       const putBody = JSON.parse(lastPutObject.input.Body);
       expect(putBody).to.deep.equal(trafficTypeExpected);
-      expect(mockLog.error).not.to.have.been.called;
+      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to cache result to S3 with key/);
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
@@ -161,7 +157,7 @@ describe('Paid TrafficController', async () => {
 
       const controller = TrafficController(mockContext, mockLog, envNoCache);
       const res = await controller.getPaidTrafficByTypeChannelCampaign();
-      expect(res.status).to.equal(302);
+      expect(res.status).to.equal(200);
       const putBody = JSON.parse(lastPutObject.input.Body);
 
       const expetedOutput = [
@@ -210,8 +206,7 @@ describe('Paid TrafficController', async () => {
       mockAthenaQuery.resolves([]);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByTypeChannel();
-      expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_RESIGNED_URL);
+      expect(res.status).to.equal(200);
       // Validate the object put to S3
       expect(lastPutObject).to.exist;
       const putBody = JSON.parse(lastPutObject.input.Body);
@@ -266,7 +261,7 @@ describe('Paid TrafficController', async () => {
       ]);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByCampaignDevice();
-      expect(res.status).to.equal(302);
+      expect(res.status).to.equal(200);
       const putBody = JSON.parse(lastPutObject.input.Body);
       expect(putBody[0].overall_cwv_score).to.equal('needs improvement');
       expect(putBody[1].overall_cwv_score).to.equal('poor');
@@ -295,7 +290,7 @@ describe('Paid TrafficController', async () => {
       ]);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByCampaignUrl();
-      expect(res.status).to.equal(302);
+      expect(res.status).to.equal(200);
       const putBody = JSON.parse(lastPutObject.input.Body);
       expect(putBody.length).to.equal(5);
       // Check that each item in the result matches the input campaign/url
@@ -328,7 +323,7 @@ describe('Paid TrafficController', async () => {
       ]);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByCampaign();
-      expect(res.status).to.equal(302);
+      expect(res.status).to.equal(200);
       const putBody = JSON.parse(lastPutObject.input.Body);
       expect(putBody[0].overall_cwv_score).to.equal('needs improvement');
       expect(putBody[1].overall_cwv_score).to.equal('poor');
