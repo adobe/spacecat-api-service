@@ -1,3 +1,10 @@
+## [1.134.3](https://github.com/adobe/spacecat-api-service/compare/v1.134.2...v1.134.3) (2025-07-18)
+
+
+### Bug Fixes
+
+* remove env vars and defaults ([#1074](https://github.com/adobe/spacecat-api-service/issues/1074)) ([6f5fcab](https://github.com/adobe/spacecat-api-service/commit/6f5fcab9c5e8d648d60178fd287f04103a7fd3e6))
+
 ## [1.134.2](https://github.com/adobe/spacecat-api-service/compare/v1.134.1...v1.134.2) (2025-07-17)
 
 
