@@ -143,7 +143,7 @@ describe('Paid TrafficController', async () => {
       const decompressed = await gunzipAsync(lastPutObject.input.Body);
       const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(trafficTypeExpected);
-      expect(mockLog.error).to.have.been.calledWithMatch(/Failed to cache result to S3 with key/);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to cache result to S3 with key/);
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
@@ -397,7 +397,15 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByTypeChannel();
       expect(res.status).to.equal(200);
-      const body = await res.json();
+      const contentEncoding = res.headers.get('content-encoding');
+      let body;
+      if (contentEncoding === 'gzip') {
+        const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+        const decompressed = await gunzipAsync(gzippedBuffer);
+        body = JSON.parse(decompressed.toString());
+      } else {
+        body = await res.json();
+      }
       expect(body).to.deep.equal(trafficTypeExpected);
     });
   });

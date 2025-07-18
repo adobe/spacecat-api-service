@@ -135,8 +135,10 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    log.error(`Failed to cache result to S3 with key ${CACHE_LOCATION}. Returning response directly.`);
-    return ok(response);
+    log.warn(`Failed to cache result to S3 with key ${CACHE_LOCATION}. Returning response directly.`);
+    return ok(response, {
+      'content-encoding': 'gzip',
+    });
   }
 
   return {
