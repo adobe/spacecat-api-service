@@ -23,7 +23,7 @@ function LlmoController() {
       // Fetch data from the external endpoint
       const response = await fetch(`https://main--project-elmo-ui-data--adobe.aem.live/${dataSource}.json`, {
         headers: {
-          Authorization: `token ${env.LLMO_HLX_API_KEY}`,
+          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': 'SpaceCat-API-Service/1.0',
         },
       });

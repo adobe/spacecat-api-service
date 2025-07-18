@@ -62,6 +62,9 @@ describe('LLMO Controller', () => {
           info: sinon.spy(),
           error: sinon.spy(),
         },
+        env: {
+          LLMO_HLX_API_KEY: 'hlx_test_api_key',
+        },
       };
 
       const result = await llmoController.getLlmoSheetData(mockContext);
@@ -70,8 +73,7 @@ describe('LLMO Controller', () => {
       expect(result).to.have.property('status', 200);
       expect(body).to.deep.equal(mockData);
       expect(fetchStub.calledOnce).to.be.true;
-      expect(fetchStub.firstCall.args[0]).to.equal('https://d1vm7168yg1w6d.cloudfront.net/frescopa/brandpresence-all-w28-2025.json');
-      expect(fetchStub.firstCall.args[1].headers).to.have.property('Referer', 'https://dev.d2ikwb7s634epv.amplifyapp.com/');
+      expect(fetchStub.firstCall.args[0]).to.equal('https://main--project-elmo-ui-data--adobe.aem.live/frescopa/brandpresence-all-w28-2025.json');
       expect(mockContext.log.info.calledOnce).to.be.true;
     });
 
@@ -87,6 +89,9 @@ describe('LLMO Controller', () => {
         log: {
           info: sinon.spy(),
           error: sinon.spy(),
+        },
+        env: {
+          LLMO_HLX_API_KEY: 'hlx_test_api_key',
         },
       };
 
@@ -117,6 +122,9 @@ describe('LLMO Controller', () => {
         log: {
           info: sinon.spy(),
           error: sinon.spy(),
+        },
+        env: {
+          LLMO_HLX_API_KEY: 'hlx_test_api_key',
         },
       };
 
