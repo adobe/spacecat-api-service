@@ -29,22 +29,18 @@ import {
   fileExists,
 } from './caching-helper.js';
 import { getDateRanges } from '../../../test/controllers/paid/calendar-week-helper.js';
+import { buildPageTypeCase } from './page-type-mapper.js';
 
 async function loadSql(variables) {
   return getStaticContent(variables, './src/controllers/paid/channel-query.sql.tpl');
 }
 
-function getWeekMonthsAndYears(year, week) {
-  const ranges = getDateRanges(week, year);
-  const months = [...new Set(ranges.map((r) => r.month))].join(', ');
-  const years = [...new Set(ranges.map((r) => r.year))].join(', ');
-  return { months, years };
-}
+const isTrue = (value) => value === true || value === 'true';
 
 async function tryGetCacheResult(siteid, s3, cacheBucket, query, log, noCache = false) {
   const outPrefix = `${crypto.createHash('md5').update(query).digest('hex')}`;
   const cacheKey = `${cacheBucket}/${siteid}/${outPrefix}.json`;
-  if (noCache === true) {
+  if (isTrue(noCache)) {
     log.info(`Skipping cache fetch for Athena result from S3: ${cacheKey} because user requested noCache`);
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
@@ -67,41 +63,58 @@ function TrafficController(context, log, env) {
     if (!site) {
       return notFound('Site not found');
     }
+    const baseURL = site.getBaseURL();
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can view paid traffic metrics');
     }
-
     const { year, week, noCache } = context.data;
     if (!year || !week) {
       const badReqMessagge = 'year and week are required parameters';
       log.info(badReqMessagge);
       return badRequest(badReqMessagge);
     }
-    const { months, years } = getWeekMonthsAndYears(year, week);
-    const dbName = env.PAID_TRAFFIC_DATABASE;
-    const tableName = env.PAID_TRAFFIC_TABLE_NAME;
+
+    const dbName = env.RUM_METRICS_DATABASE;
+    const tableName = env.RUM_METRICS_COMPACT_TABLE;
     const fullTableName = `${dbName}.${tableName}`;
     const groupBy = dimensions;
     const dimensionColumns = groupBy.join(', ');
     const dimensionColumnsPrefixed = `${groupBy.map((col) => `a.${col}`).join(', ')}, `;
-    const description = `fetch paid channel data | db: ${dbName} | siteKey: ${siteId} | year: ${year} | month: ${months} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
+
+    const dateRanges = getDateRanges(week, year);
+    const weekNum = week; // always use the input week
+    const temporalCondition = dateRanges
+      .map((r) => `(year=${r.year} AND month=${r.month} AND week=${weekNum})`)
+      .join(' OR ');
+
+    // Only build pageTypeCase if 'page_type' is in the dimensions
+    let pageTypeCase;
+    if (groupBy.includes('page_type')) {
+      pageTypeCase = buildPageTypeCase(baseURL, 'path');
+    }
+
+    if (!pageTypeCase) {
+      pageTypeCase = 'NULL as page_type';
+    }
+
+    const description = `fetch paid channel data for site: ${baseURL} | db: ${dbName} | siteKey: ${siteId} | year: ${year} | week: ${week} | temporalCondition: ${temporalCondition} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
     log.info(`Processing query: ${description}`);
 
     const query = await loadSql({
       siteId,
-      years,
-      months,
-      week,
       groupBy: groupBy.join(', '),
       dimensionColumns,
       dimensionColumnsPrefixed,
       tableName: fullTableName,
+      temporalCondition,
+      pageTypeCase,
     });
 
     log.debug(`Fetching paid data with query ${query}`);
-    const outputFolder = env.PAID_TRAFFIC_S3_OUTPUT_URI || 's3://spacecat-dev-segments/temp/out';
-    const cacheBucket = env.PAID_TRAFFIC_S3_CACHE_BUCKET_URI || 's3://spacecat-dev-segments/cache';
+    const bucketName = `${env.S3_BUCKET_NAME}/rum-metrics-compact`;
+    const outputFolder = `s3://${bucketName}/temp/out`;
+    const cacheBucket = `s3://${bucketName}/cache`;
     const { s3 } = context;
     const {
       cachedResultUrl,
@@ -123,7 +136,7 @@ function TrafficController(context, log, env) {
       dbName,
       description,
     );
-    const response = results.map((row) => mapper.toJSON(row, thresholdConfig));
+    const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
     log.info(`Succesfully fetched results of size ${response?.length}`);
     let isCached;
     if (response) {
@@ -148,6 +161,18 @@ function TrafficController(context, log, env) {
   const getPaidTrafficByTypeChannel = async () => fetchPaidTrafficData(['trf_type', 'trf_channel'], TrafficDataResponseDto);
   const getPaidTrafficByTypeCampaign = async () => fetchPaidTrafficData(['trf_type', 'utm_campaign'], TrafficDataResponseDto);
   const getPaidTrafficByType = async () => fetchPaidTrafficData(['trf_type'], TrafficDataResponseDto);
+  const getPaidTrafficByUrlPageTypeCampaignDevice = async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto);
+  const getPaidTrafficByUrlPageTypeDevice = async () => fetchPaidTrafficData(['path', 'page_type', 'device'], TrafficDataWithCWVDto);
+  const getPaidTrafficByUrlPageTypeCampaign = async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign'], TrafficDataWithCWVDto);
+  const getPaidTrafficByUrlPageTypePlatform = async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform'], TrafficDataWithCWVDto);
+  const getPaidTrafficByUrlPageTypeCampaignPlatform = async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'trf_platform'], TrafficDataWithCWVDto);
+  const getPaidTrafficByUrlPageTypePlatformDevice = async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto);
+  const getPaidTrafficByPageTypeCampaignDevice = async () => fetchPaidTrafficData(['page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto);
+  const getPaidTrafficByPageTypeDevice = async () => fetchPaidTrafficData(['page_type', 'device'], TrafficDataWithCWVDto);
+  const getPaidTrafficByPageTypeCampaign = async () => fetchPaidTrafficData(['page_type', 'utm_campaign'], TrafficDataWithCWVDto);
+  const getPaidTrafficByPageTypePlatform = async () => fetchPaidTrafficData(['page_type', 'trf_platform'], TrafficDataWithCWVDto);
+  const getPaidTrafficByPageTypePlatformDevice = async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto);
+  const getPaidTrafficByPageTypePlatformCampaign = async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign'], TrafficDataWithCWVDto);
 
   return {
     getPaidTrafficByCampaignUrlDevice,
@@ -158,6 +183,18 @@ function TrafficController(context, log, env) {
     getPaidTrafficByTypeChannel,
     getPaidTrafficByTypeCampaign,
     getPaidTrafficByType,
+    getPaidTrafficByPageTypePlatformCampaign,
+    getPaidTrafficByUrlPageTypeCampaignDevice,
+    getPaidTrafficByUrlPageTypeDevice,
+    getPaidTrafficByUrlPageTypeCampaign,
+    getPaidTrafficByUrlPageTypePlatform,
+    getPaidTrafficByUrlPageTypeCampaignPlatform,
+    getPaidTrafficByUrlPageTypePlatformDevice,
+    getPaidTrafficByPageTypeCampaignDevice,
+    getPaidTrafficByPageTypeDevice,
+    getPaidTrafficByPageTypeCampaign,
+    getPaidTrafficByPageTypePlatform,
+    getPaidTrafficByPageTypePlatformDevice,
   };
 }
 

@@ -60,7 +60,7 @@ export const TrafficDataWithCWVDto = {
    *   overall_cwv_score: string,
    * }} JSON object.
      */
-  toJSON: (data, thresholdConfig) => {
+  toJSON: (data, thresholdConfig, baseUrl) => {
     const lcp = Number(data.p70_lcp);
     const inp = Number(data.p70_inp);
     const cls = Number(data.p70_cls);
@@ -81,7 +81,9 @@ export const TrafficDataWithCWVDto = {
 
     return {
       ...TrafficDataResponseDto.toJSON(data),
-      url: data.path,
+      url: data.url || (baseUrl && data.path ? `${baseUrl.replace(/\/$/, '')}/${data.path.replace(/^\//, '')}` : undefined),
+      path: data.path,
+      page_type: data.page_type,
       device: data.device,
       p70_lcp: lcp,
       p70_cls: cls,

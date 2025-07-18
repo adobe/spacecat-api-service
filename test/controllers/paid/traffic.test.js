@@ -219,29 +219,6 @@ describe('Paid TrafficController', async () => {
       expect(putBody).to.deep.equal([]);
     });
 
-    it('uses default db, table, and S3 paths if env vars are missing', async () => {
-      const envNoDbTableS3 = { ...mockEnv };
-      delete envNoDbTableS3.PAID_TRAFFIC_DATABASE;
-      delete envNoDbTableS3.PAID_TRAFFIC_TABLE_NAME;
-      delete envNoDbTableS3.PAID_TRAFFIC_S3_OUTPUT_URI;
-      delete envNoDbTableS3.PAID_TRAFFIC_S3_CACHE_BUCKET_URI;
-      mockAthenaQuery.resolves(trafficTypeMock);
-      const controller = TrafficController(mockContext, mockLog, envNoDbTableS3);
-      await controller.getPaidTrafficByTypeChannel();
-
-      // Validate cache URL was used in S3 calls
-      const s3Calls = mockS3.send.getCalls();
-      const cacheUsed = s3Calls.some((call) => {
-        const input = call.args[0]?.input || call.args[0];
-        return input
-          && input.Bucket
-          && input.Bucket.includes('spacecat-dev-segments')
-          && input.Key
-          && input.Key.includes('cache');
-      });
-      expect(cacheUsed).to.be.true;
-    });
-
     it('getPaidTrafficByCampaignUrlDevice uses custom threshold config if provided', async () => {
       // Custom thresholds: make LCP_GOOD very high so all values are 'good',
       const customGood = {
@@ -385,9 +362,8 @@ describe('Paid TrafficController', async () => {
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
       expect(athenaCall).to.exist;
-
-      expect(athenaCall.args[0]).to.match(/(12, 1|1, 12)/); // months
-      expect(athenaCall.args[0]).to.match(/(2025, 2024|2024, 2025)/); // years
+      console.log(athenaCall.args[0]);
+      expect(athenaCall.args[0]).to.includes('(year=2024 AND month=12 AND week=53) OR (year=2025 AND month=1 AND week=53)'); // months
     });
 
     it('getPaidTrafficByTypeChannel query handles friday start date (ISO week edge case)', async () => {
@@ -409,9 +385,9 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
+      console.log(athenaCall.args[0]);
       expect(athenaCall).to.exist;
-      expect(athenaCall.args[0]).to.match(/(12, 1|1, 12)/); // months
-      expect(athenaCall.args[0]).to.match(/(2020, 2021|2021, 2020)/); // years
+      expect(athenaCall.args[0]).to.includes('AND ((year=2020 AND month=12 AND week=53) OR (year=2021 AND month=1 AND week=53))'); // months
     });
 
     it('returns response directly if caching fails due to S3 PutObjectCommand error (covers src/controllers/paid/traffic.js lines 163-164)', async () => {
