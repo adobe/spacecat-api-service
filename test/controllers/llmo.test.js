@@ -36,7 +36,7 @@ describe('LLMO Controller', () => {
     fetchStub.restore();
   });
 
-  describe('getLlmoData', () => {
+  describe('getLlmoSheetData', () => {
     it('should proxy data from external endpoint', async () => {
       const mockData = {
         timestamp: '2025-01-27T10:30:00Z',
@@ -64,7 +64,7 @@ describe('LLMO Controller', () => {
         },
       };
 
-      const result = await llmoController.getLlmoData(mockContext);
+      const result = await llmoController.getLlmoSheetData(mockContext);
       const body = await readStreamToJson(result.body);
 
       expect(result).to.have.property('status', 200);
@@ -91,7 +91,7 @@ describe('LLMO Controller', () => {
       };
 
       try {
-        await llmoController.getLlmoData(mockContext);
+        await llmoController.getLlmoSheetData(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
         expect(error.message).to.equal('Network error');
@@ -121,7 +121,7 @@ describe('LLMO Controller', () => {
       };
 
       try {
-        await llmoController.getLlmoData(mockContext);
+        await llmoController.getLlmoSheetData(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
         expect(error.message).to.include('External API returned 404');

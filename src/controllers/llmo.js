@@ -13,15 +13,17 @@
 import { ok } from '@adobe/spacecat-shared-http-utils';
 
 function LlmoController() {
-  const getLlmoData = async (context) => {
+  // Handles requests to the LLMO sheet data endpoint
+  const getLlmoSheetData = async (context) => {
     const { siteId, dataSource } = context.params;
     const { log } = context;
+    const { env } = context;
 
     try {
       // Fetch data from the external endpoint
-      const response = await fetch(`https://d1vm7168yg1w6d.cloudfront.net/${dataSource}.json`, {
+      const response = await fetch(`https://main--project-elmo-ui-data--adobe.aem.live/${dataSource}.json`, {
         headers: {
-          Referer: 'https://dev.d2ikwb7s634epv.amplifyapp.com/',
+          Authorization: `token ${env.LLMO_HLX_API_KEY}`,
           'User-Agent': 'SpaceCat-API-Service/1.0',
         },
       });
@@ -45,7 +47,7 @@ function LlmoController() {
   };
 
   return {
-    getLlmoData,
+    getLlmoSheetData,
   };
 }
 
