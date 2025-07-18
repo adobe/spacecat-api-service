@@ -19,7 +19,6 @@ import { describe } from 'mocha';
 import {
   fileExists,
   parseS3Uri,
-  getS3CachedResult,
   addResultJsonToCache,
 } from '../../../src/controllers/paid/caching-helper.js';
 
@@ -79,26 +78,6 @@ describe('Paid TrafficController caching-helper', () => {
       const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog);
       expect(result).to.be.false;
       expect(mockLog.error).to.have.been.calledWithMatch('Unexpected error');
-    });
-  });
-
-  describe('getS3CachedResult', () => {
-    it('returns presigned url if getSignedUrl succeeds', async () => {
-      mockS3.getSignedUrl.resolves('https://signed-url');
-      const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
-      expect(url).to.equal('https://signed-url');
-      expect(mockLog.info).to.have.been.calledWithMatch('Fetching cached result key');
-    });
-    it('returns null if error is NoSuchKey', async () => {
-      mockS3.getSignedUrl.rejects(Object.assign(new Error('no such key'), { name: 'NoSuchKey' }));
-      const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
-      expect(url).to.be.null;
-    });
-    it('logs and returns null on other errors', async () => {
-      mockS3.getSignedUrl.rejects(Object.assign(new Error('fail'), { name: 'OtherError' }));
-      const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
-      expect(url).to.be.null;
-      expect(mockLog.error).to.have.been.calledWithMatch('Unepected exception');
     });
   });
 

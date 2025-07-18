@@ -15,7 +15,6 @@ import {
   notFound,
   forbidden,
   badRequest,
-  found,
 } from '@adobe/spacecat-shared-http-utils';
 import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
@@ -24,9 +23,9 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { TrafficDataResponseDto } from '../../dto/traffic-data-base-response.js';
 import { TrafficDataWithCWVDto } from '../../dto/traffic-data-response-with-cwv.js';
 import {
-  getS3CachedResult,
   addResultJsonToCache,
   fileExists,
+  parseS3Uri,
 } from './caching-helper.js';
 import { getDateRanges } from '../../../test/controllers/paid/calendar-week-helper.js';
 
@@ -41,6 +40,16 @@ function getWeekMonthsAndYears(year, week) {
   return { months, years };
 }
 
+// helper to collect an S3 streaming Body into a Buffer
+function streamToBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
+}
+
 function getCacheKey(siteId, query, cacheLocation) {
   const outPrefix = crypto.createHash('md5').update(query).digest('hex');
   const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
@@ -50,6 +59,7 @@ function getCacheKey(siteId, query, cacheLocation) {
 function TrafficController(context, log, env) {
   const { dataAccess, s3 } = context;
   const { Site } = dataAccess;
+  const { GetObjectCommand } = s3;
 
   const {
     RUM_METRICS_DATABASE: rumMetricsDatabase,
@@ -64,11 +74,10 @@ function TrafficController(context, log, env) {
   async function tryGetCacheResult(siteId, query) {
     const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
     if (await fileExists(s3, cacheKey, log)) {
-      log.info(`Found cached result. Fetching signed URL for Athena result from S3: ${cacheKey}`);
-      const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
-      return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
+      log.info(`Found cached result. Will return gzipped JSON from S3: ${cacheKey}`);
+      return { cached: true, cacheKey, outPrefix };
     }
-    return { cachedResultUrl: null, cacheKey, outPrefix };
+    return { cached: false, cacheKey, outPrefix };
   }
 
   async function fetchPaidTrafficData(dimensions, mapper) {
@@ -112,11 +121,21 @@ function TrafficController(context, log, env) {
     log.debug(`Fetching paid data with query: ${query}`);
 
     // first try to get from cache
-    const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(siteId, query);
+    const { cached, cacheKey, outPrefix } = await tryGetCacheResult(siteId, query);
     const thresholdConfig = env.CWV_THRESHOLDS || {};
-    if (cachedResultUrl) {
-      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}`);
-      return found(cachedResultUrl);
+
+    if (cached) {
+      // stream gzipped JSON directly from S3
+      log.info(`Streaming cached gzipped JSON from S3: ${cacheKey}`);
+      const { bucket, prefix } = parseS3Uri(cacheKey);
+      const getCmd = new GetObjectCommand({ Bucket: bucket, Key: prefix });
+      const s3Res = await s3.s3Client.send(getCmd);
+      const buf = await streamToBuffer(s3Res.Body);
+
+      // return gzipped content via wrapper
+      return ok(buf, {
+        'content-encoding': 'gzip',
+      });
     }
 
     // if not cached, query Athena
@@ -135,7 +154,11 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    log.warn(`Failed to cache result to S3 with key ${CACHE_LOCATION}. Returning response directly.`);
+    if (!isCached) {
+      log.warn(`Failed to cache result to S3 at ${CACHE_LOCATION}.`);
+    }
+
+    // return fresh JSON (wrapper will gzip)
     return ok(response, {
       'content-encoding': 'gzip',
     });

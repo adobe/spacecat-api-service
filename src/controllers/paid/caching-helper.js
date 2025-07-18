@@ -10,15 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import {
-  GetObjectCommand, PutObjectCommand, HeadObjectCommand,
-} from '@aws-sdk/client-s3';
+import { PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { gzip } from 'zlib';
 import { promisify } from 'util';
 
 const gzipAsync = promisify(gzip);
-
-const PRE_SIGNED_MAX_AGE_SECONDS = 6 * 60 * 60; // 6 hours
 
 function parseS3Uri(s3Uri) {
   const match = s3Uri.match(/^s3:\/\/([^/]+)\/?(.*)$/);
@@ -40,29 +36,6 @@ async function fileExists(s3, key, log) {
     }
     log.error(`Unexpected error when checking if cached result exists: ${err}. Continuing execution without using cache`);
     return false;
-  }
-}
-
-async function getS3CachedResult(s3, key, log) {
-  try {
-    log.info(`Fetching cached result key: ${key}`);
-    const { bucket, prefix } = parseS3Uri(key);
-
-    const getCachedFile = new GetObjectCommand({ Bucket: bucket, Key: prefix });
-    const { s3Client, getSignedUrl } = s3;
-
-    const presignedUrl = await getSignedUrl(
-      s3Client,
-      getCachedFile,
-      { expiresIn: PRE_SIGNED_MAX_AGE_SECONDS },
-    );
-    return presignedUrl;
-  } catch (err) {
-    if (err.name === 'NoSuchKey') {
-      return null;
-    }
-    log.error(`Unepected exception when trying to fetch cached results on key: ${key}. Ignoring error and continuing with normal query. Exception was ${err}`);
-    return null;
   }
 }
 
@@ -91,6 +64,5 @@ async function addResultJsonToCache(s3, cacheKey, result, log) {
 export {
   fileExists,
   parseS3Uri,
-  getS3CachedResult,
   addResultJsonToCache,
 };
