@@ -44,6 +44,7 @@ export const SiteDto = {
     gitHubURL: site.getGitHubURL(),
     organizationId: site.getOrganizationId(),
     isLive: site.getIsLive(),
+    isSandbox: site.getIsSandbox(),
     isLiveToggledAt: site.getIsLiveToggledAt(),
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
