@@ -90,9 +90,7 @@ describe('LLMO Controller', () => {
           info: sinon.spy(),
           error: sinon.spy(),
         },
-        env: {
-          LLMO_HLX_API_KEY: 'hlx_test_api_key',
-        },
+        env: {},
       };
 
       try {
