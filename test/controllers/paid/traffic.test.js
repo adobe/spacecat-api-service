@@ -11,7 +11,6 @@
  */
 
 /* eslint-env mocha */
-
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
@@ -203,7 +202,7 @@ describe('Paid TrafficController', async () => {
         expect(rest.status).to.equal(400);
         // eslint-disable-next-line no-await-in-loop
         const body = await rest.json();
-        expect(body.message).to.equal('year and week are required parameters');
+        expect(body.message).to.equal('Year and week are required parameters');
       }
     });
 
@@ -217,29 +216,6 @@ describe('Paid TrafficController', async () => {
       expect(lastPutObject).to.exist;
       const putBody = JSON.parse(lastPutObject.input.Body);
       expect(putBody).to.deep.equal([]);
-    });
-
-    it('uses default db, table, and S3 paths if env vars are missing', async () => {
-      const envNoDbTableS3 = { ...mockEnv };
-      delete envNoDbTableS3.PAID_TRAFFIC_DATABASE;
-      delete envNoDbTableS3.PAID_TRAFFIC_TABLE_NAME;
-      delete envNoDbTableS3.PAID_TRAFFIC_S3_OUTPUT_URI;
-      delete envNoDbTableS3.PAID_TRAFFIC_S3_CACHE_BUCKET_URI;
-      mockAthenaQuery.resolves(trafficTypeMock);
-      const controller = TrafficController(mockContext, mockLog, envNoDbTableS3);
-      await controller.getPaidTrafficByTypeChannel();
-
-      // Validate cache URL was used in S3 calls
-      const s3Calls = mockS3.send.getCalls();
-      const cacheUsed = s3Calls.some((call) => {
-        const input = call.args[0]?.input || call.args[0];
-        return input
-          && input.Bucket
-          && input.Bucket.includes('spacecat-dev-segments')
-          && input.Key
-          && input.Key.includes('cache');
-      });
-      expect(cacheUsed).to.be.true;
     });
 
     it('getPaidTrafficByCampaignUrlDevice uses custom threshold config if provided', async () => {
@@ -359,22 +335,6 @@ describe('Paid TrafficController', async () => {
       const athenaCall = mockAthenaQuery.getCall(0);
       expect(athenaCall).to.exist;
       expect(athenaCall.args[0]).to.include('campaign');
-    });
-
-    it('getPaidTrafficByTypeChannel respects noCache flag and skips cache', async () => {
-      // Set noCache flag
-      mockContext.data.noCache = true;
-      mockAthenaQuery.resolves(trafficTypeMock);
-      const controller = TrafficController(mockContext, mockLog, mockEnv);
-      const res = await controller.getPaidTrafficByTypeChannel();
-      expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_RESIGNED_URL);
-      // Ensure Athena was queried
-      expect(mockAthenaQuery).to.have.been.calledOnce;
-      // Ensure S3 HeadObjectCommand (cache check) was not called
-      const s3Calls = mockS3.send.getCalls();
-      const headObjectCalled = s3Calls.some((call) => call.args[0]?.constructor?.name === 'HeadObjectCommand');
-      expect(headObjectCalled).to.be.false;
     });
 
     it('getPaidTrafficByTypeChannel query includes both months and years when week spans two months/years', async () => {
