@@ -350,9 +350,8 @@ describe('Paid TrafficController', async () => {
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
       expect(athenaCall).to.exist;
-
-      expect(athenaCall.args[0]).to.match(/(12, 1|1, 12)/); // months
-      expect(athenaCall.args[0]).to.match(/(2025, 2024|2024, 2025)/); // years
+      console.log(athenaCall.args[0]);
+      expect(athenaCall.args[0]).to.includes('(year=2024 AND month=12 AND week=53) OR (year=2025 AND month=1 AND week=53)'); // months
     });
 
     it('getPaidTrafficByTypeChannel query handles friday start date (ISO week edge case)', async () => {
@@ -374,9 +373,9 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
+      console.log(athenaCall.args[0]);
       expect(athenaCall).to.exist;
-      expect(athenaCall.args[0]).to.match(/(12, 1|1, 12)/); // months
-      expect(athenaCall.args[0]).to.match(/(2020, 2021|2021, 2020)/); // years
+      expect(athenaCall.args[0]).to.includes('AND ((year=2020 AND month=12 AND week=53) OR (year=2021 AND month=1 AND week=53))'); // months
     });
 
     it('returns response directly if caching fails due to S3 PutObjectCommand error (covers src/controllers/paid/traffic.js lines 163-164)', async () => {
