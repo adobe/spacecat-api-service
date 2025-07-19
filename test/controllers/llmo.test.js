@@ -56,7 +56,8 @@ describe('LLMO Controller', () => {
       const mockContext = {
         params: {
           siteId: 'test-site-id',
-          dataSource: 'frescopa/brandpresence-all-w28-2025',
+          dataFolder: 'frescopa',
+          dataSource: 'brandpresence-all-w28-2025',
         },
         log: {
           info: sinon.spy(),

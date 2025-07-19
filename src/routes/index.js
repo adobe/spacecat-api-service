@@ -214,7 +214,7 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
 
     // LLMO Specific Routes (TODO: Add more routes)
-    'GET /llmo/:siteId/sheet-data/:dataSource(.*)': llmoController.getLlmoSheetData,
+    'GET /llmo/:siteId/sheet-data/:dataFolder/:dataSource': llmoController.getLlmoSheetData,
     // 'GET /llmo/:siteId/config': llmoController.getLlmoConfig,
     // 'GET /llmo/:siteId/questions': llmoController.getLlmoQuestions,
     // 'POST /llmo/:siteId/questions': llmoController.addLlmoQuestion,
