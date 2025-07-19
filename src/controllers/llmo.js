@@ -1,0 +1,54 @@
+/*
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { ok } from '@adobe/spacecat-shared-http-utils';
+
+function LlmoController() {
+  // Handles requests to the LLMO sheet data endpoint
+  const getLlmoSheetData = async (context) => {
+    const { siteId, dataSource } = context.params;
+    const { log } = context;
+    const { env } = context;
+
+    try {
+      // Fetch data from the external endpoint
+      const response = await fetch(`https://main--project-elmo-ui-data--adobe.aem.live/${dataSource}.json`, {
+        headers: {
+          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+          'User-Agent': 'SpaceCat-API-Service/1.0',
+        },
+      });
+
+      if (!response.ok) {
+        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the response data
+      const data = await response.json();
+
+      log.info(`Successfully proxied data for siteId: ${siteId}, dataSource: ${dataSource}`);
+
+      // Return the response as-is
+      return ok(data);
+    } catch (error) {
+      log.error(`Error proxying data for siteId: ${siteId}, dataSource: ${dataSource}`, error);
+      throw error;
+    }
+  };
+
+  return {
+    getLlmoSheetData,
+  };
+}
+
+export default LlmoController;
