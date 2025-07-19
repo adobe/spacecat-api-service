@@ -41,25 +41,35 @@ function getWeekMonthsAndYears(year, week) {
   return { months, years };
 }
 
-async function tryGetCacheResult(siteid, s3, cacheBucket, query, log, noCache = false) {
-  const outPrefix = `${crypto.createHash('md5').update(query).digest('hex')}`;
-  const cacheKey = `${cacheBucket}/${siteid}/${outPrefix}.json`;
-  if (noCache === true) {
-    log.info(`Skipping cache fetch for Athena result from S3: ${cacheKey} because user requested noCache`);
-    return { cachedResultUrl: null, cacheKey, outPrefix };
-  }
-  const hasCache = await fileExists(s3, cacheKey, log);
-  if (hasCache === true) {
-    log.info(`Found cached result. Fetching signed url for cached Athena result from S3: ${cacheKey}`);
-    const cached = await getS3CachedResult(s3, cacheKey, log);
-    return { cachedResultUrl: cached, cacheKey, outPrefix };
-  }
-  return { cachedResultUrl: null, cacheKey, outPrefix };
+function getCacheKey(siteId, query, cacheLocation) {
+  const outPrefix = crypto.createHash('md5').update(query).digest('hex');
+  const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
+  return { cacheKey, outPrefix };
 }
 
 function TrafficController(context, log, env) {
-  const { dataAccess } = context;
+  const { dataAccess, s3 } = context;
   const { Site } = dataAccess;
+
+  const {
+    RUM_METRICS_DATABASE: rumMetricsDatabase,
+    RUM_METRICS_COMPACT_TABLE: rumMetricsCompactTable,
+    S3_BUCKET_NAME: bucketName,
+  } = env;
+
+  // constants
+  const ATHENA_TEMP_FOLDER = `s3://${bucketName}/rum-metrics-compact/temp/out`;
+  const CACHE_LOCATION = `s3://${bucketName}/rum-metrics-compact/cache`;
+
+  async function tryGetCacheResult(siteId, query) {
+    const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
+    if (await fileExists(s3, cacheKey, log)) {
+      log.info(`Found cached result. Fetching signed URL for Athena result from S3: ${cacheKey}`);
+      const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
+      return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
+    }
+    return { cachedResultUrl: null, cacheKey, outPrefix };
+  }
 
   async function fetchPaidTrafficData(dimensions, mapper) {
     const siteId = context.params?.siteId;
@@ -72,22 +82,22 @@ function TrafficController(context, log, env) {
       return forbidden('Only users belonging to the organization can view paid traffic metrics');
     }
 
-    const { year, week, noCache } = context.data;
+    // validate input params
+    const { year, week } = context.data;
     if (!year || !week) {
-      const badReqMessagge = 'year and week are required parameters';
-      log.info(badReqMessagge);
-      return badRequest(badReqMessagge);
+      return badRequest('Year and week are required parameters');
     }
+
     const { months, years } = getWeekMonthsAndYears(year, week);
-    const dbName = env.PAID_TRAFFIC_DATABASE;
-    const tableName = env.PAID_TRAFFIC_TABLE_NAME;
-    const fullTableName = `${dbName}.${tableName}`;
+    const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
     const groupBy = dimensions;
     const dimensionColumns = groupBy.join(', ');
     const dimensionColumnsPrefixed = `${groupBy.map((col) => `a.${col}`).join(', ')}, `;
-    const description = `fetch paid channel data | db: ${dbName} | siteKey: ${siteId} | year: ${year} | month: ${months} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
+    const description = `fetch paid channel data | db: ${rumMetricsDatabase} | siteKey: ${siteId} | year: ${year} | month: ${months} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
+
     log.info(`Processing query: ${description}`);
 
+    // build query
     const query = await loadSql({
       siteId,
       years,
@@ -96,68 +106,50 @@ function TrafficController(context, log, env) {
       groupBy: groupBy.join(', '),
       dimensionColumns,
       dimensionColumnsPrefixed,
-      tableName: fullTableName,
+      tableName,
     });
 
-    log.debug(`Fetching paid data with query ${query}`);
-    const outputFolder = env.PAID_TRAFFIC_S3_OUTPUT_URI || 's3://spacecat-dev-segments/temp/out';
-    const cacheBucket = env.PAID_TRAFFIC_S3_CACHE_BUCKET_URI || 's3://spacecat-dev-segments/cache';
-    const { s3 } = context;
-    const {
-      cachedResultUrl,
-      cacheKey,
-      outPrefix,
-    } = await tryGetCacheResult(siteId, s3, cacheBucket, query, log, noCache);
+    log.debug(`Fetching paid data with query: ${query}`);
+
+    // first try to get from cache
+    const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(siteId, query);
     const thresholdConfig = env.CWV_THRESHOLDS || {};
     if (cachedResultUrl) {
-      log.info(`Succesfully fetched presigned url for result file ${cacheKey} from cache`);
+      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}`);
       return found(cachedResultUrl);
     }
 
-    const resultLocation = `${outputFolder}/${outPrefix}`;
+    // if not cached, query Athena
+    const resultLocation = `${ATHENA_TEMP_FOLDER}/${outPrefix}`;
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
-    log.info(`Fetching paid data directly from athena bucket ${outputFolder} and table ${fullTableName}`);
-    const results = await athenaClient.query(
-      query,
-      dbName,
-      description,
-    );
+    log.info(`Fetching paid data directly from Athena table: ${tableName}`);
+    const results = await athenaClient.query(query, rumMetricsDatabase, description);
     const response = results.map((row) => mapper.toJSON(row, thresholdConfig));
-    log.info(`Succesfully fetched results of size ${response?.length}`);
-    let isCached;
+    log.info(`Successfully fetched results of size ${response?.length}`);
+
+    // add to cache
+    let isCached = false;
     if (response) {
       isCached = await addResultJsonToCache(s3, cacheKey, response, log);
-      log.info(`Is Copy Athena result json to S3 cache: ${cacheKey} succesful was : ${isCached}`);
+      log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    if (isCached) {
-      log.info(`Fetching signed url from : ${cacheKey}`);
-      const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
-      return found(cachedUrl);
-    }
-    log.error(`Failed to cache result to s3 with key ${cacheBucket}. Returning response directly.`);
-    return ok(response);
+    log.warn(`Failed to cache result to S3 with key ${CACHE_LOCATION}. Returning response directly.`);
+    return ok(response, {
+      'content-encoding': 'gzip',
+    });
   }
 
-  const getPaidTrafficByCampaignUrlDevice = async () => fetchPaidTrafficData(['utm_campaign', 'path', 'device'], TrafficDataWithCWVDto);
-  const getPaidTrafficByCampaignDevice = async () => fetchPaidTrafficData(['utm_campaign', 'device'], TrafficDataWithCWVDto);
-  const getPaidTrafficByCampaignUrl = async () => fetchPaidTrafficData(['utm_campaign', 'path'], TrafficDataWithCWVDto);
-  const getPaidTrafficByCampaign = async () => fetchPaidTrafficData(['utm_campaign'], TrafficDataWithCWVDto);
-  const getPaidTrafficByTypeChannelCampaign = async () => fetchPaidTrafficData(['trf_type', 'trf_channel', 'utm_campaign'], TrafficDataResponseDto);
-  const getPaidTrafficByTypeChannel = async () => fetchPaidTrafficData(['trf_type', 'trf_channel'], TrafficDataResponseDto);
-  const getPaidTrafficByTypeCampaign = async () => fetchPaidTrafficData(['trf_type', 'utm_campaign'], TrafficDataResponseDto);
-  const getPaidTrafficByType = async () => fetchPaidTrafficData(['trf_type'], TrafficDataResponseDto);
-
   return {
-    getPaidTrafficByCampaignUrlDevice,
-    getPaidTrafficByCampaignDevice,
-    getPaidTrafficByCampaignUrl,
-    getPaidTrafficByCampaign,
-    getPaidTrafficByTypeChannelCampaign,
-    getPaidTrafficByTypeChannel,
-    getPaidTrafficByTypeCampaign,
-    getPaidTrafficByType,
+    getPaidTrafficByCampaignUrlDevice: () => fetchPaidTrafficData(['utm_campaign', 'path', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignDevice: () => fetchPaidTrafficData(['utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignUrl: () => fetchPaidTrafficData(['utm_campaign', 'path'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaign: () => fetchPaidTrafficData(['utm_campaign'], TrafficDataWithCWVDto),
+    getPaidTrafficByTypeChannelCampaign: () => fetchPaidTrafficData(['trf_type', 'trf_channel', 'utm_campaign'], TrafficDataResponseDto),
+    getPaidTrafficByTypeChannel: () => fetchPaidTrafficData(['trf_type', 'trf_channel'], TrafficDataResponseDto),
+    getPaidTrafficByTypeCampaign: () => fetchPaidTrafficData(['trf_type', 'utm_campaign'], TrafficDataResponseDto),
+    getPaidTrafficByType: () => fetchPaidTrafficData(['trf_type'], TrafficDataResponseDto),
   };
 }
 
