@@ -215,11 +215,11 @@ export default function getRouteHandlers(
 
     // LLMO Specific Routes (TODO: Add more routes)
     'GET /llmo/:siteId/sheet-data/:dataFolder/:dataSource': llmoController.getLlmoSheetData,
-    // 'GET /llmo/:siteId/config': llmoController.getLlmoConfig,
-    // 'GET /llmo/:siteId/questions': llmoController.getLlmoQuestions,
-    // 'POST /llmo/:siteId/questions': llmoController.addLlmoQuestion,
-    // 'DELETE /llmo/:siteId/questions/:questionKey': llmoController.removeLlmoQuestion,
-    // 'PATCH /llmo/:siteId/questions/:questionKey': llmoController.patchLlmoQuestion,
+    'GET /llmo/:siteId/config': llmoController.getLlmoConfig,
+    'GET /llmo/:siteId/questions': llmoController.getLlmoQuestions,
+    'POST /llmo/:siteId/questions': llmoController.addLlmoQuestion,
+    'DELETE /llmo/:siteId/questions/:questionKey': llmoController.removeLlmoQuestion,
+    'PATCH /llmo/:siteId/questions/:questionKey': llmoController.patchLlmoQuestion,
   };
 
   // Initialization of static and dynamic routes

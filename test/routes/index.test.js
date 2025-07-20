@@ -321,6 +321,11 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'PATCH /sites/:siteId/config/cdn-logs',
       'GET /llmo/:siteId/sheet-data/:dataFolder/:dataSource',
+      'GET /llmo/:siteId/config',
+      'GET /llmo/:siteId/questions',
+      'POST /llmo/:siteId/questions',
+      'DELETE /llmo/:siteId/questions/:questionKey',
+      'PATCH /llmo/:siteId/questions/:questionKey',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -401,5 +406,15 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /llmo/:siteId/sheet-data/:dataFolder/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
     expect(dynamicRoutes['GET /llmo/:siteId/sheet-data/:dataFolder/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataFolder', 'dataSource']);
+    expect(dynamicRoutes['GET /llmo/:siteId/config'].handler).to.equal(mockLlmoController.getLlmoConfig);
+    expect(dynamicRoutes['GET /llmo/:siteId/config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /llmo/:siteId/questions'].handler).to.equal(mockLlmoController.getLlmoQuestions);
+    expect(dynamicRoutes['GET /llmo/:siteId/questions'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /llmo/:siteId/questions'].handler).to.equal(mockLlmoController.addLlmoQuestion);
+    expect(dynamicRoutes['POST /llmo/:siteId/questions'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['DELETE /llmo/:siteId/questions/:questionKey'].handler).to.equal(mockLlmoController.removeLlmoQuestion);
+    expect(dynamicRoutes['DELETE /llmo/:siteId/questions/:questionKey'].paramNames).to.deep.equal(['siteId', 'questionKey']);
+    expect(dynamicRoutes['PATCH /llmo/:siteId/questions/:questionKey'].handler).to.equal(mockLlmoController.patchLlmoQuestion);
+    expect(dynamicRoutes['PATCH /llmo/:siteId/questions/:questionKey'].paramNames).to.deep.equal(['siteId', 'questionKey']);
   });
 });
