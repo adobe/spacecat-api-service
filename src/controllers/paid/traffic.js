@@ -28,7 +28,7 @@ import {
   addResultJsonToCache,
   fileExists,
 } from './caching-helper.js';
-import { getDateRanges } from '../../../test/controllers/paid/calendar-week-helper.js';
+import { getDateRanges } from './calendar-week-helper.js';
 import { buildPageTypeCase } from './page-type-mapper.js';
 
 async function loadSql(variables) {
@@ -76,7 +76,7 @@ function TrafficController(context, log, env) {
     if (!site) {
       return notFound('Site not found');
     }
-    const baseURL = site.getBaseURL();
+    const baseURL = await site.getBaseURL();
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can view paid traffic metrics');
@@ -102,7 +102,7 @@ function TrafficController(context, log, env) {
     // Only build pageTypeCase if 'page_type' is in the dimensions
     let pageTypeCase;
     if (groupBy.includes('page_type')) {
-      pageTypeCase = buildPageTypeCase(baseURL, 'path');
+      pageTypeCase = buildPageTypeCase(siteId, 'path');
     }
 
     if (!pageTypeCase) {

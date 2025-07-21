@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 const regExRepo = {
-  'bulk.com': [
+  'cccdac43-1a22-4659-9086-b762f59b9928': [
     { name: 'homepage | Homepage', pattern: '^/[a-z]{2}/?$' },
     { name: 'blog | Reviews and Blog Content', pattern: '^/[a-z]{2}/(bulk-reviews|blog-[a-z0-9\\-]+)/?$' },
     { name: 'search | Search Results', pattern: '^/[a-z]{2}/(search|catalogsearch/result|search/go)/?$' },
@@ -42,21 +42,7 @@ const regExRepo = {
     { name: 'legal | Terms Conditions & Privacy Policy', pattern: '^/[a-z]{2}/(tc-exclusions|offer-terms|handelsbetingelser|impressum|privacy-policy|sitemap)(\\.html)?/?$' },
     { name: 'other | Other Pages', pattern: '.*' },
   ],
-  'sunstargum.com': [
-    { name: 'homepage | Sunstargum Homepage', pattern: '^/[a-z]{2}-[a-z]{2}/?$' },
-    { name: 'productdetail | Product Detail Page', pattern: '^/[a-z]{2}-[a-z]{2}/(products|produkte|produkter|productos|produktai|produkti|produkty|producten|tuotteet|prodotti|produtos|soins-et-produits-dentaires|proionta)/(tandpastas|limpieza-interdental|colutorios|dantu-sepeteliai|hilos-dentales|product-page|zahnbuersten|interdentaire|szczoteczki-do-zebow|cepillos-de-dientes|tandborstar|dentifricos|tabletten|mellemrumsrengoring|mellemrumsrengoering|interdental-cleaners|toothpastes|dentifices|mundspuelungen|mundskoelj|munskoelj|enjuagues-y-geles-bucales|hammaslangat|hammastahnat|hammasharjat|suuvedet|.+)/.+\\.html$' },
-    { name: 'productlistpage | All Products', pattern: '^/[a-z]{2}-[a-z]{2}/(products|produkte|produkter|productos|produktai|produkti|produkty|producten|tuotteet|prodotti|produtos|soins-et-produits-dentaires|proionta)\\.html$' },
-    { name: 'productlistpage | Product Category Pages', pattern: '^/[a-z]{2}-[a-z]{2}/(products|produkte|produkter|productos|produktai|prodotti|produtos|soins-et-produits-dentaires|tuotteet)/(tandpastas|colutorios|dantu-sepeteliai|gel-e-spray|hammastahnat|suuvedet|.+)(\\.html)?$' },
-    { name: 'landingpage | Campaign Landing Pages', pattern: '^/[a-z]{2}-[a-z]{2}/(kampagnen|campaigns|campagnes|campanas|kampanie|campagne)/[a-z0-9\\-]+\\.html$' },
-    { name: 'about | About', pattern: '^/[a-z]{2}-[a-z]{2}/(about|about-us|company|who-we-are|chi-siamo|sobre-nosotros|uber-uns|om-os|om-oss|quem-somos|qui-sommes-nous|over-ons|o-nas)\\.html$' },
-    { name: 'support | Support and Help', pattern: '^/[a-z]{2}-[a-z]{2}/(?:(support|faq|help|assistance|contact-us|customer-service|quienes-somos|uber-uns|om-os|om-oss|quem-somos|qui-sommes-nous|over-ons|o-nas)(/.*)?|.*/(faq|frequently-asked-questions)\\.html)$' },
-    { name: 'support | Contact', pattern: '^/[a-z]{2}-[a-z]{2}/(?:(contact|contact-us|contactenos|contactanos|ota-yhteytta|neem-contact-met-ons-op|neem-contact)\\.html|(sobre-nosotros|quienes-somos)/(contactanos|contact-us|gum-contactanos)\\.html)$' },
-    { name: 'storelocator | Where to Buy', pattern: '^/[a-z]{2}-[a-z]{2}/(store-locator|find-a-store|ou-trouver-nos-produits|where-to-buy|ou-acheter-nos-produits|donde-comprar|pou-na-agorasete|kopstallen|sklepy-internetowe|haendlersuche|forhandlere|war-te-koop|waar-te-koop|dove-comprare|mista-voin-ostaa-tuotteita|onde-comprar|kjop-her)(\\.html)?(/.+)?$' },
-    { name: 'contentpage | Oral Health Content', pattern: '^/[a-z]{2}-[a-z]{2}/(oral-health|salute-orale|sante-bucco-dentaire|mundgesundheit|munnhelse|salud-oral|lexique|glosario-oral|zdrowie-jamy-ustnej|munhalsa|suun-terveys|mond-gezondheid|oralhelse|saude-bucal|stomatiki-ygeia)(\\.html)?(/.+)?$' },
-    { name: 'legal | Legal and Privacy', pattern: '^/[a-z]{2}-[a-z]{2}/(privacy|terms|cookie|legal|rechtlich)(/.*)?$' },
-    { name: 'other | Other Pages', pattern: '.*' },
-  ],
-  'wilson.com': [
+  'c236a20b-c879-4960-b5b2-c0b607ade100': [
     { name: 'homepage | Homepage', pattern: '^(/([a-z]{2}-[a-z]{2}))?/?$' },
     { name: 'productdetail | Product Detail Pages', pattern: '^(/([a-z]{2}-[a-z]{2}))?/product/[a-z0-9\\-]+$' },
     { name: 'productlistpage | Category Pages', pattern: '^(/([a-z]{2}-[a-z]{2}))?/(tennis|baseball|softball|golf|basketball|custom|sportswear|accessories|gloves|footwear|sale|apparel|bags|protective|equipment|deals|football|volleyball|pickleball|padel|fastpitch|shoes|specialty-shops|official-partnerships)(/|$)' },
@@ -75,17 +61,10 @@ const regExRepo = {
   ],
 };
 
-export function buildPageTypeCase(baseUrl, column = 'path') {
-  if (!baseUrl) return null;
+export function buildPageTypeCase(siteId, column = 'path') {
+  if (!siteId) return null;
 
-  let domain;
-  try {
-    domain = new URL(baseUrl).hostname.replace(/^www\./, '');
-  } catch (e) {
-    return null;
-  }
-
-  const rules = regExRepo[domain];
+  const rules = regExRepo[siteId];
   if (!rules || !rules.length) return null;
 
   const caseLines = [
@@ -96,39 +75,4 @@ export function buildPageTypeCase(baseUrl, column = 'path') {
   ];
 
   return caseLines.join('\n');
-}
-
-// For JS-side testing (not used in SQL)
-export function mapPathToPageType(path, domain) {
-  if (!domain) return 'other | Other Pages';
-  const rules = regExRepo[domain];
-  if (!rules) return 'other | Other Pages';
-  for (const { name, pattern } of rules) {
-    if (new RegExp(pattern).test(path)) {
-      return name;
-    }
-  }
-  return 'other | Other Pages';
-}
-
-// Utility to join baseUrl and path into a full URL
-export function buildUrlFromBase(baseUrl, path) {
-  if (!baseUrl || !path) return null;
-  try {
-    // Remove trailing slash from baseUrl and leading slash from path
-    const cleanBase = baseUrl.replace(/\/$/, '');
-    const cleanPath = path.replace(/^\//, '');
-    return `${cleanBase}/${cleanPath}`;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Map an array of rows, adding a 'url' property to each using baseUrl and row.path
-export function mapRowsWithUrl(rows, baseUrl) {
-  if (!Array.isArray(rows)) return rows;
-  return rows.map((row) => ({
-    ...row,
-    url: buildUrlFromBase(baseUrl, row.path),
-  }));
 }
