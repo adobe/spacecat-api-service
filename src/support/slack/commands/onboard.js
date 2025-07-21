@@ -72,6 +72,30 @@ function OnboardCommand(context) {
   });
 
   /**
+   * Checks if an import type is already enabled for a site.
+   *
+   * @param {string} importType - The import type to check.
+   * @param {Array} imports - Array of import configurations.
+   * @returns {boolean} - True if import is enabled, false otherwise.
+   */
+  const isImportEnabled = (importType, imports) => {
+    const foundImport = imports.find((importConfig) => importConfig.type === importType);
+    return foundImport?.enabled;
+  };
+
+  /**
+   * Checks if an audit type is already enabled for a site.
+   *
+   * @param {string} type - The audit type to check.
+   * @param {Object} site - The site object.
+   * @returns {Promise<boolean>} - True if audit is enabled, false otherwise.
+   */
+  const isAuditEnabledForSite = async (type, site) => {
+    const configuration = await Configuration.findLatest();
+    return configuration.isHandlerEnabledForSite(type, site);
+  };
+
+  /**
    * Checks if a site is in the LA_CUSTOMERS list and returns appropriate response if it is.
    *
    * @param {string} baseURL - The site URL to check.
@@ -278,11 +302,24 @@ function OnboardCommand(context) {
       const importTypes = Object.keys(profile.imports);
       reportLine.imports = importTypes.join(', ');
       const siteConfig = site.getConfig();
+
+      // Get current imports to check what's already enabled
+      const imports = siteConfig.getImports();
+
+      // Filter imports that are not already enabled
+      const importsToEnable = [];
       for (const importType of importTypes) {
-        siteConfig.enableImport(importType);
+        if (!isImportEnabled(importType, imports)) {
+          siteConfig.enableImport(importType);
+          importsToEnable.push(importType);
+        }
       }
 
-      log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
+      if (importsToEnable.length > 0) {
+        log.info(`Enabled the following imports for ${siteID}: ${importsToEnable.join(', ')}`);
+      } else {
+        log.info(`All imports are already enabled for ${siteID}`);
+      }
 
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
@@ -313,9 +350,22 @@ function OnboardCommand(context) {
 
       const auditTypes = Object.keys(profile.audits);
 
-      auditTypes.forEach((auditType) => {
-        configuration.enableHandlerForSite(auditType, site);
-      });
+      // Check which audits are not already enabled
+      const auditsToEnable = [];
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        const isEnabled = await isAuditEnabledForSite(auditType, site, context);
+        if (!isEnabled) {
+          configuration.enableHandlerForSite(auditType, site);
+          auditsToEnable.push(auditType);
+        }
+      }
+
+      if (auditsToEnable.length > 0) {
+        log.info(`Enabled the following audits for site ${siteID}: ${auditsToEnable.join(', ')}`);
+      } else {
+        log.info(`All audits are already enabled for site ${siteID}`);
+      }
 
       reportLine.audits = auditTypes.join(', ');
       log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
@@ -354,7 +404,7 @@ function OnboardCommand(context) {
         },
       };
 
-      // Disable imports and audits job
+      // Disable imports and audits job - only disable what was enabled during onboarding
       const disableImportAndAuditJob = {
         type: 'disable-import-audit-processor',
         siteId: siteID,
@@ -362,8 +412,8 @@ function OnboardCommand(context) {
         imsOrgId: imsOrgID,
         organizationId,
         taskContext: {
-          importTypes,
-          auditTypes,
+          importTypes: importsToEnable,
+          auditTypes: auditsToEnable,
           slackContext: {
             channelId: slackContext.channelId,
             threadTs: slackContext.threadTs,
