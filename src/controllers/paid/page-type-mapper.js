@@ -62,6 +62,10 @@ const regExRepo = {
 };
 
 export function buildPageTypeCase(siteId, column = 'path') {
+  if (!siteId) return null;
+
+  const rules = regExRepo[siteId];
+export function buildPageTypeCase(siteId, column = 'path') {
   const rules = regExRepo[siteId];
   if (!rules || !rules.length) return null;
 
