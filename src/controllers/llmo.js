@@ -225,13 +225,13 @@ function LlmoController() {
     // update the question in the llmoConfig
     llmoConfig.questions.Human = llmoConfig.questions.Human.map((question) => {
       if (question.key === questionKey) {
-        return { ...question, ...body };
+        return { ...question, ...body, ...{ key: questionKey } };
       }
       return question;
     });
     llmoConfig.questions.AI = llmoConfig.questions.AI.map((question) => {
       if (question.key === questionKey) {
-        return { ...question, ...body };
+        return { ...question, ...body, ...{ key: questionKey } };
       }
       return question;
     });
