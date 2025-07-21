@@ -400,16 +400,9 @@ describe('Paid TrafficController', async () => {
       const contentEncoding = res.headers.get('content-encoding');
       let body;
       if (contentEncoding === 'gzip') {
-        try {
-          const gzippedBuffer = Buffer.from(await res.arrayBuffer());
-          const decompressed = await gunzipAsync(gzippedBuffer);
-          body = JSON.parse(decompressed.toString());
-        } catch (error) {
-          // If decompression fails, try parsing as regular JSON
-          // This happens when the response has gzip header but isn't actually gzipped
-          // Since we can't clone after reading, we'll just expect the test to fail gracefully
-          body = trafficTypeExpected; // Use expected data as fallback
-        }
+        const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+        const decompressed = await gunzipAsync(gzippedBuffer);
+        body = JSON.parse(decompressed.toString());
       } else {
         body = await res.json();
       }
