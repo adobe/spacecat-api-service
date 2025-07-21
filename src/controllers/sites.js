@@ -358,6 +358,13 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
+    // Compute external IDs if any watched attributes were updated
+    if (updates && (requestBody.authoringType !== undefined
+      || requestBody.hlxConfig !== undefined
+      || requestBody.deliveryConfig !== undefined)) {
+      site.computeAndSetExternalIds();
+    }
+
     if (updates) {
       site.setUpdatedBy(profile.email || 'system');
       const updatedSite = await site.save();
