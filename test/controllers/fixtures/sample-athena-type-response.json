@@ -1,6 +1,6 @@
 [
     {
-        "type": "owned",
+        "trf_type": "owned",
         "pageviews": "44984000",
         "pct_pageviews": "0.7475629090208096",
         "click_rate": "0.3025059254997523",
@@ -11,7 +11,7 @@
         "p70_inp": "29"
     },
     {
-        "type": "earned",
+        "trf_type": "earned",
         "pageviews": "8686700",
         "pct_pageviews": "0.14435921042573063",
         "click_rate": "0.4087052620672983",
@@ -22,7 +22,7 @@
         "p70_inp": "68"
     },
     {
-        "type": "paid",
+        "trf_type": "paid",
         "pageviews": "6503500",
         "pct_pageviews": "0.10807788055345979",
         "click_rate": "0.2605058814484508",
