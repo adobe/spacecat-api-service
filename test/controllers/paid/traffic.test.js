@@ -440,6 +440,65 @@ describe('Paid TrafficController', async () => {
       expect(athenaCall.args[0]).to.includes('AND ((year=2020 AND month=12 AND week=53) OR (year=2021 AND month=1 AND week=53))'); // months
     });
 
+    it('getPaidTrafficByTypeChannel falls back last full calendar week on incorrect 53 case', async () => {
+      mockContext.data.year = 2023;
+      mockContext.data.week = 53;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getPaidTrafficByTypeChannel();
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      const match = query.match(/year=(\d+)\s+AND\s+month=(\d+)\s+AND\s+week=(\d+)/);
+      // should return last full week from now
+      expect(parseInt(match[1], 10)).to.be.above(2023);
+    });
+
+    it('getPaidTrafficByTypeChannel falls back last full calendar week on incorrect 0 week case', async () => {
+      mockContext.data.year = 98;
+      mockContext.data.week = 1;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getPaidTrafficByTypeChannel();
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      const match = query.match(/year=(\d+)\s+AND\s+month=(\d+)\s+AND\s+week=(\d+)/);
+      // should return last full week from now
+      expect(parseInt(match[1], 10)).to.be.above(2023);
+    });
+
+    it('getPaidTrafficByTypeChannel query handles week 1 when Jan 4 is a Sunday', async () => {
+      // For 2015, Jan 4th is a Sunday. This tests the `|| 7` path in date logic.
+      // Week 1 of 2015 starts on Monday, Dec 29, 2014.
+      mockContext.data.year = 2015;
+      mockContext.data.week = 1;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getPaidTrafficByTypeChannel();
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      // The query should check for week 1 data in both Dec 2014 and Jan 2015.
+      expect(query).to.include('(year=2014 AND month=12 AND week=1) OR (year=2015 AND month=1 AND week=1)');
+    });
+
+    it('getPaidTrafficByTypeChannel query handles week 1 when Jan 4 is not a Sunday', async () => {
+      // For 2021, Jan 4th is a Monday. This tests the standard path.
+      // Week 1 of 2021 starts on Monday, Jan 4, 2021 and is entirely in January.
+      mockContext.data.year = 2021;
+      mockContext.data.week = 1;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getPaidTrafficByTypeChannel();
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      // The query should only check for week 1 in Jan 2021
+      expect(query).to.include('(year=2021 AND month=1 AND week=1)');
+      expect(query).not.to.include('OR (year=2020'); // Should not look in the previous year
+    });
+
     it('returns response directly if caching fails due to S3 PutObjectCommand error (covers src/controllers/paid/traffic.js lines 163-164)', async () => {
       // Simulate S3 PutObjectCommand throwing an error (cache write fails)
       mockS3.send.callsFake((cmd) => {
