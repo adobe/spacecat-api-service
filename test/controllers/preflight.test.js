@@ -156,7 +156,7 @@ describe('Preflight Controller', () => {
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             enableAuthentication: true,
-            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -203,7 +203,7 @@ describe('Preflight Controller', () => {
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             enableAuthentication: false,
-            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -280,7 +280,7 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Invalid request: checks must be one of: canonical, links, metatags, body-size, lorem-ipsum, h1-count',
+        message: 'Invalid request: checks must be one of: canonical, links, metatags, body-size, lorem-ipsum, h1-count, accessibility',
       });
     });
 
@@ -338,7 +338,7 @@ describe('Preflight Controller', () => {
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             enableAuthentication: true,
-            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count'],
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
