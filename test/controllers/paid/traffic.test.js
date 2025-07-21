@@ -129,7 +129,6 @@ describe('Paid TrafficController', async () => {
       expect(lastPutObject).to.exist;
       const decompressed = await gunzipAsync(lastPutObject.input.Body);
       const putBody = JSON.parse(decompressed.toString());
-      console.log(putBody);
       expect(putBody).to.deep.equal(urlPageTypeCampaignDeviceExp);
     });
 
@@ -154,7 +153,6 @@ describe('Paid TrafficController', async () => {
       expect(athenaCall).to.exist;
 
       const query = athenaCall.args[0];
-      console.log(query);
       expect(query).to.include(`siteid = '${newSiteId}'`);
       expect(query).to.include('WHEN REGEXP_LIKE(path');
 
@@ -416,7 +414,6 @@ describe('Paid TrafficController', async () => {
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
       expect(athenaCall).to.exist;
-      console.log(athenaCall.args[0]);
       expect(athenaCall.args[0]).to.includes('(year=2024 AND month=12 AND week=53) OR (year=2025 AND month=1 AND week=53)'); // months
     });
 
@@ -439,7 +436,6 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
-      console.log(athenaCall.args[0]);
       expect(athenaCall).to.exist;
       expect(athenaCall.args[0]).to.includes('AND ((year=2020 AND month=12 AND week=53) OR (year=2021 AND month=1 AND week=53))'); // months
     });
