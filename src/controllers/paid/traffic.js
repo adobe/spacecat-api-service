@@ -143,7 +143,7 @@ function TrafficController(context, log, env) {
 
     log.info(`Fetching paid data directly from Athena table: ${tableName}`);
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
-    const response = results.map((row) => mapper.toJSON(row, thresholdConfig));
+    const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
     log.info(`Successfully fetched results of size ${response?.length}`);
 
     // add to cache

@@ -125,11 +125,10 @@ describe('Paid TrafficController', async () => {
       mockAthenaQuery.resolves(urlPageTypeCampaignDeviceMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByUrlPageTypeCampaignDevice();
-      expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
-      // Validate the object put to S3
+      expect(res.status).to.equal(200);
       expect(lastPutObject).to.exist;
-      const putBody = JSON.parse(lastPutObject.input.Body);
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
       console.log(putBody);
       expect(putBody).to.deep.equal(urlPageTypeCampaignDeviceExp);
     });
@@ -137,22 +136,32 @@ describe('Paid TrafficController', async () => {
     it('getPaidTrafficByUrlPageTypeCampaignDevice with pageTypes fresh returns expected', async () => {
       const newSiteId = 'c236a20b-c879-4960-b5b2-c0b607ade100';
 
-      // ✅ Fix: update the actual context and site objects
       mockContext.params.siteId = newSiteId;
       mockSite.id = newSiteId;
+      mockSite.getPageTypes = sandbox.stub().returns(['product', 'category']);
+
+      // Set noCache to true to bypass cache check and force re-generation
+      mockContext.data.noCache = true;
 
       mockAthenaQuery.resolves(urlPageTypeCampaignDeviceMock);
 
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByUrlPageTypeCampaignDevice();
-      expect(res.status).to.equal(302);
+      expect(res.status).to.equal(200);
 
-      // ✅ Ensure the query contains the correct siteId
-      const athenaCall = mockAthenaQuery?.args[0];
+      // Verify Athena was called, proving we didn't hit a pre-existing cache
+      const athenaCall = mockAthenaQuery?.getCall(0);
       expect(athenaCall).to.exist;
-      console.log('Athena query call:', athenaCall);
 
-      expect(athenaCall.args[0]).to.include(`siteid = '${newSiteId}'`);
+      const query = athenaCall.args[0];
+      console.log(query);
+      expect(query).to.include(`siteid = '${newSiteId}'`);
+      expect(query).to.include('WHEN REGEXP_LIKE(path');
+
+      expect(lastPutObject).to.exist;
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
+      expect(putBody).to.deep.equal(urlPageTypeCampaignDeviceExp);
     });
 
     it('getPaidTrafficByTypeChannel cached returns expected', async () => {
@@ -183,7 +192,8 @@ describe('Paid TrafficController', async () => {
       const decompressed = await gunzipAsync(lastPutObject.input.Body);
       const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(trafficTypeExpected);
-      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to cache result to S3 with key/);
+      expect(mockLog.error).not.to.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to return cache key/);
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
@@ -389,8 +399,7 @@ describe('Paid TrafficController', async () => {
       mockAthenaQuery.resolves(trafficTypeMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByTypeChannel();
-      expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
+      expect(res.status).to.equal(200);
       // Ensure Athena was queried
       expect(mockAthenaQuery).to.have.been.calledOnce;
       // Ensure S3 HeadObjectCommand (cache check) was not called
