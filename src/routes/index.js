@@ -95,6 +95,7 @@ export default function getRouteHandlers(
   paidController,
   trafficController,
   fixesController,
+  reportsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -210,6 +211,9 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
+
+    // Reports
+    'POST /sites/:siteId/reports/:reportType': reportsController.createReport,
   };
 
   // Initialization of static and dynamic routes
