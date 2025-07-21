@@ -22,7 +22,7 @@ function LlmoController() {
     const { env } = context;
 
     // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findBySiteId(siteId);
+    const site = await context.dataAccess.Site.findById(siteId);
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
@@ -68,7 +68,7 @@ function LlmoController() {
     const { siteId } = context.params;
 
     // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findBySiteId(siteId);
+    const site = await context.dataAccess.Site.findById(siteId);
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
@@ -85,7 +85,7 @@ function LlmoController() {
     const { siteId } = context.params;
 
     // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findBySiteId(siteId);
+    const site = await context.dataAccess.Site.findById(siteId);
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
@@ -105,7 +105,7 @@ function LlmoController() {
     const { siteId } = context.params;
 
     // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findBySiteId(siteId);
+    const site = await context.dataAccess.Site.findById(siteId);
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
@@ -154,7 +154,7 @@ function LlmoController() {
     const { siteId, questionKey } = context.params;
 
     // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findBySiteId(siteId);
+    const site = await context.dataAccess.Site.findById(siteId);
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
@@ -203,7 +203,7 @@ function LlmoController() {
     const { body } = context;
 
     // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findBySiteId(siteId);
+    const site = await context.dataAccess.Site.findById(siteId);
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
