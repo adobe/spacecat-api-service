@@ -38,5 +38,6 @@ export const TrafficDataResponseDto = {
     click_rate: data.click_rate,
     engagement_rate: data.engagement_rate,
     bounce_rate: data.bounce_rate,
+    url: data.url,
   }),
 };

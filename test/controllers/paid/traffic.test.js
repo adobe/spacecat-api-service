@@ -30,7 +30,7 @@ const gunzipAsync = promisify(gunzip);
 
 const FIXTURES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../controllers/fixtures');
 const SITE_ID = 'site-id';
-const TEST_RESIGNED_URL = 'https://expected-url.com';
+const TEST_PRESIGNED_URL = 'https://expected-url.com';
 let lastPutObject;
 
 describe('Paid TrafficController', async () => {
@@ -44,11 +44,18 @@ describe('Paid TrafficController', async () => {
   let mockSite;
   let mockAccessControlUtil;
   let trafficTypeMock;
+  let urlPageTypeCampaignDeviceMock;
   let trafficTypeExpected;
+  let urlPageTypeCampaignDeviceExp;
+  const siteId = SITE_ID;
 
   beforeEach(async () => {
     const raw = await fs.readFile(path.join(FIXTURES_DIR, 'sample-athena-type-response.json'), 'utf-8');
+    const rawUrl = await fs.readFile(path.join(FIXTURES_DIR, 'sample-athena-url-page-type-campaign-device.json'), 'utf-8');
+    const rawUrlExp = await fs.readFile(path.join(FIXTURES_DIR, 'sample-url-page-type-campaign-device-expected.json'), 'utf-8');
     trafficTypeMock = JSON.parse(raw);
+    urlPageTypeCampaignDeviceMock = JSON.parse(rawUrl);
+    urlPageTypeCampaignDeviceExp = JSON.parse(rawUrlExp);
     trafficTypeExpected = trafficTypeMock.map(({
     // eslint-disable-next-line no-unused-vars, camelcase
       p70_cls, p70_inp, p70_lcp, trf_type, ...rest
@@ -65,20 +72,19 @@ describe('Paid TrafficController', async () => {
       info: sandbox.stub(), debug: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(),
     };
     mockEnv = {
-      PAID_TRAFFIC_DATABASE: 'db',
-      PAID_TRAFFIC_TABLE_NAME: 'table',
-      PAID_TRAFFIC_S3_OUTPUT_URI: 's3://output',
-      PAID_TRAFFIC_S3_CACHE_BUCKET_URI: 's3://cache',
+      RUM_METRICS_DATABASE: 'db',
+      RUM_METRICS_COMPACT_TABLE: 'table',
+      S3_BUCKET_NAME: 's3://sample-bucket',
     };
-    mockSite = { id: SITE_ID };
+    mockSite = { id: siteId, getBaseURL: sandbox.stub().resolves('https://www.sample.com') };
     mockAccessControlUtil = { hasAccess: sandbox.stub().resolves(true) };
     mockContext = {
-      params: { siteId: SITE_ID },
+      params: { siteId },
       data: {
-        siteKey: 'site-key', year: 2024, month: 6, week: 23,
+        year: 2024, month: 6, week: 23,
       },
       dataAccess: { Site: { findById: sandbox.stub().resolves(mockSite) } },
-      s3: { s3Client: mockS3, getSignedUrl: sandbox.stub().resolves(TEST_RESIGNED_URL) },
+      s3: { s3Client: mockS3, getSignedUrl: sandbox.stub().resolves(TEST_PRESIGNED_URL) },
       athenaClient: mockAthena,
     };
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
@@ -115,6 +121,47 @@ describe('Paid TrafficController', async () => {
       expect(putBody).to.deep.equal(trafficTypeExpected);
     });
 
+    it('getPaidTrafficByUrlPageTypeCampaignDevice fresh returns expected', async () => {
+      mockAthenaQuery.resolves(urlPageTypeCampaignDeviceMock);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByUrlPageTypeCampaignDevice();
+      expect(res.status).to.equal(200);
+      expect(lastPutObject).to.exist;
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
+      expect(putBody).to.deep.equal(urlPageTypeCampaignDeviceExp);
+    });
+
+    it('getPaidTrafficByUrlPageTypeCampaignDevice with pageTypes fresh returns expected', async () => {
+      const newSiteId = 'c236a20b-c879-4960-b5b2-c0b607ade100';
+
+      mockContext.params.siteId = newSiteId;
+      mockSite.id = newSiteId;
+      mockSite.getPageTypes = sandbox.stub().returns(['product', 'category']);
+
+      // Set noCache to true to bypass cache check and force re-generation
+      mockContext.data.noCache = true;
+
+      mockAthenaQuery.resolves(urlPageTypeCampaignDeviceMock);
+
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByUrlPageTypeCampaignDevice();
+      expect(res.status).to.equal(200);
+
+      // Verify Athena was called, proving we didn't hit a pre-existing cache
+      const athenaCall = mockAthenaQuery?.getCall(0);
+      expect(athenaCall).to.exist;
+
+      const query = athenaCall.args[0];
+      expect(query).to.include(`siteid = '${newSiteId}'`);
+      expect(query).to.include('WHEN REGEXP_LIKE(path');
+
+      expect(lastPutObject).to.exist;
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString());
+      expect(putBody).to.deep.equal(urlPageTypeCampaignDeviceExp);
+    });
+
     it('getPaidTrafficByTypeChannel cached returns expected', async () => {
       mockS3.send.callsFake((cmd) => {
         if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
@@ -129,7 +176,7 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByTypeChannel();
       expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_RESIGNED_URL);
+      expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
       expect(mockAthenaQuery).not.to.have.been.called;
     });
 
@@ -143,7 +190,8 @@ describe('Paid TrafficController', async () => {
       const decompressed = await gunzipAsync(lastPutObject.input.Body);
       const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(trafficTypeExpected);
-      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to cache result to S3 with key/);
+      expect(mockLog.error).not.to.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to return cache key/);
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
@@ -312,7 +360,8 @@ describe('Paid TrafficController', async () => {
       ];
       for (let i = 0; i < expectedCombos.length; i += 1) {
         expect(putBody[i].campaign).to.equal(expectedCombos[i][0]);
-        expect(putBody[i].url).to.equal(expectedCombos[i][1]);
+        expect(putBody[i].path).to.equal(expectedCombos[i][1]);
+        expect(putBody[i].url).to.equal(`https://www.sample.com${expectedCombos[i][1]}`);
         expect(putBody[i].overall_cwv_score).to.equal(expectedCombos[i][2]);
       }
       // Check that the correct dimensions were used in the query
@@ -342,6 +391,21 @@ describe('Paid TrafficController', async () => {
       expect(athenaCall.args[0]).to.include('campaign');
     });
 
+    it('getPaidTrafficByTypeChannel respects noCache flag and skips cache', async () => {
+      // Set noCache flag
+      mockContext.data.noCache = true;
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+      expect(res.status).to.equal(200);
+      // Ensure Athena was queried
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+      // Ensure S3 HeadObjectCommand (cache check) was not called
+      const s3Calls = mockS3.send.getCalls();
+      const headObjectCalled = s3Calls.some((call) => call.args[0]?.constructor?.name === 'HeadObjectCommand');
+      expect(headObjectCalled).to.be.false;
+    });
+
     it('getPaidTrafficByTypeChannel query includes both months and years when week spans two months/years', async () => {
       mockContext.data.year = 2024;
       mockContext.data.week = 53; // Last week of 2024, spans into Jan 2025
@@ -350,9 +414,7 @@ describe('Paid TrafficController', async () => {
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
       expect(athenaCall).to.exist;
-
-      expect(athenaCall.args[0]).to.match(/(12, 1|1, 12)/); // months
-      expect(athenaCall.args[0]).to.match(/(2025, 2024|2024, 2025)/); // years
+      expect(athenaCall.args[0]).to.includes('(year=2024 AND month=12 AND week=53) OR (year=2025 AND month=1 AND week=53)'); // months
     });
 
     it('getPaidTrafficByTypeChannel query handles friday start date (ISO week edge case)', async () => {
@@ -375,8 +437,66 @@ describe('Paid TrafficController', async () => {
       await controller.getPaidTrafficByTypeChannel();
       const athenaCall = mockAthenaQuery.getCall(0);
       expect(athenaCall).to.exist;
-      expect(athenaCall.args[0]).to.match(/(12, 1|1, 12)/); // months
-      expect(athenaCall.args[0]).to.match(/(2020, 2021|2021, 2020)/); // years
+      expect(athenaCall.args[0]).to.includes('AND ((year=2020 AND month=12 AND week=53) OR (year=2021 AND month=1 AND week=53))'); // months
+    });
+
+    it('getPaidTrafficByTypeChannel falls back last full calendar week on incorrect 53 case', async () => {
+      mockContext.data.year = 2023;
+      mockContext.data.week = 53;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getPaidTrafficByTypeChannel();
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      const match = query.match(/year=(\d+)\s+AND\s+month=(\d+)\s+AND\s+week=(\d+)/);
+      // should return last full week from now
+      expect(parseInt(match[1], 10)).to.be.above(2023);
+    });
+
+    it('getPaidTrafficByTypeChannel falls back last full calendar week on incorrect 0 week case', async () => {
+      mockContext.data.year = 98;
+      mockContext.data.week = 1;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getPaidTrafficByTypeChannel();
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      const match = query.match(/year=(\d+)\s+AND\s+month=(\d+)\s+AND\s+week=(\d+)/);
+      // should return last full week from now
+      expect(parseInt(match[1], 10)).to.be.above(2023);
+    });
+
+    it('getPaidTrafficByTypeChannel query handles week 1 when Jan 4 is a Sunday', async () => {
+      // For 2015, Jan 4th is a Sunday. This tests the `|| 7` path in date logic.
+      // Week 1 of 2015 starts on Monday, Dec 29, 2014.
+      mockContext.data.year = 2015;
+      mockContext.data.week = 1;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getPaidTrafficByTypeChannel();
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      // The query should check for week 1 data in both Dec 2014 and Jan 2015.
+      expect(query).to.include('(year=2014 AND month=12 AND week=1) OR (year=2015 AND month=1 AND week=1)');
+    });
+
+    it('getPaidTrafficByTypeChannel query handles week 1 when Jan 4 is not a Sunday', async () => {
+      // For 2021, Jan 4th is a Monday. This tests the standard path.
+      // Week 1 of 2021 starts on Monday, Jan 4, 2021 and is entirely in January.
+      mockContext.data.year = 2021;
+      mockContext.data.week = 1;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getPaidTrafficByTypeChannel();
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      // The query should only check for week 1 in Jan 2021
+      expect(query).to.include('(year=2021 AND month=1 AND week=1)');
+      expect(query).not.to.include('OR (year=2020'); // Should not look in the previous year
     });
 
     it('returns response directly if caching fails due to S3 PutObjectCommand error (covers src/controllers/paid/traffic.js lines 163-164)', async () => {
