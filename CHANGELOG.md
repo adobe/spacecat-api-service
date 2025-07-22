@@ -1,3 +1,10 @@
+# [1.136.0](https://github.com/adobe/spacecat-api-service/compare/v1.135.2...v1.136.0) (2025-07-22)
+
+
+### Features
+
+* mimchome/pagetype and query fixes ([#1083](https://github.com/adobe/spacecat-api-service/issues/1083)) ([f17ce6a](https://github.com/adobe/spacecat-api-service/commit/f17ce6a387e1ac64e80c58e981b94b6db3bad46d))
+
 ## [1.135.2](https://github.com/adobe/spacecat-api-service/compare/v1.135.1...v1.135.2) (2025-07-22)
 
 
