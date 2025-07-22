@@ -32,6 +32,47 @@ describe('ReportsController', () => {
   let mockSite;
   let mockAccessControlUtil;
 
+  describe('constructor', () => {
+    it('should throw error when context is not provided', () => {
+      expect(() => ReportsController(null, mockLog, mockEnv)).to.throw('Context required');
+    });
+
+    it('should throw error when context is not an object', () => {
+      expect(() => ReportsController('not-an-object', mockLog, mockEnv)).to.throw('Context required');
+    });
+
+    it('should throw error when context is empty object', () => {
+      expect(() => ReportsController({}, mockLog, mockEnv)).to.throw('Context required');
+    });
+
+    it('should throw error when dataAccess is not provided', () => {
+      const contextWithoutDataAccess = {
+        sqs: mockSqs,
+      };
+      expect(() => ReportsController(contextWithoutDataAccess, mockLog, mockEnv)).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is not an object', () => {
+      const contextWithInvalidDataAccess = {
+        dataAccess: 'not-an-object',
+        sqs: mockSqs,
+      };
+      expect(() => ReportsController(contextWithInvalidDataAccess, mockLog, mockEnv)).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is empty object', () => {
+      const contextWithEmptyDataAccess = {
+        dataAccess: {},
+        sqs: mockSqs,
+      };
+      expect(() => ReportsController(contextWithEmptyDataAccess, mockLog, mockEnv)).to.throw('Data access required');
+    });
+
+    it('should not throw error when valid context is provided', () => {
+      expect(() => ReportsController(mockContext, mockLog, mockEnv)).to.not.throw();
+    });
+  });
+
   beforeEach(async () => {
     mockLog = {
       info: sinon.stub(),

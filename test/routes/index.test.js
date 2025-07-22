@@ -162,6 +162,7 @@ describe('getRouteHandlers', () => {
 
   const mockReportsController = {
     createReport: sinon.stub(),
+    getAllReportsBySiteId: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -318,6 +319,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
       'POST /sites/:siteId/reports/:reportType',
+      'GET /sites/:siteId/reports',
       'GET /tools/scrape/jobs/by-base-url/:baseURL',
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'PATCH /sites/:siteId/config/cdn-logs',

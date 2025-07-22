@@ -214,6 +214,7 @@ export default function getRouteHandlers(
 
     // Reports
     'POST /sites/:siteId/reports/:reportType': reportsController.createReport,
+    'GET /sites/:siteId/reports': reportsController.getAllReportsBySiteId,
   };
 
   // Initialization of static and dynamic routes
