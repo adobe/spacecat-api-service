@@ -69,7 +69,7 @@ export function buildPageTypeCase(siteId, column = 'path') {
 
   const caseLines = [
     'CASE',
-    ...rules.map(({ name, pattern }) => `    WHEN REGEXP_LIKE(${column}, '${pattern}') THEN '${name.replace(/'/g, "''")}'`),
+    ...pageTypes.map(({ name, pattern }) => `    WHEN REGEXP_LIKE(${column}, '${pattern}') THEN '${name.replace(/'/g, "''")}'`),
     "    ELSE 'other | Other Pages'",
     'END AS page_type',
   ];

@@ -102,13 +102,14 @@ function TrafficController(context, log, env) {
     // Only build pageTypeCase if 'page_type' is in the dimensions
     let pageTypeCase;
     if (groupBy.includes('page_type')) {
-      pageTypeCase = buildPageTypeCase(siteId, 'path');
+      const pageTypes = await site.getPageTypes();
+      pageTypeCase = buildPageTypeCase(pageTypes, log, 'path');
     }
 
     if (!pageTypeCase) {
       pageTypeCase = 'NULL as page_type';
     }
-    const description = `fetch paid channel data | db: ${rumMetricsDatabase} } | db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${temporalCondition} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
+    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${temporalCondition} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
 
     log.info(`Processing query: ${description}`);
 
