@@ -1,3 +1,24 @@
+## [1.135.2](https://github.com/adobe/spacecat-api-service/compare/v1.135.1...v1.135.2) (2025-07-22)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1078](https://github.com/adobe/spacecat-api-service/issues/1078)) ([b888134](https://github.com/adobe/spacecat-api-service/commit/b8881346cbb2e78769c87aafc287a019c279a09e))
+
+## [1.135.1](https://github.com/adobe/spacecat-api-service/compare/v1.135.0...v1.135.1) (2025-07-22)
+
+
+### Bug Fixes
+
+* update @adobe/spacecat-shared-scrape-client to version 1.0.3 ([#1081](https://github.com/adobe/spacecat-api-service/issues/1081)) ([a1b33ce](https://github.com/adobe/spacecat-api-service/commit/a1b33ceca153b5c01b2147cad037307336e87cee))
+
+# [1.135.0](https://github.com/adobe/spacecat-api-service/compare/v1.134.6...v1.135.0) (2025-07-21)
+
+
+### Features
+
+* introduce isSandbox flag for sandbox sites ([#1072](https://github.com/adobe/spacecat-api-service/issues/1072)) ([e4dca72](https://github.com/adobe/spacecat-api-service/commit/e4dca724328ecd968ead42352f2fad2dc6b12abb))
+
 ## [1.134.6](https://github.com/adobe/spacecat-api-service/compare/v1.134.5...v1.134.6) (2025-07-20)
 
 
