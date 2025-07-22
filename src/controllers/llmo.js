@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { ok } from '@adobe/spacecat-shared-http-utils';
+import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 
@@ -114,6 +114,9 @@ function LlmoController() {
 
     // add the question to the llmoConfig
     const newQuestions = context.body;
+    if (!newQuestions) {
+      return badRequest('No questions provided in the request body');
+    }
     let updated = false;
 
     // Prepare human questions with unique keys
@@ -141,7 +144,7 @@ function LlmoController() {
     }
 
     // return the updated llmoConfig questions
-    return ok(config.getLlmoConfig().questions || {});
+    return ok(config.getLlmoConfig().questions);
   };
 
   // Handles requests to the LLMO questions endpoint, removes a question
@@ -158,7 +161,7 @@ function LlmoController() {
     await saveSiteConfig(site, config, log, 'removing question');
 
     // return the updated llmoConfig questions
-    return ok(config.getLlmoConfig().questions || {});
+    return ok(config.getLlmoConfig().questions);
   };
 
   // Handles requests to the LLMO questions endpoint, updates a question
@@ -176,7 +179,7 @@ function LlmoController() {
     await saveSiteConfig(site, config, log, 'updating question');
 
     // return the updated llmoConfig questions
-    return ok(config.getLlmoConfig().questions || {});
+    return ok(config.getLlmoConfig().questions);
   };
 
   return {

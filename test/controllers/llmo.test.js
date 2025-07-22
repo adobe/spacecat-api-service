@@ -528,6 +528,12 @@ describe('LLMO Controller', () => {
       expect(mockConfig.addLlmoAIQuestions.called).to.be.false;
     });
 
+    it('should handle empty body in questions', async () => {
+      mockContext.body = null;
+      const result = await controller.addLlmoQuestion(mockContext);
+      expect(result.status).to.equal(400);
+    });
+
     it('should handle questions with existing keys', async () => {
       mockContext.body = {
         Human: [{ key: 'existing-key', question: 'Question with existing key' }],
