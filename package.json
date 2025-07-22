@@ -74,7 +74,7 @@
     "@adobe/helix-universal-logger": "3.0.27",
     "@adobe/spacecat-shared-athena-client": "1.1.1",
     "@adobe/spacecat-shared-brand-client": "1.1.17",
-    "@adobe/spacecat-shared-data-access": "https://gitpkg.now.sh/adobe/spacecat-shared/packages/spacecat-shared-data-access?f30dda4bfc8605fb8f5ebfed46fa26549bc727f6",
+    "@adobe/spacecat-shared-data-access": "https://gitpkg.now.sh/adobe/spacecat-shared/packages/spacecat-shared-data-access?6d3f2d6127599524c6feb96f858c34adf8f9b929",
     "@adobe/spacecat-shared-gpt-client": "1.5.17",
     "@adobe/spacecat-shared-http-utils": "1.15.1",
     "@adobe/spacecat-shared-ims-client": "1.8.5",

@@ -214,12 +214,12 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
 
     // LLMO Specific Routes
-    'GET /llmo/:siteId/sheet-data/:dataFolder/:dataSource': llmoController.getLlmoSheetData,
-    'GET /llmo/:siteId/config': llmoController.getLlmoConfig,
-    'GET /llmo/:siteId/questions': llmoController.getLlmoQuestions,
-    'POST /llmo/:siteId/questions': llmoController.addLlmoQuestion,
-    'DELETE /llmo/:siteId/questions/:questionKey': llmoController.removeLlmoQuestion,
-    'PATCH /llmo/:siteId/questions/:questionKey': llmoController.patchLlmoQuestion,
+    'GET /sites/:siteId/llmo/sheet-data/:dataFolder/:dataSource': llmoController.getLlmoSheetData,
+    'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
+    'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
+    'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
+    'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
+    'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
   };
 
   // Initialization of static and dynamic routes

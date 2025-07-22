@@ -12,24 +12,55 @@
 
 import { ok } from '@adobe/spacecat-shared-http-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import crypto from 'crypto';
 
 function LlmoController() {
-  // TODO: remove the dataFolder from the params and use the site.getLlmoConfig().dataFolder instead
-  // Handles requests to the LLMO sheet data endpoint
-  const getLlmoSheetData = async (context) => {
-    const { siteId, dataFolder, dataSource } = context.params;
-    const { log } = context;
-    const { env } = context;
+  // Helper function to get site and validate LLMO config
+  const getSiteAndValidateLlmo = async (context) => {
+    const { siteId } = context.params;
+    const { dataAccess } = context;
+    const { Site } = dataAccess;
 
-    // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findById(siteId);
+    const site = await Site.findById(siteId);
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
-    // if the dataFolder is not in the llmoConfig, throw an error
-    if (!llmoConfig.dataFolder) {
+    if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
+
+    return { site, config, llmoConfig };
+  };
+
+  // Helper function to save site config with error handling
+  const saveSiteConfig = async (site, config, log, operation) => {
+    site.setConfig(Config.toDynamoItem(config));
+    try {
+      await site.save();
+    } catch (error) {
+      log.error(`Error ${operation} for site's llmo config ${site.getId()}: ${error.message}`);
+    }
+  };
+
+  // Helper function to validate question key
+  const validateQuestionKey = (config, questionKey) => {
+    const humanQuestions = config.getLlmoHumanQuestions() || [];
+    const aiQuestions = config.getLlmoAIQuestions() || [];
+
+    if (!humanQuestions.some((question) => question.key === questionKey)
+        && !aiQuestions.some((question) => question.key === questionKey)) {
+      throw new Error('Invalid question key, please provide a valid question key');
+    }
+  };
+
+  // TODO: remove the dataFolder from the params and use the site.getLlmoConfig().dataFolder instead
+  // Handles requests to the LLMO sheet data endpoint
+  const getLlmoSheetData = async (context) => {
+    const { log } = context;
+    const { siteId, dataFolder, dataSource } = context.params;
+    const { env } = context;
+
+    const { llmoConfig } = await getSiteAndValidateLlmo(context);
 
     // if the dataFolder is not the same as the llmoConfig.dataFolder, throw an error
     if (dataFolder !== llmoConfig.dataFolder) {
@@ -65,36 +96,13 @@ function LlmoController() {
 
   // Handles requests to the LLMO config endpoint
   const getLlmoConfig = async (context) => {
-    const { siteId } = context.params;
-
-    // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findById(siteId);
-    const config = site.getConfig();
-    const llmoConfig = config.getLlmoConfig();
-
-    // if the llmoConfig is not enabled, throw an error
-    if (!llmoConfig) {
-      throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
-    }
-
+    const { llmoConfig } = await getSiteAndValidateLlmo(context);
     return ok(llmoConfig);
   };
 
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
   const getLlmoQuestions = async (context) => {
-    const { siteId } = context.params;
-
-    // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findById(siteId);
-    const config = site.getConfig();
-    const llmoConfig = config.getLlmoConfig();
-
-    // if the llmoConfig is not enabled, throw an error
-    if (!llmoConfig) {
-      throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
-    }
-
-    // return the questions, incase there are no questions, return an empty object
+    const { llmoConfig } = await getSiteAndValidateLlmo(context);
     return ok(llmoConfig.questions || {});
   };
 
@@ -102,153 +110,73 @@ function LlmoController() {
   // the body format is { Human: [question1, question2], AI: [question3, question4] }
   const addLlmoQuestion = async (context) => {
     const { log } = context;
-    const { siteId } = context.params;
-
-    // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findById(siteId);
-    const config = site.getConfig();
-    const llmoConfig = config.getLlmoConfig();
-
-    // if the llmoConfig is not enabled, throw an error
-    if (!llmoConfig) {
-      throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
-    }
+    const { site, config } = await getSiteAndValidateLlmo(context);
 
     // add the question to the llmoConfig
     const newQuestions = context.body;
     let updated = false;
 
-    if (newQuestions.Human) {
-      newQuestions.Human.forEach((question) => {
-        updated = true;
-        const uniqueKey = crypto.randomUUID();
-        llmoConfig.questions.Human.push({ ...question, key: uniqueKey });
-      });
+    // Prepare human questions with unique keys
+    if (newQuestions.Human && newQuestions.Human.length > 0) {
+      const humanQuestionsWithKeys = newQuestions.Human.map((question) => ({
+        ...question,
+        key: crypto.randomUUID(),
+      }));
+      config.addLlmoHumanQuestions(humanQuestionsWithKeys);
+      updated = true;
     }
-    if (newQuestions.AI) {
-      newQuestions.AI.forEach((question) => {
-        updated = true;
-        const uniqueKey = crypto.randomUUID();
-        llmoConfig.questions.AI.push({ ...question, key: uniqueKey });
-      });
+
+    // Prepare AI questions with unique keys
+    if (newQuestions.AI && newQuestions.AI.length > 0) {
+      const aiQuestionsWithKeys = newQuestions.AI.map((question) => ({
+        ...question,
+        key: crypto.randomUUID(),
+      }));
+      config.addLlmoAIQuestions(aiQuestionsWithKeys);
+      updated = true;
     }
 
     if (updated) {
-      // update the llmoConfig in the config
-      config.updateLlmoConfig(llmoConfig.dataFolder, llmoConfig.brand, llmoConfig.questions);
-      site.setConfig(Config.toDynamoItem(config));
-      try {
-        await site.save();
-      } catch (error) {
-        log.error(`Error adding new questions for site's llmo config ${site.getId()}: ${error.message}`);
-      }
+      await saveSiteConfig(site, config, log, 'adding new questions');
     }
 
-    // return the updated llmoConfig
-    return ok(llmoConfig.questions);
+    // return the updated llmoConfig questions
+    return ok(config.getLlmoConfig().questions || {});
   };
 
   // Handles requests to the LLMO questions endpoint, removes a question
   const removeLlmoQuestion = async (context) => {
     const { log } = context;
-    const { siteId, questionKey } = context.params;
+    const { questionKey } = context.params;
+    const { site, config } = await getSiteAndValidateLlmo(context);
 
-    // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findById(siteId);
-    const config = site.getConfig();
-    const llmoConfig = config.getLlmoConfig();
+    validateQuestionKey(config, questionKey);
 
-    // if the llmoConfig is not enabled, throw an error
-    if (!llmoConfig) {
-      throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
-    }
+    // remove the question using the config method
+    config.removeLlmoQuestion(questionKey);
 
-    let updated = false;
-    // check if the questionKey is valid
-    if (llmoConfig.questions.Human.some((question) => question.key === questionKey)
-      || llmoConfig.questions.AI.some((question) => question.key === questionKey)
-    ) {
-      updated = true;
-    } else {
-      throw new Error('Invalid question key, please provide a valid question key');
-    }
+    await saveSiteConfig(site, config, log, 'removing question');
 
-    // remove the question from the llmoConfig
-    llmoConfig.questions.Human = llmoConfig.questions.Human.filter(
-      (question) => question.key !== questionKey,
-    );
-    llmoConfig.questions.AI = llmoConfig.questions.AI.filter(
-      (question) => question.key !== questionKey,
-    );
-
-    // update the llmoConfig in the config
-    if (updated) {
-      config.updateLlmoConfig(llmoConfig.dataFolder, llmoConfig.brand, llmoConfig.questions);
-      site.setConfig(Config.toDynamoItem(config));
-      try {
-        await site.save();
-      } catch (error) {
-        log.error(`Error removing question for site's llmo config ${site.getId()}: ${error.message}`);
-      }
-    }
-
-    // return the updated llmoConfig
-    return ok(llmoConfig.questions);
+    // return the updated llmoConfig questions
+    return ok(config.getLlmoConfig().questions || {});
   };
 
   // Handles requests to the LLMO questions endpoint, updates a question
   const patchLlmoQuestion = async (context) => {
-    const { siteId, questionKey } = context.params;
     const { log } = context;
+    const { questionKey } = context.params;
     const { body } = context;
+    const { site, config } = await getSiteAndValidateLlmo(context);
 
-    // for the given siteId, get the config
-    const site = await context.dataAccess.Site.findById(siteId);
-    const config = site.getConfig();
-    const llmoConfig = config.getLlmoConfig();
+    validateQuestionKey(config, questionKey);
 
-    // if the llmoConfig is not enabled, throw an error
-    if (!llmoConfig) {
-      throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
-    }
+    // update the question using the config method
+    config.updateLlmoQuestion(questionKey, body);
 
-    let updated = false;
-    // check if the questionKey is valid
-    if (llmoConfig.questions.Human.some((question) => question.key === questionKey)
-      || llmoConfig.questions.AI.some((question) => question.key === questionKey)
-    ) {
-      updated = true;
-    } else {
-      throw new Error('Invalid question key, please provide a valid question key');
-    }
+    await saveSiteConfig(site, config, log, 'updating question');
 
-    // update the question in the llmoConfig
-    llmoConfig.questions.Human = llmoConfig.questions.Human.map((question) => {
-      if (question.key === questionKey) {
-        return { ...question, ...body, ...{ key: questionKey } };
-      }
-      return question;
-    });
-    llmoConfig.questions.AI = llmoConfig.questions.AI.map((question) => {
-      if (question.key === questionKey) {
-        return { ...question, ...body, ...{ key: questionKey } };
-      }
-      return question;
-    });
-
-    // update the llmoConfig in the config
-    if (updated) {
-      config.updateLlmoConfig(llmoConfig.dataFolder, llmoConfig.brand, llmoConfig.questions);
-      site.setConfig(Config.toDynamoItem(config));
-      try {
-        await site.save();
-      } catch (error) {
-        log.error(`Error updating question for site's llmo config ${site.getId()}: ${error.message}`);
-      }
-    }
-
-    // return the updated llmoConfig
-    return ok(llmoConfig.questions);
+    // return the updated llmoConfig questions
+    return ok(config.getLlmoConfig().questions || {});
   };
 
   return {

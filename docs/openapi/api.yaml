@@ -211,13 +211,13 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
-  /llmo/{siteId}/sheet-data/{dataFolder}/{dataSource}:
+  /sites/{siteId}/llmo/sheet-data/{dataFolder}/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
-  /llmo/{siteId}/config:
+  /sites/{siteId}/llmo/config:
     $ref: './llmo-api.yaml#/llmo-config'
-  /llmo/{siteId}/questions:
+  /sites/{siteId}/llmo/questions:
     $ref: './llmo-api.yaml#/llmo-questions'
-  /llmo/{siteId}/questions/{questionKey}:
+  /sites/{siteId}/llmo/questions/{questionKey}:
     $ref: './llmo-api.yaml#/llmo-question'
 
 components:
