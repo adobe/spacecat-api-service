@@ -76,7 +76,7 @@ describe('LLMO Controller', () => {
         dataSource: 'questions',
         questionKey: 'test-question',
       },
-      body: {
+      data: {
         Human: [{ question: 'New human question?' }],
         AI: [{ question: 'New AI question?' }],
       },
@@ -302,7 +302,7 @@ describe('LLMO Controller', () => {
     });
 
     it('should handle empty questions gracefully', async () => {
-      mockContext.body = {};
+      mockContext.data = {};
 
       const result = await controller.addLlmoQuestion(mockContext);
 
@@ -313,7 +313,7 @@ describe('LLMO Controller', () => {
     });
 
     it('should handle partial questions (only Human)', async () => {
-      mockContext.body = { Human: [{ question: 'Only human question?' }] };
+      mockContext.data = { Human: [{ question: 'Only human question?' }] };
 
       const result = await controller.addLlmoQuestion(mockContext);
 
@@ -323,7 +323,7 @@ describe('LLMO Controller', () => {
     });
 
     it('should handle partial questions (only AI)', async () => {
-      mockContext.body = { AI: [{ question: 'Only AI question?' }] };
+      mockContext.data = { AI: [{ question: 'Only AI question?' }] };
 
       const result = await controller.addLlmoQuestion(mockContext);
 
@@ -436,7 +436,7 @@ describe('LLMO Controller', () => {
       const result = await controller.patchLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('test-question', mockContext.body);
+      expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('test-question', mockContext.data);
       expect(mockSite.setConfig.calledOnce).to.be.true;
       expect(mockSite.save.calledOnce).to.be.true;
     });
@@ -447,7 +447,7 @@ describe('LLMO Controller', () => {
       const result = await controller.patchLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('ai-question', mockContext.body);
+      expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('ai-question', mockContext.data);
     });
 
     it('should throw error for invalid question key', async () => {
@@ -485,7 +485,7 @@ describe('LLMO Controller', () => {
 
     it('should preserve existing properties when updating', async () => {
       const updateData = { question: 'Updated question text' };
-      mockContext.body = updateData;
+      mockContext.data = updateData;
 
       const result = await controller.patchLlmoQuestion(mockContext);
 
@@ -519,7 +519,7 @@ describe('LLMO Controller', () => {
     });
 
     it('should handle empty arrays in questions', async () => {
-      mockContext.body = { Human: [], AI: [] };
+      mockContext.data = { Human: [], AI: [] };
 
       const result = await controller.addLlmoQuestion(mockContext);
 
@@ -529,13 +529,13 @@ describe('LLMO Controller', () => {
     });
 
     it('should handle empty body in questions', async () => {
-      mockContext.body = null;
+      mockContext.data = null;
       const result = await controller.addLlmoQuestion(mockContext);
       expect(result.status).to.equal(400);
     });
 
     it('should handle questions with existing keys', async () => {
-      mockContext.body = {
+      mockContext.data = {
         Human: [{ key: 'existing-key', question: 'Question with existing key' }],
       };
 
@@ -550,7 +550,7 @@ describe('LLMO Controller', () => {
     });
 
     it('should handle questions without keys', async () => {
-      mockContext.body = {
+      mockContext.data = {
         Human: [{ question: 'Question without key' }],
       };
 

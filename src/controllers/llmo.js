@@ -113,7 +113,7 @@ function LlmoController() {
     const { site, config } = await getSiteAndValidateLlmo(context);
 
     // add the question to the llmoConfig
-    const newQuestions = context.body;
+    const newQuestions = context.data;
     if (!newQuestions) {
       return badRequest('No questions provided in the request body');
     }
@@ -168,13 +168,13 @@ function LlmoController() {
   const patchLlmoQuestion = async (context) => {
     const { log } = context;
     const { questionKey } = context.params;
-    const { body } = context;
+    const { data } = context;
     const { site, config } = await getSiteAndValidateLlmo(context);
 
     validateQuestionKey(config, questionKey);
 
     // update the question using the config method
-    config.updateLlmoQuestion(questionKey, body);
+    config.updateLlmoQuestion(questionKey, data);
 
     await saveSiteConfig(site, config, log, 'updating question');
 
