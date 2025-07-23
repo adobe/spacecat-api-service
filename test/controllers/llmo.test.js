@@ -14,6 +14,7 @@
 import { use, expect } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import { SPACECAT_USER_AGENT } from '@adobe/spacecat-shared-utils';
 import LlmoController from '../../src/controllers/llmo.js';
 
 use(sinonChai);
@@ -127,7 +128,7 @@ describe('LLMO Controller', () => {
         {
           headers: {
             Authorization: 'token test-api-key',
-            'User-Agent': 'SpaceCat-API-Service/1.0',
+            'User-Agent': SPACECAT_USER_AGENT,
           },
         },
       );
@@ -231,7 +232,7 @@ describe('LLMO Controller', () => {
         {
           headers: {
             Authorization: 'token hlx_api_key_missing',
-            'User-Agent': 'SpaceCat-API-Service/1.0',
+            'User-Agent': SPACECAT_USER_AGENT,
           },
         },
       );

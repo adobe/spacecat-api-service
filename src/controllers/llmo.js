@@ -11,8 +11,11 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
+import { SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
+
+const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
 function LlmoController() {
   // Helper function to get site and validate LLMO config
@@ -69,10 +72,10 @@ function LlmoController() {
 
     try {
       // Fetch data from the external endpoint
-      const response = await fetch(`https://main--project-elmo-ui-data--adobe.aem.live/${dataFolder}/${dataSource}.json`, {
+      const response = await fetch(`${LLMO_SHEETDATA_SOURCE_URL}/${dataFolder}/${dataSource}.json`, {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
-          'User-Agent': 'SpaceCat-API-Service/1.0',
+          'User-Agent': SPACECAT_USER_AGENT,
         },
       });
 
