@@ -1,3 +1,10 @@
+# [1.137.0](https://github.com/adobe/spacecat-api-service/compare/v1.136.1...v1.137.0) (2025-07-23)
+
+
+### Features
+
+* Introduce LLMO data source endpoint ([#1066](https://github.com/adobe/spacecat-api-service/issues/1066)) ([d2ca7a7](https://github.com/adobe/spacecat-api-service/commit/d2ca7a7080946f8b21a5fd127fbbcbc0cea80af0))
+
 ## [1.136.1](https://github.com/adobe/spacecat-api-service/compare/v1.136.0...v1.136.1) (2025-07-23)
 
 
