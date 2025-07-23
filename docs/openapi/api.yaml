@@ -211,7 +211,7 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
-  /sites/{siteId}/llmo/sheet-data/{dataFolder}/{dataSource}:
+  /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/config:
     $ref: './llmo-api.yaml#/llmo-config'

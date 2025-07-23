@@ -108,7 +108,6 @@ describe('LlmoController', () => {
     mockContext = {
       params: {
         siteId: 'test-site-id',
-        dataFolder: 'test-folder',
         dataSource: 'test-data',
         questionKey: 'test-question',
       },
@@ -219,30 +218,8 @@ describe('LlmoController', () => {
       }
     });
 
-    it('should throw error when dataFolder does not match llmoConfig', async () => {
-      mockContext.params.dataFolder = 'wrong-folder';
-
-      try {
-        await controller.getLlmoSheetData(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('invalid data folder for the site');
-      }
-    });
-
     it('should throw error when LLMO is not enabled', async () => {
       mockConfig.getLlmoConfig.returns(null);
-
-      try {
-        await controller.getLlmoSheetData(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
-      }
-    });
-
-    it('should throw error when dataFolder is missing from llmoConfig', async () => {
-      mockConfig.getLlmoConfig.returns({ brand: 'test-brand' });
 
       try {
         await controller.getLlmoSheetData(mockContext);

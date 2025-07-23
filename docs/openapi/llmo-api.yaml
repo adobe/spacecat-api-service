@@ -1,13 +1,6 @@
 llmo-sheet-data:
   parameters:
     - $ref: './parameters.yaml#/siteId'
-    - name: dataFolder
-      in: path
-      required: true
-      description: The data folder identifier for the LLMO configuration
-      schema:
-        type: string
-        example: 'adobe'
     - name: dataSource
       in: path
       required: true

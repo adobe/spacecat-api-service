@@ -56,23 +56,17 @@ function LlmoController() {
     }
   };
 
-  // TODO: remove the dataFolder from the params and use the site.getLlmoConfig().dataFolder instead
   // Handles requests to the LLMO sheet data endpoint
   const getLlmoSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataFolder, dataSource } = context.params;
+    const { siteId, dataSource } = context.params;
     const { env } = context;
 
     const { llmoConfig } = await getSiteAndValidateLlmo(context);
 
-    // if the dataFolder is not the same as the llmoConfig.dataFolder, throw an error
-    if (dataFolder !== llmoConfig.dataFolder) {
-      throw new Error('invalid data folder for the site, please use the correct data folder');
-    }
-
     try {
-      // Fetch data from the external endpoint
-      const response = await fetch(`${LLMO_SHEETDATA_SOURCE_URL}/${dataFolder}/${dataSource}.json`, {
+      // Fetch data from the external endpoint using the dataFolder from config
+      const response = await fetch(`${LLMO_SHEETDATA_SOURCE_URL}/${llmoConfig.dataFolder}/${dataSource}.json`, {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
