@@ -1,3 +1,10 @@
+## [1.136.1](https://github.com/adobe/spacecat-api-service/compare/v1.136.0...v1.136.1) (2025-07-23)
+
+
+### Bug Fixes
+
+* add support for messageGroupId in sendMessage for FIFO queues ([#1085](https://github.com/adobe/spacecat-api-service/issues/1085)) ([e9bd4db](https://github.com/adobe/spacecat-api-service/commit/e9bd4dbb3b97e4902203c06ca93ef2536b51fef7))
+
 # [1.136.0](https://github.com/adobe/spacecat-api-service/compare/v1.135.2...v1.136.0) (2025-07-22)
 
 
