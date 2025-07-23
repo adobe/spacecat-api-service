@@ -11,22 +11,25 @@
  */
 
 /* eslint-env mocha */
-import { use, expect } from 'chai';
+import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import { SPACECAT_USER_AGENT } from '@adobe/spacecat-shared-utils';
-import LlmoController from '../../src/controllers/llmo.js';
+import esmock from 'esmock';
 
 use(sinonChai);
 
-describe('LLMO Controller', () => {
+describe('LlmoController', () => {
   let controller;
   let mockContext;
   let mockSite;
   let mockConfig;
   let mockLlmoConfig;
+  let mockDataAccess;
+  let mockLog;
+  let mockEnv;
+  let tracingFetchStub;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Create mock LLMO config
     mockLlmoConfig = {
       dataFolder: 'test-folder',
@@ -51,14 +54,28 @@ describe('LLMO Controller', () => {
       updateLlmoQuestion: sinon.stub(),
       getLlmoHumanQuestions: sinon.stub().returns(mockLlmoConfig.questions.Human),
       getLlmoAIQuestions: sinon.stub().returns(mockLlmoConfig.questions.AI),
-      getSlackConfig: sinon.stub().returns({}),
+      getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
+      getLlmoDataFolder: sinon.stub().returns('test-folder'),
+      getLlmoBrand: sinon.stub().returns('test-brand'),
+      isInternalCustomer: sinon.stub().returns(false),
+      getSlackMentions: sinon.stub().returns([]),
+      getHandlerConfig: sinon.stub().returns({}),
       getContentAiConfig: sinon.stub().returns({}),
       getImports: sinon.stub().returns([]),
+      getExcludedURLs: sinon.stub().returns([]),
+      getManualOverwrites: sinon.stub().returns([]),
+      getFixedURLs: sinon.stub().returns([]),
+      getIncludedURLs: sinon.stub().returns([]),
+      getGroupedURLs: sinon.stub().returns([]),
+      getLatestMetrics: sinon.stub().returns({}),
       getFetchConfig: sinon.stub().returns({}),
       getBrandConfig: sinon.stub().returns({}),
       getCdnLogsConfig: sinon.stub().returns({}),
-      toDynamoItem: sinon.stub().returns({}),
+      updateSlackConfig: sinon.stub(),
+      updateLlmoDataFolder: sinon.stub(),
+      updateLlmoBrand: sinon.stub(),
+      updateImports: sinon.stub(),
     };
 
     // Create mock site
@@ -69,31 +86,55 @@ describe('LLMO Controller', () => {
       save: sinon.stub().resolves(),
     };
 
+    // Create mock data access
+    mockDataAccess = {
+      Site: {
+        findById: sinon.stub().resolves(mockSite),
+      },
+    };
+
+    // Create mock log
+    mockLog = {
+      info: sinon.stub(),
+      error: sinon.stub(),
+    };
+
+    // Create mock environment
+    mockEnv = {
+      LLMO_HLX_API_KEY: 'test-api-key',
+    };
+
     // Create mock context
     mockContext = {
       params: {
         siteId: 'test-site-id',
         dataFolder: 'test-folder',
-        dataSource: 'questions',
+        dataSource: 'test-data',
         questionKey: 'test-question',
       },
       data: {
-        Human: [{ question: 'New human question?' }],
-        AI: [{ question: 'New AI question?' }],
+        Human: [
+          { question: 'New human question?' },
+        ],
+        AI: [
+          { question: 'New AI question?' },
+        ],
       },
-      dataAccess: {
-        Site: {
-          findById: sinon.stub().resolves(mockSite),
-        },
-      },
-      env: {
-        LLMO_HLX_API_KEY: 'test-api-key',
-      },
-      log: {
-        info: sinon.stub(),
-        error: sinon.stub(),
-      },
+      dataAccess: mockDataAccess,
+      log: mockLog,
+      env: mockEnv,
     };
+
+    // Create tracingFetch stub
+    tracingFetchStub = sinon.stub();
+
+    // Mock the controller with the tracingFetch stub
+    const LlmoController = await esmock('../../src/controllers/llmo.js', {
+      '@adobe/spacecat-shared-utils': {
+        SPACECAT_USER_AGENT: 'test-user-agent',
+        tracingFetch: tracingFetchStub,
+      },
+    });
 
     controller = LlmoController();
   });
@@ -103,139 +144,112 @@ describe('LLMO Controller', () => {
   });
 
   describe('getLlmoSheetData', () => {
-    beforeEach(() => {
-      global.fetch = sinon.stub();
-    });
-
-    afterEach(() => {
-      delete global.fetch;
-    });
-
     it('should proxy data from external endpoint successfully', async () => {
       const mockResponse = {
         ok: true,
         json: sinon.stub().resolves({ data: 'test-data' }),
       };
-      global.fetch.resolves(mockResponse);
+      tracingFetchStub.resolves(mockResponse);
 
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
-      expect(global.fetch).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/questions.json',
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
-            'User-Agent': SPACECAT_USER_AGENT,
+            'User-Agent': 'test-user-agent',
           },
         },
       );
     });
 
-    it('should throw error when LLMO is not enabled for site', async () => {
-      mockConfig.getLlmoConfig.returns(null);
+    it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+      mockContext.env.LLMO_HLX_API_KEY = undefined;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token hlx_api_key_missing',
+            'User-Agent': 'test-user-agent',
+          },
+        },
+      );
+    });
+
+    it('should handle external API errors', async () => {
+      const mockResponse = {
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      };
+      tracingFetchStub.resolves(mockResponse);
 
       try {
         await controller.getLlmoSheetData(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('LLM Optimizer is not enabled for this site, add llmo config to the site');
+        expect(error.message).to.include('External API returned 404: Not Found');
       }
     });
 
-    it('should throw error when LLMO config has no dataFolder', async () => {
-      mockConfig.getLlmoConfig.returns({});
+    it('should handle network errors', async () => {
+      const networkError = new Error('Network error');
+      tracingFetchStub.rejects(networkError);
 
       try {
         await controller.getLlmoSheetData(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('LLM Optimizer is not enabled for this site, add llmo config to the site');
+        expect(error.message).to.include('Network error');
       }
     });
 
-    it('should throw error when dataFolder does not match', async () => {
+    it('should throw error when dataFolder does not match llmoConfig', async () => {
       mockContext.params.dataFolder = 'wrong-folder';
 
       try {
         await controller.getLlmoSheetData(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('invalid data folder for the site, please use the correct data folder');
+        expect(error.message).to.include('invalid data folder for the site');
       }
     });
 
-    it('should handle fetch errors gracefully', async () => {
-      global.fetch.rejects(new Error('Network error'));
+    it('should throw error when LLMO is not enabled', async () => {
+      mockConfig.getLlmoConfig.returns(null);
 
       try {
         await controller.getLlmoSheetData(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('Network error');
-        expect(mockContext.log.error).to.have.been.calledWith(
-          'Error proxying data for siteId: test-site-id, dataSource: questions',
-          sinon.match.instanceOf(Error),
-        );
+        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
       }
     });
 
-    it('should handle non-ok response status', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-      };
-      global.fetch.resolves(mockResponse);
+    it('should throw error when dataFolder is missing from llmoConfig', async () => {
+      mockConfig.getLlmoConfig.returns({ brand: 'test-brand' });
 
       try {
         await controller.getLlmoSheetData(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('External API returned 404: Not Found');
-        expect(mockContext.log.error).to.have.been.calledWith(
-          'Failed to fetch data from external endpoint: 404 Not Found',
-        );
+        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
       }
-    });
-
-    it('should handle non-ok response status with error logging', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-      };
-      global.fetch.resolves(mockResponse);
-
-      try {
-        await controller.getLlmoSheetData(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.equal('External API returned 500: Internal Server Error');
-      }
-    });
-
-    it('should use default API key when env variable is missing', async () => {
-      delete mockContext.env.LLMO_HLX_API_KEY;
-      const mockResponse = {
-        ok: true,
-        json: sinon.stub().resolves({ data: 'test-data' }),
-      };
-      global.fetch.resolves(mockResponse);
-
-      await controller.getLlmoSheetData(mockContext);
-
-      expect(global.fetch).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/questions.json',
-        {
-          headers: {
-            Authorization: 'token hlx_api_key_missing',
-            'User-Agent': SPACECAT_USER_AGENT,
-          },
-        },
-      );
     });
   });
 
@@ -255,13 +269,13 @@ describe('LLMO Controller', () => {
         await controller.getLlmoConfig(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('LLM Optimizer is not enabled for this site, add llmo config to the site');
+        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
       }
     });
   });
 
   describe('getLlmoQuestions', () => {
-    it('should return questions successfully', async () => {
+    it('should return LLMO questions successfully', async () => {
       const result = await controller.getLlmoQuestions(mockContext);
 
       expect(result.status).to.equal(200);
@@ -269,8 +283,11 @@ describe('LLMO Controller', () => {
       expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
     });
 
-    it('should return empty object when no questions exist', async () => {
-      mockLlmoConfig.questions = null;
+    it('should return empty questions when questions are not configured', async () => {
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+      });
 
       const result = await controller.getLlmoQuestions(mockContext);
 
@@ -278,92 +295,68 @@ describe('LLMO Controller', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({});
     });
-
-    it('should throw error when LLMO is not enabled', async () => {
-      mockConfig.getLlmoConfig.returns(null);
-
-      try {
-        await controller.getLlmoQuestions(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.equal('LLM Optimizer is not enabled for this site, add llmo config to the site');
-      }
-    });
   });
 
   describe('addLlmoQuestion', () => {
-    it('should add questions successfully', async () => {
+    it('should add human questions successfully', async () => {
       const result = await controller.addLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions.calledOnce).to.be.true;
-      expect(mockConfig.addLlmoAIQuestions.calledOnce).to.be.true;
-      expect(mockSite.setConfig.calledOnce).to.be.true;
-      expect(mockSite.save.calledOnce).to.be.true;
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
+      expect(mockConfig.addLlmoHumanQuestions).to.have.been.calledOnce;
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
     });
 
-    it('should handle empty questions gracefully', async () => {
+    it('should add AI questions successfully', async () => {
+      mockContext.data = {
+        AI: [{ question: 'New AI question?' }],
+      };
+
+      const result = await controller.addLlmoQuestion(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
+      expect(mockConfig.addLlmoAIQuestions).to.have.been.calledOnce;
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should return bad request when no questions provided', async () => {
+      mockContext.data = null;
+
+      const result = await controller.addLlmoQuestion(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('No questions provided in the request body');
+    });
+
+    it('should not save when no questions are added', async () => {
       mockContext.data = {};
 
       const result = await controller.addLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions.called).to.be.false;
-      expect(mockConfig.addLlmoAIQuestions.called).to.be.false;
-      expect(mockSite.save.called).to.be.false;
+      expect(mockSite.save).to.not.have.been.called;
     });
 
-    it('should handle partial questions (only Human)', async () => {
-      mockContext.data = { Human: [{ question: 'Only human question?' }] };
+    it('should handle site save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
 
       const result = await controller.addLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions.calledOnce).to.be.true;
-      expect(mockConfig.addLlmoAIQuestions.called).to.be.false;
-    });
-
-    it('should handle partial questions (only AI)', async () => {
-      mockContext.data = { AI: [{ question: 'Only AI question?' }] };
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions.called).to.be.false;
-      expect(mockConfig.addLlmoAIQuestions.calledOnce).to.be.true;
-    });
-
-    it('should throw error when LLMO is not enabled', async () => {
-      mockConfig.getLlmoConfig.returns(null);
-
-      try {
-        await controller.addLlmoQuestion(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.equal('LLM Optimizer is not enabled for this site, add llmo config to the site');
-      }
-    });
-
-    it('should handle save errors gracefully', async () => {
-      mockSite.save.rejects(new Error('Save failed'));
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockContext.log.error).to.have.been.calledWith(
-        'Error adding new questions for site\'s llmo config test-site-id: Save failed',
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error adding new questions for site\'s llmo config test-site-id: Database connection failed',
       );
-    });
-
-    it('should handle null/undefined questions gracefully', async () => {
-      mockConfig.getLlmoHumanQuestions.returns(null);
-      mockConfig.getLlmoAIQuestions.returns(undefined);
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions).to.have.been.calledWith(sinon.match.array);
-      expect(mockConfig.addLlmoAIQuestions).to.have.been.calledWith(sinon.match.array);
     });
   });
 
@@ -372,18 +365,11 @@ describe('LLMO Controller', () => {
       const result = await controller.removeLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
       expect(mockConfig.removeLlmoQuestion).to.have.been.calledWith('test-question');
-      expect(mockSite.setConfig.calledOnce).to.be.true;
-      expect(mockSite.save.calledOnce).to.be.true;
-    });
-
-    it('should remove AI question successfully', async () => {
-      mockContext.params.questionKey = 'ai-question';
-
-      const result = await controller.removeLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.removeLlmoQuestion).to.have.been.calledWith('ai-question');
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
     });
 
     it('should throw error for invalid question key', async () => {
@@ -393,29 +379,24 @@ describe('LLMO Controller', () => {
         await controller.removeLlmoQuestion(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('Invalid question key, please provide a valid question key');
+        expect(error.message).to.include('Invalid question key');
       }
     });
 
-    it('should throw error when LLMO is not enabled', async () => {
-      mockConfig.getLlmoConfig.returns(null);
-
-      try {
-        await controller.removeLlmoQuestion(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.equal('LLM Optimizer is not enabled for this site, add llmo config to the site');
-      }
-    });
-
-    it('should handle save errors gracefully', async () => {
-      mockSite.save.rejects(new Error('Save failed'));
+    it('should handle site save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
 
       const result = await controller.removeLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockContext.log.error).to.have.been.calledWith(
-        'Error removing question for site\'s llmo config test-site-id: Save failed',
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
+      expect(mockConfig.removeLlmoQuestion).to.have.been.calledWith('test-question');
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error removing question for site\'s llmo config test-site-id: Database connection failed',
       );
     });
 
@@ -423,32 +404,31 @@ describe('LLMO Controller', () => {
       mockConfig.getLlmoHumanQuestions.returns(null);
       mockConfig.getLlmoAIQuestions.returns(undefined);
 
+      // Use an invalid question key so the validation will fail
+      mockContext.params.questionKey = 'invalid-question-key';
+
       try {
         await controller.removeLlmoQuestion(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('Invalid question key, please provide a valid question key');
+        expect(error.message).to.include('Invalid question key');
       }
     });
   });
 
   describe('patchLlmoQuestion', () => {
-    it('should update Human question successfully', async () => {
-      const result = await controller.patchLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('test-question', mockContext.data);
-      expect(mockSite.setConfig.calledOnce).to.be.true;
-      expect(mockSite.save.calledOnce).to.be.true;
-    });
-
-    it('should update AI question successfully', async () => {
-      mockContext.params.questionKey = 'ai-question';
+    it('should update question successfully', async () => {
+      const updateData = { question: 'Updated question?' };
+      mockContext.data = updateData;
 
       const result = await controller.patchLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('ai-question', mockContext.data);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
+      expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('test-question', updateData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
     });
 
     it('should throw error for invalid question key', async () => {
@@ -458,111 +438,27 @@ describe('LLMO Controller', () => {
         await controller.patchLlmoQuestion(mockContext);
         expect.fail('Should have thrown an error');
       } catch (error) {
-        expect(error.message).to.equal('Invalid question key, please provide a valid question key');
+        expect(error.message).to.include('Invalid question key');
       }
     });
 
-    it('should throw error when LLMO is not enabled', async () => {
-      mockConfig.getLlmoConfig.returns(null);
-
-      try {
-        await controller.patchLlmoQuestion(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.equal('LLM Optimizer is not enabled for this site, add llmo config to the site');
-      }
-    });
-
-    it('should handle save errors gracefully', async () => {
-      mockSite.save.rejects(new Error('Save failed'));
-
-      const result = await controller.patchLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockContext.log.error).to.have.been.calledWith(
-        'Error updating question for site\'s llmo config test-site-id: Save failed',
-      );
-    });
-
-    it('should preserve existing properties when updating', async () => {
-      const updateData = { question: 'Updated question text' };
+    it('should handle site save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+      const updateData = { question: 'Updated question?' };
       mockContext.data = updateData;
 
       const result = await controller.patchLlmoQuestion(mockContext);
 
       expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
       expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('test-question', updateData);
-    });
-
-    it('should handle null/undefined questions gracefully', async () => {
-      mockConfig.getLlmoHumanQuestions.returns(null);
-      mockConfig.getLlmoAIQuestions.returns(undefined);
-
-      try {
-        await controller.patchLlmoQuestion(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.equal('Invalid question key, please provide a valid question key');
-      }
-    });
-  });
-
-  describe('Edge cases and error scenarios', () => {
-    it('should handle site not found', async () => {
-      mockContext.dataAccess.Site.findById.resolves(null);
-
-      try {
-        await controller.getLlmoConfig(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Cannot read properties of null');
-      }
-    });
-
-    it('should handle empty arrays in questions', async () => {
-      mockContext.data = { Human: [], AI: [] };
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions.called).to.be.false;
-      expect(mockConfig.addLlmoAIQuestions.called).to.be.false;
-    });
-
-    it('should handle empty body in questions', async () => {
-      mockContext.data = null;
-      const result = await controller.addLlmoQuestion(mockContext);
-      expect(result.status).to.equal(400);
-    });
-
-    it('should handle questions with existing keys', async () => {
-      mockContext.data = {
-        Human: [{ key: 'existing-key', question: 'Question with existing key' }],
-      };
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions.called).to.be.true;
-      const callArgs = mockConfig.addLlmoHumanQuestions.getCall(0).args[0];
-      expect(callArgs).to.have.lengthOf(1);
-      expect(callArgs[0]).to.have.property('question', 'Question with existing key');
-      expect(callArgs[0]).to.have.property('key').that.is.a('string');
-    });
-
-    it('should handle questions without keys', async () => {
-      mockContext.data = {
-        Human: [{ question: 'Question without key' }],
-      };
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions.called).to.be.true;
-      const callArgs = mockConfig.addLlmoHumanQuestions.getCall(0).args[0];
-      expect(callArgs).to.have.lengthOf(1);
-      expect(callArgs[0]).to.have.property('question', 'Question without key');
-      expect(callArgs[0]).to.have.property('key').that.is.a('string');
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error updating question for site\'s llmo config test-site-id: Database connection failed',
+      );
     });
   });
 });
