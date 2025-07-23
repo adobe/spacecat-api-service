@@ -37,6 +37,7 @@ const SUPPORTS_PAGE_URLS = [
   'organic-keywords-ai-overview',
   'organic-keywords-feature-snippets',
   'organic-keywords-questions',
+  'top-forms',
 ];
 
 /**
@@ -70,6 +71,7 @@ function RunImportCommand(context) {
    * @param {Object} config - The configuration object.`
    * @param {Object} slackContext - The Slack context object.
    * @param {string} [pageURL] - Optional full page URL to use instead of the base URL.
+   * @param {Object} [data] - Optional data object for import-specific data.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const runImportForSite = async (
@@ -80,6 +82,7 @@ function RunImportCommand(context) {
     config,
     slackContext,
     pageURL,
+    data,
   ) => {
     const { say } = slackContext;
 
@@ -98,6 +101,7 @@ function RunImportCommand(context) {
       slackContext,
       context,
       pageURL,
+      data,
     );
   };
 
@@ -172,14 +176,21 @@ function RunImportCommand(context) {
           return;
         }
 
-        const csvData = await parseCSV(file, botToken);
+        // For top-forms import type, we need 3 columns: baseUrl, pageUrl, formSource
+        const minColumns = importType === 'top-forms' ? 3 : 2;
+        const csvData = await parseCSV(file, botToken, minColumns);
 
         say(`:adobe-run: Triggering import run of type ${importType} for ${csvData.length} sites.`);
 
         await Promise.all(
           csvData.map(async (row) => {
-            const [csvBaseURL, csvPageURL] = row;
+            const [csvBaseURL, csvPageURL, formSource] = row;
             if (isValidUrl(csvBaseURL)) {
+              // Create data object for top-forms import type
+              const data = importType === 'top-forms' && formSource
+                ? { formSource }
+                : undefined;
+
               await runImportForSite(
                 importType,
                 csvBaseURL,
@@ -188,6 +199,7 @@ function RunImportCommand(context) {
                 config,
                 slackContext,
                 supportsPageURLs && isValidUrl(csvPageURL) ? csvPageURL : undefined,
+                data,
               );
             } else {
               await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
@@ -213,6 +225,7 @@ function RunImportCommand(context) {
           config,
           slackContext,
           pageURL,
+          undefined, // data parameter - undefined for single URL case
         );
 
         const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}${pageURL ? ` for page ${pageURL}` : ''}\n`;
