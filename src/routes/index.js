@@ -69,6 +69,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} paidController - The paid controller.
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
+ * @param {Object} llmoController - The LLMO controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -95,6 +96,7 @@ export default function getRouteHandlers(
   paidController,
   trafficController,
   fixesController,
+  llmoController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -222,6 +224,14 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
+
+    // LLMO Specific Routes
+    'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
+    'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
+    'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
+    'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
+    'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
+    'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
   };
 
   // Initialization of static and dynamic routes

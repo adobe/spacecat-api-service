@@ -47,6 +47,8 @@ tags:
     description: APIs for importing content to Edge Delivery Services
   - name: scrape
     description: APIs for scraping web pages
+  - name: llmo
+    description: LLMO (Large Language Model Optimizer) operations
 
 paths:
   /audits/latest/{auditType}:
@@ -209,6 +211,14 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
+  /sites/{siteId}/llmo/sheet-data/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-sheet-data'
+  /sites/{siteId}/llmo/config:
+    $ref: './llmo-api.yaml#/llmo-config'
+  /sites/{siteId}/llmo/questions:
+    $ref: './llmo-api.yaml#/llmo-questions'
+  /sites/{siteId}/llmo/questions/{questionKey}:
+    $ref: './llmo-api.yaml#/llmo-question'
 
 components:
   securitySchemes:
