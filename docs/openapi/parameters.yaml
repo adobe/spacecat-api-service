@@ -119,8 +119,16 @@ metric:
   schema:
     type: string
     enum:
-      - 'organic-traffic'
-      - 'organic-keywords'
+      - all-traffic
+      - cwv-daily
+      - cwv-weekly
+      - organic-keywords
+      - organic-keywords-ai-overview
+      - organic-keywords-feature-snippets
+      - organic-keywords-nonbranded
+      - organic-keywords-questions
+      - organic-traffic
+      - top-pages
     example: 'organic-traffic'
 jobId:
   name: jobId
@@ -187,3 +195,51 @@ fixId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+startDate:
+  name: startDate
+  description: The start date in ISO 8601 format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/DateTime'
+endDate:
+  name: endDate
+  description: The end date in ISO 8601 format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/DateTime'
+processingType:
+  name: processingType
+  description: The processing type/handler used by the scrape job
+  in: path
+  required: true
+  schema:
+    type: string
+weekNumber:
+  name: weekNumber
+  description: The ISO week number (1-53)
+  in: query
+  required: false
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 53
+month:
+  name: month
+  description: The month number (1-12)
+  in: query
+  required: true
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 12
+    example: 5
+year:
+  name: year
+  description: The 4-digit year
+  in: query
+  required: true
+  schema:
+    type: integer
+    example: 2024

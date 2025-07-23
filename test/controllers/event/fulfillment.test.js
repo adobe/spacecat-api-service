@@ -125,6 +125,46 @@ describe('Fulfillment Controller', () => {
     expect(results[3].requestId).to.equal('12345');
   });
 
+  it('uses default event type when not specified', async () => {
+    const eventArray = localFileToObject('sample-hoolihan-event.json');
+    const response = await fulfillmentController.processFulfillmentEvents({ data: eventArray });
+    expect(response.status).to.equal(202);
+    const results = await response.json();
+    expect(results[0].status).to.equal('accepted');
+  });
+
+  it('accepts valid event types (aem-sites-optimizer)', async () => {
+    const eventArray = localFileToObject('sample-hoolihan-event.json');
+    const response = await fulfillmentController.processFulfillmentEvents({
+      data: eventArray,
+      params: { eventType: 'aem-sites-optimizer' },
+    });
+    expect(response.status).to.equal(202);
+    const results = await response.json();
+    expect(results[0].status).to.equal('accepted');
+  });
+
+  it('accepts valid event types (edge-delivery-services)', async () => {
+    const eventArray = localFileToObject('sample-hoolihan-event.json');
+    const response = await fulfillmentController.processFulfillmentEvents({
+      data: eventArray,
+      params: { eventType: 'edge-delivery-services' },
+    });
+    expect(response.status).to.equal(202);
+    const results = await response.json();
+    expect(results[0].status).to.equal('accepted');
+  });
+
+  it('rejects invalid event types', async () => {
+    const eventArray = localFileToObject('sample-hoolihan-event.json');
+    const response = await fulfillmentController.processFulfillmentEvents({
+      data: eventArray,
+      params: { eventType: 'invalid-event-type' },
+    });
+    expect(response.status).to.equal(400);
+    expect(response.headers.get('x-error')).to.equal('Bad Request - Invalid event type');
+  });
+
   it('rejects when SQS fails', async () => {
     const failingSqs = {
       sendMessage: sandbox.stub().rejects(new Error('Error queueing message')),

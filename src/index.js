@@ -57,11 +57,14 @@ import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
+import PaidController from './controllers/paid.js';
+import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
 import DemoController from './controllers/demo.js';
 import ScrapeController from './controllers/scrape.js';
+import ScrapeJobController from './controllers/scrapeJob.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
 
@@ -111,9 +114,12 @@ async function run(request, context) {
     const opportunitiesController = OpportunitiesController(context);
     const suggestionsController = SuggestionsController(context, context.sqs, context.env);
     const brandsController = BrandsController(context, log, context.env);
+    const paidController = PaidController(context);
+    const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
     const scrapeController = ScrapeController(context);
+    const scrapeJobController = ScrapeJobController(context);
     const fixesController = new FixesController(context);
 
     /* ---------- build MCP registry & controller ---------- */
@@ -144,7 +150,10 @@ async function run(request, context) {
       preflightController,
       demoController,
       scrapeController,
+      scrapeJobController,
       mcpController,
+      paidController,
+      trafficController,
       fixesController,
     );
 
@@ -156,7 +165,8 @@ async function run(request, context) {
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
-      if (params.organizationId && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
+      if (params.organizationId
+        && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;

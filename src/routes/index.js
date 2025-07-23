@@ -64,7 +64,10 @@ function isStaticRoute(routePattern) {
  * @param {Object} preflightController - The preflight controller.
  * @param {Object} demoController - The demo controller.
  * @param {Object} scrapeController - The scrape controller.
+ * @param {Object} scrapeJobController - The scrape job controller.
  * @param {Object} mcpController - The MCP controller.
+ * @param {Object} paidController - The paid controller.
+ * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -87,7 +90,10 @@ export default function getRouteHandlers(
   preflightController,
   demoController,
   scrapeController,
+  scrapeJobController,
   mcpController,
+  paidController,
+  trafficController,
   fixesController,
 ) {
   const staticRoutes = {};
@@ -101,6 +107,7 @@ export default function getRouteHandlers(
     'GET /configurations/:version': configurationController.getByVersion,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
+    'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
     'POST /hooks/site-detection/cdn/:hookSecret': hooksController.processCDNHook,
     'POST /hooks/site-detection/rum/:hookSecret': hooksController.processRUMHook,
     'GET /organizations': organizationsController.getAll,
@@ -120,6 +127,7 @@ export default function getRouteHandlers(
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
     'PATCH /sites/:siteId': sitesController.updateSite,
+    'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
@@ -151,7 +159,31 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
+    'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
+    'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
+    'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device': trafficController.getPaidTrafficByUrlPageTypeCampaignDevice,
+    'GET /sites/:siteId/traffic/paid/url-page-type-device': trafficController.getPaidTrafficByUrlPageTypeDevice,
+    'GET /sites/:siteId/traffic/paid/url-page-type-campaign': trafficController.getPaidTrafficByUrlPageTypeCampaign,
+    'GET /sites/:siteId/traffic/paid/url-page-type-platform': trafficController.getPaidTrafficByUrlPageTypePlatform,
+    'GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform': trafficController.getPaidTrafficByUrlPageTypeCampaignPlatform,
+    'GET /sites/:siteId/traffic/paid/url-page-type-platform-device': trafficController.getPaidTrafficByUrlPageTypePlatformDevice,
+    'GET /sites/:siteId/traffic/paid/page-type-campaign-device': trafficController.getPaidTrafficByPageTypeCampaignDevice,
+    'GET /sites/:siteId/traffic/paid/page-type-device': trafficController.getPaidTrafficByPageTypeDevice,
+    'GET /sites/:siteId/traffic/paid/page-type-campaign': trafficController.getPaidTrafficByPageTypeCampaign,
+    'GET /sites/:siteId/traffic/paid/page-type-platform': trafficController.getPaidTrafficByPageTypePlatform,
+    'GET /sites/:siteId/traffic/paid/page-type-platform-device': trafficController.getPaidTrafficByPageTypePlatformDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-url-device': trafficController.getPaidTrafficByCampaignUrlDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-device': trafficController.getPaidTrafficByCampaignDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-url': trafficController.getPaidTrafficByCampaignUrl,
+    'GET /sites/:siteId/traffic/paid/campaign': trafficController.getPaidTrafficByCampaign,
+    'GET /sites/:siteId/traffic/paid/type-channel-campaign': trafficController.getPaidTrafficByTypeChannelCampaign,
+    'GET /sites/:siteId/traffic/paid/type-channel': trafficController.getPaidTrafficByTypeChannel,
+    'GET /sites/:siteId/traffic/paid/type-campaign': trafficController.getPaidTrafficByTypeCampaign,
+    'GET /sites/:siteId/traffic/paid/type': trafficController.getPaidTrafficByType,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
+    'GET /sites/:siteId/top-pages': sitesController.getTopPages,
+    'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
+    'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
@@ -172,6 +204,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
     'GET /mcp': mcpController.handleSseRequest,
     'POST /mcp': mcpController.handleRpc,
+
+    // Scrape Jobs
+    'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
+    'GET /tools/scrape/jobs/:jobId': scrapeJobController.getScrapeJobStatus,
+    'GET /tools/scrape/jobs/:jobId/results': scrapeJobController.getScrapeJobUrlResults,
+    'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs': scrapeJobController.getScrapeJobsByDateRange,
+    'GET /tools/scrape/jobs/by-base-url/:baseURL': scrapeJobController.getScrapeJobsByBaseURL,
+    'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType': scrapeJobController.getScrapeJobsByBaseURL,
 
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),

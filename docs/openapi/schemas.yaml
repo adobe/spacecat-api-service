@@ -157,12 +157,42 @@ Config:
     contentAiConfig:
       description: Optional. The ContentAi configuration
       $ref: '#/ContentAiConfig'
+    cdnLogsConfig:
+      description: Optional. The CDN logs configuration
+      $ref: '#/CdnLogsConfig'
 ContentAiConfig:
   type: object
   properties:
     index:
       description: Optional. The index name for website in the content AI service
       type: string
+CdnLogsConfig:
+  type: object
+  properties:
+    bucketName:
+      description: The name of the S3 bucket to store CDN logs
+      type: string
+    outputLocation:
+      description: The output location for sharepoint folder
+      type: string
+    filters:
+      description: The filters for CDN logs
+      type: array
+      items:
+        type: object
+        properties:
+          key:
+            description: The key to filter
+            type: string
+          value:
+            description: The value to filter
+            type: array
+            items:
+              type: string
+  example:
+    bucketName: 'test-bucket'
+    filters: [{ key: 'test-key', value: ['test-value'] }]
+    outputLocation: 'test-output-location'
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -372,6 +402,10 @@ Site:
                   type: string
       contentAiConfig:
         index: 'example-index-name'
+      cdnLogsConfig:
+        bucketName: 'test-bucket'
+        filters: [{ key: 'test-key', value: ['test-value'] }]
+        outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -477,6 +511,19 @@ SiteUpdate:
       authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
       siteId: '1234'
     goLiveDate: '2024-01-20T10:00:00Z'
+CdnLogsConfigUpdate:
+  type: object
+  required:
+    - cdnLogsConfig
+  properties:
+    cdnLogsConfig:
+      description: The CDN logs configuration to update
+      $ref: '#/CdnLogsConfig'
+  example:
+    cdnLogsConfig:
+      bucketName: 'test-bucket'
+      outputLocation: 'test-output-location'
+      filters: [{ key: 'test-key', value: ['test-value'] }]
 UpdateHandlerTypeConfig:
   type: object
   properties:
@@ -1566,6 +1613,10 @@ DocImportData:
   title: "Doc Import"
   description: "There are no data properties available for doc based imports."
   properties: {}
+DAImportData:
+  title: "DA Import"
+  description: "There are no data properties available for DA based imports."
+  properties: {}
 XWalkImportData:
   title: "Xwalk Import"
   properties:
@@ -1576,7 +1627,9 @@ XWalkImportData:
   required:
     - siteName
     - assetFolder
-ImportOptionsBase:
+
+BrowserOptions:
+  description: Common browser options for page loading operations
   properties:
     pageLoadTimeout:
       description: The time in milliseconds to wait for the page to load
@@ -1584,16 +1637,28 @@ ImportOptionsBase:
     enableJavascript:
       description: Whether to enable JavaScript on the page
       type: boolean
+      default: true
   example:
-    pageLoadTimeout: 100
+    pageLoadTimeout: 200
     enableJavascript: true
+
+ImportOptionsBase:
+  description: Base options for import operations, extends BrowserOptions with import-specific features
+  allOf:
+    - $ref: '#/BrowserOptions'
+    - type: object
+      properties: {}
+  example:
+    pageLoadTimeout: 200
+    enableJavascript: true
+
 ImportOptions:
   allOf: #/ImportOptionsBase
     - $ref: '#/ImportOptionsBase'
   properties:
     type:
-      enum: ['doc', 'xwalk']
-      description: The type of import job. Options are 'doc' or 'xwalk'.
+      enum: ['doc', 'xwalk', 'da']
+      description: The type of import job. Valid options are 'doc', 'da' or 'xwalk'.
       type: string
       default: 'doc'
     data:
@@ -1602,6 +1667,8 @@ ImportOptions:
       oneOf:
         - $ref: '#/DocImportData'
         - $ref: '#/XWalkImportData'
+        - $ref: '#/DAImportData'
+
 ImportJobRequest:
   type: object
   required:
@@ -1705,35 +1772,94 @@ ImportJobArchive:
   example:
     jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
     downloadUrl: 'https://spacecat-example-bucket.s3.example-region.amazonaws.com/import/12d6ac8e-d5e4-4788-90eb-b69e10e745fd/import-result.zip?X-Amz-Algorithm=AWS...'
+ScrapeOptions:
+  description: Options specific to scraping operations, extends BrowserOptions with scraping-specific features
+  allOf:
+    - $ref: '#/BrowserOptions'
+    - type: object
+      properties:
+        hideConsentBanners:
+          description: Whether to hide consent banners on the page
+          type: boolean
+          default: false
+        waitForSelector:
+          description: The selector to wait for before considering the page loaded
+          type: string
+          pattern: '^[.#]?[a-zA-Z][a-zA-Z0-9_-]*(\.[a-zA-Z][a-zA-Z0-9_-]*)*$'
+        sectionLoadWaitTime:
+          description: The time in milliseconds to wait for the section to load
+          type: integer
+          minimum: 0
+          maximum: 30000
+          default: 2000
+        screenshotTypes:
+          description: The types of screenshots to take
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: string
+            enum:
+              - 'fullPage'
+              - 'thumbnail'
+              - 'section'
+              - 'block'
+              - 'scroll'
+  example:
+    pageLoadTimeout: 200
+    enableJavascript: true
+    hideConsentBanners: true
 ScrapeRequest:
   type: object
   required:
     - urls
+    - processingType
   properties:
-    jobId:
-      description: Optional ID of the scrape job
-      $ref: '#/Id'
+    processingType:
+      description: The name of the scrape handler to use.
+      type: string
+      default: 'default'
     options:
       description: Optional configuration params, defined as a JSON object
-      $ref: '#/ImportOptionsBase'
+      $ref: '#/ScrapeOptions'
     customHeaders:
       description: Optional custom headers to send with each HTTP request
       type: object
     urls:
-      description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
+      description: The URLs to scrape. The URLs must be unique.
       type: array
       items:
-        $ref: '#/URL'
+        type: string
+        format: url
       example:
-        urls:
-          - 'https://example.com/en/page1'
-          - 'https://example.com/fr/page2'
+        - 'https://example.com/en/page1'
+        - 'https://example.com/fr/page2'
+
 ScrapeResponse:
   type: object
   properties:
     id:
       description: The ID of the scrape job
       $ref: '#/Id'
+    baseURL:
+      description: The base URL of the scrape job
+      type: string
+      format: uri
+    processingType:
+      description: The scrape handler to use for the scrape job
+      type: string
+    startedAt:
+      description: The date and time when the scrape job started
+      type: string
+      format: date-time
+    endedAt:
+      description: The date and time when the scrape job ended, if finished
+      type: string
+      format: date-time
+    duration:
+      description: The duration of the scrape job in milliseconds
+      type: integer
+      format: int32
     status:
       description: The status of the scrape job
       type: string
@@ -1741,12 +1867,6 @@ ScrapeResponse:
         - 'IN_PROGRESS'
         - 'COMPLETE'
         - 'FAILED'
-    startTime:
-      description: The date and time when the scrape job started
-      $ref: '#/DateTime'
-    endTime:
-      description: The date and time when the scrape job ended, if finished
-      $ref: '#/DateTime'
     urlCount:
       description: The total number of URLs in the job
       type: integer
@@ -1756,50 +1876,68 @@ ScrapeResponse:
     failedCount:
       description: The number of URLs that failed to scrape
       type: integer
-    results:
-      description: The scrape results
-      $ref: '#/ScrapeResult'
+
   example:
     id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    baseURL: 'https://myBaseUrl.com'
+    processingType: 'default'
+    options:
+      enableJavascript: true
+      hideConsentBanners: true
+    startedAt: '2024-01-19T14:20:30Z'
+    endedAt: '2024-01-19T14:20:30Z'
+    duration: 33771,
     status: 'COMPLETE'
-    startTime: '2024-01-19T14:20:30Z'
     urlCount: 10
     successCount: 9
     failedCount: 1
+
+ScrapeJobUrlResultsResponse:
+  type: object
+  properties:
+    jobId:
+      description: The ID of the scrape job
+      $ref: '#/Id'
     results:
-      - url: 'https://example.com/en/page1'
-        status: 'COMPLETE'
-        content: '...'
-      - url: 'https://example.com/fr/page2'
-        status: 'FAILED'
-        error: '...'
+      description: The results of the scrape job
+      type: array
+      items:
+        $ref: '#/ScrapeResult'
+
 ScrapeResult:
+  type: object
+  properties:
+    url:
+      description: The URL of the scraped page
+      $ref: '#/URL'
+    status:
+      description: The status of the scrape job
+      type: string
+      enum:
+        - 'COMPLETE'
+        - 'FAILED'
+        - 'PENDING'
+    reason:
+      description: The error message if the scrape failed
+      type: string
+    path:
+      description: The s3 path of the scraped page if the scrape was successful
+      type: string
+  example:
+    url: 'https://example.com/en/page1'
+    status: 'COMPLETE'
+    path: 'scrapes/12d6ac8e-d5e4-4788-90eb-b69e10e74abc/page1.html'
+
+ScrapeJobsByDateRangeResponse:
   type: array
   items:
-    type: object
-    properties:
-      url:
-        description: The URL of the scraped page
-        $ref: '#/URL'
-      status:
-        description: The status of the scrape job
-        type: string
-        enum:
-          - 'COMPLETE'
-          - 'FAILED'
-      content:
-        description: The content of the scraped page
-        type: string
-      error:
-        description: The error message if the scrape failed
-        type: string
-    example:
-      - url: 'https://example.com/en/page1'
-        status: 'COMPLETE'
-        content: '<body>...</body>'
-      - url: 'https://example.com/fr/page2'
-        status: 'FAILED'
-        error: 'Timeout'
+    $ref: '#/CreateAsyncJobAcceptedResponse'
+
+ScrapeJobsByBaseURLResponse:
+  type: array
+  items:
+    $ref: '#/CreateAsyncJobAcceptedResponse'
+
 BrokenBacklink:
   type: object
   properties:
@@ -1815,6 +1953,7 @@ BrokenBacklink:
     traffic_domain:
       description: The referring domain's estimated monthly organic traffic from search.
       type: number
+
 BrokenInternalLink:
   type: object
   properties:
@@ -2669,19 +2808,41 @@ AsyncJob:
 
 CreateAsyncJobAcceptedResponse:
   properties:
-    jobId:
+    id:
       type: string
       format: uuid
+      description: The ID of the newly created scrape job.
+    baseURL:
+      type: string
+      format: uri
+      description: The base URL of the scrape job
+    processingType:
+      type: string
+      description: The scrape handler to use for the scrape job
+    options:
+      type: object
+      description: The options used for the scrape job
+    startedAt:
+      type: string
+      format: date-time
     status:
       type: string
       enum: [ IN_PROGRESS, COMPLETED, FAILED ]
-    createdAt:
-      type: string
-      format: date-time
-    pollUrl:
-      type: string
-      format: uri
-      description: URL to poll for job status
+    urlCount:
+      type: integer
+      description: The number of URLs in the scrape job
+    successCount:
+      type: integer
+      description: The number of successful URLs in the scrape job
+    failedCount:
+      type: integer
+      description: The number of failed URLs in the scrape job
+    redirectCount:
+      type: integer
+      description: The number of redirected URLs in the scrape job
+    customHeaders:
+      type: object
+      description: The custom headers used for the scrape job
 
 ScrapedContentResponse:
   type: array
@@ -2923,3 +3084,50 @@ FixStatusUpdateListResponse:
   required:
     - fixes
     - metadata
+
+PaidSiteTopPage:
+  type: object
+  required:
+    - url
+    - ctr
+    - avgClicksPerSession
+    - pageViews
+    - clickedSessions
+    - bounceRate
+    - totalNumClicks
+    - source
+  properties:
+    url:
+      type: string
+      format: uri
+    ctr:
+      type: number
+      format: float
+    avgClicksPerSession:
+      type: number
+      format: float
+    pageViews:
+      type: integer
+    clickedSessions:
+      type: integer
+    bounceRate:
+      type: number
+      format: float
+    totalNumClicks:
+      type: integer
+    source:
+      type: string
+      description: Paid traffic source (e.g., paid:search:google)
+  example:
+    url: "https://www.example.com/uk/"
+    ctr: 0.015
+    avgClicksPerSession: 1.82
+    pageViews: 6100
+    clickedSessions: 1800
+    bounceRate: 0.98
+    totalNumClicks: 5100
+    source: "paid:affiliate:"
+PaidSiteTopPageList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/PaidSiteTopPage'

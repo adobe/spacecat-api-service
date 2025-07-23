@@ -105,3 +105,38 @@ site:
         $ref: './responses.yaml#/404-site-not-found-with-id'
       '500':
         $ref: './responses.yaml#/500'
+
+site-cdn-logs-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - site
+    summary: Update CDN logs configuration for a site
+    description: |
+      This endpoint allows updating the CDN logs configuration for a specific site.
+    operationId: updateSiteCdnLogsConfig
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/CdnLogsConfigUpdate'
+    responses:
+      '200':
+        description: CDN logs configuration updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'

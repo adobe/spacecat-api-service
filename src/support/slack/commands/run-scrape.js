@@ -40,13 +40,13 @@ function RunScrapeCommand(context) {
             + '\nOnly members of role "scrape" can run this command.'
             + '\nCurrently this will run the scraper for all sources and all destinations configured for the site, hence be aware of costs.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {baseURL|CSV-File}`,
+    usageText: `${PHRASES[0]} {baseURL|CSV-File} {batchSize} {allowCache}`,
   });
 
   const { dataAccess, log } = context;
   const { Site } = dataAccess;
 
-  const scrapeSite = async (baseURL, slackContext) => {
+  const scrapeSite = async (baseURL, batchSize, allowCache, slackContext) => {
     const { say } = slackContext;
     const site = await Site.findByBaseURL(baseURL);
     if (!isNonEmptyObject(site)) {
@@ -66,12 +66,12 @@ function RunScrapeCommand(context) {
     log.info(`Found top pages for site \`${baseURL}\`, total ${topPages.length} pages.`);
 
     const batches = [];
-    for (let i = 0; i < urls.length; i += 50) {
-      batches.push(urls.slice(i, i + 50));
+    for (let i = 0; i < urls.length; i += batchSize) {
+      batches.push(urls.slice(i, i + batchSize));
     }
 
     return Promise.all(
-      batches.map((urlsBatch) => triggerScraperRun(`${site.getId()}`, urlsBatch, slackContext, context)),
+      batches.map((urlsBatch) => triggerScraperRun(`${site.getId()}`, urlsBatch, slackContext, context, allowCache)),
     );
   };
 
@@ -97,7 +97,8 @@ function RunScrapeCommand(context) {
     }
     */
     try {
-      const [baseURLInput] = args;
+      const [baseURLInput, batchSize = 20, allowCache = false] = args;
+      const batchSizeNum = Number(batchSize);
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const isValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
@@ -109,6 +110,10 @@ function RunScrapeCommand(context) {
 
       if (isValidBaseURL && hasFiles) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
+        return;
+      }
+      if (Number.isNaN(batchSizeNum)) {
+        await say(':error: Batch size must be a number.');
         return;
       }
 
@@ -131,15 +136,15 @@ function RunScrapeCommand(context) {
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             try {
-              await scrapeSite(csvBaseURL, slackContext);
+              await scrapeSite(csvBaseURL, batchSizeNum, allowCache, slackContext);
             } catch (error) {
               say(`:warning: Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
             }
           }),
         );
       } else if (isValidBaseURL) {
-        say(`:adobe-run: Triggering scrape run for site \`${baseURL}\``);
-        await scrapeSite(baseURL, slackContext);
+        say(`:adobe-run: Triggering scrape run for site \`${baseURL}\` with batchSize: ${batchSize} and allowCache: ${allowCache}`);
+        await scrapeSite(baseURL, batchSizeNum, allowCache, slackContext);
         say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\`.`);
       }
     } catch (error) {

@@ -17,7 +17,7 @@ import { isValidUUID } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from './utils.js';
 import { STATUS_BAD_REQUEST } from '../utils/constants.js';
 
-const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
+const PRE_SIGNED_URL_TTL_SECONDS = 3600 * 24; // 1 day
 
 /**
  * Import Supervisor provides functionality to start and manage import jobs.
@@ -156,6 +156,8 @@ function ImportSupervisor(services, config) {
       processingType = 'import';
     } else if (options.type === ImportJobModel.ImportOptionTypes.XWALK) {
       processingType = 'import-xwalk';
+    } else if (options.type === ImportJobModel.ImportOptionTypes.DA) {
+      processingType = 'import-da';
     }
 
     // Send a single message containing all URLs and the new job ID
@@ -361,8 +363,8 @@ function ImportSupervisor(services, config) {
    */
   function isJobInTerminalState(job) {
     return job.getStatus() === ImportJobModel.ImportJobStatus.FAILED
-        || job.getStatus() === ImportJobModel.ImportJobStatus.COMPLETE
-        || job.getStatus() === ImportJobModel.ImportJobStatus.STOPPED;
+      || job.getStatus() === ImportJobModel.ImportJobStatus.COMPLETE
+      || job.getStatus() === ImportJobModel.ImportJobStatus.STOPPED;
   }
 
   /**
