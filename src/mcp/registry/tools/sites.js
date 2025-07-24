@@ -90,6 +90,7 @@ export function createSiteTools(sitesController, context) {
           'organic-keywords-feature-snippets',
           'organic-keywords-questions',
           'all-traffic',
+          'top-forms',
         ])
         .describe('The metric to retrieve. For ahrefs source: organic-keywords, organic-keywords-nonbranded, organic-traffic. For rum source: all-traffic'),
       source: z.enum(['ahrefs', 'rum']).describe('The source of the metrics. Supported sources: ahrefs, rum'),
