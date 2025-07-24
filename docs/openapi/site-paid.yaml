@@ -593,3 +593,184 @@ PaidTrafficCampaignData:
     overall_cwv_score:
       type: string
       description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+site-traffic-paid-url-page-type-platform-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by URL, page type, platform, campaign, and device
+    description: Returns paid traffic data for a site, grouped by URL, page type, platform, campaign, and device for a given week and year.
+    operationId: getPaidTrafficByUrlPageTypePlatformCampaignDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficUrlPageTypePlatformCampaignDeviceData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-page-type-platform-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by page type, platform, campaign, and device
+    description: Returns paid traffic data for a site, grouped by page type, platform, campaign, and device for a given week and year.
+    operationId: getPaidTrafficByPageTypePlatformCampaignDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficPageTypePlatformCampaignDeviceData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+PaidTrafficUrlPageTypePlatformCampaignDeviceData:
+  type: object
+  properties:
+    url:
+      type: string
+      description: The URL
+    page_type:
+      type: string
+      description: The page type classification
+    platform:
+      type: string
+      description: The platform (e.g., desktop, mobile, tablet)
+    campaign:
+      type: string
+      description: The campaign name or ID
+    device:
+      type: string
+      description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficPageTypePlatformCampaignDeviceData:
+  type: object
+  properties:
+    page_type:
+      type: string
+      description: The page type classification
+    platform:
+      type: string
+      description: The platform (e.g., desktop, mobile, tablet)
+    campaign:
+      type: string
+      description: The campaign name or ID
+    device:
+      type: string
+      description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
