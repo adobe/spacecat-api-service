@@ -49,15 +49,7 @@ function normalizeStringKeepingSpaces(str) {
     .trim();
 }
 
-export async function matchCompanies(dataAccess, query) {
-  const { Organization } = dataAccess;
-  const orgs = (await Organization.all())
-    .map((org) => ({
-      id: org.getId(),
-      name: org.getName(),
-      imsOrgId: org.getImsOrgId(),
-    }));
-
+export async function matchCompanies(orgs, query) {
   // makes sure the fuzzy search matches at least 1 word in the query one-to-one
   // see. https://www.fusejs.io/examples.html#extended-search
   const searchQuery = normalizeStringKeepingSpaces(query).split(' ')

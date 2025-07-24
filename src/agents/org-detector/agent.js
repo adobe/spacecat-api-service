@@ -32,6 +32,8 @@ import { retrieveMainContent } from './tools/main-content-retriever.js';
 import { extractLinks } from './tools/link-extractor.js';
 import { getInstructions } from './instructions.js';
 
+import { sendMessageToMystique } from './tr-agent.js';
+
 /**
  * Tool #1: Footer Retriever
  * Returns html content of the <footer> element:
@@ -64,9 +66,9 @@ const footerRetrieverTool = (apiKey, apiUrl, log) => tool(
  *   ...
  * ]
  */
-const companyMatcherTool = (dataAccess) => tool(
+const companyMatcherTool = (orgs) => tool(
   async ({ text }) => {
-    const matches = await matchCompanies(dataAccess, text);
+    const matches = await matchCompanies(orgs, text);
     return JSON.stringify(matches);
   },
   {
@@ -168,7 +170,7 @@ export default class OrgDetectorAgent {
    * @param {string} env.AZURE_OPEN_AI_API_DEPLOYMENT_NAME - Azure OpenAI API deployment name.
    * @param {function} log - Logging function to record application activity.
    */
-  constructor(dataAccess, env, log) {
+  constructor(orgs, env, log) {
     const {
       USER_API_KEY: spacecatApiKey,
       SPACECAT_API_BASE_URL: spacecatApiBaseUrl,
@@ -185,7 +187,7 @@ export default class OrgDetectorAgent {
     // gather the tools
     const tools = [
       footerRetrieverTool(spacecatApiKey, spacecatApiBaseUrl, this.log),
-      companyMatcherTool(dataAccess),
+      companyMatcherTool(orgs),
       githubOrgNameRetrieverTool(ignoredGithubOrgs, this.log),
       mainContentRetrieverTool(spacecatApiKey, spacecatApiBaseUrl, this.log),
       linkExtractorTool(this.log),
@@ -285,6 +287,8 @@ export default class OrgDetectorAgent {
    * If no company match is found, the `matchedCompany` field will be `null`.
    */
   async detect(domain, githubLogin) {
+    sendMessageToMystique(domain);
+
     const instructions = getInstructions(domain, githubLogin);
     const noFoundFallback = { org: null };
 
