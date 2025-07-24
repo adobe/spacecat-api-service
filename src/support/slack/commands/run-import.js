@@ -86,11 +86,39 @@ function RunImportCommand(context) {
   ) => {
     const { say } = slackContext;
 
+    log.info('[RUN-IMPORT] runImportForSite called with params:', {
+      importType,
+      baseURL,
+      startDate,
+      endDate,
+      pageURL,
+      data,
+      hasConfig: !!config,
+      hasSlackContext: !!slackContext,
+    });
+
     const site = await Site.findByBaseURL(baseURL);
+    log.info('[RUN-IMPORT] Site lookup result:', {
+      baseURL,
+      siteFound: !!site,
+      siteId: site?.getId(),
+      siteData: site ? Object.keys(site) : null,
+    });
+
     if (!isNonEmptyObject(site)) {
+      log.warn('[RUN-IMPORT] Site not found for baseURL:', baseURL);
       await postSiteNotFoundMessage(say, baseURL);
       return;
     }
+
+    log.info('[RUN-IMPORT] About to trigger import run with params:', {
+      importType,
+      siteId: site.getId(),
+      startDate,
+      endDate,
+      pageURL,
+      data,
+    });
 
     await triggerImportRun(
       config,
@@ -103,6 +131,12 @@ function RunImportCommand(context) {
       pageURL,
       data,
     );
+
+    log.info('[RUN-IMPORT] triggerImportRun completed for:', {
+      importType,
+      siteId: site.getId(),
+      baseURL,
+    });
   };
 
   /**
@@ -116,7 +150,21 @@ function RunImportCommand(context) {
   const handleExecution = async (args, slackContext) => {
     const { say, files, botToken } = slackContext;
 
+    log.info('[RUN-IMPORT] handleExecution started with args:', {
+      args,
+      hasFiles: !!files,
+      fileCount: files?.length,
+      fileNames: files?.map((f) => f.name),
+      hasBotToken: !!botToken,
+    });
+
     const config = await Configuration.findLatest();
+    log.info('[RUN-IMPORT] Configuration loaded:', {
+      hasConfig: !!config,
+      configKeys: config ? Object.keys(config) : null,
+      jobsCount: config?.getJobs()?.length,
+    });
+
     /* todo: uncomment after summit and back-office-UI support for configuration setting (roles)
     const slackRoles = config.getSlackRoles() || {};
     const admins = slackRoles?.import || [];
@@ -129,25 +177,57 @@ function RunImportCommand(context) {
 
     try {
       const [importType, baseURLInput, start, end, pageURLInput] = args;
+      log.info('[RUN-IMPORT] Parsed arguments:', {
+        importType,
+        baseURLInput,
+        start,
+        end,
+        pageURLInput,
+        isTopForms: importType === 'top-forms',
+      });
+
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const hasValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
+
+      log.info('[RUN-IMPORT] URL processing results:', {
+        originalBaseURLInput: baseURLInput,
+        extractedBaseURL: baseURL,
+        hasValidBaseURL,
+        hasFiles,
+        fileCount: files?.length,
+      });
 
       const [startDate, endDate] = hasFiles
         ? [baseURLInput, start]
         : [start, end];
 
+      log.info('[RUN-IMPORT] Date processing:', {
+        hasFiles,
+        startDate,
+        endDate,
+        originalStart: start,
+        originalEnd: end,
+      });
+
       if (!hasText(importType) || (!hasValidBaseURL && !hasFiles)) {
+        log.warn('[RUN-IMPORT] Invalid input validation failed:', {
+          hasImportType: !!hasText(importType),
+          hasValidBaseURL,
+          hasFiles,
+        });
         await say(baseCommand.usage());
         return;
       }
 
       if (hasValidBaseURL && hasFiles) {
+        log.warn('[RUN-IMPORT] Both baseURL and files provided - conflicting input');
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
 
       if ((startDate || endDate) && !isValidDateInterval(startDate, endDate)) {
+        log.warn('[RUN-IMPORT] Invalid date interval:', { startDate, endDate });
         await say(':error: Invalid date interval. '
         + 'Please provide valid dates in the format YYYY-MM-DD. '
         + 'The end date must be after the start date and within a two-year range.');
@@ -155,41 +235,94 @@ function RunImportCommand(context) {
       }
 
       const jobConfig = config.getJobs().filter((job) => job.group === 'imports' && job.type === importType);
+      log.info('[RUN-IMPORT] Job configuration lookup:', {
+        importType,
+        jobConfigFound: !!jobConfig,
+        jobConfigLength: jobConfig?.length,
+        allImportJobs: config.getJobs().filter((job) => job.group === 'imports').map((job) => job.type),
+      });
 
       if (!Array.isArray(jobConfig) || jobConfig.length === 0) {
         const validImportTypes = config.getJobs().filter((job) => job.group === 'imports').map((job) => job.type);
+        log.warn('[RUN-IMPORT] Invalid import type:', { importType, validImportTypes });
         await say(`:warning: Import type ${importType} does not exist. Valid import types are: ${validImportTypes.join(', ')}`);
         return;
       }
 
       const supportsPageURLs = SUPPORTS_PAGE_URLS.includes(importType);
+      log.info('[RUN-IMPORT] Page URL support check:', {
+        importType,
+        supportsPageURLs,
+        SUPPORTS_PAGE_URLS,
+      });
 
       if (hasFiles) {
+        log.info('[RUN-IMPORT] Processing CSV file flow');
+
         if (files.length > 1) {
+          log.warn('[RUN-IMPORT] Multiple files provided:', { fileCount: files.length });
           await say(':warning: Please provide only one CSV file.');
           return;
         }
 
         const file = files[0];
+        log.info('[RUN-IMPORT] Processing single file:', {
+          fileName: file.name,
+          fileSize: file.size,
+          isCSV: file.name.endsWith('.csv'),
+        });
+
         if (!file.name.endsWith('.csv')) {
+          log.warn('[RUN-IMPORT] Non-CSV file provided:', { fileName: file.name });
           await say(':warning: Please provide a CSV file.');
           return;
         }
 
         // For top-forms import type, we need 3 columns: baseUrl, pageUrl, formSource
         const minColumns = importType === 'top-forms' ? 3 : 2;
+        log.info('[RUN-IMPORT] CSV parsing configuration:', {
+          importType,
+          minColumns,
+          isTopForms: importType === 'top-forms',
+        });
+
         const csvData = await parseCSV(file, botToken, minColumns);
+        log.info('[RUN-IMPORT] CSV parsing result:', {
+          csvDataLength: csvData?.length,
+          firstRow: csvData?.[0],
+          sampleRows: csvData?.slice(0, 3),
+          isTopForms: importType === 'top-forms',
+        });
 
         say(`:adobe-run: Triggering import run of type ${importType} for ${csvData.length} sites.`);
 
+        log.info('[RUN-IMPORT] Starting batch processing for CSV data');
+
         await Promise.all(
-          csvData.map(async (row) => {
+          csvData.map(async (row, index) => {
             const [csvBaseURL, csvPageURL, formSource] = row;
+            log.info(`[RUN-IMPORT] Processing CSV row ${index + 1}:`, {
+              csvBaseURL,
+              csvPageURL,
+              formSource,
+              isTopForms: importType === 'top-forms',
+              rowIndex: index,
+            });
+
             if (isValidUrl(csvBaseURL)) {
               // Create data object for top-forms import type
               const data = importType === 'top-forms' && formSource
                 ? { formSource }
                 : undefined;
+
+              log.info(`[RUN-IMPORT] Valid URL found, creating data object for row ${index + 1}:`, {
+                importType,
+                csvBaseURL,
+                csvPageURL,
+                formSource,
+                data,
+                isTopForms: importType === 'top-forms',
+              });
 
               await runImportForSite(
                 importType,
@@ -201,12 +334,25 @@ function RunImportCommand(context) {
                 supportsPageURLs && isValidUrl(csvPageURL) ? csvPageURL : undefined,
                 data,
               );
+
+              log.info(`[RUN-IMPORT] Completed processing for row ${index + 1}:`, {
+                csvBaseURL,
+                success: true,
+              });
             } else {
+              log.warn(`[RUN-IMPORT] Invalid URL in CSV row ${index + 1}:`, {
+                csvBaseURL,
+                rowIndex: index,
+              });
               await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
             }
           }),
         );
+
+        log.info('[RUN-IMPORT] Batch CSV processing completed');
       } else if (hasValidBaseURL) {
+        log.info('[RUN-IMPORT] Processing single URL flow');
+
         // if pageURLInput is enclosed in brackets, remove them.
         // Slack sends URLs enclosed in brackets if not configured differently.
         // For details, check https://api.slack.com/interactivity/slash-commands
@@ -216,7 +362,17 @@ function RunImportCommand(context) {
         const pageURL = extractedPageURL && supportsPageURLs && isValidUrl(extractedPageURL)
           ? extractedPageURL
           : undefined;
+
+        log.info('[RUN-IMPORT] Page URL processing:', {
+          originalPageURLInput: pageURLInput,
+          extractedPageURL,
+          finalPageURL: pageURL,
+          supportsPageURLs,
+          isValidExtractedURL: extractedPageURL ? isValidUrl(extractedPageURL) : false,
+        });
+
         log.info(`Import run of type ${importType} for site ${baseURL} with input: `, { pageURL, startDate, endDate });
+
         await runImportForSite(
           importType,
           baseURL,
@@ -231,10 +387,13 @@ function RunImportCommand(context) {
         const message = `:adobe-run: Triggered import run of type ${importType} for site \`${baseURL}\`${startDate && endDate ? ` and interval ${startDate}-${endDate}` : ''}${pageURL ? ` for page ${pageURL}` : ''}\n`;
         // message += 'Stand by for results. I will post them here when they are ready.';
 
+        log.info('[RUN-IMPORT] Single URL processing completed, sending message:', { message });
         await say(message);
       }
+
+      log.info('[RUN-IMPORT] handleExecution completed successfully');
     } catch (error) {
-      log.error(error);
+      log.error('[RUN-IMPORT] Error in handleExecution:', error);
       await postErrorMessage(say, error);
     }
   };
