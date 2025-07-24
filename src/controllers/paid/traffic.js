@@ -17,23 +17,17 @@ import {
   badRequest,
   found,
 } from '@adobe/spacecat-shared-http-utils';
-import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
+import {
+  AWSAthenaClient, getTrafficAnalysisQuery, TrafficDataResponseDto,
+  TrafficDataWithCWVDto, getTrafficAnalysisQueryPlaceholdersFilled,
+} from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
-import { getStaticContent } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { TrafficDataResponseDto } from '../../dto/traffic-data-base-response.js';
-import { TrafficDataWithCWVDto } from '../../dto/traffic-data-response-with-cwv.js';
 import {
   getS3CachedResult,
   addResultJsonToCache,
   fileExists,
 } from './caching-helper.js';
-import { getDateRanges } from './calendar-week-helper.js';
-import { buildPageTypeCase } from './page-type-mapper.js';
-
-async function loadSql(variables) {
-  return getStaticContent(variables, './src/controllers/paid/channel-query.sql.tpl');
-}
 
 function getCacheKey(siteId, query, cacheLocation) {
   const outPrefix = crypto.createHash('md5').update(query).digest('hex');
@@ -89,40 +83,28 @@ function TrafficController(context, log, env) {
     }
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
-    const groupBy = dimensions;
-    const dimensionColumns = groupBy.join(', ');
-    const dimensionColumnsPrefixed = `${groupBy.map((col) => `a.${col}`).join(', ')}, `;
 
-    const dateRanges = getDateRanges(week, year);
-    const weekNum = week; // always use the input week
-    const temporalCondition = dateRanges
-      .map((r) => `(year=${r.year} AND month=${r.month} AND week=${weekNum})`)
-      .join(' OR ');
-
-    // Only build pageTypeCase if 'page_type' is in the dimensions
-    let pageTypeCase;
-    if (groupBy.includes('page_type')) {
-      const pageTypes = await site.getPageTypes();
-      pageTypeCase = buildPageTypeCase(pageTypes, log, 'path');
+    let pageTypes = null;
+    if (dimensions.includes('page_type')) {
+      pageTypes = await site.getPageTypes();
     }
 
-    if (!pageTypeCase) {
-      pageTypeCase = 'NULL as page_type';
-    }
-    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${temporalCondition} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
+    const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
+      week,
+      year,
+      siteId,
+      dimensions,
+      tableName,
+      pageTypes,
+      pageTypeMatchColumn: 'path',
+    });
+
+    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
     log.info(`Processing query: ${description}`);
 
     // build query
-    const query = await loadSql({
-      siteId,
-      groupBy: groupBy.join(', '),
-      dimensionColumns,
-      dimensionColumnsPrefixed,
-      tableName,
-      temporalCondition,
-      pageTypeCase,
-    });
+    const query = await getTrafficAnalysisQuery(quereyParams);
 
     log.debug(`Fetching paid data with query: ${query}`);
 
@@ -145,7 +127,7 @@ function TrafficController(context, log, env) {
     log.info(`Fetching paid data directly from Athena table: ${tableName}`);
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
     const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
-    log.info(`Successfully fetched results of size ${response?.length}`);
+    log.info(`Successfully fetched results of length ${response?.length}`);
 
     // add to cache
     let isCached = false;
@@ -154,7 +136,7 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    log.warn(`Failed to return cache key ${CACHE_LOCATION}. Returning response directly.`);
+    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly.`);
     return ok(response, {
       'content-encoding': 'gzip',
     });
