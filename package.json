@@ -43,7 +43,8 @@
     "timeout": 900000,
     "nodeVersion": 22,
     "static": [
-      "static/onboard/profiles.json"
+      "static/onboard/profiles.json",
+      "src/controllers/paid/channel-query.sql.tpl"
     ]
   },
   "repository": {
