@@ -321,7 +321,7 @@ describe('ScrapeJobController tests', () => {
 
       // Check the resulting message to the scrape-worker-queue
       const firstCall = mockSqsClient.sendMessage.getCall(0);
-      expect(firstCall.args[1].urls.length).to.equal(3);
+      expect(firstCall.args[1].batch.length).to.equal(3);
       expect(firstCall.args[0]).to.equal('https://sqs.us-east-1.amazonaws.com/1234567890/scrape-worker-queue');
     });
 

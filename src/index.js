@@ -58,12 +58,14 @@ import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
 import PaidController from './controllers/paid.js';
+import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
 import DemoController from './controllers/demo.js';
 import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
+import LlmoController from './controllers/llmo.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
 
@@ -114,10 +116,12 @@ async function run(request, context) {
     const suggestionsController = SuggestionsController(context, context.sqs, context.env);
     const brandsController = BrandsController(context, log, context.env);
     const paidController = PaidController(context);
+    const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
     const scrapeController = ScrapeController(context);
     const scrapeJobController = ScrapeJobController(context);
+    const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
 
     /* ---------- build MCP registry & controller ---------- */
@@ -151,7 +155,9 @@ async function run(request, context) {
       scrapeJobController,
       mcpController,
       paidController,
+      trafficController,
       fixesController,
+      llmoController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

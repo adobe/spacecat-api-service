@@ -67,7 +67,9 @@ function isStaticRoute(routePattern) {
  * @param {Object} scrapeJobController - The scrape job controller.
  * @param {Object} mcpController - The MCP controller.
  * @param {Object} paidController - The paid controller.
+ * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
+ * @param {Object} llmoController - The LLMO controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -92,7 +94,9 @@ export default function getRouteHandlers(
   scrapeJobController,
   mcpController,
   paidController,
+  trafficController,
   fixesController,
+  llmoController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -158,6 +162,26 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
+    'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
+    'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device': trafficController.getPaidTrafficByUrlPageTypeCampaignDevice,
+    'GET /sites/:siteId/traffic/paid/url-page-type-device': trafficController.getPaidTrafficByUrlPageTypeDevice,
+    'GET /sites/:siteId/traffic/paid/url-page-type-campaign': trafficController.getPaidTrafficByUrlPageTypeCampaign,
+    'GET /sites/:siteId/traffic/paid/url-page-type-platform': trafficController.getPaidTrafficByUrlPageTypePlatform,
+    'GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform': trafficController.getPaidTrafficByUrlPageTypeCampaignPlatform,
+    'GET /sites/:siteId/traffic/paid/url-page-type-platform-device': trafficController.getPaidTrafficByUrlPageTypePlatformDevice,
+    'GET /sites/:siteId/traffic/paid/page-type-campaign-device': trafficController.getPaidTrafficByPageTypeCampaignDevice,
+    'GET /sites/:siteId/traffic/paid/page-type-device': trafficController.getPaidTrafficByPageTypeDevice,
+    'GET /sites/:siteId/traffic/paid/page-type-campaign': trafficController.getPaidTrafficByPageTypeCampaign,
+    'GET /sites/:siteId/traffic/paid/page-type-platform': trafficController.getPaidTrafficByPageTypePlatform,
+    'GET /sites/:siteId/traffic/paid/page-type-platform-device': trafficController.getPaidTrafficByPageTypePlatformDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-url-device': trafficController.getPaidTrafficByCampaignUrlDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-device': trafficController.getPaidTrafficByCampaignDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-url': trafficController.getPaidTrafficByCampaignUrl,
+    'GET /sites/:siteId/traffic/paid/campaign': trafficController.getPaidTrafficByCampaign,
+    'GET /sites/:siteId/traffic/paid/type-channel-campaign': trafficController.getPaidTrafficByTypeChannelCampaign,
+    'GET /sites/:siteId/traffic/paid/type-channel': trafficController.getPaidTrafficByTypeChannel,
+    'GET /sites/:siteId/traffic/paid/type-campaign': trafficController.getPaidTrafficByTypeCampaign,
+    'GET /sites/:siteId/traffic/paid/type': trafficController.getPaidTrafficByType,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
@@ -200,6 +224,14 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),
+
+    // LLMO Specific Routes
+    'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
+    'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
+    'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
+    'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
+    'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
+    'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
   };
 
   // Initialization of static and dynamic routes
