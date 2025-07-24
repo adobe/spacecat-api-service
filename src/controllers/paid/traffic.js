@@ -153,6 +153,8 @@ function TrafficController(context, log, env) {
     getPaidTrafficByTypeChannel: async () => fetchPaidTrafficData(['trf_type', 'trf_channel'], TrafficDataResponseDto),
     getPaidTrafficByTypeCampaign: async () => fetchPaidTrafficData(['trf_type', 'utm_campaign'], TrafficDataResponseDto),
     getPaidTrafficByType: async () => fetchPaidTrafficData(['trf_type'], TrafficDataResponseDto),
+    getPaidTrafficByUrlPageTypePlatformCampaignDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatformCampaignDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypeCampaignDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypeDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypeCampaign: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign'], TrafficDataWithCWVDto),
