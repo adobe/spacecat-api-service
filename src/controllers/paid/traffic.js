@@ -54,6 +54,7 @@ function TrafficController(context, log, env) {
   async function tryGetCacheResult(siteId, query, noCache) {
     const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
     if (isTrue(noCache)) {
+      log.info(`Skipping cache check for file: ${cacheKey} because param noCache is: ${noCache}`);
       return { cachedResultUrl: null, cacheKey, outPrefix };
     }
     if (await fileExists(s3, cacheKey, log)) {
@@ -61,6 +62,7 @@ function TrafficController(context, log, env) {
       const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
       return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
     }
+    log.info(`Cached result for file: ${cacheKey} does not exist`);
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
 
