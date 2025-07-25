@@ -260,7 +260,7 @@ const getThreadTimestamp = (event) => event.thread_ts || event.ts;
  * @param {object} event - The Slack event.
  * @return {string | undefined} - The message without the bot mention.
  */
-const getMessageFromEvent = (event) => event.text?.replace(BOT_MENTION_REGEX, '').trim();
+const getMessageFromEvent = (event) => event.text?.replace(BOT_MENTION_REGEX, '').replace(/\s+/g, ' ').trim();
 
 /**
  * Wraps the Slack say function to respond in a thread. This is necessary because
