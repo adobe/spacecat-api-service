@@ -3131,3 +3131,304 @@ PaidSiteTopPageList:
   type: array
   items:
     $ref: './schemas.yaml#/PaidSiteTopPage'
+
+LlmoQuestion:
+  type: object
+  required:
+    - key
+    - question
+  properties:
+    key:
+      description: Unique identifier for the question
+      type: string
+      format: uuid
+      example: '123e4567-e89b-12d3-a456-426614174000'
+    question:
+      description: The question text
+      type: string
+      example: 'What is the main value proposition of this product?'
+    source:
+      description: Source of the question
+      type: string
+      example: 'human'
+    country:
+      description: Country context for the question
+      type: string
+      example: 'US'
+    product:
+      description: Product context for the question
+      type: string
+      example: 'Adobe Creative Cloud'
+    volume:
+      description: Volume or traffic context
+      type: string
+      example: 'high'
+    importTime:
+      description: Time when the question was imported
+      type: string
+      format: date-time
+      example: '2024-01-20T12:00:00Z'
+    keyword:
+      description: Associated keyword for the question
+      type: string
+      example: 'creative software'
+    url:
+      description: URL context for the question
+      type: string
+      format: uri
+      example: 'https://www.adobe.com/creativecloud.html'
+    tags:
+      description: Array of tags associated with the question
+      type: array
+      items:
+        type: string
+      example: ['product', 'pricing', 'features']
+  additionalProperties: true
+
+LlmoQuestions:
+  type: object
+  description: LLMO questions configuration containing both human and AI questions
+  properties:
+    Human:
+      description: Array of human-generated questions
+      type: array
+      items:
+        $ref: '#/LlmoQuestion'
+      example:
+        - key: '123e4567-e89b-12d3-a456-426614174000'
+          question: 'What is the main value proposition of this product?'
+          source: 'human'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'high'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'creative software'
+          url: 'https://www.adobe.com/creativecloud.html'
+          tags: ['product', 'pricing', 'features']
+        - key: '456e7890-e89b-12d3-a456-426614174001'
+          question: 'How does this service solve customer problems?'
+          source: 'ai'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'medium'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'customer support'
+          url: 'https://www.adobe.com/support.html'
+          tags: ['support', 'benefits']
+    AI:
+      description: Array of AI-generated questions
+      type: array
+      items:
+        $ref: '#/LlmoQuestion'
+      example:
+        - key: '789e0123-e89b-12d3-a456-426614174002'
+          question: 'What are the key features that differentiate this product?'
+          source: 'ai'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'high'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'features comparison'
+          url: 'https://www.adobe.com/features.html'
+          tags: ['features', 'differentiation']
+        - key: '012e3456-e89b-12d3-a456-426614174003'
+          question: 'How does this compare to competitors in the market?'
+          source: 'ai'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'medium'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'competitive analysis'
+          url: 'https://www.adobe.com/competitive.html'
+          tags: ['competitive', 'analysis']
+  additionalProperties: false
+
+LlmoQuestionsInput:
+  type: object
+  description: Input format for adding new LLMO questions
+  properties:
+    Human:
+      description: Array of human questions to add
+      type: array
+      items:
+        type: object
+        properties:
+          question:
+            description: The question text
+            type: string
+            example: 'What is the main value proposition of this product?'
+          source:
+            description: Source of the question
+            type: string
+            example: 'human'
+          country:
+            description: Country context for the question
+            type: string
+            example: 'US'
+          product:
+            description: Product context for the question
+            type: string
+            example: 'Adobe Creative Cloud'
+          volume:
+            description: Volume or traffic context
+            type: string
+            example: 'high'
+          importTime:
+            description: Time when the question was imported
+            type: string
+            format: date-time
+            example: '2024-01-20T12:00:00Z'
+          keyword:
+            description: Associated keyword for the question
+            type: string
+            example: 'creative software'
+          url:
+            description: URL context for the question
+            type: string
+            format: uri
+            example: 'https://www.adobe.com/creativecloud.html'
+          tags:
+            description: Array of tags associated with the question
+            type: array
+            items:
+              type: string
+            example: ['product', 'pricing', 'features']
+        required:
+          - question
+        additionalProperties: true
+      example:
+        - question: 'What is the main value proposition of this product?'
+          source: 'human'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'high'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'creative software'
+          url: 'https://www.adobe.com/creativecloud.html'
+          tags: ['product', 'pricing', 'features']
+    AI:
+      description: Array of AI questions to add
+      type: array
+      items:
+        type: object
+        properties:
+          question:
+            description: The question text
+            type: string
+            example: 'What are the key features that differentiate this product?'
+          source:
+            description: Source of the question
+            type: string
+            example: 'ai'
+          country:
+            description: Country context for the question
+            type: string
+            example: 'US'
+          product:
+            description: Product context for the question
+            type: string
+            example: 'Adobe Creative Cloud'
+          volume:
+            description: Volume or traffic context
+            type: string
+            example: 'high'
+          importTime:
+            description: Time when the question was imported
+            type: string
+            format: date-time
+            example: '2024-01-20T12:00:00Z'
+          keyword:
+            description: Associated keyword for the question
+            type: string
+            example: 'features comparison'
+          url:
+            description: URL context for the question
+            type: string
+            format: uri
+            example: 'https://www.adobe.com/features.html'
+          tags:
+            description: Array of tags associated with the question
+            type: array
+            items:
+              type: string
+            example: ['features', 'differentiation']
+        required:
+          - question
+        additionalProperties: true
+      example:
+        - question: 'What are the key features that differentiate this product?'
+          source: 'ai'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'high'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'features comparison'
+          url: 'https://www.adobe.com/features.html'
+          tags: ['features', 'differentiation']
+  additionalProperties: false
+
+LlmoQuestionUpdate:
+  type: object
+  description: Update format for modifying an existing LLMO question
+  properties:
+    question:
+      description: Updated question text
+      type: string
+      example: 'What is the updated value proposition of this product?'
+    source:
+      description: Updated source of the question
+      type: string
+      example: 'human'
+    country:
+      description: Updated country context for the question
+      type: string
+      example: 'US'
+    product:
+      description: Updated product context for the question
+      type: string
+      example: 'Adobe Creative Cloud'
+    volume:
+      description: Updated volume or traffic context
+      type: string
+      example: 'high'
+    importTime:
+      description: Updated import time
+      type: string
+      format: date-time
+      example: '2024-01-20T12:00:00Z'
+    keyword:
+      description: Updated associated keyword for the question
+      type: string
+      example: 'creative software'
+    url:
+      description: Updated URL context for the question
+      type: string
+      format: uri
+      example: 'https://www.adobe.com/creativecloud.html'
+    tags:
+      description: Updated array of tags associated with the question
+      type: array
+      items:
+        type: string
+      example: ['product', 'pricing', 'features']
+  additionalProperties: true
+
+LlmoConfig:
+  type: object
+  description: LLMO (Large Language Model Optimizer) configuration for a site
+  required:
+    - dataFolder
+    - brand
+  properties:
+    dataFolder:
+      description: The data folder identifier for the LLMO configuration
+      type: string
+      example: 'adobe'
+    brand:
+      description: The brand identifier for the LLMO configuration
+      type: string
+      example: 'adobe'
+    questions:
+      description: The questions configuration containing both human and AI questions
+      $ref: '#/LlmoQuestions'
+  additionalProperties: false

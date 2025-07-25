@@ -65,10 +65,10 @@ describe('Sites Controller', () => {
 
   const sites = [
     {
-      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {}, isSandbox: false,
     },
     {
-      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {},
+      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {}, isSandbox: false,
     },
   ].map((site) => new Site(
     {
@@ -84,6 +84,7 @@ describe('Sites Controller', () => {
                 authoringType: { type: 'string', name: 'authoringType', get: (value) => value },
                 gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
                 isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
+                isSandbox: { type: 'boolean', name: 'isSandbox', get: (value) => value },
                 organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
                 hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
                 deliveryConfig: { type: 'any', name: 'deliveryConfig', get: (value) => value },
@@ -1384,6 +1385,265 @@ describe('Sites Controller', () => {
     const updatedSite = await response.json();
     expect(updatedSite).to.have.property('id', SITE_IDS[0]);
     expect(updatedSite).to.have.property('name', 'new-name');
+  });
+
+  it('updates a site isSandbox to true', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        isSandbox: true,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('isSandbox', true);
+  });
+
+  it('updates a site isSandbox to false', async () => {
+    const site = sites[0];
+    // Set the initial isSandbox value to true so we can test changing it to false
+    site.setIsSandbox(true);
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        isSandbox: false,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('isSandbox', false);
+  });
+
+  it('does not update site when isSandbox is the same', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        isSandbox: false, // Same as initial value
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'No updates provided');
+  });
+
+  it('updates site with isSandbox and other fields', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        isSandbox: true,
+        name: 'updated-name',
+        isLive: true,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('isSandbox', true);
+    expect(updatedSite).to.have.property('name', 'updated-name');
+    expect(updatedSite).to.have.property('isLive', true);
+  });
+
+  describe('pageTypes validation', () => {
+    it('updates site with valid pageTypes', async () => {
+      const site = sites[0];
+      site.pageTypes = sandbox.stub().returns([]);
+      site.setPageTypes = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const validPageTypes = [
+        { name: 'homepage | Homepage', pattern: '^(/([a-z]{2}-[a-z]{2}))?/?$' },
+        { name: 'product | Product Pages', pattern: '^(/([a-z]{2}-[a-z]{2}))?/product/[a-z0-9\\-]+$' },
+        { name: 'other | Other Pages', pattern: '.*' },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: validPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setPageTypes).to.have.been.calledWith(validPageTypes);
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns bad request when pageType is not an object', async () => {
+      const invalidPageTypes = [
+        { name: 'homepage', pattern: '^/$' },
+        'invalid-page-type',
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[1] must be an object');
+    });
+
+    it('returns bad request when pageType missing name', async () => {
+      const invalidPageTypes = [
+        { pattern: '^/$' }, // Missing name
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] must have a name');
+    });
+
+    it('returns bad request when pageType has empty name', async () => {
+      const invalidPageTypes = [
+        { name: '', pattern: '^/$' },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] must have a name');
+    });
+
+    it('returns bad request when pageType missing pattern', async () => {
+      const invalidPageTypes = [
+        { name: 'homepage' }, // Missing pattern
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] must have a pattern');
+    });
+
+    it('returns bad request when pageType has empty pattern', async () => {
+      const invalidPageTypes = [
+        { name: 'homepage', pattern: '' },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] must have a pattern');
+    });
+
+    it('returns bad request when pageType has invalid regex pattern', async () => {
+      const invalidPageTypes = [
+        { name: 'homepage', pattern: '^/$' },
+        { name: 'invalid', pattern: '[invalid-regex' }, // Invalid regex - unclosed bracket
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error.message).to.include('pageTypes[1] has invalid regex pattern:');
+    });
+
+    it('returns bad request for complex invalid regex patterns', async () => {
+      const invalidPageTypes = [
+        { name: 'invalid-quantifier', pattern: '*invalid' }, // Invalid quantifier
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error.message).to.include('pageTypes[0] has invalid regex pattern:');
+    });
+
+    it('does not update site when pageTypes are the same', async () => {
+      const site = sites[0];
+      const existingPageTypes = [
+        { name: 'homepage', pattern: '^/$' },
+      ];
+
+      site.getPageTypes = sandbox.stub().returns(existingPageTypes);
+      site.save = sandbox.spy(site.save);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: existingPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.save).to.have.not.been.called;
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'No updates provided');
+    });
+
+    it('validates all pageTypes and returns first error', async () => {
+      const invalidPageTypes = [
+        { name: 'homepage', pattern: '^/$' }, // Valid
+        { pattern: '^/about$' }, // Missing name (first error)
+        { name: 'invalid', pattern: '[invalid' }, // Invalid regex (would be second error)
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[1] must have a name');
+    });
   });
 
   describe('updateCdnLogsConfig', () => {

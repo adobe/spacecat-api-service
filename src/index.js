@@ -66,6 +66,7 @@ import DemoController from './controllers/demo.js';
 import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
+import LlmoController from './controllers/llmo.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
 
@@ -122,6 +123,7 @@ async function run(request, context) {
     const scrapeController = ScrapeController(context);
     const scrapeJobController = ScrapeJobController(context);
     const reportsController = ReportsController(context, log, context.env);
+    const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
 
     /* ---------- build MCP registry & controller ---------- */
@@ -158,6 +160,7 @@ async function run(request, context) {
       trafficController,
       fixesController,
       reportsController,
+      llmoController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
