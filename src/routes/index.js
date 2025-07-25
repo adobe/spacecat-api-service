@@ -97,6 +97,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  reportsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -234,6 +235,10 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
     'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
+
+    // Reports
+    'POST /sites/:siteId/reports/:reportType': reportsController.createReport,
+    'GET /sites/:siteId/reports': reportsController.getAllReportsBySiteId,
   };
 
   // Initialization of static and dynamic routes

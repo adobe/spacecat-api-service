@@ -178,6 +178,11 @@ describe('getRouteHandlers', () => {
     getLlmoSheetData: () => null,
   };
 
+  const mockReportsController = {
+    createReport: sinon.stub(),
+    getAllReportsBySiteId: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -204,6 +209,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockReportsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -345,6 +351,8 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
+      'POST /sites/:siteId/reports/:reportType',
+      'GET /sites/:siteId/reports',
       'GET /tools/scrape/jobs/by-base-url/:baseURL',
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'PATCH /sites/:siteId/config/cdn-logs',
