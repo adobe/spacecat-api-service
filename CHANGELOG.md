@@ -1,3 +1,10 @@
+# [1.138.0](https://github.com/adobe/spacecat-api-service/compare/v1.137.5...v1.138.0) (2025-07-25)
+
+
+### Features
+
+* use shared for query and read pageTypes from site db ([#1089](https://github.com/adobe/spacecat-api-service/issues/1089)) ([a7e0cd9](https://github.com/adobe/spacecat-api-service/commit/a7e0cd994a612a5fbf8832341684ee277431892b))
+
 ## [1.137.5](https://github.com/adobe/spacecat-api-service/compare/v1.137.4...v1.137.5) (2025-07-25)
 
 
