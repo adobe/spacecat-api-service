@@ -49,6 +49,7 @@ export const SiteDto = {
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
     config: Config.toDynamoItem(site.getConfig()),
+    pageTypes: site.getPageTypes(),
     ...(audit && { audits: [AuditDto.toAbbreviatedJSON(audit)] }),
     updatedBy: site.getUpdatedBy(),
   }),

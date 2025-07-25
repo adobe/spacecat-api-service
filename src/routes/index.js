@@ -163,6 +163,8 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
+    'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device': trafficController.getPaidTrafficByUrlPageTypePlatformCampaignDevice,
+    'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device': trafficController.getPaidTrafficByPageTypePlatformCampaignDevice,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device': trafficController.getPaidTrafficByUrlPageTypeCampaignDevice,
     'GET /sites/:siteId/traffic/paid/url-page-type-device': trafficController.getPaidTrafficByUrlPageTypeDevice,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign': trafficController.getPaidTrafficByUrlPageTypeCampaign,
