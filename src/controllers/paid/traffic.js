@@ -18,10 +18,9 @@ import {
   found,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  AWSAthenaClient, TrafficDataResponseDto,
+  AWSAthenaClient, TrafficDataResponseDto, getTrafficAnalysisQuery,
   TrafficDataWithCWVDto, getTrafficAnalysisQueryPlaceholdersFilled,
 } from '@adobe/spacecat-shared-athena-client';
-import { getStaticContent } from '@adobe/spacecat-shared-utils';
 import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
@@ -34,10 +33,6 @@ function getCacheKey(siteId, query, cacheLocation) {
   const outPrefix = crypto.createHash('md5').update(query).digest('hex');
   const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
   return { cacheKey, outPrefix };
-}
-
-async function loadSql(variables) {
-  return getStaticContent(variables, './src/controllers/paid/channel-query.sql.tpl');
 }
 
 const isTrue = (value) => value === true || value === 'true';
@@ -111,7 +106,7 @@ function TrafficController(context, log, env) {
     log.info(`Processing query: ${description}`);
 
     // build query
-    const query = await loadSql(quereyParams);
+    const query = getTrafficAnalysisQuery(quereyParams);
 
     log.debug(`Fetching paid data with query: ${query}`);
 
