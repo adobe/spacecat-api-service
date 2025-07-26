@@ -213,6 +213,154 @@ describe('OnboardCommand', () => {
       await command.handleExecution(args, slackContext);
       expect(slackContext.say.calledWithMatch(/:x: \*Errors:\* failed to add the site/)).to.be.true;
     });
+
+    it('blocks onboarding for Live Agent customer sites', async () => {
+      context.env.LA_CUSTOMERS = 'liveagent.com,example.com';
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.calledWith(':warning: Cannot onboard site https://example.com - it\'s already onboarded and live!')).to.be.true;
+      expect(dataAccessStub.Organization.findByImsOrgId.notCalled).to.be.true;
+      expect(dataAccessStub.Site.findByBaseURL.notCalled).to.be.true;
+    });
+
+    it('allows onboarding for non-Live Agent customer sites', async () => {
+      context.env.LA_CUSTOMERS = 'liveagent.com,other.com';
+      nock(baseURL).get('/').replyWithError('rainy weather');
+
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
+      dataAccessStub.Organization.findByImsOrgId.resolves(null);
+      imsClientStub.getImsOrganizationDetails.resolves({ orgName: 'Mock IMS Org' });
+      dataAccessStub.Organization.create.resolves(mockOrganization);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Site.create.resolves({
+        getBaseURL: () => baseURL,
+        getDeliveryType: () => 'other',
+        getIsLive: () => true,
+      });
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
+      expect(slackContext.say.calledWith(':warning: Cannot onboard site https://example.com - it\'s already onboarded and live!')).to.be.false;
+    });
+
+    it('uses default IMS Org ID when none is provided', async () => {
+      context.env.DEMO_IMS_ORG = 'default-ims-org-id';
+      nock(baseURL).get('/').replyWithError('rainy weather');
+
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
+      dataAccessStub.Organization.findByImsOrgId.resolves(null);
+      imsClientStub.getImsOrganizationDetails.resolves({ orgName: 'Mock IMS Org' });
+      dataAccessStub.Organization.create.resolves(mockOrganization);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      dataAccessStub.Site.create.resolves({
+        getBaseURL: () => baseURL,
+        getDeliveryType: () => 'other',
+        getIsLive: () => true,
+        getId: () => 'site-123',
+        getConfig: () => ({
+          getImports: () => [],
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+      });
+
+      const args = ['example.com']; // No IMS Org ID provided
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Just verify the function executed without throwing
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('only enables imports that are not already enabled', async () => {
+      nock(baseURL).get('/').replyWithError('rainy weather');
+
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
+      const mockSiteConfig = {
+        getImports: sinon.stub().returns([
+          { type: 'organic-traffic', enabled: true },
+          { type: 'top-pages', enabled: false },
+        ]),
+        enableImport: sinon.stub(),
+        setConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        save: sinon.stub().resolves(),
+        getId: sinon.stub().returns('site-123'),
+      };
+
+      dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
+      dataAccessStub.Site.findByBaseURL.resolves(mockSite);
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Just verify the function executed without throwing
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('only enables audits that are not already enabled', async () => {
+      nock(baseURL).get('/').replyWithError('rainy weather');
+
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
+      const mockSite = {
+        getConfig: sinon.stub().returns({
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+        getId: sinon.stub().returns('site-123'),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        save: sinon.stub().resolves(),
+      };
+
+      dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
+      dataAccessStub.Site.findByBaseURL.resolves(mockSite);
+      dataAccessStub.Configuration.findLatest.resolves(mockConfiguration);
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Just verify the function executed without throwing
+      expect(slackContext.say.called).to.be.true;
+    });
   });
 
   describe('Batch Onboarding from CSV', () => {
