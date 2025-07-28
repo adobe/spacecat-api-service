@@ -122,11 +122,10 @@ function RunTrafficAnalysisBackfillCommand(context) {
         return;
       }
 
-      const trafficAnalysis = site.imports?.find(
-        (siteImport) => siteImport.type === TRAFFIC_ANALYSIS_IMPORT_TYPE,
-      );
+      const siteConfig = site.getConfig();
+      const isTrafficAnalysisEnabled = siteConfig?.isImportEnabled(TRAFFIC_ANALYSIS_IMPORT_TYPE);
 
-      if (!trafficAnalysis || !trafficAnalysis.enabled) {
+      if (!isTrafficAnalysisEnabled) {
         await say(`:warning: Import type ${TRAFFIC_ANALYSIS_IMPORT_TYPE} is not enabled for site \`${baseURL}\``);
         return;
       }
@@ -136,11 +135,6 @@ function RunTrafficAnalysisBackfillCommand(context) {
         return;
       }
 
-      // if pageURLInput is enclosed in brackets, remove them.
-      // Slack sends URLs enclosed in brackets if not configured differently.
-      // For details, check https://api.slack.com/interactivity/slash-commands
-      //
-      // extractURLFromSlackInput also removes the www. subdomain; we want to avoid that here.
       const weekYearPairs = getLastNumberOfWeeks(weeks || 52);
 
       const message = `:adobe-run: Triggered backfill for traffic analysis import for site \`${baseURL}\` for the last ${weeks || 52} weeks\n`;

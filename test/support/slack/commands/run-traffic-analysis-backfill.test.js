@@ -27,6 +27,7 @@ describe('RunTrafficAnalysisBackfillCommand', () => {
   let sqsStub;
   let configStub;
   let siteStub;
+  let siteConfigStub;
 
   beforeEach(() => {
     dataAccessStub = {
@@ -42,12 +43,13 @@ describe('RunTrafficAnalysisBackfillCommand', () => {
         { group: 'imports', type: 'traffic-analysis' },
       ]),
     };
+    siteConfigStub = {
+      isImportEnabled: sinon.stub().returns(true),
+    };
     siteStub = {
       getId: sinon.stub().returns('test-site-id'),
       getBaseURL: sinon.stub().returns('https://example.com'),
-      imports: [
-        { type: 'traffic-analysis', enabled: true },
-      ],
+      getConfig: sinon.stub().returns(siteConfigStub),
     };
     context = {
       dataAccess: dataAccessStub,
@@ -125,28 +127,8 @@ describe('RunTrafficAnalysisBackfillCommand', () => {
     });
 
     it('informs user when traffic analysis import is not enabled for site', async () => {
-      const siteWithoutTrafficAnalysis = {
-        ...siteStub,
-        imports: [
-          { type: 'other-import', enabled: true },
-        ],
-      };
-      dataAccessStub.Site.findByBaseURL.resolves(siteWithoutTrafficAnalysis);
-      const command = RunTrafficAnalysisBackfillCommand(context);
-
-      await command.handleExecution(['https://example.com', '4'], slackContext);
-
-      expect(slackContext.say.calledWith(':warning: Import type traffic-analysis is not enabled for site `https://example.com`')).to.be.true;
-    });
-
-    it('informs user when traffic analysis import is disabled for site', async () => {
-      const siteWithDisabledTrafficAnalysis = {
-        ...siteStub,
-        imports: [
-          { type: 'traffic-analysis', enabled: false },
-        ],
-      };
-      dataAccessStub.Site.findByBaseURL.resolves(siteWithDisabledTrafficAnalysis);
+      siteConfigStub.isImportEnabled.returns(false);
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = RunTrafficAnalysisBackfillCommand(context);
 
       await command.handleExecution(['https://example.com', '4'], slackContext);
