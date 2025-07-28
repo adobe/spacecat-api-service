@@ -51,12 +51,12 @@ function ReportsController(ctx, log, env) {
    * @param {object} context - Context of the request.
    * @param {object} context.params - Request parameters.
    * @param {string} context.params.siteId - The site ID.
-   * @param {string} context.params.reportType - The type of report to generate.
    * @param {object} context.data - Request body data.
+   * @param {string} context.data.reportType - The type of report to generate.
    * @return {Promise<Response>} Report job response.
    */
   const createReport = async (context) => {
-    const { siteId, reportType } = context.params;
+    const { siteId } = context.params;
     const { data } = context;
 
     // Validate site ID
@@ -64,14 +64,16 @@ function ReportsController(ctx, log, env) {
       return badRequest('Valid site ID is required');
     }
 
-    // Validate report type
-    if (!hasText(reportType)) {
-      return badRequest('Report type is required');
-    }
-
     // Validate request data
     if (!isNonEmptyObject(data)) {
       return badRequest('Request data is required');
+    }
+
+    const { reportType } = data;
+
+    // Validate report type
+    if (!hasText(reportType)) {
+      return badRequest('Report type is required');
     }
 
     try {
@@ -133,6 +135,13 @@ function ReportsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Retrieves all reports for a specific site.
+   * @param {object} context - Context of the request.
+   * @param {object} context.params - Request parameters.
+   * @param {string} context.params.siteId - The site ID.
+   * @return {Promise<Response>} Response containing all reports for the site.
+   */
   const getAllReportsBySiteId = async (context) => {
     const { siteId } = context.params;
 
@@ -172,9 +181,127 @@ function ReportsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Retrieves a specific report for a site.
+   * @param {object} context - Context of the request.
+   * @param {object} context.params - Request parameters.
+   * @param {string} context.params.siteId - The site ID.
+   * @param {string} context.params.reportId - The report ID to retrieve.
+   * @return {Promise<Response>} Response containing the report data.
+   */
+  const getReport = async (context) => {
+    const { siteId, reportId } = context.params;
+
+    // Validate site ID
+    if (!isValidUUID(siteId)) {
+      return badRequest('Valid site ID is required');
+    }
+
+    // Validate report ID
+    if (!isValidUUID(reportId)) {
+      return badRequest('Valid report ID is required');
+    }
+
+    try {
+      // Check if site exists
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      // Check access control
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      // Check if report exists
+      const report = await Report.findById(reportId);
+      if (!report) {
+        return notFound('Report not found');
+      }
+
+      // Verify the report belongs to the specified site
+      if (report.getSiteId() !== siteId) {
+        return badRequest('Report does not belong to the specified site');
+      }
+
+      // Convert report to JSON using the DTO
+      const reportJSON = ReportDto.toJSON(report);
+
+      log.info(`Retrieved report ${reportId} for site ${siteId}`);
+
+      return ok(reportJSON);
+    } catch (error) {
+      log.error(`Failed to get report ${reportId} for site ${siteId}: ${error.message}`);
+      return internalServerError(`Failed to get report: ${error.message}`);
+    }
+  };
+
+  /**
+   * Deletes a specific report for a site.
+   * @param {object} context - Context of the request.
+   * @param {object} context.params - Request parameters.
+   * @param {string} context.params.siteId - The site ID.
+   * @param {string} context.params.reportId - The report ID to delete.
+   * @return {Promise<Response>} Response confirming report deletion.
+   */
+  const deleteReport = async (context) => {
+    const { siteId, reportId } = context.params;
+
+    // Validate site ID
+    if (!isValidUUID(siteId)) {
+      return badRequest('Valid site ID is required');
+    }
+
+    // Validate report ID
+    if (!isValidUUID(reportId)) {
+      return badRequest('Valid report ID is required');
+    }
+
+    try {
+      // Check if site exists
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      // Check access control
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      // Check if report exists
+      const report = await Report.findById(reportId);
+      if (!report) {
+        return notFound('Report not found');
+      }
+
+      // Verify the report belongs to the specified site
+      if (report.getSiteId() !== siteId) {
+        return badRequest('Report does not belong to the specified site');
+      }
+
+      // Delete the report
+      await report.remove();
+
+      log.info(`Report ${reportId} deleted successfully for site ${siteId}`);
+
+      return ok({
+        message: 'Report deleted successfully',
+        siteId,
+        reportId,
+      });
+    } catch (error) {
+      log.error(`Failed to delete report ${reportId} for site ${siteId}: ${error.message}`);
+      return internalServerError(`Failed to delete report: ${error.message}`);
+    }
+  };
+
   return {
     createReport,
     getAllReportsBySiteId,
+    getReport,
+    deleteReport,
   };
 }
 

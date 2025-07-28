@@ -237,8 +237,10 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
 
     // Reports
-    'POST /sites/:siteId/reports/:reportType': reportsController.createReport,
+    'POST /sites/:siteId/reports': reportsController.createReport,
     'GET /sites/:siteId/reports': reportsController.getAllReportsBySiteId,
+    'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
+    'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
   };
 
   // Initialization of static and dynamic routes

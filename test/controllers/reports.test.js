@@ -143,9 +143,9 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: 'performance',
         },
         data: {
+          reportType: 'performance',
           reportPeriod: {
             dateRange: 'last-30-days',
             metrics: ['lcp', 'fid', 'cls'],
@@ -198,9 +198,11 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: 'invalid-uuid',
-          reportType: 'performance',
         },
-        data: { test: 'data' },
+        data: {
+          reportType: 'performance',
+          test: 'data',
+        },
       };
 
       const result = await reportsController.createReport(context);
@@ -214,9 +216,11 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: '',
         },
-        data: { test: 'data' },
+        data: {
+          reportType: '',
+          test: 'data',
+        },
       };
 
       const result = await reportsController.createReport(context);
@@ -230,7 +234,6 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: 'performance',
         },
         data: null,
       };
@@ -248,9 +251,11 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: 'performance',
         },
-        data: { test: 'data' },
+        data: {
+          reportType: 'performance',
+          test: 'data',
+        },
       };
 
       const result = await reportsController.createReport(context);
@@ -266,9 +271,11 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: 'performance',
         },
-        data: { test: 'data' },
+        data: {
+          reportType: 'performance',
+          test: 'data',
+        },
       };
 
       const result = await reportsController.createReport(context);
@@ -293,9 +300,11 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: 'performance',
         },
-        data: { test: 'data' },
+        data: {
+          reportType: 'performance',
+          test: 'data',
+        },
       };
 
       const result = await controllerWithoutQueue.createReport(context);
@@ -311,9 +320,11 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: 'performance',
         },
-        data: { test: 'data' },
+        data: {
+          reportType: 'performance',
+          test: 'data',
+        },
       };
 
       const result = await reportsController.createReport(context);
@@ -327,9 +338,11 @@ describe('ReportsController', () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: 'performance',
         },
-        data: { test: 'data' },
+        data: {
+          reportType: 'performance',
+          test: 'data',
+        },
         attributes: {},
       };
 
@@ -484,6 +497,338 @@ describe('ReportsController', () => {
       expect(result.status).to.equal(500);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Failed to get reports: Database error');
+    });
+  });
+
+  describe('getReport', () => {
+    let mockReport;
+
+    beforeEach(() => {
+      mockReport = {
+        getId: () => '987e6543-e21b-12d3-a456-426614174001',
+        getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
+        getReportType: () => 'performance',
+        getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
+        getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
+        getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:30:00Z',
+        getUpdatedBy: () => 'test@example.com',
+      };
+
+      mockDataAccess.Report.findById = sinon.stub().resolves(mockReport);
+    });
+
+    it('should successfully retrieve a specific report', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include({
+        id: '987e6543-e21b-12d3-a456-426614174001',
+        siteId: '123e4567-e89b-12d3-a456-426614174000',
+        reportType: 'performance',
+      });
+
+      expect(mockDataAccess.Report.findById).to.have.been.calledOnceWith('987e6543-e21b-12d3-a456-426614174001');
+    });
+
+    it('should return bad request for invalid site ID', async () => {
+      const context = {
+        params: {
+          siteId: 'invalid-uuid',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Valid site ID is required');
+    });
+
+    it('should return bad request for invalid report ID', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: 'invalid-uuid',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Valid report ID is required');
+    });
+
+    it('should return not found for non-existent site', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site not found');
+    });
+
+    it('should return forbidden when user lacks access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('User does not have access to this site');
+    });
+
+    it('should return not found for non-existent report', async () => {
+      mockDataAccess.Report.findById.resolves(null);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174002',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report not found');
+    });
+
+    it('should return bad request when report does not belong to site', async () => {
+      const mockReportFromDifferentSite = {
+        ...mockReport,
+        getSiteId: () => '456e7890-e12b-34d5-a678-901234567890',
+      };
+      mockDataAccess.Report.findById.resolves(mockReportFromDifferentSite);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report does not belong to the specified site');
+    });
+
+    it('should return internal server error when database operation fails', async () => {
+      mockDataAccess.Report.findById.rejects(new Error('Database error'));
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(500);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Failed to get report: Database error');
+    });
+  });
+
+  describe('deleteReport', () => {
+    let mockReport;
+
+    beforeEach(() => {
+      mockReport = {
+        getId: () => '987e6543-e21b-12d3-a456-426614174001',
+        getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
+        remove: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Report.findById = sinon.stub().resolves(mockReport);
+    });
+
+    it('should successfully delete a specific report', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include({
+        message: 'Report deleted successfully',
+        siteId: '123e4567-e89b-12d3-a456-426614174000',
+        reportId: '987e6543-e21b-12d3-a456-426614174001',
+      });
+
+      expect(mockDataAccess.Report.findById).to.have.been.calledOnceWith('987e6543-e21b-12d3-a456-426614174001');
+      expect(mockReport.remove).to.have.been.calledOnce;
+    });
+
+    it('should return bad request for invalid site ID', async () => {
+      const context = {
+        params: {
+          siteId: 'invalid-uuid',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Valid site ID is required');
+    });
+
+    it('should return bad request for invalid report ID', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: 'invalid-uuid',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Valid report ID is required');
+    });
+
+    it('should return not found for non-existent site', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site not found');
+    });
+
+    it('should return forbidden when user lacks access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('User does not have access to this site');
+    });
+
+    it('should return not found for non-existent report', async () => {
+      mockDataAccess.Report.findById.resolves(null);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174002',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report not found');
+    });
+
+    it('should return bad request when report does not belong to site', async () => {
+      const mockReportFromDifferentSite = {
+        ...mockReport,
+        getSiteId: () => '456e7890-e12b-34d5-a678-901234567890',
+      };
+      mockDataAccess.Report.findById.resolves(mockReportFromDifferentSite);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report does not belong to the specified site');
+    });
+
+    it('should return internal server error when deletion fails', async () => {
+      mockReport.remove.rejects(new Error('Deletion failed'));
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(500);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Failed to delete report: Deletion failed');
+    });
+
+    it('should return internal server error when database operation fails', async () => {
+      mockDataAccess.Report.findById.rejects(new Error('Database error'));
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(500);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Failed to delete report: Database error');
     });
   });
 });
