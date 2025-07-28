@@ -159,8 +159,8 @@ async function run(request, context) {
       paidController,
       trafficController,
       fixesController,
-      reportsController,
       llmoController,
+      reportsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
