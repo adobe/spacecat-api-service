@@ -122,24 +122,6 @@ describe('Paid TrafficController', async () => {
       expect(putBody).to.deep.equal(trafficTypeExpected);
     });
 
-    it('getPaidTrafficByPageType with filter queries as expected', async () => {
-      mockAthenaQuery.resolves(trafficTypeMock);
-      mockContext.data = {
-        year: 2025,
-        week: 23,
-        trafficType: 'owned',
-      };
-      const controller = TrafficController(mockContext, mockLog, mockEnv);
-      const res = await controller.getPaidTrafficByPageType();
-      expect(res.status).to.equal(200);
-
-      const athenaCall = mockAthenaQuery?.getCall(0);
-      expect(athenaCall).to.exist;
-      const query = athenaCall.args[0];
-      expect(query).to.include('page_type');
-      expect(query).to.include('AND trf_type IN (\'owned\')');
-    });
-
     it('getPaidTrafficByUrlPageTypeCampaignDevice fresh returns expected', async () => {
       pageTypesMock = null;
       mockAthenaQuery.resolves(urlPageTypeCampaignDeviceMock);
@@ -183,10 +165,6 @@ describe('Paid TrafficController', async () => {
       // Verify Athena was called, proving we didn't hit a pre-existing cache
       const athenaCall = mockAthenaQuery?.getCall(0);
       expect(athenaCall).to.exist;
-
-      const query = athenaCall.args[0];
-      expect(query).to.include('WHEN REGEXP_LIKE(path');
-      expect(query).to.include('AND trf_type IN (\'paid\')');
 
       expect(lastPutObject).to.exist;
       const decompressed = await gunzipAsync(lastPutObject.input.Body);
@@ -442,7 +420,7 @@ describe('Paid TrafficController', async () => {
       expect(headObjectCalled).to.be.false;
     });
 
-    it('returns response directly if caching fails due to S3 PutObjectCommand error (covers src/controllers/paid/traffic.js lines 163-164)', async () => {
+    it('returns response directly if caching fails due to S3 PutObjectCommand error', async () => {
       // Simulate S3 PutObjectCommand throwing an error (cache write fails)
       mockS3.send.callsFake((cmd) => {
         if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
@@ -470,6 +448,98 @@ describe('Paid TrafficController', async () => {
         body = await res.json();
       }
       expect(body).to.deep.equal(trafficTypeExpected);
+    });
+
+    // Systematic test for all endpoint functions to ensure coverage
+    it('All endpoint functions have correct dimensions and traffic filtering in query', async () => {
+      const mockResponse = [{
+        utm_campaign: 'test',
+        path: '/test',
+        device: 'desktop',
+        pageviews: 100,
+        pct_pageviews: 0.5,
+        click_rate: 0.1,
+        engagement_rate: 0.2,
+        bounce_rate: 0.3,
+        p70_lcp: 2.5,
+        p70_cls: 0.1,
+        p70_inp: 200,
+        trf_type: 'paid',
+        trf_channel: 'search',
+        trf_platform: 'google',
+        page_type: 'homepage',
+      }];
+
+      const endpointsWithDimensions = [
+        { method: 'getPaidTrafficByCampaignUrlDevice', dimensions: 'utm_campaign, path, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByCampaignDevice', dimensions: 'utm_campaign, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByCampaignUrl', dimensions: 'utm_campaign, path', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByCampaign', dimensions: 'utm_campaign', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByPageType', dimensions: 'page_type', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByTypeChannelCampaign', dimensions: 'trf_type, trf_channel, utm_campaign', defaultFilter: 'none' },
+        { method: 'getPaidTrafficByTypeChannel', dimensions: 'trf_type, trf_channel', defaultFilter: 'none' },
+        { method: 'getPaidTrafficByTypeCampaign', dimensions: 'trf_type, utm_campaign', defaultFilter: 'none' },
+        { method: 'getPaidTrafficByType', dimensions: 'trf_type', defaultFilter: 'none' },
+        { method: 'getPaidTrafficByUrlPageTypePlatformCampaignDevice', dimensions: 'path, page_type, trf_platform, utm_campaign, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByPageTypePlatformCampaignDevice', dimensions: 'page_type, trf_platform, utm_campaign, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByUrlPageTypeCampaignDevice', dimensions: 'path, page_type, utm_campaign, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByUrlPageTypeDevice', dimensions: 'path, page_type, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByUrlPageTypeCampaign', dimensions: 'path, page_type, utm_campaign', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByUrlPageTypePlatform', dimensions: 'path, page_type, trf_platform', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByUrlPageTypeCampaignPlatform', dimensions: 'path, page_type, utm_campaign, trf_platform', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByUrlPageTypePlatformDevice', dimensions: 'path, page_type, trf_platform, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByPageTypeCampaignDevice', dimensions: 'page_type, utm_campaign, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByPageTypeDevice', dimensions: 'page_type, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByPageTypeCampaign', dimensions: 'page_type, utm_campaign', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByPageTypePlatform', dimensions: 'page_type, trf_platform', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByPageTypePlatformDevice', dimensions: 'page_type, trf_platform, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByPageTypePlatformCampaign', dimensions: 'page_type, trf_platform, utm_campaign', defaultFilter: 'paid' },
+      ];
+
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+
+      for (const endpoint of endpointsWithDimensions) {
+        mockAthenaQuery.resetHistory();
+
+        // Test default behavior
+        // eslint-disable-next-line no-await-in-loop
+        const res = await controller[endpoint.method]();
+        expect(res.status).to.equal(200, `${endpoint.method} should return 200`);
+
+        const query = mockAthenaQuery.getCall(0).args[0];
+        expect(query).to.include(endpoint.dimensions, `${endpoint.method} should include dimensions: ${endpoint.dimensions}`);
+
+        // Check traffic type filtering
+        if (endpoint.defaultFilter === 'paid') {
+          expect(query).to.include('AND trf_type IN (\'paid\')', `${endpoint.method} should default to paid filter`);
+        } else {
+          expect(query).to.include('AND TRUE', `${endpoint.method} should not filter by traffic type by default`);
+        }
+      }
+    });
+    it('TrafficType parameter if passed is respected', async () => {
+      const mockResponse = [{ utm_campaign: 'test', pageviews: 100 }];
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+
+      // Test valid traffic types
+      const validTypes = [
+        { value: 'owned', expectedFilter: 'AND trf_type IN (\'owned\')' },
+        { value: 'earned', expectedFilter: 'AND trf_type IN (\'earned\')' },
+        { value: 'paid', expectedFilter: 'AND trf_type IN (\'paid\')' },
+        { value: 'all', expectedFilter: 'AND TRUE' },
+      ];
+
+      for (const test of validTypes) {
+        mockAthenaQuery.resetHistory();
+        mockAthenaQuery.resolves(mockResponse);
+        mockContext.data.trafficType = test.value;
+
+        // eslint-disable-next-line no-await-in-loop
+        await controller.getPaidTrafficByCampaign();
+        const query = mockAthenaQuery.getCall(0).args[0];
+        expect(query).to.include(test.expectedFilter, `trafficType=${test.value} should apply correct filter`);
+      }
     });
   });
 });
