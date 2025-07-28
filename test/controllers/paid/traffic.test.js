@@ -82,7 +82,7 @@ describe('Paid TrafficController', async () => {
     mockContext = {
       params: { siteId },
       data: {
-        year: 2024, month: 6, week: 23,
+        year: 2024, week: 23,
       },
       dataAccess: { Site: { findById: sandbox.stub().resolves(mockSite) } },
       s3: { s3Client: mockS3, getSignedUrl: sandbox.stub().resolves(TEST_PRESIGNED_URL) },
@@ -120,6 +120,24 @@ describe('Paid TrafficController', async () => {
       const decompressed = await gunzipAsync(lastPutObject.input.Body);
       const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(trafficTypeExpected);
+    });
+
+    it('getPaidTrafficByPageType with filter queries as expected', async () => {
+      mockAthenaQuery.resolves(trafficTypeMock);
+      mockContext.data = {
+        year: 2025,
+        week: 23,
+        trafficType: 'owned',
+      };
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByPageType();
+      expect(res.status).to.equal(200);
+
+      const athenaCall = mockAthenaQuery?.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      expect(query).to.include('page_type');
+      expect(query).to.include('AND trf_type IN (\'owned\')');
     });
 
     it('getPaidTrafficByUrlPageTypeCampaignDevice fresh returns expected', async () => {
@@ -168,6 +186,7 @@ describe('Paid TrafficController', async () => {
 
       const query = athenaCall.args[0];
       expect(query).to.include('WHEN REGEXP_LIKE(path');
+      expect(query).to.include('AND trf_type IN (\'paid\')');
 
       expect(lastPutObject).to.exist;
       const decompressed = await gunzipAsync(lastPutObject.input.Body);
@@ -236,6 +255,10 @@ describe('Paid TrafficController', async () => {
       const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(expectedOutput);
       expect(mockAthenaQuery).to.have.been.calledOnce;
+      const query = mockAthenaQuery.args[0][0];
+
+      // by default dont filter on traffic type for typeChannel query
+      expect(query).to.include('AND TRUE');
     });
 
     it('returns 404 if site not found', async () => {

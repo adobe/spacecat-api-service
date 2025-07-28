@@ -79,7 +79,9 @@ function TrafficController(context, log, env) {
     }
 
     // validate input params
-    const { year, week, noCache } = context.data;
+    const {
+      year, week, noCache, trafficType,
+    } = context.data;
     if (!year || !week) {
       return badRequest('Year and week are required parameters');
     }
@@ -91,6 +93,16 @@ function TrafficController(context, log, env) {
       pageTypes = await site.getPageTypes();
     }
 
+    let trfTypes = null;
+    if (trafficType && ['owned', 'earned', 'paid'].includes(trafficType)) {
+      trfTypes = [trafficType];
+    }
+
+    // no filter supplied and api is not for traffic type default to paid
+    if (trafficType == null && !dimensions.includes('trf_type')) {
+      trfTypes = ['paid'];
+    }
+
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
       week,
       year,
@@ -99,6 +111,7 @@ function TrafficController(context, log, env) {
       tableName,
       pageTypes,
       pageTypeMatchColumn: 'path',
+      trfTypes,
     });
 
     const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
@@ -161,6 +174,7 @@ function TrafficController(context, log, env) {
     getPaidTrafficByUrlPageTypePlatform: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypeCampaignPlatform: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypePlatformDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageType: async () => fetchPaidTrafficData(['page_type'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypeCampaignDevice: async () => fetchPaidTrafficData(['page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypeDevice: async () => fetchPaidTrafficData(['page_type', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypeCampaign: async () => fetchPaidTrafficData(['page_type', 'utm_campaign'], TrafficDataWithCWVDto),
