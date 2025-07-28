@@ -163,6 +163,10 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
+  /sites/{siteId}/traffic/paid/url-page-type-platform-campaign-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-page-type-platform-campaign-device'
+  /sites/{siteId}/traffic/paid/page-type-platform-campaign-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-page-type-platform-campaign-device'
   /sites/{siteId}/traffic/paid/campaign-url-device:
     $ref: './site-paid.yaml#/site-traffic-paid-campaign-url-device'
   /sites/{siteId}/traffic/paid/campaign-device:

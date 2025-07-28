@@ -1,3 +1,59 @@
+## [1.138.3](https://github.com/adobe/spacecat-api-service/compare/v1.138.2...v1.138.3) (2025-07-27)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1097](https://github.com/adobe/spacecat-api-service/issues/1097)) ([0c27595](https://github.com/adobe/spacecat-api-service/commit/0c27595af43aa84c2abb6fdac33395ff3c3f5f0a))
+
+## [1.138.2](https://github.com/adobe/spacecat-api-service/compare/v1.138.1...v1.138.2) (2025-07-26)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1096](https://github.com/adobe/spacecat-api-service/issues/1096)) ([a621d58](https://github.com/adobe/spacecat-api-service/commit/a621d583c87a86603d9f1c33230a608cc1a9617d))
+
+## [1.138.1](https://github.com/adobe/spacecat-api-service/compare/v1.138.0...v1.138.1) (2025-07-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.36.0 ([#1095](https://github.com/adobe/spacecat-api-service/issues/1095)) ([975edb0](https://github.com/adobe/spacecat-api-service/commit/975edb094d51e3cfda2209ff1a48a006fe967505))
+
+# [1.138.0](https://github.com/adobe/spacecat-api-service/compare/v1.137.5...v1.138.0) (2025-07-25)
+
+
+### Features
+
+* use shared for query and read pageTypes from site db ([#1089](https://github.com/adobe/spacecat-api-service/issues/1089)) ([a7e0cd9](https://github.com/adobe/spacecat-api-service/commit/a7e0cd994a612a5fbf8832341684ee277431892b))
+
+## [1.137.5](https://github.com/adobe/spacecat-api-service/compare/v1.137.4...v1.137.5) (2025-07-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-athena-client to v1.2.2 ([#1094](https://github.com/adobe/spacecat-api-service/issues/1094)) ([f6d6be5](https://github.com/adobe/spacecat-api-service/commit/f6d6be541fdc9d30bfdaa4176cf76b5911ef679e))
+
+## [1.137.4](https://github.com/adobe/spacecat-api-service/compare/v1.137.3...v1.137.4) (2025-07-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.35.0 ([#1093](https://github.com/adobe/spacecat-api-service/issues/1093)) ([e6f551c](https://github.com/adobe/spacecat-api-service/commit/e6f551ceda982dd05008a5239fc816ffdba4fb09))
+
+## [1.137.3](https://github.com/adobe/spacecat-api-service/compare/v1.137.2...v1.137.3) (2025-07-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-athena-client to v1.2.1 ([#1091](https://github.com/adobe/spacecat-api-service/issues/1091)) ([9186d5d](https://github.com/adobe/spacecat-api-service/commit/9186d5da6638c981cc48fe54fa53ae48c33dce80))
+
+## [1.137.2](https://github.com/adobe/spacecat-api-service/compare/v1.137.1...v1.137.2) (2025-07-24)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1088](https://github.com/adobe/spacecat-api-service/issues/1088)) ([6478e7f](https://github.com/adobe/spacecat-api-service/commit/6478e7f2f07dcb127337951722a18d5030b68c22))
+
 ## [1.137.1](https://github.com/adobe/spacecat-api-service/compare/v1.137.0...v1.137.1) (2025-07-23)
 
 
