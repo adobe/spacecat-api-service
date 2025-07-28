@@ -1,3 +1,10 @@
+## [1.138.4](https://github.com/adobe/spacecat-api-service/compare/v1.138.3...v1.138.4) (2025-07-28)
+
+
+### Bug Fixes
+
+* update spacecat-shared-data-access package version for fix SITES-33793 ([#1090](https://github.com/adobe/spacecat-api-service/issues/1090)) ([193ea85](https://github.com/adobe/spacecat-api-service/commit/193ea8569fe1287a7304a8c765f4d5479ba3fd9a))
+
 ## [1.138.3](https://github.com/adobe/spacecat-api-service/compare/v1.138.2...v1.138.3) (2025-07-27)
 
 
