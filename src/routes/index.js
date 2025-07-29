@@ -171,6 +171,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/url-page-type-platform': trafficController.getPaidTrafficByUrlPageTypePlatform,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform': trafficController.getPaidTrafficByUrlPageTypeCampaignPlatform,
     'GET /sites/:siteId/traffic/paid/url-page-type-platform-device': trafficController.getPaidTrafficByUrlPageTypePlatformDevice,
+    'GET /sites/:siteId/traffic/paid/page-type': trafficController.getPaidTrafficByPageType,
     'GET /sites/:siteId/traffic/paid/page-type-campaign-device': trafficController.getPaidTrafficByPageTypeCampaignDevice,
     'GET /sites/:siteId/traffic/paid/page-type-device': trafficController.getPaidTrafficByPageTypeDevice,
     'GET /sites/:siteId/traffic/paid/page-type-campaign': trafficController.getPaidTrafficByPageTypeCampaign,
