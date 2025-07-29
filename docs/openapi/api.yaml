@@ -49,6 +49,8 @@ tags:
     description: APIs for scraping web pages
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: reports
+    description: Report generation and management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -223,6 +225,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-questions'
   /sites/{siteId}/llmo/questions/{questionKey}:
     $ref: './llmo-api.yaml#/llmo-question'
+  /sites/{siteId}/reports:
+    $ref: './site-api.yaml#/site-reports'
+  /sites/{siteId}/reports/{reportId}:
+    $ref: './site-api.yaml#/site-report'
 
 components:
   securitySchemes:

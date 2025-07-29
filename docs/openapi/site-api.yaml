@@ -140,3 +140,261 @@ site-cdn-logs-config:
         $ref: './responses.yaml#/404-site-not-found-with-id'
       '500':
         $ref: './responses.yaml#/500'
+
+site-reports:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - reports
+    summary: Get all reports for a site
+    description: |
+      Retrieves all reports generated for the specified site, including their current status and download links.
+      Reports can be in various states: queued, generated, or enhanced (with AI insights).
+    operationId: getAllReportsBySiteId
+    responses:
+      '200':
+        description: Successful operation with array of reports
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The site ID
+                reports:
+                  type: array
+                  items:
+                    $ref: './schemas.yaml#/Report'
+                count:
+                  type: integer
+                  description: Total number of reports
+              example:
+                siteId: "550e8400-e29b-41d4-a716-446655440000"
+                count: 2
+                reports:
+                  - id: "550e8400-e29b-41d4-a716-446655440001"
+                    siteId: "550e8400-e29b-41d4-a716-446655440000"
+                    reportType: "performance"
+                    status: "enhanced"
+                    storagePath: "s3://bucket/reports/base/report.csv"
+                    createdAt: "2024-01-15T10:30:00Z"
+                    updatedAt: "2024-01-15T11:45:00Z"
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  post:
+    tags:
+      - reports
+    summary: Create a new report generation job
+    description: |
+      Initiates the generation of a new report for the specified site and report type.
+      The report will go through multiple phases: generation, AI enhancement via Mystique, and finalization.
+    operationId: createReport
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - reportType
+              - reportPeriod
+            properties:
+              reportType:
+                type: string
+                enum: [performance, accessibility, seo, security, conversion]
+                description: The type of report to generate
+                example: 'performance'
+              reportPeriod:
+                type: object
+                required:
+                  - startDate
+                  - endDate
+                properties:
+                  startDate:
+                    type: string
+                    format: date
+                    description: Start date for the report period
+                  endDate:
+                    type: string
+                    format: date
+                    description: End date for the report period
+              comparisonPeriod:
+                type: object
+                properties:
+                  startDate:
+                    type: string
+                    format: date
+                    description: Start date for comparison period
+                  endDate:
+                    type: string
+                    format: date
+                    description: End date for comparison period
+            example:
+              reportType: "performance"
+              reportPeriod:
+                startDate: "2024-01-01"
+                endDate: "2024-01-31"
+              comparisonPeriod:
+                startDate: "2023-12-01"
+                endDate: "2023-12-31"
+    responses:
+      '202':
+        description: Report generation job queued successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Report generation job queued successfully"
+                siteId:
+                  type: string
+                  format: uuid
+                reportType:
+                  type: string
+                status:
+                  type: string
+                  enum: [queued]
+                jobId:
+                  type: string
+                  format: uuid
+                timestamp:
+                  type: string
+                  format: date-time
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+site-report:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The unique identifier of the report
+  get:
+    tags:
+      - reports
+    summary: Get a specific report
+    description: |
+      Retrieves detailed information about a specific report, including its current status,
+      download links for base and enhanced versions, and metadata.
+    operationId: getReport
+    responses:
+      '200':
+        description: Successful operation with report details
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Report'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        description: Report not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Report not found"
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  delete:
+    tags:
+      - reports
+    summary: Delete a specific report
+    description: |
+      Deletes a specific report and its associated files from storage.
+      This action cannot be undone.
+    operationId: deleteReport
+    responses:
+      '200':
+        description: Report deleted successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Report deleted successfully"
+                siteId:
+                  type: string
+                  format: uuid
+                reportId:
+                  type: string
+                  format: uuid
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        description: Report not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Report not found"
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]

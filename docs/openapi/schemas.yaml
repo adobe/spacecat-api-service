@@ -3432,3 +3432,66 @@ LlmoConfig:
       description: The questions configuration containing both human and AI questions
       $ref: '#/LlmoQuestions'
   additionalProperties: false
+
+Report:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+      description: Unique identifier for the report
+    siteId:
+      $ref: '#/Id'
+      description: The site ID this report belongs to
+    reportType:
+      type: string
+      enum: [performance, accessibility, seo, security, conversion]
+      description: The type of report generated
+      example: 'performance'
+    status:
+      type: string
+      enum: [queued, generated, enhanced, failed]
+      description: Current status of the report
+      example: 'enhanced'
+    reportPeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date for the report period
+          example: '2024-01-01'
+        endDate:
+          type: string
+          format: date
+          description: End date for the report period
+          example: '2024-01-31'
+      required: [startDate, endDate]
+    comparisonPeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date for comparison period
+          example: '2023-12-01'
+        endDate:
+          type: string
+          format: date
+          description: End date for comparison period
+          example: '2023-12-31'
+    storagePath:
+      type: string
+      description: S3 path to the base report file
+      example: 's3://spacecat-reports/base/550e8400-e29b-41d4-a716-446655440001.csv'
+    createdAt:
+      $ref: '#/DateTime'
+      description: When the report was initially created
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the report was last updated
+    updatedBy:
+      type: string
+      description: User or system that last updated the report
+      example: 'user@adobe.com'
+  required: [id, siteId, reportType, status, reportPeriod, createdAt, updatedAt]
+  additionalProperties: false
