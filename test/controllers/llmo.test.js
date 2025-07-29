@@ -166,6 +166,66 @@ describe('LlmoController', () => {
       );
     });
 
+    it('should proxy data with sheetType parameter successfully', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'analytics-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add sheetType to the context params
+      mockContext.params.sheetType = 'analytics';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'analytics-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+          },
+        },
+      );
+    });
+
+    it('should handle external API errors with sheetType parameter', async () => {
+      const mockResponse = {
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add sheetType to the context params
+      mockContext.params.sheetType = 'analytics';
+
+      try {
+        await controller.getLlmoSheetData(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('External API returned 404: Not Found');
+      }
+    });
+
+    it('should handle network errors with sheetType parameter', async () => {
+      const networkError = new Error('Network error');
+      tracingFetchStub.rejects(networkError);
+
+      // Add sheetType to the context params
+      mockContext.params.sheetType = 'analytics';
+
+      try {
+        await controller.getLlmoSheetData(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('Network error');
+      }
+    });
+
     it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
       const mockResponse = {
         ok: true,
