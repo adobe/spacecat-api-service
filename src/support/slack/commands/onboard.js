@@ -307,16 +307,16 @@ function OnboardCommand(context) {
       const imports = siteConfig.getImports();
 
       // Filter imports that are not already enabled
-      const importsToEnable = [];
+      const importsEnabled = [];
       for (const importType of importTypes) {
         if (!isImportEnabled(importType, imports)) {
           siteConfig.enableImport(importType);
-          importsToEnable.push(importType);
+          importsEnabled.push(importType);
         }
       }
 
-      if (importsToEnable.length > 0) {
-        log.info(`Enabled the following imports for ${siteID}: ${importsToEnable.join(', ')}`);
+      if (importsEnabled.length > 0) {
+        log.info(`Enabled the following imports for ${siteID}: ${importsEnabled.join(', ')}`);
       } else {
         log.info(`All imports are already enabled for ${siteID}`);
       }
@@ -351,18 +351,18 @@ function OnboardCommand(context) {
       const auditTypes = Object.keys(profile.audits);
 
       // Check which audits are not already enabled
-      const auditsToEnable = [];
+      const auditsEnabled = [];
       for (const auditType of auditTypes) {
         /* eslint-disable no-await-in-loop */
         const isEnabled = await isAuditEnabledForSite(auditType, site, context);
         if (!isEnabled) {
           configuration.enableHandlerForSite(auditType, site);
-          auditsToEnable.push(auditType);
+          auditsEnabled.push(auditType);
         }
       }
 
-      if (auditsToEnable.length > 0) {
-        log.info(`Enabled the following audits for site ${siteID}: ${auditsToEnable.join(', ')}`);
+      if (auditsEnabled.length > 0) {
+        log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
       } else {
         log.info(`All audits are already enabled for site ${siteID}`);
       }
@@ -412,8 +412,8 @@ function OnboardCommand(context) {
         imsOrgId: imsOrgID,
         organizationId,
         taskContext: {
-          importTypes: importsToEnable,
-          auditTypes: auditsToEnable,
+          importTypes: importsEnabled,
+          auditTypes: auditsEnabled,
           slackContext: {
             channelId: slackContext.channelId,
             threadTs: slackContext.threadTs,
