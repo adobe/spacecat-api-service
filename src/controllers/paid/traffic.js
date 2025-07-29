@@ -22,6 +22,8 @@ import {
   TrafficDataWithCWVDto, getTrafficAnalysisQueryPlaceholdersFilled,
 } from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
+import { gzip } from 'zlib';
+import { promisify } from 'util';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
   getS3CachedResult,
@@ -150,11 +152,34 @@ function TrafficController(context, log, env) {
       isCached = await addResultJsonToCache(s3, cacheKey, response, log);
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
-
     log.warn(`Failed to return cache key ${cacheKey}. Returning response directly.`);
-    return ok(response, {
-      'content-encoding': 'gzip',
-    });
+    // Compress and base64 encode the response for Lambda
+    try {
+      const gzipAsync = promisify(gzip);
+      const jsonString = JSON.stringify(response);
+
+      // Step 1: Actually compress the JSON string
+      const compressed = await gzipAsync(jsonString);
+
+      // // Step 2: Convert compressed binary data to base64 string
+      const base64Encoded = compressed.toString('base64');
+
+      log.info(`Response compressed from ${jsonString.length} to ${compressed.length} bytes, base64 encoded to ${base64Encoded.length} characters`);
+
+      // Step 3: Return the base64 encoded string (not the raw compressed buffer)
+      return ok(base64Encoded, {
+        'Content-Type': 'application/json',
+        'Content-Encoding': 'gzip',
+        isBase64Encoded: true,
+      });
+    } catch (error) {
+      log.error(`Failed to compress response: ${error.message}`);
+      // Fallback to uncompressed response
+      log.warn(`Failed to return compressed response for cache key ${cacheKey}. Returning uncompressed response directly.`);
+      return ok(response, {
+        'Content-Type': 'application/json',
+      });
+    }
   }
 
   return {
