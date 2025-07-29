@@ -1,3 +1,24 @@
+# [1.139.0](https://github.com/adobe/spacecat-api-service/compare/v1.138.6...v1.139.0) (2025-07-29)
+
+
+### Features
+
+*  allow filter by traffic type ([#1101](https://github.com/adobe/spacecat-api-service/issues/1101)) ([18b4d96](https://github.com/adobe/spacecat-api-service/commit/18b4d96f27a0edddf1b94ceb7af3d2c1f724ed0a))
+
+## [1.138.6](https://github.com/adobe/spacecat-api-service/compare/v1.138.5...v1.138.6) (2025-07-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-athena-client to v1.2.3 ([#1100](https://github.com/adobe/spacecat-api-service/issues/1100)) ([68c13ed](https://github.com/adobe/spacecat-api-service/commit/68c13edd52285dc59c85def984aeb6c52c36f55d))
+
+## [1.138.5](https://github.com/adobe/spacecat-api-service/compare/v1.138.4...v1.138.5) (2025-07-28)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1098](https://github.com/adobe/spacecat-api-service/issues/1098)) ([c7d110e](https://github.com/adobe/spacecat-api-service/commit/c7d110ec19e21fce28f74adc07c9cd3a29c92f17))
+
 ## [1.138.4](https://github.com/adobe/spacecat-api-service/compare/v1.138.3...v1.138.4) (2025-07-28)
 
 

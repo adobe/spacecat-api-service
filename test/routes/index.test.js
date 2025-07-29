@@ -334,6 +334,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/type-channel-campaign',
       'GET /sites/:siteId/traffic/paid/type-channel',
       'GET /sites/:siteId/traffic/paid/type-campaign',
+      'GET /sites/:siteId/traffic/paid/page-type',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign',
       'GET /sites/:siteId/traffic/paid/page-type-campaign-device',
       'GET /sites/:siteId/traffic/paid/page-type-device',
