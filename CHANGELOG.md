@@ -1,3 +1,10 @@
+# [1.139.0](https://github.com/adobe/spacecat-api-service/compare/v1.138.6...v1.139.0) (2025-07-29)
+
+
+### Features
+
+*  allow filter by traffic type ([#1101](https://github.com/adobe/spacecat-api-service/issues/1101)) ([18b4d96](https://github.com/adobe/spacecat-api-service/commit/18b4d96f27a0edddf1b94ceb7af3d2c1f724ed0a))
+
 ## [1.138.6](https://github.com/adobe/spacecat-api-service/compare/v1.138.5...v1.138.6) (2025-07-28)
 
 
