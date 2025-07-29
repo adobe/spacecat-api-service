@@ -1,3 +1,31 @@
+## [1.138.4](https://github.com/adobe/spacecat-api-service/compare/v1.138.3...v1.138.4) (2025-07-28)
+
+
+### Bug Fixes
+
+* update spacecat-shared-data-access package version for fix SITES-33793 ([#1090](https://github.com/adobe/spacecat-api-service/issues/1090)) ([193ea85](https://github.com/adobe/spacecat-api-service/commit/193ea8569fe1287a7304a8c765f4d5479ba3fd9a))
+
+## [1.138.3](https://github.com/adobe/spacecat-api-service/compare/v1.138.2...v1.138.3) (2025-07-27)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1097](https://github.com/adobe/spacecat-api-service/issues/1097)) ([0c27595](https://github.com/adobe/spacecat-api-service/commit/0c27595af43aa84c2abb6fdac33395ff3c3f5f0a))
+
+## [1.138.2](https://github.com/adobe/spacecat-api-service/compare/v1.138.1...v1.138.2) (2025-07-26)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1096](https://github.com/adobe/spacecat-api-service/issues/1096)) ([a621d58](https://github.com/adobe/spacecat-api-service/commit/a621d583c87a86603d9f1c33230a608cc1a9617d))
+
+## [1.138.1](https://github.com/adobe/spacecat-api-service/compare/v1.138.0...v1.138.1) (2025-07-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.36.0 ([#1095](https://github.com/adobe/spacecat-api-service/issues/1095)) ([975edb0](https://github.com/adobe/spacecat-api-service/commit/975edb094d51e3cfda2209ff1a48a006fe967505))
+
 # [1.138.0](https://github.com/adobe/spacecat-api-service/compare/v1.137.5...v1.138.0) (2025-07-25)
 
 
