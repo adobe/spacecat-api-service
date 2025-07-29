@@ -53,6 +53,17 @@ function ReportsController(ctx, log, env) {
    * @param {string} context.params.siteId - The site ID.
    * @param {object} context.data - Request body data.
    * @param {string} context.data.reportType - The type of report to generate.
+   * @param {object} context.data.reportPeriod - The report period with startDate
+   *   and endDate.
+   * @param {string} context.data.reportPeriod.startDate - The start date for the
+   *   report period.
+   * @param {string} context.data.reportPeriod.endDate - The end date for the report period.
+   * @param {object} context.data.comparisonPeriod - The comparison period with startDate
+   *   and endDate.
+   * @param {string} context.data.comparisonPeriod.startDate - The start date for the
+   *   comparison period.
+   * @param {string} context.data.comparisonPeriod.endDate - The end date for the
+   *   comparison period.
    * @return {Promise<Response>} Report job response.
    */
   const createReport = async (context) => {
@@ -76,6 +87,32 @@ function ReportsController(ctx, log, env) {
       return badRequest('Report type is required');
     }
 
+    // Validate report period
+    if (!isNonEmptyObject(data.reportPeriod)) {
+      return badRequest('Report period is required');
+    }
+
+    if (!hasText(data.reportPeriod.startDate)) {
+      return badRequest('Report period start date is required');
+    }
+
+    if (!hasText(data.reportPeriod.endDate)) {
+      return badRequest('Report period end date is required');
+    }
+
+    // Validate comparison period
+    if (!isNonEmptyObject(data.comparisonPeriod)) {
+      return badRequest('Comparison period is required');
+    }
+
+    if (!hasText(data.comparisonPeriod.startDate)) {
+      return badRequest('Comparison period start date is required');
+    }
+
+    if (!hasText(data.comparisonPeriod.endDate)) {
+      return badRequest('Comparison period end date is required');
+    }
+
     try {
       // Check if site exists
       const site = await Site.findById(siteId);
@@ -86,6 +123,31 @@ function ReportsController(ctx, log, env) {
       // Check access control
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
+      }
+
+      // Check if a report with the same parameters already exists
+      const existingReports = await Report.allBySiteId(siteId);
+      const existingReport = existingReports.find((report) => {
+        const reportData = report.getReportType();
+        const reportPeriod = report.getReportPeriod();
+        const comparisonPeriod = report.getComparisonPeriod();
+
+        // Check if report type matches
+        if (reportData !== reportType) {
+          return false;
+        }
+
+        // Deep comparison of report periods
+        const periodsMatch = JSON.stringify(reportPeriod) === JSON.stringify(data.reportPeriod);
+        const comparisonPeriodsMatch = JSON.stringify(comparisonPeriod)
+          === JSON.stringify(data.comparisonPeriod);
+
+        return periodsMatch && comparisonPeriodsMatch;
+      });
+
+      if (existingReport) {
+        log.info(`Report already exists for site ${siteId} with the same parameters`);
+        return badRequest('A report with the same type and duration already exists for this site');
       }
 
       // Get the reports queue URL from environment

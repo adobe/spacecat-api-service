@@ -97,15 +97,15 @@ describe('ReportsController', () => {
           getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
           getReportType: () => 'performance',
           getReportPeriod: () => ({
-            dateRange: 'last-30-days',
-            metrics: ['lcp', 'fid', 'cls'],
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
           }),
           getComparisonPeriod: () => ({
-            dateRange: 'last-30-days',
-            metrics: ['lcp', 'fid', 'cls'],
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
           }),
         }),
-        allBySiteId: sinon.stub(),
+        allBySiteId: sinon.stub().resolves([]), // No existing reports by default
       },
     };
 
@@ -147,12 +147,12 @@ describe('ReportsController', () => {
         data: {
           reportType: 'performance',
           reportPeriod: {
-            dateRange: 'last-30-days',
-            metrics: ['lcp', 'fid', 'cls'],
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
           },
           comparisonPeriod: {
-            dateRange: 'last-30-days',
-            metrics: ['lcp', 'fid', 'cls'],
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
           },
         },
         attributes: {
@@ -182,16 +182,191 @@ describe('ReportsController', () => {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
           reportType: 'performance',
           reportPeriod: {
-            dateRange: 'last-30-days',
-            metrics: ['lcp', 'fid', 'cls'],
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
           },
           comparisonPeriod: {
-            dateRange: 'last-30-days',
-            metrics: ['lcp', 'fid', 'cls'],
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
           },
           initiatedBy: 'test@example.com',
         }),
       );
+    });
+
+    it('should return bad request for duplicate report with same parameters', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+        attributes: {
+          user: {
+            email: 'test@example.com',
+          },
+        },
+      };
+
+      // Mock existing report with same parameters
+      const existingReport = {
+        getReportType: () => 'performance',
+        getReportPeriod: () => ({
+          startDate: '2025-01-01',
+          endDate: '2025-01-31',
+        }),
+        getComparisonPeriod: () => ({
+          startDate: '2024-12-01',
+          endDate: '2024-12-31',
+        }),
+      };
+
+      mockDataAccess.Report.allBySiteId = sinon.stub().resolves([existingReport]);
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site');
+    });
+
+    it('should not return duplicate error when existing reports have different report type', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+        attributes: {
+          user: {
+            email: 'test@example.com',
+          },
+        },
+      };
+
+      // Mock existing report with DIFFERENT report type but same periods
+      const existingReport = {
+        getReportType: () => 'optimization', // Different type
+        getReportPeriod: () => ({
+          startDate: '2025-01-01',
+          endDate: '2025-01-31',
+        }),
+        getComparisonPeriod: () => ({
+          startDate: '2024-12-01',
+          endDate: '2024-12-31',
+        }),
+      };
+
+      mockDataAccess.Report.allBySiteId = sinon.stub().resolves([existingReport]);
+
+      // Reset other mocks for successful creation
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockAccessControlUtil.hasAccess.resolves(true);
+      mockDataAccess.Report.create.resolves({
+        getId: () => 'test-report-id',
+        getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
+        getReportType: () => 'performance',
+        getReportPeriod: () => ({
+          startDate: '2025-01-01',
+          endDate: '2025-01-31',
+        }),
+        getComparisonPeriod: () => ({
+          startDate: '2024-12-01',
+          endDate: '2024-12-31',
+        }),
+      });
+      mockSqs.sendMessage.resolves();
+
+      const result = await reportsController.createReport(context);
+
+      // Should succeed since report types are different
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report generation job queued successfully');
+      expect(responseBody.reportType).to.equal('performance');
+    });
+
+    it('should successfully create report when existing report has different type (explicit branch test)', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'security', // Different from existing
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+        attributes: {
+          user: {
+            email: 'test@example.com',
+          },
+        },
+      };
+
+      // Mock existing report with different report type
+      const existingReportWithDifferentType = {
+        getReportType: () => 'cwv', // Different from 'security'
+        getReportPeriod: () => ({
+          startDate: '2025-01-01',
+          endDate: '2025-01-31',
+        }),
+        getComparisonPeriod: () => ({
+          startDate: '2024-12-01',
+          endDate: '2024-12-31',
+        }),
+      };
+
+      mockDataAccess.Report.allBySiteId = sinon.stub().resolves([existingReportWithDifferentType]);
+
+      // Reset other mocks for successful creation
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockAccessControlUtil.hasAccess.resolves(true);
+      mockDataAccess.Report.create.resolves({
+        getId: () => 'test-security-report-id',
+        getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
+        getReportType: () => 'security',
+        getReportPeriod: () => ({
+          startDate: '2025-01-01',
+          endDate: '2025-01-31',
+        }),
+        getComparisonPeriod: () => ({
+          startDate: '2024-12-01',
+          endDate: '2024-12-31',
+        }),
+      });
+      mockSqs.sendMessage.resolves();
+
+      const result = await reportsController.createReport(context);
+
+      // Should succeed since report types are different
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report generation job queued successfully');
+      expect(responseBody.reportType).to.equal('security');
     });
 
     it('should return bad request for invalid site ID', async () => {
@@ -201,7 +376,14 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
-          test: 'data',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
         },
       };
 
@@ -230,6 +412,144 @@ describe('ReportsController', () => {
       expect(responseBody.message).to.equal('Report type is required');
     });
 
+    it('should return bad request for missing report period', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report period is required');
+    });
+
+    it('should return bad request for missing report period start date', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report period start date is required');
+    });
+
+    it('should return bad request for missing report period end date', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report period end date is required');
+    });
+
+    it('should return bad request for missing comparison period', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Comparison period is required');
+    });
+
+    it('should return bad request for missing comparison period start date', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Comparison period start date is required');
+    });
+
+    it('should return bad request for missing comparison period end date', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Comparison period end date is required');
+    });
+
     it('should return bad request for missing data', async () => {
       const context = {
         params: {
@@ -254,7 +574,14 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
-          test: 'data',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
         },
       };
 
@@ -274,7 +601,14 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
-          test: 'data',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
         },
       };
 
@@ -303,7 +637,14 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
-          test: 'data',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
         },
       };
 
@@ -323,7 +664,14 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
-          test: 'data',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
         },
       };
 
@@ -341,7 +689,14 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
-          test: 'data',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
         },
         attributes: {},
       };
