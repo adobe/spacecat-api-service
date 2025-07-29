@@ -17,35 +17,25 @@ import {
   badRequest,
   found,
 } from '@adobe/spacecat-shared-http-utils';
-import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
+import {
+  AWSAthenaClient, TrafficDataResponseDto, getTrafficAnalysisQuery,
+  TrafficDataWithCWVDto, getTrafficAnalysisQueryPlaceholdersFilled,
+} from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
-import { getStaticContent } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { TrafficDataResponseDto } from '../../dto/traffic-data-base-response.js';
-import { TrafficDataWithCWVDto } from '../../dto/traffic-data-response-with-cwv.js';
 import {
   getS3CachedResult,
   addResultJsonToCache,
   fileExists,
 } from './caching-helper.js';
-import { getDateRanges } from '../../../test/controllers/paid/calendar-week-helper.js';
-
-async function loadSql(variables) {
-  return getStaticContent(variables, './src/controllers/paid/channel-query.sql.tpl');
-}
-
-function getWeekMonthsAndYears(year, week) {
-  const ranges = getDateRanges(week, year);
-  const months = [...new Set(ranges.map((r) => r.month))].join(', ');
-  const years = [...new Set(ranges.map((r) => r.year))].join(', ');
-  return { months, years };
-}
 
 function getCacheKey(siteId, query, cacheLocation) {
   const outPrefix = crypto.createHash('md5').update(query).digest('hex');
   const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
   return { cacheKey, outPrefix };
 }
+
+const isTrue = (value) => value === true || value === 'true';
 
 function TrafficController(context, log, env) {
   const { dataAccess, s3 } = context;
@@ -61,13 +51,18 @@ function TrafficController(context, log, env) {
   const ATHENA_TEMP_FOLDER = `s3://${bucketName}/rum-metrics-compact/temp/out`;
   const CACHE_LOCATION = `s3://${bucketName}/rum-metrics-compact/cache`;
 
-  async function tryGetCacheResult(siteId, query) {
+  async function tryGetCacheResult(siteId, query, noCache) {
     const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
+    if (isTrue(noCache)) {
+      log.info(`Skipping cache check for file: ${cacheKey} because param noCache is: ${noCache}`);
+      return { cachedResultUrl: null, cacheKey, outPrefix };
+    }
     if (await fileExists(s3, cacheKey, log)) {
       log.info(`Found cached result. Fetching signed URL for Athena result from S3: ${cacheKey}`);
       const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
       return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
     }
+    log.info(`Cached result for file: ${cacheKey} does not exist`);
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
 
@@ -77,42 +72,50 @@ function TrafficController(context, log, env) {
     if (!site) {
       return notFound('Site not found');
     }
+    const baseURL = await site.getBaseURL();
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can view paid traffic metrics');
     }
 
     // validate input params
-    const { year, week } = context.data;
+    const { year, week, noCache } = context.data;
     if (!year || !week) {
       return badRequest('Year and week are required parameters');
     }
 
-    const { months, years } = getWeekMonthsAndYears(year, week);
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
-    const groupBy = dimensions;
-    const dimensionColumns = groupBy.join(', ');
-    const dimensionColumnsPrefixed = `${groupBy.map((col) => `a.${col}`).join(', ')}, `;
-    const description = `fetch paid channel data | db: ${rumMetricsDatabase} | siteKey: ${siteId} | year: ${year} | month: ${months} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
+
+    let pageTypes = null;
+    if (dimensions.includes('page_type')) {
+      pageTypes = await site.getPageTypes();
+    }
+
+    const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
+      week,
+      year,
+      siteId,
+      dimensions,
+      tableName,
+      pageTypes,
+      pageTypeMatchColumn: 'path',
+    });
+
+    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
     log.info(`Processing query: ${description}`);
 
     // build query
-    const query = await loadSql({
-      siteId,
-      years,
-      months,
-      week,
-      groupBy: groupBy.join(', '),
-      dimensionColumns,
-      dimensionColumnsPrefixed,
-      tableName,
-    });
+    const query = getTrafficAnalysisQuery(quereyParams);
 
     log.debug(`Fetching paid data with query: ${query}`);
 
     // first try to get from cache
-    const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(siteId, query);
+    const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(
+      siteId,
+      query,
+      noCache,
+    );
     const thresholdConfig = env.CWV_THRESHOLDS || {};
     if (cachedResultUrl) {
       log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}`);
@@ -125,8 +128,8 @@ function TrafficController(context, log, env) {
 
     log.info(`Fetching paid data directly from Athena table: ${tableName}`);
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
-    const response = results.map((row) => mapper.toJSON(row, thresholdConfig));
-    log.info(`Successfully fetched results of size ${response?.length}`);
+    const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
+    log.info(`Successfully fetched results of length ${response?.length}`);
 
     // add to cache
     let isCached = false;
@@ -135,21 +138,36 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    log.warn(`Failed to cache result to S3 with key ${CACHE_LOCATION}. Returning response directly.`);
+    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly.`);
     return ok(response, {
       'content-encoding': 'gzip',
     });
   }
 
   return {
-    getPaidTrafficByCampaignUrlDevice: () => fetchPaidTrafficData(['utm_campaign', 'path', 'device'], TrafficDataWithCWVDto),
-    getPaidTrafficByCampaignDevice: () => fetchPaidTrafficData(['utm_campaign', 'device'], TrafficDataWithCWVDto),
-    getPaidTrafficByCampaignUrl: () => fetchPaidTrafficData(['utm_campaign', 'path'], TrafficDataWithCWVDto),
-    getPaidTrafficByCampaign: () => fetchPaidTrafficData(['utm_campaign'], TrafficDataWithCWVDto),
-    getPaidTrafficByTypeChannelCampaign: () => fetchPaidTrafficData(['trf_type', 'trf_channel', 'utm_campaign'], TrafficDataResponseDto),
-    getPaidTrafficByTypeChannel: () => fetchPaidTrafficData(['trf_type', 'trf_channel'], TrafficDataResponseDto),
-    getPaidTrafficByTypeCampaign: () => fetchPaidTrafficData(['trf_type', 'utm_campaign'], TrafficDataResponseDto),
-    getPaidTrafficByType: () => fetchPaidTrafficData(['trf_type'], TrafficDataResponseDto),
+    getPaidTrafficByCampaignUrlDevice: async () => fetchPaidTrafficData(['utm_campaign', 'path', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignDevice: async () => fetchPaidTrafficData(['utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignUrl: async () => fetchPaidTrafficData(['utm_campaign', 'path'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaign: async () => fetchPaidTrafficData(['utm_campaign'], TrafficDataWithCWVDto),
+    getPaidTrafficByTypeChannelCampaign: async () => fetchPaidTrafficData(['trf_type', 'trf_channel', 'utm_campaign'], TrafficDataResponseDto),
+    getPaidTrafficByTypeChannel: async () => fetchPaidTrafficData(['trf_type', 'trf_channel'], TrafficDataResponseDto),
+    getPaidTrafficByTypeCampaign: async () => fetchPaidTrafficData(['trf_type', 'utm_campaign'], TrafficDataResponseDto),
+    getPaidTrafficByType: async () => fetchPaidTrafficData(['trf_type'], TrafficDataResponseDto),
+    getPaidTrafficByUrlPageTypePlatformCampaignDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatformCampaignDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypeCampaignDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypeDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypeCampaign: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypePlatform: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypeCampaignPlatform: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'trf_platform'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypePlatformDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypeCampaignDevice: async () => fetchPaidTrafficData(['page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypeDevice: async () => fetchPaidTrafficData(['page_type', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypeCampaign: async () => fetchPaidTrafficData(['page_type', 'utm_campaign'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatform: async () => fetchPaidTrafficData(['page_type', 'trf_platform'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatformDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatformCampaign: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign'], TrafficDataWithCWVDto),
+
   };
 }
 
