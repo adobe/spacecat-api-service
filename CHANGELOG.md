@@ -1,3 +1,17 @@
+# [1.140.0](https://github.com/adobe/spacecat-api-service/compare/v1.139.1...v1.140.0) (2025-07-30)
+
+
+### Features
+
+* **slack:** add new command for traffic analysis backfill ([#1099](https://github.com/adobe/spacecat-api-service/issues/1099)) ([c54e01b](https://github.com/adobe/spacecat-api-service/commit/c54e01bc9b4b3060babfd3dcb6b324ea93ad5aab))
+
+## [1.139.1](https://github.com/adobe/spacecat-api-service/compare/v1.139.0...v1.139.1) (2025-07-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.42.0 ([#1103](https://github.com/adobe/spacecat-api-service/issues/1103)) ([d8ed1df](https://github.com/adobe/spacecat-api-service/commit/d8ed1df7dc62ac46f28daabbd6dbd2f4f8c92d18))
+
 # [1.139.0](https://github.com/adobe/spacecat-api-service/compare/v1.138.6...v1.139.0) (2025-07-29)
 
 
