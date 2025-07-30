@@ -28,6 +28,7 @@ import toggleSiteAudit from './commands/toggle-site-audit.js';
 import onboard from './commands/onboard.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
 import toggleSiteImport from './commands/toggle-site-import.js';
+import runTrafficAnalysisBackfill from './commands/run-traffic-analysis-backfill.js';
 
 /**
  * Returns all commands.
@@ -47,6 +48,7 @@ export default (context) => [
   runImport(context),
   runInternalReport(context),
   runScrape(context),
+  runTrafficAnalysisBackfill(context),
   setLiveStatus(context),
   getGoogleLink(context),
   help(context),
