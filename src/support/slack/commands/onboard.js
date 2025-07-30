@@ -224,6 +224,7 @@ function OnboardCommand(context) {
         organization = await Organization.create({
           name: imsOrgDetails.orgName,
           imsOrgId: imsOrgID,
+          tenantId: imsOrgDetails.tenantId,
         });
 
         const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;

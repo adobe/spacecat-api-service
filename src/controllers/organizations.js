@@ -64,7 +64,12 @@ function OrganizationsController(ctx, env) {
     }
 
     try {
-      const organization = await Organization.create(context.data);
+      // Extract tenantId from request data if provided, otherwise use undefined
+      const { tenantId, ...organizationData } = context.data;
+      const organization = await Organization.create({
+        ...organizationData,
+        ...(tenantId && { tenantId }),
+      });
       return createResponse(OrganizationDto.toJSON(organization), 201);
     } catch (e) {
       return badRequest(e.message);

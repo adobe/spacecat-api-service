@@ -207,11 +207,15 @@ describe('Organizations Controller', () => {
   it('creates an organization', async () => {
     mockDataAccess.Organization.create.resolves(organizations[0]);
     const response = await organizationsController.createOrganization({
-      data: { name: 'Org 1' },
+      data: { name: 'Org 1', tenantId: 'test-tenant' },
       ...context,
     });
 
     expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
+    expect(mockDataAccess.Organization.create).to.have.been.calledWith({
+      name: 'Org 1',
+      tenantId: 'test-tenant',
+    });
     expect(response.status).to.equal(201);
 
     const organization = await response.json();
@@ -219,11 +223,25 @@ describe('Organizations Controller', () => {
     expect(organization).to.have.property('name', 'Org 1');
   });
 
+  it('creates an organization without tenantId', async () => {
+    mockDataAccess.Organization.create.resolves(organizations[0]);
+    const response = await organizationsController.createOrganization({
+      data: { name: 'Org 1' },
+      ...context,
+    });
+
+    expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
+    expect(mockDataAccess.Organization.create).to.have.been.calledWith({
+      name: 'Org 1',
+    });
+    expect(response.status).to.equal(201);
+  });
+
   it('creates an organization for non admin users', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     mockDataAccess.Organization.create.resolves(organizations[0]);
     const response = await organizationsController.createOrganization({
-      data: { name: 'Org 1' },
+      data: { name: 'Org 1', tenantId: 'test-tenant' },
       ...context,
     });
     expect(response.status).to.equal(403);
@@ -235,11 +253,15 @@ describe('Organizations Controller', () => {
   it('returns bad request when creating an organization fails', async () => {
     mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
     const response = await organizationsController.createOrganization({
-      data: { name: 'Org 1' },
+      data: { name: 'Org 1', tenantId: 'test-tenant' },
       ...context,
     });
 
     expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
+    expect(mockDataAccess.Organization.create).to.have.been.calledWith({
+      name: 'Org 1',
+      tenantId: 'test-tenant',
+    });
     expect(response.status).to.equal(400);
 
     const error = await response.json();

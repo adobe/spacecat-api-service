@@ -124,7 +124,10 @@ describe('SetSiteOrganizationCommand', () => {
       };
       siteStub.findByBaseURL.resolves(mockSite);
       organizationStub.findByImsOrgId.resolves(null);
-      imsClientStub.getImsOrganizationDetails.resolves({ orgName: 'Mock IMS Org' });
+      imsClientStub.getImsOrganizationDetails.resolves({
+        orgName: 'Mock IMS Org',
+        tenantId: 'test-tenant-id',
+      });
 
       const mockNewOrg = {
         getId: () => 'newOrgId',
@@ -141,6 +144,7 @@ describe('SetSiteOrganizationCommand', () => {
       expect(organizationStub.create.calledWith({
         name: 'Mock IMS Org',
         imsOrgId: 'newImsOrgId',
+        tenantId: 'test-tenant-id',
       })).to.be.true;
       expect(mockNewOrg.save.calledOnce).to.be.true;
       expect(mockSite.setOrganizationId.calledWith('newOrgId')).to.be.true;
