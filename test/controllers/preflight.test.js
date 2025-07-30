@@ -12,14 +12,21 @@
 
 /* eslint-env mocha */
 
+// Add global fetch polyfill for tests
+import { fetch } from '@adobe/fetch';
+
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import esmock from 'esmock';
+
 import * as utils from '../../src/support/utils.js';
 import PreflightController from '../../src/controllers/preflight.js';
+
+// Make fetch available globally
+global.fetch = fetch;
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -121,12 +128,18 @@ describe('Preflight Controller', () => {
     const headResponse = { status: 401 };
 
     beforeEach(() => {
+      // Ensure fetch is available globally before stubbing
+      if (!global.fetch) {
+        global.fetch = fetch;
+      }
       fetchStub = sinon.stub(global, 'fetch');
       fetchStub.resolves(headResponse);
     });
 
     afterEach(() => {
-      fetchStub.restore();
+      if (fetchStub && fetchStub.restore) {
+        fetchStub.restore();
+      }
     });
 
     it('creates a preflight job successfully in production environment', async () => {
@@ -174,7 +187,9 @@ describe('Preflight Controller', () => {
     });
 
     it('creates a preflight job successfully in production environment with authentication enabled', async () => {
-      fetchStub.restore();
+      if (fetchStub && fetchStub.restore) {
+        fetchStub.restore();
+      }
       fetchStub = sinon.stub(global, 'fetch').resolves({ status: 200 });
 
       const context = {
