@@ -129,6 +129,7 @@ async function run(request, context) {
       auditsController,
       sitesController,
       scrapeController,
+      opportunitiesController,
       context,
     });
     const mcpController = McpController(context, mcpRegistry);
