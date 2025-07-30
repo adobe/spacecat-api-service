@@ -27,6 +27,16 @@ import { ErrorWithStatusCode } from '../../src/support/utils.js';
 use(sinonChai);
 use(chaiAsPromised);
 
+const actCtx = {
+  acls: [],
+  aclEntities: {
+    // Right now only check site
+    exclude: [
+      'scrapeJob', 'scrapeUrl',
+    ],
+  },
+};
+
 const createScrapeJob = (data) => (new ScrapeJob(
   {
     entities: {
@@ -41,6 +51,7 @@ const createScrapeJob = (data) => (new ScrapeJob(
   },
   {
     log: console,
+    aclCtx: actCtx,
     getCollection: stub().returns({
       schema: ScrapeJobSchema,
       findById: stub(),
@@ -148,7 +159,9 @@ describe('ScrapeJobController tests', () => {
       if (jobId !== exampleJob.scrapeJobId) {
         throw new ErrorWithStatusCode('Not found', 404);
       }
-      return createScrapeJob(exampleJob);
+      const job = createScrapeJob(exampleJob);
+      job.aclCtx = actCtx;
+      return job;
     });
 
     scrapeJobConfiguration = {
@@ -306,11 +319,8 @@ describe('ScrapeJobController tests', () => {
     });
 
     it('should pick another scrape queue when the first one is in use', async () => {
-      baseContext.dataAccess.getScrapeJobsByStatus = sandbox.stub().resolves([
-        createScrapeJob({
-          ...exampleJob,
-        }),
-      ]);
+      const job = createScrapeJob(exampleJob);
+      baseContext.dataAccess.getScrapeJobsByStatus = sandbox.stub().resolves([job]);
       const response = await scrapeJobController.createScrapeJob(baseContext);
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(202);
@@ -567,6 +577,7 @@ describe('ScrapeJobController tests', () => {
 
     it('should return an array of scrape jobs', async () => {
       const job = createScrapeJob(exampleJob);
+      job.aclCtx = actCtx;
       baseContext.dataAccess.ScrapeJob.allByDateRange = sandbox.stub().resolves([job]);
       baseContext.params.startDate = '2022-10-05T14:48:00.000Z';
       baseContext.params.endDate = '2022-10-07T14:48:00.000Z';
@@ -603,6 +614,7 @@ describe('ScrapeJobController tests', () => {
   describe('getScrapeJobsByBaseURL', () => {
     it('should return an array of scrape jobs', async () => {
       const job = createScrapeJob(exampleJob);
+      job.aclCtx = actCtx;
       baseContext.dataAccess.ScrapeJob.allByBaseURL = sandbox.stub().resolves([job]);
       baseContext.params.baseURL = 'aHR0cHM6Ly93d3cuZXhhbXBsZS5jb20=';
 
@@ -615,6 +627,7 @@ describe('ScrapeJobController tests', () => {
 
     it('should return an array of scrape jobs for baseUrl and processingType', async () => {
       const job = createScrapeJob(exampleJob);
+      job.aclCtx = actCtx;
       baseContext.dataAccess.ScrapeJob.allByBaseURLAndProcessingType = sandbox
         .stub()
         .resolves([job]);

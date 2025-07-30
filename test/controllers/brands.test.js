@@ -35,6 +35,7 @@ describe('Brands Controller', () => {
     info: sandbox.stub(),
     error: sandbox.stub(),
     warn: sandbox.stub(),
+    debug: sandbox.stub(),
   };
 
   const ORGANIZATION_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
@@ -83,6 +84,32 @@ describe('Brands Controller', () => {
     loggerStub,
   ));
 
+  const acls = [{
+    acl: [{
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/9033554c-de8a-44ac-a356-09b51af8cc28/**',
+    },
+    {
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/9033554c-de8a-44ac-a356-09b51af8cc28',
+    },
+    ],
+  }];
+
+  const actCtx = {
+    acls,
+    aclEntities: {
+      // Right now only check site
+      exclude: [
+        'site', 'apiKey', 'audit', 'configuration', 'experiment',
+        'importJob', 'importUrl', 'keyEvent', 'latestAudit',
+        'opportunity', 'siteCandidate', 'siteTopPage', 'suggestion', 'asyncJob',
+      ],
+    },
+  };
+
+  organizations[0].aclCtx = actCtx;
+
   const getCollectionStub = stub();
   getCollectionStub.returns({
     schema: OrganizationSchema,
@@ -121,6 +148,8 @@ describe('Brands Controller', () => {
     site,
     loggerStub,
   ));
+
+  sites[0].aclCtx = actCtx;
 
   let mockDataAccess;
   let brandsController;

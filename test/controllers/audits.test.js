@@ -46,6 +46,30 @@ describe('Audits Controller', () => {
     'patchAuditForSite',
   ];
 
+  const acls = [{
+    acl: [{
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/org-id/**',
+    },
+    {
+      actions: ['C', 'R', 'U', 'D'],
+      path: '/organization/org-id',
+    },
+    ],
+  }];
+
+  const actCtx = {
+    acls,
+    aclEntities: {
+      // Right now only check site
+      exclude: [
+        'site', 'apiKey', 'audit', 'configuration', 'experiment',
+        'importJob', 'importUrl', 'keyEvent', 'latestAudit',
+        'opportunity', 'siteCandidate', 'siteTopPage', 'suggestion', 'asyncJob',
+      ],
+    },
+  };
+
   const mockRawAudits = [
     {
       siteId: SITE_ID,
@@ -182,6 +206,8 @@ describe('Audits Controller', () => {
     name: 'Test Org',
     imsOrgId: 'org-id@AdobeOrg',
   });
+  mockOrganization.aclCtx = actCtx;
+  mockOrganization.log = console;
   const mockSite = new Site(
     {
       entities: {
