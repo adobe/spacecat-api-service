@@ -94,7 +94,7 @@ describe('RunImportCommand - Top Forms Integration', () => {
       slackContext.files = []; // No files provided
 
       await command.handleExecution(['top-forms', 'https://example.com'], slackContext);
-      expect(slackContext.say.calledWith(':error: Top-forms import requires a CSV file with pageUrl and formSource columns.')).to.be.true;
+      expect(slackContext.say.calledWith(':error: Top-forms import requires a CSV file with pageUrl and formSource(Optional) columns.')).to.be.true;
     });
 
     it('should reject invalid baseURL for top-forms import', async () => {
@@ -279,7 +279,7 @@ https://example.com/form2,salesforce`;
       nock('https://files.slack.com')
         .get('/test.csv')
         .matchHeader('authorization', 'Bearer test-bot-token')
-        .reply(500, 'Server Error');
+        .reply(500);
 
       await command.handleExecution(['top-forms', 'https://example.com'], slackContext);
 
