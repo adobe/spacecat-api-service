@@ -17,7 +17,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
+import approveSiteCandidate, { POLLING_NUM_RETRIES, POLLING_INTERVAL } from '../../../../src/support/slack/actions/approve-site-candidate.js';
 import {
   expectedAnnouncedMessage,
   expectedApprovedReply,
@@ -45,6 +45,7 @@ describe('approveSiteCandidate', () => {
   let site;
   let siteCandidate;
   let clock;
+  let fetchMock;
 
   beforeEach(async () => {
     clock = sinon.useFakeTimers();
@@ -74,14 +75,11 @@ describe('approveSiteCandidate', () => {
         SLACK_REPORT_CHANNEL_INTERNAL: 'channel-id',
         ORGANIZATION_ID_FRIENDS_FAMILY: 'friends-family-org',
         DEFAULT_ORGANIZATION_ID: 'default',
+        MYSTIQUE_API_BASE_URL: 'https://mystique-api.com',
+        IGNORED_GITHUB_ORGS: 'ignored-orgs',
       },
       slackClients: {
         WORKSPACE_INTERNAL_STANDARD: slackClient,
-      },
-      // If your updated code uses OrgDetectorAgent.fromContext:
-      // we can mock it similarly to how we do with other agents/clients
-      orgDetectorAgent: {
-        detect: sinon.stub(),
       },
     };
 
@@ -108,17 +106,24 @@ describe('approveSiteCandidate', () => {
 
     ackMock = sinon.stub().resolves();
     respondMock = sinon.stub().resolves();
+
+    fetchMock = sinon.stub(global, 'fetch');
   });
 
   afterEach(() => {
     sinon.restore();
     clock.restore();
+    fetchMock.restore();
   });
 
   it('should approve site candidate (customer) and announce site discovery', async () => {
     context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
     context.dataAccess.Site.findByBaseURL.resolves(null);
     context.dataAccess.Site.create.resolves(site);
+
+    // Ensure org detection API call does not wait due to polling
+    fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({ uuid: 'job-uuid' }) });
+    fetchMock.onSecondCall().resolves({ ok: true, json: async () => ({ status: 'completed', matchedCompany: { name: 'Some Company', imsOrgId: 'Company@AdobeOrg' } }) });
 
     // Call the function under test
     const approveFunction = approveSiteCandidate(context);
@@ -164,6 +169,7 @@ describe('approveSiteCandidate', () => {
     expect(siteCandidate.setUpdatedBy).to.have.been.calledWith('approvers-username');
     expect(siteCandidate.save).to.have.been.calledOnce;
     expect(respondMock).to.have.been.called; // with appropriate FnF message
+    expect(fetchMock).not.to.have.been.called; // FnF should not trigger org detection
   });
 
   it('should approve previously added non-live site, set aem_edge, then announce', async () => {
@@ -171,6 +177,10 @@ describe('approveSiteCandidate', () => {
     context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
     context.dataAccess.Site.findByBaseURL.resolves(site);
     site.save.resolves(site);
+
+    // Ensure org detection API call does not wait due to polling
+    fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({ uuid: 'job-uuid' }) });
+    fetchMock.onSecondCall().resolves({ ok: true, json: async () => ({ status: 'completed', matchedCompany: { name: 'Some Company', imsOrgId: 'Company@AdobeOrg' } }) });
 
     const approveFunction = approveSiteCandidate(context);
     await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
@@ -184,19 +194,37 @@ describe('approveSiteCandidate', () => {
   });
 
   it('should detect an org if it is not FnF and post a thread message with "approveOrg"/"rejectOrg" buttons', async () => {
-    context.orgDetectorAgent.detect.resolves({
-      name: 'Some Company',
-      imsOrgId: 'Company@AdobeOrg',
-    });
-
     context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
     context.dataAccess.Site.findByBaseURL.resolves(null);
     context.dataAccess.Site.create.resolves(site);
 
+    // Ensure org detection API call does not wait due to polling
+    fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({ uuid: 'job-uuid' }) });
+    fetchMock.onSecondCall().resolves({ ok: true, json: async () => ({ status: 'completed', matchedCompany: { name: 'Some Company', imsOrgId: 'Company@AdobeOrg' } }) });
+
     const approveFunction = approveSiteCandidate(context);
     await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
 
-    expect(context.orgDetectorAgent.detect).to.have.been.calledWith('spacecat.com', 'some-owner');
+    expect(fetchMock).to.have.been.calledTwice;
+    expect(fetchMock.firstCall).to.have.been.calledWith(
+      'https://mystique-api.com/v1/org-detector',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domain: 'spacecat.com',
+          githubLogin: 'some-owner',
+          ignoredGithubOrgs: 'ignored-orgs',
+        }),
+      },
+    );
+    expect(fetchMock.secondCall).to.have.been.calledWith(
+      'https://mystique-api.com/v1/org-detector/job-uuid',
+      {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
 
     expect(slackClient.postMessage).to.have.been.calledTwice;
     const orgDetectionMsg = slackClient.postMessage.secondCall.args[0];
@@ -209,10 +237,12 @@ describe('approveSiteCandidate', () => {
 
   it('should not post org detection prompt if no org is detected or if it is FnF', async () => {
     // Scenario A: No org detected
-    context.orgDetectorAgent.detect.resolves({}); // empty object
     context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
     context.dataAccess.Site.findByBaseURL.resolves(null);
     context.dataAccess.Site.create.resolves(site);
+
+    fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({ uuid: 'job-uuid' }) });
+    fetchMock.onSecondCall().resolves({ ok: true, json: async () => ({ status: 'completed', matchedCompany: null }) });
 
     const approveFunction = approveSiteCandidate(context);
     await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
@@ -220,18 +250,22 @@ describe('approveSiteCandidate', () => {
     // postMessage call for site announcement
     expect(slackClient.postMessage).to.have.been.calledOnce;
 
+    // Scenario B: Friends & Family - should not trigger org detection
     sinon.restore();
 
     clock = sinon.useFakeTimers();
     slackClient.postMessage = sinon.stub().resolves();
-    context.orgDetectorAgent.detect = sinon.stub().resolves({
-      name: 'Some Company',
-      imsOrgId: 'Company@AdobeOrg',
-    });
+    fetchMock = sinon.stub(global, 'fetch');
+
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+
     const approveFnF = approveSiteCandidate(context);
     await approveFnF({ ack: ackMock, body: slackFriendsFamilyResponse, respond: respondMock });
 
     expect(slackClient.postMessage).to.have.been.calledOnce;
+    expect(fetchMock).not.to.have.been.called;
   });
 
   it('logs and throws the error again if something goes wrong', async () => {
@@ -243,5 +277,59 @@ describe('approveSiteCandidate', () => {
     ).to.be.rejectedWith('processing error');
 
     expect(context.log.error).to.have.been.calledWith('Error occurred while acknowledging site candidate approval');
+  });
+
+  it('should throw if org detection start POST request fails', async () => {
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+
+    fetchMock.onFirstCall().resolves({ ok: false, statusText: 'Bad Request' });
+
+    const approveFunction = approveSiteCandidate(context);
+    await expect(
+      approveFunction({
+        ack: ackMock,
+        body: slackActionResponse,
+        respond: respondMock,
+      }),
+    ).to.be.rejectedWith('Failed to start OrgDetectorAgent: Bad Request');
+  });
+
+  it('should throw if org detection POST returns invalid response', async () => {
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+
+    fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({}) });
+
+    const approveFunction = approveSiteCandidate(context);
+    const approvePromise = approveFunction({
+      ack: ackMock,
+      body: slackActionResponse,
+      respond: respondMock,
+    });
+    await expect(approvePromise).to.be.rejectedWith('Invalid response from OrgDetectorAgent start request: missing uuid');
+  });
+
+  it('should throw if org detection GET polling exceeds retries', async () => {
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+
+    fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({ uuid: 'job-uuid' }) });
+    for (let i = 1; i <= 11; i += 1) {
+      fetchMock.onCall(i).resolves({ ok: true, json: async () => ({ status: 'processing', matchedCompany: null }) });
+    }
+
+    const approveFunction = approveSiteCandidate(context);
+    const approvePromise = approveFunction({
+      ack: ackMock,
+      body: slackActionResponse,
+      respond: respondMock,
+    });
+
+    await clock.tickAsync(POLLING_NUM_RETRIES * POLLING_INTERVAL);
+    await expect(approvePromise).to.be.rejectedWith('Polling for OrgDetectorAgent job job-uuid exceeded maximum retries (10)');
   });
 });

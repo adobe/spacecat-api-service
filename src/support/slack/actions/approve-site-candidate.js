@@ -22,8 +22,8 @@ import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
 
-const POLLING_NUM_RETRIES = 10;
-const POLLING_INTERVAL = 60 * 5 * 1000; // 5 minutes
+export const POLLING_INTERVAL = 60 * 5 * 1000; // 5 minutes
+export const POLLING_NUM_RETRIES = 10;
 
 async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
   const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
@@ -135,7 +135,7 @@ export default function approveSiteCandidate(lambdaContext) {
         if (!startResponse.ok) throw new Error(`Failed to start OrgDetectorAgent: ${startResponse.statusText}`);
         const startData = await startResponse.json();
 
-        if (!startData || !startData.uuid) throw new Error('Invalid response from OrgDetectorAgent start');
+        if (!startData || !startData.uuid) throw new Error('Invalid response from OrgDetectorAgent start request: missing uuid');
         const jobId = startData.uuid;
 
         // Poll the mystique API to check the status of the Org Detector Agent job
