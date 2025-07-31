@@ -178,10 +178,34 @@ site-reports:
                   - id: "550e8400-e29b-41d4-a716-446655440001"
                     siteId: "550e8400-e29b-41d4-a716-446655440000"
                     reportType: "performance"
-                    status: "enhanced"
-                    storagePath: "s3://bucket/reports/base/report.csv"
+                    status: "success"
+                    storagePath: "/reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/"
+                    reportPeriod:
+                      startDate: "2024-01-01"
+                      endDate: "2024-01-31"
+                    comparisonPeriod:
+                      startDate: "2023-12-01"
+                      endDate: "2023-12-31"
                     createdAt: "2024-01-15T10:30:00Z"
                     updatedAt: "2024-01-15T11:45:00Z"
+                    updatedBy: "user@example.com"
+                    data:
+                      rawPresignedUrl: "https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=..."
+                      mystiquePresignedUrl: "https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=..."
+                  - id: "550e8400-e29b-41d4-a716-446655440002"
+                    siteId: "550e8400-e29b-41d4-a716-446655440000"
+                    reportType: "seo"
+                    status: "processing"
+                    storagePath: "/reports/550e8400-e29b-41d4-a716-446655440000/seo/550e8400-e29b-41d4-a716-446655440002/"
+                    reportPeriod:
+                      startDate: "2024-02-01"
+                      endDate: "2024-02-28"
+                    comparisonPeriod:
+                      startDate: "2024-01-01"
+                      endDate: "2024-01-31"
+                    createdAt: "2024-02-15T10:30:00Z"
+                    updatedAt: "2024-02-15T10:30:00Z"
+                    updatedBy: "user@example.com"
       '400':
         $ref: './responses.yaml#/400-no-site-id'
       '401':
@@ -216,10 +240,11 @@ site-reports:
             required:
               - reportType
               - reportPeriod
+              - comparisonPeriod
             properties:
               reportType:
                 type: string
-                enum: [performance, accessibility, seo, security, conversion]
+                enum: [performance, accessibility, seo, security, conversion, cwv, optimization]
                 description: The type of report to generate
                 example: 'performance'
               reportPeriod:
@@ -238,6 +263,9 @@ site-reports:
                     description: End date for the report period
               comparisonPeriod:
                 type: object
+                required:
+                  - startDate
+                  - endDate
                 properties:
                   startDate:
                     type: string
@@ -256,7 +284,7 @@ site-reports:
                 startDate: "2023-12-01"
                 endDate: "2023-12-31"
     responses:
-      '202':
+      '200':
         description: Report generation job queued successfully
         content:
           application/json:
@@ -269,19 +297,44 @@ site-reports:
                 siteId:
                   type: string
                   format: uuid
+                  description: The unique identifier of the site
                 reportType:
                   type: string
+                  description: The type of report requested
+                  example: "performance"
                 status:
                   type: string
-                  enum: [queued]
+                  enum: [processing]
+                  description: Current status of the report job
                 jobId:
                   type: string
                   format: uuid
+                  description: Unique identifier for the report job
                 timestamp:
                   type: string
                   format: date-time
+                  description: Timestamp when the job was created
       '400':
-        $ref: './responses.yaml#/400'
+        description: Bad request - validation errors or duplicate report
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the validation failure
+                  examples:
+                    - "Valid site ID is required"
+                    - "Report type is required"
+                    - "Report period is required"
+                    - "Report period start date is required"
+                    - "Report period end date is required"
+                    - "Comparison period is required"
+                    - "Comparison period start date is required"
+                    - "Comparison period end date is required"
+                    - "Request data is required"
+                    - "A report with the same type and duration already exists for this site"
       '401':
         $ref: './responses.yaml#/401'
       '403':
@@ -292,7 +345,18 @@ site-reports:
       '404':
         $ref: './responses.yaml#/404-site-not-found-with-id'
       '500':
-        $ref: './responses.yaml#/500'
+        description: Internal server error - configuration or processing issues
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  examples:
+                    - "Reports queue is not configured"
+                    - "Failed to create report job: SQS error"
     security:
       - api_key: [ ]
       - ims_key: [ ]
@@ -313,18 +377,50 @@ site-report:
       - reports
     summary: Get a specific report
     description: |
-      Retrieves detailed information about a specific report, including its current status,
-      download links for base and enhanced versions, and metadata.
+      Retrieves detailed information about a specific report, including download links 
+      for base and enhanced versions. Only returns reports with 'success' status.
+      Reports that are still processing will return a 400 error.
     operationId: getReport
     responses:
       '200':
-        description: Successful operation with report details
+        description: Successful operation with report details and download links
         content:
           application/json:
             schema:
               $ref: './schemas.yaml#/Report'
+            example:
+              id: "550e8400-e29b-41d4-a716-446655440001"
+              siteId: "550e8400-e29b-41d4-a716-446655440000"
+              reportType: "performance"
+              status: "success"
+              storagePath: "/reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/"
+              reportPeriod:
+                startDate: "2024-01-01"
+                endDate: "2024-01-31"
+              comparisonPeriod:
+                startDate: "2023-12-01"
+                endDate: "2023-12-31"
+              createdAt: "2024-01-15T10:30:00Z"
+              updatedAt: "2024-01-15T11:45:00Z"
+              updatedBy: "user@example.com"
+              data:
+                rawPresignedUrl: "https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=..."
+                mystiquePresignedUrl: "https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=..."
       '400':
-        $ref: './responses.yaml#/400'
+        description: Bad request - validation errors or report not ready
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message
+                  examples:
+                    - "Valid site ID is required"
+                    - "Valid report ID is required"
+                    - "Report is still processing."
+                    - "Report does not belong to the specified site"
       '401':
         $ref: './responses.yaml#/401'
       '403':

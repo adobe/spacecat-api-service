@@ -17,29 +17,50 @@ export const ReportDto = {
   /**
    * Converts a Report object into a JSON object.
    * @param {Readonly<Report>} report - Report object from spacecat-shared.
+   * @param {object} [presignedUrlObject] - Optional object containing presigned URLs.
    * @returns {{
    * id: string,
    * siteId: string,
    * reportType: string,
+   * status: string,
    * reportPeriod: { startDate: string, endDate: string },
    * comparisonPeriod: { startDate: string, endDate: string },
    * storagePath: string,
    * createdAt: string,
    * updatedAt: string,
-   * updatedBy: string
+   * updatedBy: string,
+   * data?: { rawPresignedUrl?: string, mystiquePresignedUrl?: string }
    * }}
    */
-  toJSON: (report) => ({
-    id: report.getId(),
-    siteId: report.getSiteId(),
-    reportType: report.getReportType(),
-    reportPeriod: report.getReportPeriod(),
-    comparisonPeriod: report.getComparisonPeriod(),
-    storagePath: report.getStoragePath(),
-    createdAt: report.getCreatedAt(),
-    updatedAt: report.getUpdatedAt(),
-    updatedBy: report.getUpdatedBy(),
-  }),
+  toJSON: (report, presignedUrlObject) => {
+    const result = {
+      id: report.getId(),
+      siteId: report.getSiteId(),
+      reportType: report.getReportType(),
+      status: report.getStatus(),
+      reportPeriod: report.getReportPeriod(),
+      comparisonPeriod: report.getComparisonPeriod(),
+      storagePath: report.getStoragePath(),
+      createdAt: report.getCreatedAt(),
+      updatedAt: report.getUpdatedAt(),
+      updatedBy: report.getUpdatedBy(),
+    };
+
+    // Add presigned URLs in optional "data" field if provided
+    if (presignedUrlObject
+      && (presignedUrlObject.rawPresignedUrl
+        || presignedUrlObject.mystiquePresignedUrl)) {
+      result.data = {};
+      if (presignedUrlObject.rawPresignedUrl) {
+        result.data.rawPresignedUrl = presignedUrlObject.rawPresignedUrl;
+      }
+      if (presignedUrlObject.mystiquePresignedUrl) {
+        result.data.mystiquePresignedUrl = presignedUrlObject.mystiquePresignedUrl;
+      }
+    }
+
+    return result;
+  },
 
   /**
    * Converts a Report object into a JSON object for queue messages.

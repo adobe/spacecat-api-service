@@ -26,6 +26,24 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { ReportDto } from '../dto/report.js';
 
+async function generatePresignedUrl(s3, bucket, key) {
+  const {
+    s3Client,
+    getSignedUrl,
+    GetObjectCommand,
+  } = s3;
+
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
+
+  // 7 days
+  const expiresIn = 60 * 60 * 24 * 7;
+
+  return getSignedUrl(s3Client, command, { expiresIn });
+}
+
 /**
  * Reports controller. Provides methods to create and manage report generation jobs.
  * @param {object} ctx - Context of the request.
@@ -38,7 +56,7 @@ function ReportsController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess, sqs } = ctx;
+  const { dataAccess, sqs, s3 } = ctx;
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -187,7 +205,7 @@ function ReportsController(ctx, log, env) {
         message: 'Report generation job queued successfully',
         siteId,
         reportType,
-        status: 'queued',
+        status: 'processing',
         jobId,
         timestamp: reportMessage.timestamp,
       });
@@ -205,6 +223,7 @@ function ReportsController(ctx, log, env) {
    * @return {Promise<Response>} Response containing all reports for the site.
    */
   const getAllReportsBySiteId = async (context) => {
+    const { S3_REPORT_BUCKET: bucketName } = env;
     const { siteId } = context.params;
 
     // Validate site ID
@@ -227,8 +246,31 @@ function ReportsController(ctx, log, env) {
       // Get all reports for the site
       const reports = await Report.allBySiteId(siteId);
 
-      // Convert reports to JSON using the DTO
-      const reportsJson = reports.map((report) => ReportDto.toJSON(report));
+      // Convert reports to JSON using the DTO, with presigned URLs for successful reports
+      const reportsJson = await Promise.all(reports.map(async (report) => {
+        // Only generate presigned URLs for successful reports
+        if (report.getStatus() === 'success') {
+          try {
+            const rawReportKey = `${report.getStoragePath()}raw/report.json`;
+            const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
+            const rawPresignedUrl = await generatePresignedUrl(s3, bucketName, rawReportKey);
+            const mystiquePresignedUrl = await generatePresignedUrl(
+              s3,
+              bucketName,
+              mystiqueReportKey,
+            );
+            const presignedUrlObject = {
+              rawPresignedUrl,
+              mystiquePresignedUrl,
+            };
+            return ReportDto.toJSON(report, presignedUrlObject);
+          } catch (urlError) {
+            log.warn(`Failed to generate presigned URLs for report ${report.getId()}: ${urlError.message}`);
+            return ReportDto.toJSON(report);
+          }
+        }
+        return ReportDto.toJSON(report);
+      }));
 
       log.info(`Retrieved ${reports.length} reports for site ${siteId}`);
 
@@ -252,6 +294,7 @@ function ReportsController(ctx, log, env) {
    * @return {Promise<Response>} Response containing the report data.
    */
   const getReport = async (context) => {
+    const { S3_REPORT_BUCKET: bucketName } = env;
     const { siteId, reportId } = context.params;
 
     // Validate site ID
@@ -282,13 +325,25 @@ function ReportsController(ctx, log, env) {
         return notFound('Report not found');
       }
 
+      if (report.getStatus() !== 'success') {
+        return badRequest('Report is still processing.');
+      }
+
       // Verify the report belongs to the specified site
       if (report.getSiteId() !== siteId) {
         return badRequest('Report does not belong to the specified site');
       }
 
+      const rawReportKey = `${report.getStoragePath()}raw/report.json`;
+      const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
+      const rawPresignedUrl = await generatePresignedUrl(s3, bucketName, rawReportKey);
+      const mystiquePresignedUrl = await generatePresignedUrl(s3, bucketName, mystiqueReportKey);
+      const presignedUrlObject = {
+        rawPresignedUrl,
+        mystiquePresignedUrl,
+      };
       // Convert report to JSON using the DTO
-      const reportJSON = ReportDto.toJSON(report);
+      const reportJSON = ReportDto.toJSON(report, presignedUrlObject);
 
       log.info(`Retrieved report ${reportId} for site ${siteId}`);
 
