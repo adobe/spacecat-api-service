@@ -96,42 +96,6 @@ function OnboardCommand(context) {
   };
 
   /**
-   * Checks if a site is in the LA_CUSTOMERS list and returns appropriate response if it is.
-   *
-   * @param {string} baseURL - The site URL to check.
-   * @param {string} imsOrgID - The IMS Org ID.
-   * @param {string} profileName - The profile name.
-   * @param {Object} slackContext - Slack context with say function.
-   * @returns {Promise<Object|null>} - Returns a report line if site is restricted, null otherwise.
-   */
-  const checkLACustomerRestriction = async (baseURL, imsOrgID, profileName, slackContext) => {
-    const { say } = slackContext;
-
-    if (env.LA_CUSTOMERS) {
-      const laCustomers = env.LA_CUSTOMERS.split(',').map((url) => url.trim());
-      const isLACustomer = laCustomers.some(
-        (url) => baseURL.toLowerCase().endsWith(url.toLowerCase()),
-      );
-
-      if (isLACustomer) {
-        const message = `:warning: Cannot onboard site ${baseURL} - it's already onboarded and live!`;
-        log.warn(message);
-        await say(message);
-        return {
-          site: baseURL,
-          imsOrgId: imsOrgID,
-          profile: profileName,
-          errors: 'Site is a Live customer',
-          status: 'Failed',
-          existingSite: 'Yes',
-        };
-      }
-    }
-
-    return null;
-  };
-
-  /**
    * Onboards a single site.
    *
    * @param {string} baseURLInput - The site URL.
@@ -157,17 +121,6 @@ function OnboardCommand(context) {
 
     // Set default IMS Org ID if not provided
     const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
-
-    // Check if site is in LA_CUSTOMERS list
-    const laCustomerCheck = await checkLACustomerRestriction(
-      baseURL,
-      imsOrgID,
-      profileName,
-      slackContext,
-    );
-    if (laCustomerCheck) {
-      return laCustomerCheck;
-    }
 
     log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
     await say(`:gear:  Starting ${profileName} environment setup for site ${baseURL}`);
@@ -199,57 +152,65 @@ function OnboardCommand(context) {
         return reportLine;
       }
 
-      // check if the organization with IMS Org ID already exists; create if it doesn't
-      let organization = await Organization.findByImsOrgId(imsOrgID);
-      // TODO: remove this one as we do not want to create organization.
-      // Let user create organization. Just add a slack message.
-      if (!organization) {
-        let imsOrgDetails;
-        try {
-          imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
-          log.info(`IMS Org Details: ${imsOrgDetails}`);
-        } catch (error) {
-          log.error(`Error retrieving IMS Org details: ${error.message}`);
-          reportLine.errors = `Error retrieving IMS org with the ID *${imsOrgID}*.`;
-          reportLine.status = 'Failed';
-          return reportLine;
-        }
-
-        if (!imsOrgDetails) {
-          reportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
-          reportLine.status = 'Failed';
-          return reportLine;
-        }
-
-        organization = await Organization.create({
-          name: imsOrgDetails.orgName,
-          imsOrgId: imsOrgID,
-          tenantId: imsOrgDetails.tenantId,
-        });
-
-        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
-        await say(message);
-        log.info(message);
-      }
-
-      const organizationId = organization.getId();
-      log.info(`Organization ${organizationId} was successfully retrieved or created`);
-      reportLine.spacecatOrgId = organizationId;
-
+      // Check if site already exists
       let site = await Site.findByBaseURL(baseURL);
+      let organizationId; // Declare organizationId in broader scope
       if (site) {
-        reportLine.existingSite = 'Yes';
-        reportLine.deliveryType = site.getDeliveryType();
-        log.info(`Site ${baseURL} already exists. Site ID: ${site.getId()}, Delivery Type: ${reportLine.deliveryType}`);
-
+        // Site exists - don't update org, just provide info
         const siteOrgId = site.getOrganizationId();
-        if (siteOrgId !== organizationId) {
-          log.info(`:warning: :alert: Site ${baseURL} organization ID mismatch. Run below slack command to update site organization to ${organizationId}`);
-          log.info(`:fire: @spacecat set imsorg ${baseURL} ${organizationId}`);
-          // site.setOrganizationId(organizationId);
-          // log.info(`Site ${baseURL} organization ID updated to ${organizationId}`);
+        organizationId = siteOrgId; // Set organizationId for existing site
+        const siteOrganization = await Organization.findById(siteOrgId);
+
+        if (siteOrganization) {
+          const message = `:information_source: Site ${baseURL} already exists. Organization: ${siteOrganization.getName()} (ID: ${siteOrgId}, IMS Org ID: ${siteOrganization.getImsOrgId()})`;
+          await say(message);
+          log.info(message);
+        } else {
+          const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
+          await say(message);
+          log.info(message);
         }
       } else {
+        // New site - handle organization logic
+        log.info(`Site ${baseURL} doesn't exist. Processing organization...`);
+
+        // Check if the organization with IMS Org ID already exists; create if it doesn't
+        let organization = await Organization.findByImsOrgId(imsOrgID);
+
+        if (!organization) {
+          let imsOrgDetails;
+          try {
+            imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
+            log.info(`IMS Org Details: ${imsOrgDetails}`);
+          } catch (error) {
+            log.error(`Error retrieving IMS Org details: ${error.message}`);
+            reportLine.errors = `Error retrieving IMS org with the ID *${imsOrgID}*.`;
+            reportLine.status = 'Failed';
+            return reportLine;
+          }
+
+          if (!imsOrgDetails) {
+            reportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
+            reportLine.status = 'Failed';
+            return reportLine;
+          }
+
+          organization = await Organization.create({
+            name: imsOrgDetails.orgName,
+            imsOrgId: imsOrgID,
+            tenantId: imsOrgDetails.tenantId,
+          });
+
+          const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
+          await say(message);
+          log.info(message);
+        }
+
+        organizationId = organization.getId(); // Set organizationId for new site
+        log.info(`Organization ${organizationId} was successfully retrieved or created`);
+        reportLine.spacecatOrgId = organizationId;
+
+        // Create new site
         log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
         const deliveryType = await findDeliveryType(baseURL);
         log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
