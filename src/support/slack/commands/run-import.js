@@ -218,7 +218,7 @@ function RunImportCommand(context) {
         return { success: false };
       }
       if (!hasFiles) {
-        await say(':error: Top-forms import requires a CSV file with pageUrl and formSource columns.');
+        await say(':error: Top-forms import requires a CSV file with pageUrl and formSource(Optional) columns.');
         return { success: false };
       }
     } else {
@@ -328,9 +328,8 @@ function RunImportCommand(context) {
           return;
         }
 
-        const csvData = await parseCSV(file, botToken, 2); // Always expect at least 2 columns
-
         const isTopForms = importType === 'top-forms';
+        const csvData = await parseCSV(file, botToken, isTopForms ? 1 : 2);
 
         if (isTopForms) {
           say(`:adobe-run: Triggering import run of type ${importType} for ${hasValidBaseURL ? '1 site with ' : ''}${csvData.length} ${hasValidBaseURL ? 'forms' : 'sites'}.`);
