@@ -21,7 +21,9 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
-import OrgDetectorAgent from '../../../agents/org-detector/agent.js';
+
+const POLLING_NUM_RETRIES = 10;
+const POLLING_INTERVAL = 60 * 5 * 1000; // 5 minutes
 
 async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
   const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
@@ -40,8 +42,11 @@ async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
 export default function approveSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
   const { KeyEvent, Site, SiteCandidate } = dataAccess;
-  const { ORGANIZATION_ID_FRIENDS_FAMILY: friendsFamilyOrgId } = lambdaContext.env;
-  const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = lambdaContext.env;
+  const {
+    ORGANIZATION_ID_FRIENDS_FAMILY: friendsFamilyOrgId,
+    MYSTIQUE_API_BASE_URL: mystiqueApiBaseUrl,
+    DEFAULT_ORGANIZATION_ID: defaultOrgId,
+  } = lambdaContext.env;
 
   return async ({ ack, body, respond }) => {
     try {
@@ -117,11 +122,61 @@ export default function approveSiteCandidate(lambdaContext) {
       );
 
       if (!isFnF) {
-        const orgDetectorAgent = OrgDetectorAgent.fromContext(lambdaContext);
-        const org = await orgDetectorAgent.detect(
-          siteCandidate.getBaseURL().replace('https://', ''),
-          siteCandidate.getHlxConfig()?.rso?.owner,
-        );
+        // Start the Org Detector Agent in Mystique
+        const startResponse = await fetch(`${mystiqueApiBaseUrl}/v1/org-detector`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            domain: siteCandidate.getBaseURL().replace('https://', ''),
+            githubLogin: siteCandidate.getHlxConfig()?.rso?.owner,
+            ignoredGithubOrgs: lambdaContext.env.IGNORED_GITHUB_ORGS,
+          }),
+        });
+        if (!startResponse.ok) throw new Error(`Failed to start OrgDetectorAgent: ${startResponse.statusText}`);
+        const startData = await startResponse.json();
+
+        if (!startData || !startData.uuid) throw new Error('Invalid response from OrgDetectorAgent start');
+        const jobId = startData.uuid;
+
+        // Poll the mystique API to check the status of the Org Detector Agent job
+        /* eslint-disable no-await-in-loop */
+        const org = await (async function doPolling() {
+          let result = null;
+          let polling = true;
+          let retryCount = 0;
+
+          while (polling && retryCount < POLLING_NUM_RETRIES) {
+            // Errors are handled by the outer try-catch block
+            let response;
+
+            if (polling) {
+              response = await fetch(`${mystiqueApiBaseUrl}/v1/org-detector/${jobId}`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+              });
+            }
+
+            if (polling && response.ok) {
+              const { status, matchedCompany = null } = await response.json();
+
+              polling = status !== 'completed';
+              result = matchedCompany;
+            }
+
+            retryCount += 1;
+
+            if (polling && retryCount < POLLING_NUM_RETRIES) {
+              await new Promise((resolve) => {
+                setTimeout(resolve, POLLING_INTERVAL);
+              });
+            } else if (polling && retryCount >= POLLING_NUM_RETRIES) {
+              throw new Error(`Polling for OrgDetectorAgent job ${jobId} exceeded maximum retries (${POLLING_NUM_RETRIES})`);
+            }
+          }
+
+          return result;
+        }());
+        /* eslint-enable no-await-in-loop */
 
         log.info(`Detected org: ${JSON.stringify(org)}`);
 
