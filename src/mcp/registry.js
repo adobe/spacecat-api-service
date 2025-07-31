@@ -15,9 +15,13 @@
 import { createAuditResources } from './registry/resources/audits.js';
 import { createSiteResources } from './registry/resources/sites.js';
 import { createScrapeContentResources } from './registry/resources/scrape-content.js';
+import { createOpportunityResources } from './registry/resources/opportunities.js';
+import { createSuggestionResources } from './registry/resources/suggestions.js';
 import { createSiteTools } from './registry/tools/sites.js';
 import { createAuditTools } from './registry/tools/audits.js';
 import { createScrapeContentTools } from './registry/tools/scrape-content.js';
+import { createOpportunityTools } from './registry/tools/opportunities.js';
+import { createSuggestionTools } from './registry/tools/suggestions.js';
 import utilTools from './registry/tools/utils.js';
 
 /**
@@ -29,6 +33,8 @@ import utilTools from './registry/tools/utils.js';
  * @param {object} deps.auditsController – instance of the Audits controller.
  * @param {object} deps.sitesController – instance of the Sites controller.
  * @param {object} deps.scrapeController – instance of the Scrape controller.
+ * @param {object} deps.opportunitiesController – instance of the Opportunities controller.
+ * @param {object} deps.suggestionsController – instance of the Suggestions controller.
  * @param {object} deps.context – the context object.
  * @returns {{ tools: Record<string,object>, resources: object, prompts: object }}
  */
@@ -36,6 +42,8 @@ export default function buildRegistry({
   auditsController,
   sitesController,
   scrapeController,
+  opportunitiesController,
+  suggestionsController,
   context,
 } = {}) {
   const tools = {
@@ -43,12 +51,16 @@ export default function buildRegistry({
     ...createAuditTools(auditsController),
     ...createSiteTools(sitesController, context),
     ...createScrapeContentTools(scrapeController, context),
+    ...createOpportunityTools(opportunitiesController, context),
+    ...createSuggestionTools(suggestionsController, context),
   };
 
   const resources = {
     ...createAuditResources(auditsController),
     ...createSiteResources(sitesController, context),
     ...createScrapeContentResources(scrapeController, context),
+    ...createOpportunityResources(opportunitiesController, context),
+    ...createSuggestionResources(suggestionsController, context),
   };
 
   return {
