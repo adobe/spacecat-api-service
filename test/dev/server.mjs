@@ -17,17 +17,17 @@ import { config } from 'dotenv';
 import { main } from '../../src/index.js';
 
 // Load environment variables from .env file
-config();
+config({ override: true });
 
 // eslint-disable-next-line no-underscore-dangle
 global.__rootdir = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 
 async function run() {
-    process.env.HLX_DEV_SERVER_HOST = 'localhost:3000';
-    process.env.HLX_DEV_SERVER_SCHEME = 'http';
-    const devServer = await new DevelopmentServer(main)
-        .init();
-    await devServer.start();
+  process.env.HLX_DEV_SERVER_HOST = 'localhost:3000';
+  process.env.HLX_DEV_SERVER_SCHEME = 'http';
+  const devServer = await new DevelopmentServer(main)
+    .init();
+  await devServer.start();
 }
 
 run().then(process.stdout).catch(process.stderr);
