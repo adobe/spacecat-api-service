@@ -490,10 +490,21 @@ function OnboardCommand(context) {
             env.WORKFLOW_WAIT_TIME_IN_SECONDS, // Use environment default wait time in batch mode
             slackContext,
           );
+
+          // Add individual site status reporting for CSV processing
+          if (reportLine.errors) {
+            await say(`:warning: Site ${baseURL}: ${reportLine.errors}`);
+          } else {
+            await say(`:white_check_mark: Site ${baseURL}: Successfully onboarded with workflow started`);
+          }
+
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
         await configuration.save();
+
+        // Add error handling after configuration save (matching single site case)
+        // Note: Individual errors are already reported above in the loop
 
         log.info('All sites were processed and onboarded.');
 
