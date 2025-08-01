@@ -64,19 +64,7 @@ function OrganizationsController(ctx, env) {
     }
 
     try {
-      const { imsClient, data, log } = context;
-      const { imsOrgId } = data;
-      log.info(`Getting IMS org details for ${imsOrgId}`);
-      const imsOrg = await imsClient.getImsOrganizationDetails(imsOrgId);
-      log.info(`IMS org details: ${JSON.stringify(imsOrg)}`);
-      const { tenantId, orgName } = imsOrg;
-      const newOrgData = {
-        name: orgName,
-        imsOrgId,
-        tenantId,
-      };
-      const organization = await Organization.create(newOrgData);
-      log.info(`Organization created: ${JSON.stringify(organization)}`);
+      const organization = await Organization.create(context.data);
       return createResponse(OrganizationDto.toJSON(organization), 201);
     } catch (e) {
       return badRequest(e.message);

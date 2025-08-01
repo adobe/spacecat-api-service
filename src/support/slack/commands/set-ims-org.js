@@ -98,7 +98,6 @@ function SetSiteOrganizationCommand(context) {
         spaceCatOrg = await Organization.create({
           name: imsOrgDetails.orgName,
           imsOrgId: userImsOrgId,
-          tenantId: imsOrgDetails.tenantId,
         });
         await spaceCatOrg.save();
 

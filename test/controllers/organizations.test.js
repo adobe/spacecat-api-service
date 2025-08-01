@@ -204,11 +204,26 @@ describe('Organizations Controller', () => {
     expect(() => OrganizationsController({ dataAccess: mockDataAccess })).to.throw('Environment object required');
   });
 
+  it('creates an organization', async () => {
+    mockDataAccess.Organization.create.resolves(organizations[0]);
+    const response = await organizationsController.createOrganization({
+      data: { name: 'Org 1' },
+      ...context,
+    });
+
+    expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
+    expect(response.status).to.equal(201);
+
+    const organization = await response.json();
+    expect(organization).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
+    expect(organization).to.have.property('name', 'Org 1');
+  });
+
   it('creates an organization for non admin users', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     mockDataAccess.Organization.create.resolves(organizations[0]);
     const response = await organizationsController.createOrganization({
-      data: { name: 'Org 1', tenantId: 'test-tenant' },
+      data: { name: 'Org 1' },
       ...context,
     });
     expect(response.status).to.equal(403);
@@ -217,98 +232,18 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new Organizations');
   });
 
-  it('creates an organization with IMS integration', async () => {
-    const mockImsOrg = {
-      tenantId: 'test-tenant-id',
-      orgName: 'Test Organization',
-    };
-
-    const mockImsClient = {
-      getImsOrganizationDetails: sinon.stub().resolves(mockImsOrg),
-    };
-
-    const mockLog = {
-      info: sinon.stub(),
-    };
-
-    mockDataAccess.Organization.create.resolves(organizations[0]);
-
+  it('returns bad request when creating an organization fails', async () => {
+    mockDataAccess.Organization.create.rejects(new Error('Failed to create organization'));
     const response = await organizationsController.createOrganization({
-      data: { imsOrgId: 'test-ims-org-id' },
-      imsClient: mockImsClient,
-      log: mockLog,
+      data: { name: 'Org 1' },
       ...context,
     });
 
-    expect(mockImsClient.getImsOrganizationDetails).to.have.been.calledOnceWith('test-ims-org-id');
-    expect(mockDataAccess.Organization.create).to.have.been.calledOnceWith({
-      name: 'Test Organization',
-      imsOrgId: 'test-ims-org-id',
-      tenantId: 'test-tenant-id',
-    });
-    expect(response.status).to.equal(201);
-
-    const organization = await response.json();
-    expect(organization).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
-  });
-
-  it('handles IMS client error during organization creation', async () => {
-    const mockImsClient = {
-      getImsOrganizationDetails: sinon.stub().rejects(new Error('IMS API Error')),
-    };
-
-    const mockLog = {
-      info: sinon.stub(),
-    };
-
-    const response = await organizationsController.createOrganization({
-      data: { imsOrgId: 'test-ims-org-id' },
-      imsClient: mockImsClient,
-      log: mockLog,
-      ...context,
-    });
-
-    expect(mockImsClient.getImsOrganizationDetails).to.have.been.calledOnceWith('test-ims-org-id');
-    expect(mockDataAccess.Organization.create).to.not.have.been.called;
+    expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
     expect(response.status).to.equal(400);
 
     const error = await response.json();
-    expect(error).to.have.property('message', 'IMS API Error');
-  });
-
-  it('handles organization creation error after IMS lookup', async () => {
-    const mockImsOrg = {
-      tenantId: 'test-tenant-id',
-      orgName: 'Test Organization',
-    };
-
-    const mockImsClient = {
-      getImsOrganizationDetails: sinon.stub().resolves(mockImsOrg),
-    };
-
-    const mockLog = {
-      info: sinon.stub(),
-    };
-
-    mockDataAccess.Organization.create.rejects(new Error('Database Error'));
-
-    const response = await organizationsController.createOrganization({
-      data: { imsOrgId: 'test-ims-org-id' },
-      imsClient: mockImsClient,
-      log: mockLog,
-      ...context,
-    });
-
-    expect(mockImsClient.getImsOrganizationDetails).to.have.been.calledOnceWith('test-ims-org-id');
-    expect(mockDataAccess.Organization.create).to.have.been.calledOnceWith({
-      name: 'Test Organization',
-      imsOrgId: 'test-ims-org-id',
-      tenantId: 'test-tenant-id',
-    });
-    expect(response.status).to.equal(400);
-
-    const error = await response.json();
-    expect(error).to.have.property('message', 'Database Error');
+    expect(error).to.have.property('message', 'Failed to create organization');
   });
 
   it('updates an organization', async () => {
