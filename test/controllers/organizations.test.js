@@ -227,11 +227,16 @@ describe('Organizations Controller', () => {
       getImsOrganizationDetails: sinon.stub().resolves(mockImsOrg),
     };
 
+    const mockLog = {
+      info: sinon.stub(),
+    };
+
     mockDataAccess.Organization.create.resolves(organizations[0]);
 
     const response = await organizationsController.createOrganization({
       data: { imsOrgId: 'test-ims-org-id' },
       imsClient: mockImsClient,
+      log: mockLog,
       ...context,
     });
 
@@ -252,9 +257,14 @@ describe('Organizations Controller', () => {
       getImsOrganizationDetails: sinon.stub().rejects(new Error('IMS API Error')),
     };
 
+    const mockLog = {
+      info: sinon.stub(),
+    };
+
     const response = await organizationsController.createOrganization({
       data: { imsOrgId: 'test-ims-org-id' },
       imsClient: mockImsClient,
+      log: mockLog,
       ...context,
     });
 
@@ -276,11 +286,16 @@ describe('Organizations Controller', () => {
       getImsOrganizationDetails: sinon.stub().resolves(mockImsOrg),
     };
 
+    const mockLog = {
+      info: sinon.stub(),
+    };
+
     mockDataAccess.Organization.create.rejects(new Error('Database Error'));
 
     const response = await organizationsController.createOrganization({
       data: { imsOrgId: 'test-ims-org-id' },
       imsClient: mockImsClient,
+      log: mockLog,
       ...context,
     });
 
