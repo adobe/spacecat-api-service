@@ -171,6 +171,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/url-page-type-platform': trafficController.getPaidTrafficByUrlPageTypePlatform,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform': trafficController.getPaidTrafficByUrlPageTypeCampaignPlatform,
     'GET /sites/:siteId/traffic/paid/url-page-type-platform-device': trafficController.getPaidTrafficByUrlPageTypePlatformDevice,
+    'GET /sites/:siteId/traffic/paid/page-type': trafficController.getPaidTrafficByPageType,
     'GET /sites/:siteId/traffic/paid/page-type-campaign-device': trafficController.getPaidTrafficByPageTypeCampaignDevice,
     'GET /sites/:siteId/traffic/paid/page-type-device': trafficController.getPaidTrafficByPageTypeDevice,
     'GET /sites/:siteId/traffic/paid/page-type-campaign': trafficController.getPaidTrafficByPageTypeCampaign,
@@ -229,6 +230,7 @@ export default function getRouteHandlers(
 
     // LLMO Specific Routes
     'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
+    'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.getLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
