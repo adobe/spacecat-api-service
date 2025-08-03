@@ -517,7 +517,7 @@ function OnboardCommand(context) {
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
               title: 'Spacecat Onboarding Report',
-              initial_comment: ':spacecat: *Onboard in progress!* :satellite:\nHere you can find the *execution report*. :memo:',
+              initial_comment: ':spacecat: *Batch onboarding in progress!* :satellite:\nHere you can find the *execution report*. :memo:',
               thread_ts: threadTs,
             });
             log.info(uploadResponse);
@@ -525,8 +525,6 @@ function OnboardCommand(context) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
           }
         });
-
-        await say(':white_check_mark: Batch onboarding process finished successfully.');
       } else {
         if (args.length < 1) {
           await say(':warning: Missing required argument. Please provide at least *Site URL*.');
