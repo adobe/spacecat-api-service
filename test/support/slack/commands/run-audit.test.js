@@ -18,6 +18,7 @@ import sinon from 'sinon';
 import nock from 'nock';
 
 import RunAuditCommand from '../../../../src/support/slack/commands/run-audit.js';
+import { parseAdditionalUrls } from '../../../../src/support/utils.js';
 
 use(sinonChai);
 
@@ -277,6 +278,142 @@ describe('RunAuditCommand', () => {
 
       await command.handleExecution(['', 'all'], slackContext);
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: CSV processing failed: Authentication failed: Invalid Slack token.')).to.be.true;
+    });
+  });
+
+  describe('parseAdditionalUrls Function', () => {
+    it('should return null for empty arguments', () => {
+      const result = parseAdditionalUrls([]);
+      expect(result).to.be.null;
+    });
+
+    it('should return null for empty string arguments', () => {
+      const result = parseAdditionalUrls(['']);
+      expect(result).to.be.null;
+    });
+
+    it('should parse single valid URL into additionalAuditData structure', () => {
+      const result = parseAdditionalUrls(['https://example.com/page1']);
+      expect(result).to.deep.equal({
+        staticUrls: ['https://example.com/page1']
+      });
+    });
+
+    it('should parse comma-separated URLs into additionalAuditData structure', () => {
+      const result = parseAdditionalUrls(['https://example.com/page1,https://example.com/page2']);
+      expect(result).to.deep.equal({
+        staticUrls: ['https://example.com/page1', 'https://example.com/page2']
+      });
+    });
+
+    it('should handle URLs with spaces and create proper structure', () => {
+      const result = parseAdditionalUrls(['https://example.com/page1, https://example.com/page2']);
+      expect(result).to.deep.equal({
+        staticUrls: ['https://example.com/page1', 'https://example.com/page2']
+      });
+    });
+
+    it('should filter invalid URLs and return only valid ones', () => {
+      const result = parseAdditionalUrls(['https://example.com/page1,invalid-url,https://example.com/page2']);
+      expect(result).to.deep.equal({
+        staticUrls: ['https://example.com/page1', 'https://example.com/page2']
+      });
+    });
+
+    it('should return null for single invalid URL', () => {
+      const result = parseAdditionalUrls(['invalid-url']);
+      expect(result).to.be.null;
+    });
+
+    it('should return null when all URLs are invalid', () => {
+      const result = parseAdditionalUrls(['invalid-url1,invalid-url2']);
+      expect(result).to.be.null;
+    });
+
+    it('should handle URLs with query parameters', () => {
+      const result = parseAdditionalUrls(['https://example.com/page1?param=value,https://example.com/page2?test=123']);
+      expect(result).to.deep.equal({
+        staticUrls: ['https://example.com/page1?param=value', 'https://example.com/page2?test=123']
+      });
+    });
+  });
+
+  describe('Run Audit with Additional URLs', () => {
+    let command;
+    let site;
+    let config;
+
+    beforeEach(() => {
+      site = {
+        getId: () => 'site-123',
+        getBaseURL: () => 'https://example.com'
+      };
+      config = {
+        isHandlerEnabledForSite: sinon.stub().returns(true)
+      };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(config);
+      command = RunAuditCommand(context);
+    });
+
+    it('should pass additional URLs to triggerAuditForSite', async () => {
+      const args = ['https://example.com', 'experimentation-opportunities', 'https://example.com/page1,https://example.com/page2'];
+      
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+      
+      expect(queueUrl).to.equal('testQueueUrl');
+      expect(message.type).to.equal('experimentation-opportunities');
+      expect(message.siteId).to.equal('site-123');
+      expect(message.auditContext).to.have.property('additionalAuditData');
+      expect(message.auditContext.additionalAuditData).to.deep.equal({
+        staticUrls: ['https://example.com/page1', 'https://example.com/page2']
+      });
+    });
+
+    it('should work normally without additional URLs', async () => {
+      const args = ['https://example.com', 'experimentation-opportunities'];
+      
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+      
+      expect(message.auditContext).to.not.have.property('additionalAuditData');
+    });
+
+    it('should show additional URLs info in Slack message', async () => {
+      const args = ['https://example.com', 'experimentation-opportunities', 'https://example.com/page1,https://example.com/page2'];
+      
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(
+        ':adobe-run: Triggering experimentation-opportunities audit for https://example.com with 2 additional URLs'
+      );
+    });
+
+    it('should handle invalid additional URLs gracefully', async () => {
+      const args = ['https://example.com', 'experimentation-opportunities', 'invalid-url1,invalid-url2'];
+      
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [, message] = sqsStub.sendMessage.firstCall.args;
+      expect(message.auditContext).to.not.have.property('additionalAuditData');
+    });
+
+    it('should handle mixed valid/invalid additional URLs', async () => {
+      const args = ['https://example.com', 'experimentation-opportunities', 'https://example.com/page1,invalid-url,https://example.com/page2'];
+      
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [, message] = sqsStub.sendMessage.firstCall.args;
+      expect(message.auditContext.additionalAuditData).to.deep.equal({
+        staticUrls: ['https://example.com/page1', 'https://example.com/page2']
+      });
     });
   });
 });
