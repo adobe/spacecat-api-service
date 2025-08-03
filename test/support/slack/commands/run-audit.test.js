@@ -444,5 +444,56 @@ describe('RunAuditCommand', () => {
         staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
       });
     });
+
+    it('should handle CSV processing without additional URLs', async () => {
+      const fileUrl = 'https://example.com/sites.csv';
+      slackContext.files = [
+        {
+          name: 'sites.csv',
+          url_private: fileUrl,
+        },
+      ];
+      nock(fileUrl)
+        .get('')
+        .reply(200, 'https://site1.com,uuid1\nhttps://site2.com,uuid2');
+
+      const args = ['lhs-mobile'];
+
+      await command.handleExecution(args, slackContext);
+      expect(slackContext.say).to.have.been.calledWith(
+        ':adobe-run: Triggering lhs-mobile audit for 2 sites.',
+      );
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+    });
+
+    it('should handle CSV processing with additional URLs', async () => {
+      const fileUrl = 'https://example.com/sites.csv';
+      slackContext.files = [
+        {
+          name: 'sites.csv',
+          url_private: fileUrl,
+        },
+      ];
+      nock(fileUrl)
+        .get('')
+        .reply(200, 'https://site1.com,uuid1\nhttps://site2.com,uuid2');
+
+      const args = ['lhs-mobile', 'https://example.com/page1,https://example.com/page2']; // CSV with additional URLs
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(
+        ':adobe-run: Triggering lhs-mobile audit for 2 sites with 2 additional URLs.',
+      );
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+      const [, message1] = sqsStub.sendMessage.firstCall.args;
+      const [, message2] = sqsStub.sendMessage.secondCall.args;
+      expect(message1.auditContext.additionalAuditData).to.deep.equal({
+        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
+      });
+      expect(message2.auditContext.additionalAuditData).to.deep.equal({
+        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
+      });
+    });
   });
 });

@@ -150,7 +150,10 @@ function RunAuditCommand(context) {
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
       const hasValidBaseURL = isValidUrl(baseURL);
-      const additionalAuditData = parseAdditionalUrls(additionalArgs);
+
+      const additionalAuditData = hasFiles
+        ? parseAdditionalUrls([auditTypeInputArg, ...additionalArgs].filter(Boolean))
+        : parseAdditionalUrls(additionalArgs);
 
       if (!hasValidBaseURL && !hasFiles) {
         await say(baseCommand.usage());
@@ -163,8 +166,7 @@ function RunAuditCommand(context) {
       }
 
       if (hasFiles) {
-        const [, auditTypeInput] = ['', baseURLInputArg];
-        const auditType = auditTypeInput || LHS_MOBILE;
+        const auditType = baseURLInputArg || LHS_MOBILE;
 
         if (files.length > 1) {
           await say(':warning: Please provide only one CSV file.');
