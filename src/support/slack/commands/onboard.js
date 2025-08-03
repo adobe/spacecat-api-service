@@ -495,7 +495,7 @@ function OnboardCommand(context) {
           if (reportLine.errors) {
             await say(`:warning: Site ${baseURL}: ${reportLine.errors}`);
           } else {
-            await say(`:white_check_mark: Site ${baseURL}: Successfully onboarded with workflow started`);
+            await say(`:white_check_mark: Site ${baseURL}: Onboarding started`);
           }
 
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
@@ -517,7 +517,7 @@ function OnboardCommand(context) {
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
               title: 'Spacecat Onboarding Report',
-              initial_comment: ':spacecat: *Onboarding complete!* :satellite:\nHere you can find the *execution report*. :memo:',
+              initial_comment: ':spacecat: *Onboard in progress!* :satellite:\nHere you can find the *execution report*. :memo:',
               thread_ts: threadTs,
             });
             log.info(uploadResponse);
