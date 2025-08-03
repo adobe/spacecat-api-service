@@ -73,7 +73,7 @@ function RunAuditCommand(context) {
     baseURL,
     auditType,
     slackContext,
-    additionalAuditData = null
+    additionalAuditData = null,
   ) => {
     const { say } = slackContext;
 
@@ -105,7 +105,7 @@ function RunAuditCommand(context) {
                 enabledAuditType,
                 slackContext,
                 context,
-                additionalAuditData
+                additionalAuditData,
               );
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType} for site ${baseURL}`, error);
@@ -123,7 +123,7 @@ function RunAuditCommand(context) {
           auditType,
           slackContext,
           context,
-          additionalAuditData
+          additionalAuditData,
         );
       }
     } catch (error) {
@@ -193,7 +193,7 @@ function RunAuditCommand(context) {
                 csvBaseURL,
                 auditType,
                 slackContext,
-                additionalAuditData
+                additionalAuditData,
               );
             } else {
               await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
@@ -212,7 +212,7 @@ function RunAuditCommand(context) {
           baseURL,
           auditType,
           slackContext,
-          additionalAuditData
+          additionalAuditData,
         );
       }
     } catch (error) {

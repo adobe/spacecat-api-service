@@ -211,7 +211,7 @@ export const triggerAuditForSite = async (
   auditType,
   slackContext,
   lambdaContext,
-  additionalAuditData = null
+  additionalAuditData = null,
 ) => {
   const auditContext = {
     slackContext: {
@@ -229,7 +229,7 @@ export const triggerAuditForSite = async (
     lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
     auditType,
     auditContext,
-    site.getId()
+    site.getId(),
   );
 };
 
