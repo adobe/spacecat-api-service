@@ -20,7 +20,7 @@ import {
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
 
-import { triggerAuditForSite } from '../../utils.js';
+import { triggerAuditForSite, parseAdditionalUrls } from '../../utils.js';
 
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
@@ -52,22 +52,29 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`',
+    description:
+      'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`. Supports additional URLs for certain audit types.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType (optional)]`,
+    usageText: `${PHRASES[0]} {site} [auditType (optional)] [additionalURLs (optional)]`,
   });
 
   const { dataAccess, log } = context;
   const { Configuration, Site } = dataAccess;
 
   /**
-   * Runs an audit for the given site.
+   * Runs an audit for the given site with optional additional data.
    * @param {string} baseURL - The base URL of the site.
    * @param {string} auditType - The type of audit to run.
    * @param {object} slackContext - The Slack context object.
+   * @param {Object|null} additionalAuditData - Additional audit data.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
-  const runAuditForSite = async (baseURL, auditType, slackContext) => {
+  const runAuditForSite = async (
+    baseURL,
+    auditType,
+    slackContext,
+    additionalAuditData = null
+  ) => {
     const { say } = slackContext;
 
     try {
@@ -93,9 +100,15 @@ function RunAuditCommand(context) {
         await Promise.all(
           enabledAudits.map(async (enabledAuditType) => {
             try {
-              await triggerAuditForSite(site, enabledAuditType, slackContext, context);
+              await triggerAuditForSite(
+                site,
+                enabledAuditType,
+                slackContext,
+                context,
+                additionalAuditData
+              );
             } catch (error) {
-              log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
+              log.error(`Error running audit ${enabledAuditType} for site ${baseURL}`, error);
               await postErrorMessage(say, error);
             }
           }),
@@ -105,7 +118,13 @@ function RunAuditCommand(context) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
           return;
         }
-        await triggerAuditForSite(site, auditType, slackContext, context);
+        await triggerAuditForSite(
+          site,
+          auditType,
+          slackContext,
+          context,
+          additionalAuditData
+        );
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -126,11 +145,12 @@ function RunAuditCommand(context) {
     const { say, files, botToken } = slackContext;
 
     try {
-      const [baseURLInputArg, auditTypeInputArg] = args;
+      const [baseURLInputArg, auditTypeInputArg, ...additionalArgs] = args;
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
       const hasValidBaseURL = isValidUrl(baseURL);
+      const additionalAuditData = parseAdditionalUrls(additionalArgs);
 
       if (!hasValidBaseURL && !hasFiles) {
         await say(baseCommand.usage());
@@ -159,13 +179,22 @@ function RunAuditCommand(context) {
 
         const csvData = await parseCSV(file, botToken);
 
-        say(`:adobe-run: Triggering ${auditType} audit for ${csvData.length} sites.`);
+        const additionalUrlsInfo = additionalAuditData
+          ? ` with ${additionalAuditData.staticUrls.length} additional URLs`
+          : '';
+
+        say(`:adobe-run: Triggering ${auditType} audit for ${csvData.length} sites${additionalUrlsInfo}.`);
 
         await Promise.all(
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             if (isValidUrl(csvBaseURL)) {
-              await runAuditForSite(csvBaseURL, auditType, slackContext);
+              await runAuditForSite(
+                csvBaseURL,
+                auditType,
+                slackContext,
+                additionalAuditData
+              );
             } else {
               await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
             }
@@ -173,8 +202,18 @@ function RunAuditCommand(context) {
         );
       } else if (hasValidBaseURL) {
         const auditType = auditTypeInputArg || LHS_MOBILE;
-        say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
-        await runAuditForSite(baseURL, auditType, slackContext);
+
+        const additionalUrlsInfo = additionalAuditData
+          ? ` with ${additionalAuditData.staticUrls.length} additional URLs`
+          : '';
+
+        say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}${additionalUrlsInfo}`);
+        await runAuditForSite(
+          baseURL,
+          auditType,
+          slackContext,
+          additionalAuditData
+        );
       }
     } catch (error) {
       log.error(error);
