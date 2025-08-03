@@ -47,7 +47,7 @@ function OnboardCommand(context) {
     name: 'Onboard Site(s)',
     description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [imsOrgId] [profile] [workflowWaitTime]`,
+    usageText: `${PHRASES[0]} {site} [imsOrgId] [profile] [workflowWaitTime] or ${PHRASES[1]} {site} [imsOrgId] [profile] [workflowWaitTime]`,
   });
 
   const {
@@ -533,7 +533,31 @@ function OnboardCommand(context) {
           return;
         }
 
-        const [baseURLInput, imsOrgID = env.DEMO_IMS_ORG, profileName = 'demo', workflowWaitTime] = args;
+        // Parse arguments with smart detection of imsOrgId
+        const [baseURLInput, secondArg, thirdArg, fourthArg] = args;
+
+        let imsOrgID;
+        let profileName;
+        let workflowWaitTime;
+
+        if (args.length >= 2) {
+          // Check if second argument ends with @AdobeOrg to determine if it's an imsOrgId
+          if (secondArg && secondArg.endsWith('@AdobeOrg')) {
+            imsOrgID = secondArg;
+            profileName = thirdArg || 'demo';
+            workflowWaitTime = fourthArg;
+          } else {
+            // Second argument is not an imsOrgId, treat it as profileName
+            imsOrgID = env.DEMO_IMS_ORG;
+            profileName = secondArg;
+            workflowWaitTime = thirdArg;
+          }
+        } else {
+          // Only siteId provided
+          imsOrgID = env.DEMO_IMS_ORG;
+          profileName = 'demo';
+          workflowWaitTime = undefined;
+        }
         const parsedWaitTime = workflowWaitTime ? Number(workflowWaitTime) : undefined;
 
         const configuration = await Configuration.findLatest();
