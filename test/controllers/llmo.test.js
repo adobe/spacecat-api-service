@@ -156,7 +156,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -208,7 +208,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?offset=20',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000&offset=20',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -234,7 +234,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?sheet=analytics-sheet',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000&sheet=analytics-sheet',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -290,7 +290,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -348,7 +348,7 @@ describe('LlmoController', () => {
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       // Empty strings should be treated as falsy and not added to URL
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -377,7 +377,7 @@ describe('LlmoController', () => {
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       // Null values should be treated as falsy and not added to URL
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -403,7 +403,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'analytics-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json?limit=500000',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -461,7 +461,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
         {
           headers: {
             Authorization: 'token hlx_api_key_missing',
