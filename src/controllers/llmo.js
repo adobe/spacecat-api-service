@@ -65,9 +65,23 @@ function LlmoController() {
     const { llmoConfig } = await getSiteAndValidateLlmo(context);
     const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 
+    // Add limit, offset and sheet query params to the url
+    const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+    const { limit, offset, sheet } = context.query;
+    if (limit) {
+      url.searchParams.set('limit', limit);
+    }
+    if (offset) {
+      url.searchParams.set('offset', offset);
+    }
+    // allow fetching a specific sheet from the sheet data source
+    if (sheet) {
+      url.searchParams.set('sheet', sheet);
+    }
+
     try {
       // Fetch data from the external endpoint using the dataFolder from config
-      const response = await fetch(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`, {
+      const response = await fetch(url.toString(), {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
