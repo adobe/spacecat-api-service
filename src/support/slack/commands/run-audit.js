@@ -20,7 +20,7 @@ import {
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
 
-import { triggerAuditForSite, parseAdditionalUrls } from '../../utils.js';
+import { triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
@@ -53,9 +53,9 @@ function RunAuditCommand(context) {
     id: 'run-audit',
     name: 'Run Audit',
     description:
-      'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`. Supports additional URLs for certain audit types.',
+      'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`. Supports additional Data for certain audit types.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType (optional)] [additionalURLs (optional)]`,
+    usageText: `${PHRASES[0]} {site} [auditType (optional)] [additionalData (optional)]`,
   });
 
   const { dataAccess, log } = context;
@@ -66,14 +66,14 @@ function RunAuditCommand(context) {
    * @param {string} baseURL - The base URL of the site.
    * @param {string} auditType - The type of audit to run.
    * @param {object} slackContext - The Slack context object.
-   * @param {Object|null} additionalAuditData - Additional audit data.
+   * @param {Object|null} additionalData - Additional data.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const runAuditForSite = async (
     baseURL,
     auditType,
     slackContext,
-    additionalAuditData = null,
+    additionalData = null,
   ) => {
     const { say } = slackContext;
 
@@ -105,7 +105,7 @@ function RunAuditCommand(context) {
                 enabledAuditType,
                 slackContext,
                 context,
-                additionalAuditData,
+                additionalData,
               );
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType} for site ${baseURL}`, error);
@@ -123,7 +123,7 @@ function RunAuditCommand(context) {
           auditType,
           slackContext,
           context,
-          additionalAuditData,
+          additionalData,
         );
       }
     } catch (error) {
@@ -151,10 +151,6 @@ function RunAuditCommand(context) {
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
       const hasValidBaseURL = isValidUrl(baseURL);
 
-      const additionalAuditData = hasFiles
-        ? parseAdditionalUrls([auditTypeInputArg, ...additionalArgs].filter(Boolean))
-        : parseAdditionalUrls(additionalArgs);
-
       if (!hasValidBaseURL && !hasFiles) {
         await say(baseCommand.usage());
         return;
@@ -167,6 +163,8 @@ function RunAuditCommand(context) {
 
       if (hasFiles) {
         const auditType = baseURLInputArg || LHS_MOBILE;
+        const filteredArgs = [auditTypeInputArg, ...additionalArgs].filter(Boolean);
+        const additionalData = filteredArgs.length > 0 ? filteredArgs : null;
 
         if (files.length > 1) {
           await say(':warning: Please provide only one CSV file.');
@@ -181,11 +179,10 @@ function RunAuditCommand(context) {
 
         const csvData = await parseCSV(file, botToken);
 
-        const additionalUrlsInfo = additionalAuditData
-          ? ` with ${additionalAuditData.staticUrls.length} additional URLs`
+        const additionalInfo = additionalData
+          ? ` with ${additionalData.length} additional parameters`
           : '';
-
-        say(`:adobe-run: Triggering ${auditType} audit for ${csvData.length} sites${additionalUrlsInfo}.`);
+        say(`:adobe-run: Triggering ${auditType} audit for ${csvData.length} sites${additionalInfo}.`);
 
         await Promise.all(
           csvData.map(async (row) => {
@@ -195,7 +192,7 @@ function RunAuditCommand(context) {
                 csvBaseURL,
                 auditType,
                 slackContext,
-                additionalAuditData,
+                additionalData,
               );
             } else {
               await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
@@ -204,17 +201,18 @@ function RunAuditCommand(context) {
         );
       } else if (hasValidBaseURL) {
         const auditType = auditTypeInputArg || LHS_MOBILE;
+        const filteredArgs = additionalArgs.filter(Boolean);
+        const additionalData = filteredArgs.length > 0 ? filteredArgs : null;
 
-        const additionalUrlsInfo = additionalAuditData
-          ? ` with ${additionalAuditData.staticUrls.length} additional URLs`
+        const additionalInfo = additionalData
+          ? ` with ${additionalData.length} additional parameters`
           : '';
-
-        say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}${additionalUrlsInfo}`);
+        say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}${additionalInfo}`);
         await runAuditForSite(
           baseURL,
           auditType,
           slackContext,
-          additionalAuditData,
+          additionalData,
         );
       }
     } catch (error) {

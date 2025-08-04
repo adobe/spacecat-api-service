@@ -18,7 +18,6 @@ import sinon from 'sinon';
 import nock from 'nock';
 
 import RunAuditCommand from '../../../../src/support/slack/commands/run-audit.js';
-import { parseAdditionalUrls } from '../../../../src/support/utils.js';
 
 use(sinonChai);
 
@@ -51,7 +50,7 @@ describe('RunAuditCommand', () => {
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
       expect(command.description).to.equal(
-        'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`. Supports additional URLs for certain audit types.',
+        'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`. Supports additional Data for certain audit types.',
       );
     });
   });
@@ -283,75 +282,7 @@ describe('RunAuditCommand', () => {
     });
   });
 
-  describe('parseAdditionalUrls Function', () => {
-    it('should return null for empty arguments', () => {
-      const result = parseAdditionalUrls([]);
-      expect(result).to.be.null;
-    });
-
-    it('should return null for empty string arguments', () => {
-      const result = parseAdditionalUrls(['']);
-      expect(result).to.be.null;
-    });
-
-    it('should parse single valid URL into additionalAuditData structure', () => {
-      const result = parseAdditionalUrls(['https://example.com/page1']);
-      expect(result).to.deep.equal({
-        staticUrls: ['https://example.com/page1'],
-      });
-    });
-
-    it('should parse comma-separated URLs into additionalAuditData structure', () => {
-      const result = parseAdditionalUrls([
-        'https://example.com/page1,https://example.com/page2',
-      ]);
-      expect(result).to.deep.equal({
-        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
-      });
-    });
-
-    it('should handle URLs with spaces and create proper structure', () => {
-      const result = parseAdditionalUrls([
-        'https://example.com/page1, https://example.com/page2',
-      ]);
-      expect(result).to.deep.equal({
-        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
-      });
-    });
-
-    it('should filter invalid URLs and return only valid ones', () => {
-      const result = parseAdditionalUrls([
-        'https://example.com/page1,invalid-url,https://example.com/page2',
-      ]);
-      expect(result).to.deep.equal({
-        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
-      });
-    });
-
-    it('should return null for single invalid URL', () => {
-      const result = parseAdditionalUrls(['invalid-url']);
-      expect(result).to.be.null;
-    });
-
-    it('should return null when all URLs are invalid', () => {
-      const result = parseAdditionalUrls(['invalid-url1,invalid-url2']);
-      expect(result).to.be.null;
-    });
-
-    it('should handle URLs with query parameters', () => {
-      const result = parseAdditionalUrls([
-        'https://example.com/page1?param=value,https://example.com/page2?test=123',
-      ]);
-      expect(result).to.deep.equal({
-        staticUrls: [
-          'https://example.com/page1?param=value',
-          'https://example.com/page2?test=123',
-        ],
-      });
-    });
-  });
-
-  describe('Run Audit with Additional URLs', () => {
+  describe('Run Audit with Additional Data', () => {
     let command;
     let site;
     let config;
@@ -369,11 +300,12 @@ describe('RunAuditCommand', () => {
       command = RunAuditCommand(context);
     });
 
-    it('should pass additional URLs to triggerAuditForSite', async () => {
+    it('should pass additional data to triggerAuditForSite', async () => {
       const args = [
         'https://example.com',
         'experimentation-opportunities',
-        'https://example.com/page1,https://example.com/page2',
+        'data1',
+        'data2',
       ];
 
       await command.handleExecution(args, slackContext);
@@ -384,13 +316,11 @@ describe('RunAuditCommand', () => {
       expect(queueUrl).to.equal('testQueueUrl');
       expect(message.type).to.equal('experimentation-opportunities');
       expect(message.siteId).to.equal('site-123');
-      expect(message.auditContext).to.have.property('additionalAuditData');
-      expect(message.auditContext.additionalAuditData).to.deep.equal({
-        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
-      });
+      expect(message.auditContext).to.have.property('additionalData');
+      expect(message.auditContext.additionalData).to.deep.equal(['data1', 'data2']);
     });
 
-    it('should work normally without additional URLs', async () => {
+    it('should work normally without additional data', async () => {
       const args = ['https://example.com', 'experimentation-opportunities'];
 
       await command.handleExecution(args, slackContext);
@@ -398,54 +328,10 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage).to.have.been.calledOnce;
       const [_, message] = sqsStub.sendMessage.firstCall.args;
 
-      expect(message.auditContext).to.not.have.property('additionalAuditData');
+      expect(message.auditContext).to.not.have.property('additionalData');
     });
 
-    it('should show additional URLs info in Slack message', async () => {
-      const args = [
-        'https://example.com',
-        'experimentation-opportunities',
-        'https://example.com/page1,https://example.com/page2',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledWith(
-        ':adobe-run: Triggering experimentation-opportunities audit for https://example.com with 2 additional URLs',
-      );
-    });
-
-    it('should handle invalid additional URLs gracefully', async () => {
-      const args = [
-        'https://example.com',
-        'experimentation-opportunities',
-        'invalid-url1,invalid-url2',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      const [_, message] = sqsStub.sendMessage.firstCall.args;
-      expect(message.auditContext).to.not.have.property('additionalAuditData');
-    });
-
-    it('should handle mixed valid/invalid additional URLs', async () => {
-      const args = [
-        'https://example.com',
-        'experimentation-opportunities',
-        'https://example.com/page1,invalid-url,https://example.com/page2',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(sqsStub.sendMessage).to.have.been.calledOnce;
-      const [_, message] = sqsStub.sendMessage.firstCall.args;
-      expect(message.auditContext.additionalAuditData).to.deep.equal({
-        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
-      });
-    });
-
-    it('should handle CSV processing without additional URLs', async () => {
+    it('should handle CSV processing without additional data', async () => {
       const fileUrl = 'https://example.com/sites.csv';
       slackContext.files = [
         {
@@ -466,7 +352,7 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage).to.have.been.calledTwice;
     });
 
-    it('should handle CSV processing with additional URLs', async () => {
+    it('should handle CSV processing with additional data', async () => {
       const fileUrl = 'https://example.com/sites.csv';
       slackContext.files = [
         {
@@ -478,22 +364,18 @@ describe('RunAuditCommand', () => {
         .get('')
         .reply(200, 'https://site1.com,uuid1\nhttps://site2.com,uuid2');
 
-      const args = ['lhs-mobile', 'https://example.com/page1,https://example.com/page2']; // CSV with additional URLs
+      const args = ['lhs-mobile', 'data1', 'data2'];
 
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
-        ':adobe-run: Triggering lhs-mobile audit for 2 sites with 2 additional URLs.',
+        ':adobe-run: Triggering lhs-mobile audit for 2 sites with 2 additional parameters.',
       );
       expect(sqsStub.sendMessage).to.have.been.calledTwice;
       const [, message1] = sqsStub.sendMessage.firstCall.args;
       const [, message2] = sqsStub.sendMessage.secondCall.args;
-      expect(message1.auditContext.additionalAuditData).to.deep.equal({
-        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
-      });
-      expect(message2.auditContext.additionalAuditData).to.deep.equal({
-        staticUrls: ['https://example.com/page1', 'https://example.com/page2'],
-      });
+      expect(message1.auditContext.additionalData).to.deep.equal(['data1', 'data2']);
+      expect(message2.auditContext.additionalData).to.deep.equal(['data1', 'data2']);
     });
   });
 });

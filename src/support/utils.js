@@ -15,43 +15,8 @@ import URI from 'urijs';
 import {
   hasText,
   tracingFetch as fetch,
-  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import { STATUS_BAD_REQUEST } from '../utils/constants.js';
-
-/**
- * Parses additional URLs from command arguments.
- * @param {string[]} additionalArgs - The additional arguments after the main command args.
- * @returns {Object|null} Additional audit data object or null if no valid URLs found.
- */
-export const parseAdditionalUrls = (additionalArgs) => {
-  if (additionalArgs.length === 0) {
-    return null;
-  }
-
-  const additionalDataArg = additionalArgs.join(' ').trim();
-  if (!additionalDataArg) {
-    return null;
-  }
-
-  let urls = [];
-  if (additionalDataArg.includes(',')) {
-    urls = additionalDataArg
-      .split(',')
-      .map((url) => url.trim())
-      .filter((url) => isValidUrl(url));
-  } else if (isValidUrl(additionalDataArg)) {
-    urls = [additionalDataArg];
-  } else {
-    return null;
-  }
-
-  if (urls.length > 0) {
-    return { staticUrls: urls };
-  }
-
-  return null;
-};
 
 /**
  * Checks if the url parameter "url" equals "ALL".
@@ -203,7 +168,7 @@ export const sendAuditMessages = async (
  * @param {string} auditType - The type of audit.
  * @param {Object} slackContext - The Slack context object.
  * @param {Object} lambdaContext - The Lambda context object.
- * @param {Object|null} [additionalAuditData] - Additional audit data.
+ * @param {Object|null} [additionalData] - Additional data.
  * @return {Promise} - A promise representing the audit trigger operation.
  */
 export const triggerAuditForSite = async (
@@ -211,7 +176,7 @@ export const triggerAuditForSite = async (
   auditType,
   slackContext,
   lambdaContext,
-  additionalAuditData = null,
+  additionalData = null,
 ) => {
   const auditContext = {
     slackContext: {
@@ -220,8 +185,8 @@ export const triggerAuditForSite = async (
     },
   };
 
-  if (additionalAuditData) {
-    auditContext.additionalAuditData = additionalAuditData;
+  if (additionalData) {
+    auditContext.additionalData = additionalData;
   }
 
   return sendAuditMessage(
