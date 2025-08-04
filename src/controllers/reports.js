@@ -44,6 +44,20 @@ async function generatePresignedUrl(s3, bucket, key) {
   return getSignedUrl(s3Client, command, { expiresIn });
 }
 
+async function deleteS3Object(s3, bucket, key) {
+  const {
+    s3Client,
+    DeleteObjectCommand,
+  } = s3;
+
+  const command = new DeleteObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
+
+  return s3Client.send(command);
+}
+
 /**
  * Reports controller. Provides methods to create and manage report generation jobs.
  * @param {object} ctx - Context of the request.
@@ -364,6 +378,7 @@ function ReportsController(ctx, log, env) {
    */
   const deleteReport = async (context) => {
     const { siteId, reportId } = context.params;
+    const { S3_REPORT_BUCKET: bucketName } = env;
 
     // Validate site ID
     if (!isValidUUID(siteId)) {
@@ -398,7 +413,25 @@ function ReportsController(ctx, log, env) {
         return badRequest('Report does not belong to the specified site');
       }
 
-      // Delete the report
+      // Delete S3 files if they exist (only for successful reports)
+      if (report.getStatus() === 'success' && report.getStoragePath()) {
+        const rawReportKey = `${report.getStoragePath()}raw/report.json`;
+        const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
+
+        try {
+          // Delete both S3 files
+          await Promise.all([
+            deleteS3Object(s3, bucketName, rawReportKey),
+            deleteS3Object(s3, bucketName, mystiqueReportKey),
+          ]);
+          log.info(`S3 files deleted for report ${reportId}: ${rawReportKey}, ${mystiqueReportKey}`);
+        } catch (s3Error) {
+          // Log S3 deletion error but continue with database deletion
+          log.warn(`Failed to delete S3 files for report ${reportId}: ${s3Error.message}`);
+        }
+      }
+
+      // Delete the report from database
       await report.remove();
 
       log.info(`Report ${reportId} deleted successfully for site ${siteId}`);

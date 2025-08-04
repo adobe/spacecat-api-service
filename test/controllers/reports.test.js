@@ -217,9 +217,12 @@ describe('ReportsController', () => {
 
     mockContext = {
       s3: {
-        s3Client: {},
+        s3Client: {
+          send: sinon.stub().resolves(),
+        },
         getSignedUrl: sinon.stub().resolves('https://presigned-url.com'),
         GetObjectCommand: sinon.stub(),
+        DeleteObjectCommand: sinon.stub(),
       },
       dataAccess: mockDataAccess,
       sqs: mockSqs,
@@ -859,6 +862,7 @@ describe('ReportsController', () => {
         getId: () => '987e6543-e21b-12d3-a456-426614174001',
         getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
         getStatus: () => 'success',
+        getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
         remove: sinon.stub().resolves(),
       };
 
@@ -871,6 +875,7 @@ describe('ReportsController', () => {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
           reportId: '987e6543-e21b-12d3-a456-426614174001',
         },
+        s3: mockContext.s3,
       };
 
       const result = await reportsController.deleteReport(context);
@@ -884,6 +889,95 @@ describe('ReportsController', () => {
       });
 
       expect(mockDataAccess.Report.findById).to.have.been.calledOnceWith('987e6543-e21b-12d3-a456-426614174001');
+      expect(mockReport.remove).to.have.been.calledOnce;
+    });
+
+    it('should delete S3 files for successful reports', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        s3: mockContext.s3,
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(200);
+
+      // Verify S3 deletion was called for both files
+      expect(mockContext.s3.DeleteObjectCommand).to.have.been.calledTwice;
+      expect(mockContext.s3.s3Client.send).to.have.been.calledTwice;
+
+      // Verify the correct S3 keys were used
+      const deleteCommands = mockContext.s3.DeleteObjectCommand.getCalls();
+      const rawReportKey = '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/raw/report.json';
+      const mystiqueReportKey = '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/mystique/report.json';
+
+      expect(deleteCommands[0].args[0]).to.deep.include({
+        Bucket: 'test-bucket',
+        Key: rawReportKey,
+      });
+      expect(deleteCommands[1].args[0]).to.deep.include({
+        Bucket: 'test-bucket',
+        Key: mystiqueReportKey,
+      });
+
+      expect(mockReport.remove).to.have.been.calledOnce;
+    });
+
+    it('should not delete S3 files for reports with non-success status', async () => {
+      // Create a report with processing status
+      const processingReport = {
+        ...mockReport,
+        getStatus: () => 'processing',
+      };
+      mockDataAccess.Report.findById.resolves(processingReport);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        s3: mockContext.s3,
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(200);
+
+      // Verify S3 deletion was NOT called
+      expect(mockContext.s3.DeleteObjectCommand).to.not.have.been.called;
+      expect(mockContext.s3.s3Client.send).to.not.have.been.called;
+
+      expect(processingReport.remove).to.have.been.calledOnce;
+    });
+
+    it('should continue with database deletion even if S3 deletion fails', async () => {
+      // Make S3 deletion fail
+      mockContext.s3.s3Client.send.rejects(new Error('S3 deletion failed'));
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        s3: mockContext.s3,
+      };
+
+      const result = await reportsController.deleteReport(context);
+
+      expect(result.status).to.equal(200);
+
+      // Verify S3 deletion was attempted
+      expect(mockContext.s3.DeleteObjectCommand).to.have.been.calledTwice;
+      expect(mockContext.s3.s3Client.send).to.have.been.calledTwice;
+
+      // Verify warning was logged for S3 failure
+      expect(mockLog.warn).to.have.been.calledOnce;
+      expect(mockLog.warn.firstCall.args[0]).to.include('Failed to delete S3 files');
+
+      // Verify database deletion still proceeded
       expect(mockReport.remove).to.have.been.calledOnce;
     });
 
@@ -936,6 +1030,7 @@ describe('ReportsController', () => {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
           reportId: '987e6543-e21b-12d3-a456-426614174001',
         },
+        s3: mockContext.s3,
       };
 
       const result = await reportsController.deleteReport(context);
