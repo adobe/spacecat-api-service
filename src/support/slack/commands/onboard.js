@@ -80,7 +80,8 @@ function OnboardCommand(context) {
    */
   const isImportEnabled = (importType, imports) => {
     const foundImport = imports.find((importConfig) => importConfig.type === importType);
-    return foundImport?.enabled;
+    // If import is found, check if it's enabled, otherwise assume it's not enabled (false)
+    return foundImport ? foundImport.enabled : false;
   };
 
   /**
@@ -265,15 +266,17 @@ function OnboardCommand(context) {
       reportLine.imports = importTypes.join(', ');
       const siteConfig = site.getConfig();
 
-      // Get current imports to check what's already enabled
+      // Enabled imports only if there are not already enabled
       const imports = siteConfig.getImports();
-
-      // Filter imports that are not already enabled
       const importsEnabled = [];
       for (const importType of importTypes) {
-        if (!isImportEnabled(importType, imports)) {
+        const isEnabled = isImportEnabled(importType, imports);
+        if (!isEnabled) {
+          log.info(`Enabling import: ${importType}`);
           siteConfig.enableImport(importType);
           importsEnabled.push(importType);
+        } else {
+          log.info(`Import '${importType}' is already enabled, skipping`);
         }
       }
 
@@ -374,8 +377,8 @@ function OnboardCommand(context) {
         imsOrgId: imsOrgID,
         organizationId,
         taskContext: {
-          importTypes: importsEnabled,
-          auditTypes: auditsEnabled,
+          importTypes: importsEnabled || [],
+          auditTypes: auditsEnabled || [],
           slackContext: {
             channelId: slackContext.channelId,
             threadTs: slackContext.threadTs,
