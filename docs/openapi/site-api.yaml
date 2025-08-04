@@ -449,7 +449,8 @@ site-report:
       - reports
     summary: Delete a specific report
     description: |
-      Deletes a specific report and its associated files from storage.
+      Deletes a specific report from the database and removes its associated files from S3 storage.
+      For successful reports, this includes both the raw report data and enhanced Mystique analysis files.
       This action cannot be undone.
     operationId: deleteReport
     responses:
