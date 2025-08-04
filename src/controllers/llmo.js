@@ -67,8 +67,10 @@ function LlmoController() {
 
     // Add limit, offset and sheet query params to the url
     const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
-    const { limit, offset, sheet } = context.params;
-    url.searchParams.set('limit', limit || 500000);
+    const { limit, offset, sheet } = context.data;
+    if (limit) {
+      url.searchParams.set('limit', limit);
+    }
     if (offset) {
       url.searchParams.set('offset', offset);
     }

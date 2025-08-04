@@ -156,7 +156,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -174,7 +174,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add limit to the context params
-      mockContext.params.limit = '10';
+      mockContext.data.limit = '10';
 
       const result = await controller.getLlmoSheetData(mockContext);
 
@@ -200,7 +200,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add offset to the context params
-      mockContext.params.offset = '20';
+      mockContext.data.offset = '20';
 
       const result = await controller.getLlmoSheetData(mockContext);
 
@@ -208,7 +208,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000&offset=20',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?offset=20',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -226,7 +226,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add sheet to the context params
-      mockContext.params.sheet = 'analytics-sheet';
+      mockContext.data.sheet = 'analytics-sheet';
 
       const result = await controller.getLlmoSheetData(mockContext);
 
@@ -234,7 +234,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000&sheet=analytics-sheet',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?sheet=analytics-sheet',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -252,9 +252,9 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add multiple query parameters to the context params
-      mockContext.params.limit = '10';
-      mockContext.params.offset = '20';
-      mockContext.params.sheet = 'analytics-sheet';
+      mockContext.data.limit = '10';
+      mockContext.data.offset = '20';
+      mockContext.data.sheet = 'analytics-sheet';
 
       const result = await controller.getLlmoSheetData(mockContext);
 
@@ -280,9 +280,9 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Ensure no query parameters are set
-      delete mockContext.params.limit;
-      delete mockContext.params.offset;
-      delete mockContext.params.sheet;
+      delete mockContext.data.limit;
+      delete mockContext.data.offset;
+      delete mockContext.data.sheet;
 
       const result = await controller.getLlmoSheetData(mockContext);
 
@@ -290,7 +290,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -309,9 +309,9 @@ describe('LlmoController', () => {
 
       // Add sheetType and query parameters to the context params
       mockContext.params.sheetType = 'analytics';
-      mockContext.params.limit = '5';
-      mockContext.params.offset = '10';
-      mockContext.params.sheet = 'performance-sheet';
+      mockContext.data.limit = '5';
+      mockContext.data.offset = '10';
+      mockContext.data.sheet = 'performance-sheet';
 
       const result = await controller.getLlmoSheetData(mockContext);
 
@@ -337,9 +337,9 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add empty string query parameters
-      mockContext.params.limit = '';
-      mockContext.params.offset = '';
-      mockContext.params.sheet = '';
+      mockContext.data.limit = '';
+      mockContext.data.offset = '';
+      mockContext.data.sheet = '';
 
       const result = await controller.getLlmoSheetData(mockContext);
 
@@ -348,7 +348,7 @@ describe('LlmoController', () => {
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       // Empty strings should be treated as falsy and not added to URL
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -366,9 +366,9 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add null query parameters
-      mockContext.params.limit = null;
-      mockContext.params.offset = null;
-      mockContext.params.sheet = null;
+      mockContext.data.limit = null;
+      mockContext.data.offset = null;
+      mockContext.data.sheet = null;
 
       const result = await controller.getLlmoSheetData(mockContext);
 
@@ -377,7 +377,7 @@ describe('LlmoController', () => {
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       // Null values should be treated as falsy and not added to URL
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -403,7 +403,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'analytics-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json?limit=500000',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
@@ -422,7 +422,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add sheetType to the context params
-      mockContext.params.sheetType = 'analytics';
+      mockContext.data.sheetType = 'analytics';
 
       try {
         await controller.getLlmoSheetData(mockContext);
@@ -437,7 +437,7 @@ describe('LlmoController', () => {
       tracingFetchStub.rejects(networkError);
 
       // Add sheetType to the context params
-      mockContext.params.sheetType = 'analytics';
+      mockContext.data.sheetType = 'analytics';
 
       try {
         await controller.getLlmoSheetData(mockContext);
@@ -461,7 +461,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=500000',
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token hlx_api_key_missing',
