@@ -34,6 +34,50 @@ llmo-sheet-data:
     security:
       - api_key: [ ]
 
+llmo-sheet-data-with-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: sheetType
+      in: path
+      required: true
+      description: The sheet type identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'analytics'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'questions'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO sheet data with sheet type
+    description: |
+      Retrieves data from the external LLMO data endpoint for a specific site with a specified sheet type.
+      This endpoint proxies data from the external HLX API based on the site's LLMO configuration.
+      The data is fetched from the path: {dataFolder}/{sheetType}/{dataSource}.json
+    operationId: getLlmoSheetDataWithType
+    responses:
+      '200':
+        description: LLMO sheet data retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The data returned from the external LLMO endpoint
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
