@@ -94,13 +94,18 @@ function LlmoController() {
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
-      // Get the response data
-      const data = await response.json();
+      // Get the response data as ArrayBuffer to preserve compression
+      const data = await response.arrayBuffer();
 
       log.info(`Successfully proxied data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
 
-      // Return the response as-is
-      return ok(data);
+      // Preserve all headers from the external response
+      const headers = {
+        ...Object.fromEntries(response.headers.entries()),
+      };
+
+      // Return the response with preserved compression and headers
+      return ok(data, headers);
     } catch (error) {
       log.error(`Error proxying data for siteId: ${siteId}, sheetURL: ${sheetURL}`, error);
       throw error;
