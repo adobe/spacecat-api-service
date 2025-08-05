@@ -94,12 +94,6 @@ function LlmoController() {
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
-      // Don't decompress, just forward the response as-is
-      // return new Response(response.body, {
-      //  status: response.status,
-      //  headers: response.headers,
-      // });
-
       // Get the response data
       const data = await response.json();
 
