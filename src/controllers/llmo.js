@@ -59,14 +59,15 @@ function LlmoController() {
   // Handles requests to the LLMO sheet data endpoint
   const getLlmoSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataSource } = context.params;
+    const { siteId, dataSource, sheetType } = context.params;
     const { env } = context;
 
     const { llmoConfig } = await getSiteAndValidateLlmo(context);
+    const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 
     try {
       // Fetch data from the external endpoint using the dataFolder from config
-      const response = await fetch(`${LLMO_SHEETDATA_SOURCE_URL}/${llmoConfig.dataFolder}/${dataSource}.json`, {
+      const response = await fetch(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`, {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
@@ -81,12 +82,12 @@ function LlmoController() {
       // Get the response data
       const data = await response.json();
 
-      log.info(`Successfully proxied data for siteId: ${siteId}, dataSource: ${dataSource}`);
+      log.info(`Successfully proxied data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
 
       // Return the response as-is
       return ok(data);
     } catch (error) {
-      log.error(`Error proxying data for siteId: ${siteId}, dataSource: ${dataSource}`, error);
+      log.error(`Error proxying data for siteId: ${siteId}, sheetURL: ${sheetURL}`, error);
       throw error;
     }
   };
