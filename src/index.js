@@ -163,6 +163,7 @@ async function run(request, context) {
     const routeMatch = matchPath(method, suffix, routeHandlers);
 
     if (routeMatch) {
+      log.info(`Route match: ${JSON.stringify(routeMatch)}`);
       const { handler, params } = routeMatch;
 
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
@@ -172,8 +173,9 @@ async function run(request, context) {
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
+      log.info(`Params: ${JSON.stringify(params)}`);
       context.params = params;
-
+      log.info(`Calling handler: ${handler.name}`);
       return await handler(context);
     } else {
       const notFoundMessage = `no such route /${route}`;
