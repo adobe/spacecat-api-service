@@ -404,8 +404,9 @@ export function getImsUserToken(context) {
  * @returns {string} imsUserToken - The IMS User access token from request body.
  * @throws {ErrorWithStatusCode} - If the IMS token is missing from request body.
  */
-export function getImsUserTokenFromBody(context) {
+export function getImsUserTokenFromBody(context, log) {
   const imsToken = context.data?.imsToken;
+  log.info('imsToken', imsToken);
   if (!hasText(imsToken)) {
     throw new ErrorWithStatusCode('Missing IMS token in request body', STATUS_BAD_REQUEST);
   }
@@ -466,7 +467,7 @@ export async function getCSPromiseTokenFromBody(context, log) {
   // get IMS promise token and attach to queue message
   let userToken;
   try {
-    userToken = await getImsUserTokenFromBody(context);
+    userToken = await getImsUserTokenFromBody(context, log);
     log.info('Successfully extracted IMS token from request body: ', userToken);
   } catch (e) {
     log.error(`Failed to get user token: ${e.message}`);

@@ -156,19 +156,19 @@ function PreflightController(ctx, log, env) {
       log.info(`Context keys: ${Object.keys(context).join(', ')}`);
       log.info(`Data: ${JSON.stringify(data, null, 2)}`);
       let promiseTokenResponse;
-      if (CS_TYPES.includes(site.getAuthoringType())) {
-        try {
-          promiseTokenResponse = await getCSPromiseTokenFromBody(context, log);
-          log.info('promiseTokenResponse', promiseTokenResponse);
-          log.info('Successfully got promise token');
-        } catch (e) {
-          log.error(`Failed to get promise token: ${e.message}`);
-          if (e instanceof ErrorWithStatusCode) {
-            return badRequest(e.message);
-          }
-          return internalServerError('Error getting promise token');
+      // if (CS_TYPES.includes(site.getAuthoringType())) {
+      try {
+        promiseTokenResponse = await getCSPromiseTokenFromBody(context, log);
+        log.info('promiseTokenResponse', promiseTokenResponse);
+        log.info('Successfully got promise token');
+      } catch (e) {
+        log.error(`Failed to get promise token: ${e.message}`);
+        if (e instanceof ErrorWithStatusCode) {
+          return badRequest(e.message);
         }
+        return internalServerError('Error getting promise token');
       }
+      // }
 
       // Create a new async job
       const job = await dataAccess.AsyncJob.create({
