@@ -153,8 +153,8 @@ function PreflightController(ctx, log, env) {
         throw new Error(`No site found for preview URL: ${previewBaseURL}`);
       }
 
-      log.info('context', context);
-      log.info('data', data);
+      log.info(`Context keys: ${Object.keys(context).join(', ')}`);
+      log.info(`Data: ${JSON.stringify(data, null, 2)}`);
       let promiseTokenResponse;
       if (CS_TYPES.includes(site.getAuthoringType())) {
         try {
