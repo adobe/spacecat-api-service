@@ -218,7 +218,7 @@ describe('Preflight Controller', () => {
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             enableAuthentication: false,
-            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility', 'readability']],
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility', 'readability'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
