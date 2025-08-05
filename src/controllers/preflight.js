@@ -17,7 +17,7 @@ import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { getCSPromiseTokenFromBody, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -158,7 +158,7 @@ function PreflightController(ctx, log, env) {
       let promiseTokenResponse;
       if (CS_TYPES.includes(site.getAuthoringType())) {
         try {
-          promiseTokenResponse = await getCSPromiseToken(context, log);
+          promiseTokenResponse = await getCSPromiseTokenFromBody(context, log);
           log.info('promiseTokenResponse', promiseTokenResponse);
           log.info('Successfully got promise token');
         } catch (e) {

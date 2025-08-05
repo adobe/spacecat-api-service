@@ -399,6 +399,20 @@ export function getImsUserToken(context) {
 }
 
 /**
+ * Get the IMS user token from the request body (preflight-specific).
+ * @param {object} context - The context of the request.
+ * @returns {string} imsUserToken - The IMS User access token from request body.
+ * @throws {ErrorWithStatusCode} - If the IMS token is missing from request body.
+ */
+export function getImsUserTokenFromBody(context) {
+  const imsToken = context.data?.imsToken;
+  if (!hasText(imsToken)) {
+    throw new ErrorWithStatusCode('Missing IMS token in request body', STATUS_BAD_REQUEST);
+  }
+  return imsToken;
+}
+
+/**
  * Get an IMS promise token from the authorization header in context.
  * @param {object} context - The context of the request.
  * @param {object} log - The logger instance.
@@ -419,6 +433,44 @@ export async function getCSPromiseToken(context, log) {
   } catch (e) {
     log.error(`Failed to get user token: ${e.message}`);
     throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
+  }
+  log.info('Creating IMS promise client');
+  const imsPromiseClient = ImsPromiseClient.createFrom(
+    context,
+    ImsPromiseClient.CLIENT_TYPE.EMITTER,
+  );
+
+  log.info('Requesting promise token from IMS client');
+  const result = await imsPromiseClient.getPromiseToken(
+    userToken,
+    context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT,
+  );
+
+  log.info('Successfully obtained promise token: ', result);
+  return result;
+}
+
+/**
+ * Get an IMS promise token from the IMS token in request body (preflight-specific).
+ * @param {object} context - The context of the request.
+ * @param {object} log - The logger instance.
+ * @returns {Promise<{
+ *   promise_token: string,
+ *   expires_in: number,
+ *   token_type: string,
+ * }>} - The promise token response.
+ * @throws {ErrorWithStatusCode} - If the IMS token is missing from request body.
+ */
+export async function getCSPromiseTokenFromBody(context, log) {
+  log.info('Getting IMS promise token from request body');
+  // get IMS promise token and attach to queue message
+  let userToken;
+  try {
+    userToken = await getImsUserTokenFromBody(context);
+    log.info('Successfully extracted IMS token from request body: ', userToken);
+  } catch (e) {
+    log.error(`Failed to get user token: ${e.message}`);
+    throw new ErrorWithStatusCode('Missing IMS token in request body', STATUS_BAD_REQUEST);
   }
   log.info('Creating IMS promise client');
   const imsPromiseClient = ImsPromiseClient.createFrom(
