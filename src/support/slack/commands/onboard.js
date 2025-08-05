@@ -12,9 +12,11 @@
 
 // todo: prototype - untested
 /* c8 ignore start */
-import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import {
+  isValidUrl, isObject, isNonEmptyArray, isValidIMSOrgId,
+} from '@adobe/spacecat-shared-utils';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import os from 'os';
 import path from 'path';
@@ -147,59 +149,37 @@ function OnboardCommand(context) {
         return reportLine;
       }
 
-      if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
+      if (!isValidIMSOrgId(imsOrgID)) {
         reportLine.errors = 'Invalid IMS Org ID';
         reportLine.status = 'Failed';
         return reportLine;
       }
 
-      // Check if site already exists
       let site = await Site.findByBaseURL(baseURL);
-      let organizationId; // Declare organizationId in broader scope
+      let organizationId;
+      //  Check if site already exists
       if (site) {
-        // Site exists - don't update org, just provide info
         const siteOrgId = site.getOrganizationId();
-        organizationId = siteOrgId; // Set organizationId for existing site
-        const siteOrganization = await Organization.findById(siteOrgId);
-
-        if (siteOrganization) {
-          const message = `:information_source: Site ${baseURL} already exists. Organization: ${siteOrganization.getName()} (ID: ${siteOrgId}, IMS Org ID: ${siteOrganization.getImsOrgId()})`;
-          await say(message);
-          log.info(message);
-        } else {
-          const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
-          await say(message);
-          log.info(message);
-        }
+        const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
+        await say(message);
+        log.info(message);
       } else {
         // New site - handle organization logic
         log.info(`Site ${baseURL} doesn't exist. Processing organization...`);
 
         // Check if the organization with IMS Org ID already exists; create if it doesn't
         let organization = await Organization.findByImsOrgId(imsOrgID);
-
+        const imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
         if (!organization) {
-          let imsOrgDetails;
-          try {
-            imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
-            log.info(`IMS Org Details: ${imsOrgDetails}`);
-          } catch (error) {
-            log.error(`Error retrieving IMS Org details: ${error.message}`);
-            reportLine.errors = `Error retrieving IMS org with the ID *${imsOrgID}*.`;
-            reportLine.status = 'Failed';
-            return reportLine;
-          }
-
           if (!imsOrgDetails) {
             reportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
             reportLine.status = 'Failed';
             return reportLine;
           }
-
+          log.info(`IMS Org Details: ${imsOrgDetails}`);
           organization = await Organization.create({
             name: imsOrgDetails.orgName,
             imsOrgId: imsOrgID,
-            tenantId: imsOrgDetails.tenantId,
           });
 
           const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
@@ -402,10 +382,6 @@ function OnboardCommand(context) {
         },
       };
 
-      log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
-      log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
-      log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
-
       // Prepare and start step function workflow with the necessary parameters
       const workflowInput = {
         opportunityStatusJob,
@@ -506,9 +482,6 @@ function OnboardCommand(context) {
 
         await configuration.save();
 
-        // Add error handling after configuration save (matching single site case)
-        // Note: Individual errors are already reported above in the loop
-
         log.info('All sites were processed and onboarded.');
 
         fileStream.end();
@@ -542,16 +515,14 @@ function OnboardCommand(context) {
         let workflowWaitTime;
 
         if (args.length >= 2) {
-          // Check if second argument ends with @AdobeOrg to determine if it's an imsOrgId
-          if (secondArg && secondArg.endsWith('@AdobeOrg')) {
+          // Check if second argument is a valid IMS Org ID
+          if (secondArg && isValidIMSOrgId(secondArg)) {
             imsOrgID = secondArg;
             profileName = thirdArg || 'demo';
             workflowWaitTime = fourthArg;
           } else {
-            // Second argument is not an imsOrgId, treat it as profileName
-            imsOrgID = env.DEMO_IMS_ORG;
-            profileName = secondArg;
-            workflowWaitTime = thirdArg;
+            await say(':warning: Invalid IMS Org ID. Please provide a valid IMS Org ID.');
+            return;
           }
         } else {
           // Only siteId provided
