@@ -1,3 +1,10 @@
+# [1.141.0](https://github.com/adobe/spacecat-api-service/compare/v1.140.4...v1.141.0) (2025-08-05)
+
+
+### Features
+
+* preflight readability documentation ([#1116](https://github.com/adobe/spacecat-api-service/issues/1116)) ([5529e80](https://github.com/adobe/spacecat-api-service/commit/5529e802e8c59879fd3bd93d3845f070ec12d2fb))
+
 ## [1.140.4](https://github.com/adobe/spacecat-api-service/compare/v1.140.3...v1.140.4) (2025-08-05)
 
 
