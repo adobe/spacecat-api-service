@@ -85,6 +85,7 @@ function LlmoController() {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
+          'Accept-Encoding': 'gzip, deflate, br, zstd',
         },
       });
 

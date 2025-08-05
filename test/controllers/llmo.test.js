@@ -161,6 +161,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -187,6 +188,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -213,6 +215,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -239,6 +242,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -267,6 +271,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -295,6 +300,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -324,6 +330,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -353,6 +360,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -382,6 +390,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -408,6 +417,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
@@ -466,6 +476,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token hlx_api_key_missing',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
           },
         },
       );
