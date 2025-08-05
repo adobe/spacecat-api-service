@@ -541,6 +541,279 @@ describe('ReportsController', () => {
       expect(responseBody.message).to.equal('Comparison period end date is required');
     });
 
+    it('should return bad request for invalid report period start date format', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025/01/01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report period start date must be in YYYY-MM-DD format');
+    });
+
+    it('should return bad request for invalid report period end date format', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '01/31/2025',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report period end date must be in YYYY-MM-DD format');
+    });
+
+    it('should return bad request for invalid comparison period start date format', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '12-01-2024',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Comparison period start date must be in YYYY-MM-DD format');
+    });
+
+    it('should return bad request for invalid comparison period end date format', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024/12/31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Comparison period end date must be in YYYY-MM-DD format');
+    });
+
+    it('should return bad request for invalid report period start date value', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-13-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report period start date is not a valid date');
+    });
+
+    it('should return bad request for invalid report period end date value', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-13-01',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report period end date is not a valid date');
+    });
+
+    it('should return bad request for invalid comparison period start date value', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-00-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Comparison period start date is not a valid date');
+    });
+
+    it('should return bad request for invalid comparison period end date value', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-32',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Comparison period end date is not a valid date');
+    });
+
+    it('should return bad request when report period start date is after end date', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-31',
+            endDate: '2025-01-01',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report period start date must be less than or equal to end date');
+    });
+
+    it('should return bad request when comparison period start date is after end date', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-31',
+            endDate: '2024-12-01',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Comparison period start date must be less than or equal to end date');
+    });
+
+    it('should accept same-day periods', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-01',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-01',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(200);
+    });
+
     it('should return bad request for missing data', async () => {
       const context = {
         params: {

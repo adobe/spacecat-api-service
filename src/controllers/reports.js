@@ -26,6 +26,54 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { ReportDto } from '../dto/report.js';
 
+/**
+ * Validates a period object (reportPeriod or comparisonPeriod)
+ * @param {object} period - The period object to validate
+ * @param {string} periodName - The name of the period for error messages
+ * @returns {string|null} Error message if validation fails, null if valid
+ */
+function isValidPeriod(period, periodName) {
+  if (!isNonEmptyObject(period)) {
+    return `${periodName} is required`;
+  }
+
+  if (!hasText(period.startDate)) {
+    return `${periodName} start date is required`;
+  }
+
+  if (!hasText(period.endDate)) {
+    return `${periodName} end date is required`;
+  }
+
+  // Validate date format (YYYY-MM-DD)
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(period.startDate)) {
+    return `${periodName} start date must be in YYYY-MM-DD format`;
+  }
+
+  if (!dateRegex.test(period.endDate)) {
+    return `${periodName} end date must be in YYYY-MM-DD format`;
+  }
+
+  // Validate that dates can be parsed
+  const parsedStartDate = new Date(period.startDate);
+  if (Number.isNaN(parsedStartDate.getTime())) {
+    return `${periodName} start date is not a valid date`;
+  }
+
+  const parsedEndDate = new Date(period.endDate);
+  if (Number.isNaN(parsedEndDate.getTime())) {
+    return `${periodName} end date is not a valid date`;
+  }
+
+  // Validate that start date is not after end date
+  if (parsedStartDate > parsedEndDate) {
+    return `${periodName} start date must be less than or equal to end date`;
+  }
+
+  return null;
+}
+
 async function generatePresignedUrl(s3, bucket, key) {
   const {
     s3Client,
@@ -126,29 +174,15 @@ function ReportsController(ctx, log, env) {
     }
 
     // Validate report period
-    if (!isNonEmptyObject(data.reportPeriod)) {
-      return badRequest('Report period is required');
-    }
-
-    if (!hasText(data.reportPeriod.startDate)) {
-      return badRequest('Report period start date is required');
-    }
-
-    if (!hasText(data.reportPeriod.endDate)) {
-      return badRequest('Report period end date is required');
+    const reportPeriodError = isValidPeriod(data.reportPeriod, 'Report period');
+    if (reportPeriodError) {
+      return badRequest(reportPeriodError);
     }
 
     // Validate comparison period
-    if (!isNonEmptyObject(data.comparisonPeriod)) {
-      return badRequest('Comparison period is required');
-    }
-
-    if (!hasText(data.comparisonPeriod.startDate)) {
-      return badRequest('Comparison period start date is required');
-    }
-
-    if (!hasText(data.comparisonPeriod.endDate)) {
-      return badRequest('Comparison period end date is required');
+    const comparisonPeriodError = isValidPeriod(data.comparisonPeriod, 'Comparison period');
+    if (comparisonPeriodError) {
+      return badRequest(comparisonPeriodError);
     }
 
     try {
