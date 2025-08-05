@@ -35,7 +35,7 @@ export class SQS {
    * @param {object} message - The message to send.
    * @returns {Promise<void>} - Promise that resolves when the message is sent.
    */
-  async sendMessage(queueNameOrUrl, message) {
+  async sendMessage(queueNameOrUrl, message, messageGroupId) {
     const body = {
       ...message,
       timestamp: new Date().toISOString(),
@@ -45,6 +45,7 @@ export class SQS {
     const msgCommand = new SendMessageCommand({
       MessageBody: JSON.stringify(body),
       QueueUrl: queueUrl,
+      MessageGroupId: messageGroupId, // Only needed for FIFO queues
     });
 
     try {

@@ -147,6 +147,20 @@ describe('getRouteHandlers', () => {
     getPaidTrafficByTypeChannel: sinon.stub(),
     getPaidTrafficByTypeCampaign: sinon.stub(),
     getPaidTrafficByType: sinon.stub(),
+    getPaidTrafficByPageTypePlatformCampaign: sinon.stub(),
+    getPaidTrafficByUrlPageTypeCampaignDevice: sinon.stub(),
+    getPaidTrafficByUrlPageTypePlatformCampaignDevice: sinon.stub(),
+    getPaidTrafficPageTypePlatformCampaignDevice: sinon.stub(),
+    getPaidTrafficByUrlPageTypeDevice: sinon.stub(),
+    getPaidTrafficByUrlPageTypeCampaign: sinon.stub(),
+    getPaidTrafficByUrlPageTypePlatform: sinon.stub(),
+    getPaidTrafficByUrlPageTypeCampaignPlatform: sinon.stub(),
+    getPaidTrafficByUrlPageTypePlatformDevice: sinon.stub(),
+    getPaidTrafficByPageTypeCampaignDevice: sinon.stub(),
+    getPaidTrafficByPageTypeDevice: sinon.stub(),
+    getPaidTrafficByPageTypeCampaign: sinon.stub(),
+    getPaidTrafficByPageTypePlatform: sinon.stub(),
+    getPaidTrafficByPageTypePlatformDevice: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -158,6 +172,10 @@ describe('getRouteHandlers', () => {
     patchFixesStatus: () => null,
     patchFix: () => null,
     removeFix: () => null,
+  };
+
+  const mockLlmoController = {
+    getLlmoSheetData: () => null,
   };
 
   it('segregates static and dynamic routes', () => {
@@ -185,6 +203,7 @@ describe('getRouteHandlers', () => {
       mockPaidController,
       mockTrafficController,
       mockFixesController,
+      mockLlmoController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -304,17 +323,39 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/campaign',
       'GET /sites/:siteId/traffic/paid/campaign-url-device',
       'GET /sites/:siteId/traffic/paid/campaign-device',
-      'GET /sites/:siteId/traffic/paid/campaig-url',
+      'GET /sites/:siteId/traffic/paid/campaign-url',
       'GET /sites/:siteId/traffic/paid/type',
       'GET /sites/:siteId/traffic/paid/type-channel-campaign',
       'GET /sites/:siteId/traffic/paid/type-channel',
       'GET /sites/:siteId/traffic/paid/type-campaign',
+      'GET /sites/:siteId/traffic/paid/page-type',
+      'GET /sites/:siteId/traffic/paid/page-type-platform-campaign',
+      'GET /sites/:siteId/traffic/paid/page-type-campaign-device',
+      'GET /sites/:siteId/traffic/paid/page-type-device',
+      'GET /sites/:siteId/traffic/paid/page-type-campaign',
+      'GET /sites/:siteId/traffic/paid/page-type-platform',
+      'GET /sites/:siteId/traffic/paid/page-type-platform-device',
+      'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device',
+      'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device',
+      'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device',
+      'GET /sites/:siteId/traffic/paid/url-page-type-device',
+      'GET /sites/:siteId/traffic/paid/url-page-type-campaign',
+      'GET /sites/:siteId/traffic/paid/url-page-type-platform',
+      'GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform',
+      'GET /sites/:siteId/traffic/paid/url-page-type-platform-device',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
       'GET /tools/scrape/jobs/by-base-url/:baseURL',
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'PATCH /sites/:siteId/config/cdn-logs',
+      'GET /sites/:siteId/llmo/sheet-data/:dataSource',
+      'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
+      'GET /sites/:siteId/llmo/config',
+      'GET /sites/:siteId/llmo/questions',
+      'POST /sites/:siteId/llmo/questions',
+      'DELETE /sites/:siteId/llmo/questions/:questionKey',
+      'PATCH /sites/:siteId/llmo/questions/:questionKey',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -377,6 +418,18 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/scraped-content/:type'].paramNames).to.deep.equal(['siteId', 'type']);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid'].handler).to.equal(mockPaidController.getTopPaidPages);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/page-type-platform-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByPageTypePlatformCampaign);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type-campaign-device'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageTypeCampaignDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type-device'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageTypeDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageTypeCampaign);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageTypePlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageTypeCampaignPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageTypePlatformDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/page-type-campaign-device'].handler).to.equal(mockTrafficController.getPaidTrafficByPageTypeCampaignDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/page-type-device'].handler).to.equal(mockTrafficController.getPaidTrafficByPageTypeDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/page-type-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByPageTypeCampaign);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/page-type-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByPageTypePlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/page-type-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByPageTypePlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type'].handler).to.equal(mockTrafficController.getPaidTrafficByType);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeCampaign);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-channel'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeChannel);
@@ -393,5 +446,19 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType'].paramNames).to.deep.equal(['baseURL', 'processingType']);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].handler).to.equal(mockSitesController.updateCdnLogsConfig);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].handler).to.equal(mockLlmoController.getLlmoConfig);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/questions'].handler).to.equal(mockLlmoController.getLlmoQuestions);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/questions'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/questions'].handler).to.equal(mockLlmoController.addLlmoQuestion);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/questions'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['DELETE /sites/:siteId/llmo/questions/:questionKey'].handler).to.equal(mockLlmoController.removeLlmoQuestion);
+    expect(dynamicRoutes['DELETE /sites/:siteId/llmo/questions/:questionKey'].paramNames).to.deep.equal(['siteId', 'questionKey']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/questions/:questionKey'].handler).to.equal(mockLlmoController.patchLlmoQuestion);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/questions/:questionKey'].paramNames).to.deep.equal(['siteId', 'questionKey']);
   });
 });

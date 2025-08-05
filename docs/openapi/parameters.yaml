@@ -243,3 +243,17 @@ year:
   schema:
     type: integer
     example: 2024
+
+trafficType:
+  name: trafficType
+  description: Filter by traffic type (owned, earned, paid) or all
+  in: query
+  required: false
+  schema:
+    type: string
+    enum:
+      - 'all'
+      - 'owned'
+      - 'earned' 
+      - 'paid'
+    example: 'paid'

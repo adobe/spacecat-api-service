@@ -29,6 +29,7 @@ export const AUDIT_BODY_SIZE = 'body-size';
 export const AUDIT_LOREM_IPSUM = 'lorem-ipsum';
 export const AUDIT_H1_COUNT = 'h1-count';
 export const AUDIT_ACCESSIBILITY = 'accessibility';
+export const AUDIT_READABILITY = 'readability';
 
 const AVAILABLE_CHECKS = [
   AUDIT_CANONICAL,
@@ -38,6 +39,7 @@ const AVAILABLE_CHECKS = [
   AUDIT_LOREM_IPSUM,
   AUDIT_H1_COUNT,
   AUDIT_ACCESSIBILITY,
+  AUDIT_READABILITY,
 ];
 
 /**
