@@ -74,6 +74,21 @@ function isValidPeriod(period, periodName) {
   return null;
 }
 
+/**
+ * Compares two period objects for equality
+ * @param {object} period1 - First period object with startDate and endDate
+ * @param {object} period2 - Second period object with startDate and endDate
+ * @returns {boolean} True if periods are equal, false otherwise
+ */
+function comparePeriods(period1, period2) {
+  if (!period1 || !period2) {
+    return false;
+  }
+
+  // Compare startDate and endDate properties
+  return period1.startDate === period2.startDate && period1.endDate === period2.endDate;
+}
+
 async function generatePresignedUrl(s3, bucket, key) {
   const {
     s3Client,
@@ -211,10 +226,9 @@ function ReportsController(ctx, log, env) {
           return false;
         }
 
-        // Deep comparison of report periods
-        const periodsMatch = JSON.stringify(reportPeriod) === JSON.stringify(data.reportPeriod);
-        const comparisonPeriodsMatch = JSON.stringify(comparisonPeriod)
-          === JSON.stringify(data.comparisonPeriod);
+        // Compare report periods using dedicated function
+        const periodsMatch = comparePeriods(reportPeriod, data.reportPeriod);
+        const comparisonPeriodsMatch = comparePeriods(comparisonPeriod, data.comparisonPeriod);
 
         return periodsMatch && comparisonPeriodsMatch;
       });
