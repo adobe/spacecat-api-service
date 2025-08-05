@@ -389,7 +389,8 @@ export const wwwUrlResolver = (site) => {
  * @returns {string} imsUserToken - The IMS User access token.
  * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
  */
-export function getImsUserToken(context) {
+export function getImsUserToken(context, log) {
+  log.info('Getting session token from context');
   const authorizationHeader = context.pathInfo?.headers?.authorization;
   const BEARER_PREFIX = 'Bearer ';
   if (!hasText(authorizationHeader) || !authorizationHeader.startsWith(BEARER_PREFIX)) {
@@ -429,8 +430,8 @@ export async function getCSPromiseToken(context, log) {
   // get IMS promise token and attach to queue message
   let userToken;
   try {
-    userToken = await getImsUserToken(context);
-    log.info('Successfully extracted IMS token from context: ', userToken);
+    userToken = await getImsUserToken(context, log);
+    log.info('Successfully extracted session token from context: ', userToken);
   } catch (e) {
     log.error(`Failed to get user token: ${e.message}`);
     throw new ErrorWithStatusCode('Missing Authorization header', STATUS_BAD_REQUEST);
@@ -441,7 +442,7 @@ export async function getCSPromiseToken(context, log) {
     ImsPromiseClient.CLIENT_TYPE.EMITTER,
   );
 
-  log.info('Requesting promise token from IMS client');
+  log.info('Requesting promise token from session token');
   const result = await imsPromiseClient.getPromiseToken(
     userToken,
     context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT,
