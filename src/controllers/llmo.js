@@ -85,7 +85,7 @@ function LlmoController() {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'gzip, deflate, br, zstd',
+          'Accept-Encoding': 'gzip',
         },
       });
 
@@ -94,18 +94,20 @@ function LlmoController() {
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
-      // Get the response data as ArrayBuffer to preserve compression
-      const data = await response.arrayBuffer();
+      // Don't decompress, just forward the response as-is
+      // return new Response(response.body, {
+      //  status: response.status,
+      //  headers: response.headers,
+      // });
+
+      // Get the response data
+      const data = await response.json();
 
       log.info(`Successfully proxied data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
-
-      // Preserve all headers from the external response
-      const headers = {
-        ...Object.fromEntries(response.headers.entries()),
-      };
-
-      // Return the response with preserved compression and headers
-      return ok(data, headers);
+      // Return the data and let the framework handle the compression
+      return ok(data, {
+        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
+      });
     } catch (error) {
       log.error(`Error proxying data for siteId: ${siteId}, sheetURL: ${sheetURL}`, error);
       throw error;

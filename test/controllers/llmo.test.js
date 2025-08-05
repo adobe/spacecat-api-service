@@ -29,19 +29,6 @@ describe('LlmoController', () => {
   let mockEnv;
   let tracingFetchStub;
 
-  // Helper function to create mock response for the new ArrayBuffer implementation
-  const createMockResponse = () => ({
-    ok: true,
-    arrayBuffer: sinon.stub().resolves(new ArrayBuffer(8)),
-    headers: {
-      get: sinon.stub().returns('application/json'),
-      entries: sinon.stub().returns([
-        ['content-type', 'application/json'],
-        ['content-encoding', 'gzip'],
-      ]),
-    },
-  });
-
   beforeEach(async () => {
     // Create mock LLMO config
     mockLlmoConfig = {
@@ -157,29 +144,34 @@ describe('LlmoController', () => {
 
   describe('getLlmoSheetData', () => {
     it('should proxy data from external endpoint successfully', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should add limit query parameter to URL when provided', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Add limit to the context params
@@ -188,23 +180,25 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10',
         {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should add offset query parameter to URL when provided', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Add offset to the context params
@@ -213,23 +207,25 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?offset=20',
         {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should add sheet query parameter to URL when provided', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Add sheet to the context params
@@ -238,23 +234,25 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?sheet=analytics-sheet',
         {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should add multiple query parameters to URL when provided', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Add multiple query parameters to the context params
@@ -265,23 +263,25 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10&offset=20&sheet=analytics-sheet',
         {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should not add query parameters when they are not provided', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Ensure no query parameters are set
@@ -292,23 +292,52 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle response with empty headers gracefully', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+        headers: {
+          entries: sinon.stub().returns([]), // Empty headers
+        },
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should add query parameters with sheetType parameter', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'analytics-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Add sheetType and query parameters to the context params
@@ -320,23 +349,25 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'analytics-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json?limit=5&offset=10&sheet=performance-sheet',
         {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should handle empty string query parameters', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Add empty string query parameters
@@ -347,9 +378,8 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       // Empty strings should be treated as falsy and not added to URL
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
@@ -357,14 +387,17 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should handle null query parameters', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Add null query parameters
@@ -375,9 +408,8 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       // Null values should be treated as falsy and not added to URL
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
@@ -385,14 +417,17 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
     });
 
     it('should proxy data with sheetType parameter successfully', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'analytics-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
 
       // Add sheetType to the context params
@@ -401,16 +436,15 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'analytics-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json',
         {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
@@ -451,23 +485,25 @@ describe('LlmoController', () => {
     });
 
     it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
-      const mockResponse = createMockResponse();
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
       tracingFetchStub.resolves(mockResponse);
       mockContext.env.LLMO_HLX_API_KEY = undefined;
 
       const result = await controller.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);
-      // The response should contain the ArrayBuffer data
-      const responseBody = await result.arrayBuffer();
-      expect(responseBody).to.be.instanceof(ArrayBuffer);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
       expect(tracingFetchStub).to.have.been.calledWith(
         'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
         {
           headers: {
             Authorization: 'token hlx_api_key_missing',
             'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
