@@ -27,7 +27,7 @@
 		"audits": {
 			"scrape-top-pages": {},
 			"alt-text": {},
-			"broken-backlinks": {}, 
+			"broken-backlinks": {},
 			"broken-internal-links-auto-suggest": {},
 			"cwv": {},
 			"broken-internal-links": {},
@@ -51,7 +51,7 @@
 		"audits": {
 			"scrape-top-pages": {},
 			"alt-text": {},
-			"broken-backlinks": {}, 
+			"broken-backlinks": {},
 			"broken-internal-links-auto-suggest": {},
 			"cwv": {},
 			"broken-internal-links": {},
@@ -89,5 +89,5 @@
 		},
 		"config": {},
 		"integrations": {}
-	}	
+	}
 }
