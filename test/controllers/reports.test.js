@@ -303,7 +303,7 @@ describe('ReportsController', () => {
         },
       };
 
-      // Mock existing report with same parameters
+      // Mock existing successful report with same parameters
       const existingReport = {
         getReportType: () => 'performance',
         getReportPeriod: () => ({
@@ -314,12 +314,122 @@ describe('ReportsController', () => {
           startDate: '2024-12-01',
           endDate: '2024-12-31',
         }),
+        getStatus: () => 'success',
       };
 
       mockDataAccess.Report.allBySiteId = sinon.stub().resolves([existingReport]);
 
       const result = await reportsController.createReport(context);
 
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site');
+    });
+
+    it('should successfully create report when existing failed report has same parameters', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+        attributes: {
+          user: {
+            email: 'test@example.com',
+          },
+        },
+      };
+
+      // Mock existing failed report with same parameters
+      const existingFailedReport = {
+        getReportType: () => 'performance',
+        getReportPeriod: () => ({
+          startDate: '2025-01-01',
+          endDate: '2025-01-31',
+        }),
+        getComparisonPeriod: () => ({
+          startDate: '2024-12-01',
+          endDate: '2024-12-31',
+        }),
+        getStatus: () => 'failed',
+      };
+
+      mockDataAccess.Report.allBySiteId = sinon.stub().resolves([existingFailedReport]);
+
+      const result = await reportsController.createReport(context);
+
+      // Should succeed since the existing report failed
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report generation job queued successfully');
+      expect(responseBody.reportType).to.equal('performance');
+    });
+
+    it('should filter out failed reports but prevent duplicate for successful reports', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+        attributes: {
+          user: {
+            email: 'test@example.com',
+          },
+        },
+      };
+
+      // Mock mixed reports: failed and successful with same parameters
+      const existingReports = [
+        {
+          getReportType: () => 'performance',
+          getReportPeriod: () => ({
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          }),
+          getComparisonPeriod: () => ({
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          }),
+          getStatus: () => 'failed',
+        },
+        {
+          getReportType: () => 'performance',
+          getReportPeriod: () => ({
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          }),
+          getComparisonPeriod: () => ({
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          }),
+          getStatus: () => 'success',
+        },
+      ];
+
+      mockDataAccess.Report.allBySiteId = sinon.stub().resolves(existingReports);
+
+      const result = await reportsController.createReport(context);
+
+      // Should fail because there's a successful report with same parameters
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site');
@@ -360,6 +470,7 @@ describe('ReportsController', () => {
             startDate: '2024-12-01',
             endDate: '2024-12-31',
           }),
+          getStatus: () => 'success',
         },
         {
           getReportType: () => 'security',
@@ -371,6 +482,7 @@ describe('ReportsController', () => {
             startDate: '2024-12-01',
             endDate: '2024-12-31',
           }),
+          getStatus: () => 'success',
         },
       ];
 

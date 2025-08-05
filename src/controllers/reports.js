@@ -199,7 +199,9 @@ function ReportsController(ctx, log, env) {
 
       // Check if a report with the same parameters already exists
       const existingReports = await Report.allBySiteId(siteId);
-      const existingReport = existingReports.find((report) => {
+      // Filter out failed reports (only consider successful reports for duplicate checking)
+      const successfulReports = existingReports.filter((report) => report.getStatus() === 'success');
+      const existingReport = successfulReports.find((report) => {
         const reportData = report.getReportType();
         const reportPeriod = report.getReportPeriod();
         const comparisonPeriod = report.getComparisonPeriod();
