@@ -17,7 +17,8 @@ export const ReportDto = {
   /**
    * Converts a Report object into a JSON object.
    * @param {Readonly<Report>} report - Report object from spacecat-shared.
-   * @param {object} [presignedUrlObject] - Optional object containing presigned URLs.
+   * @param {object} [presignedUrlObject] - Optional object containing
+   * presigned URLs and expiration times.
    * @returns {{
    * id: string,
    * siteId: string,
@@ -29,7 +30,11 @@ export const ReportDto = {
    * createdAt: string,
    * updatedAt: string,
    * updatedBy: string,
-   * data?: { rawPresignedUrl?: string, mystiquePresignedUrl?: string }
+   * data?: { rawPresignedUrl?: string,
+   *  rawPresignedUrlExpiresAt?: string,
+   *  mystiquePresignedUrl?: string,
+   *  mystiquePresignedUrlExpiresAt?: string
+   * }
    * }}
    */
   toJSON: (report, presignedUrlObject) => {
@@ -46,7 +51,7 @@ export const ReportDto = {
       updatedBy: report.getUpdatedBy(),
     };
 
-    // Add presigned URLs in optional "data" field if provided
+    // Add presigned URLs and expiration times in optional "data" field if provided
     if (presignedUrlObject
       && (presignedUrlObject.rawPresignedUrl
         || presignedUrlObject.mystiquePresignedUrl)) {
@@ -54,8 +59,15 @@ export const ReportDto = {
       if (presignedUrlObject.rawPresignedUrl) {
         result.data.rawPresignedUrl = presignedUrlObject.rawPresignedUrl;
       }
+      if (presignedUrlObject.rawPresignedUrlExpiresAt) {
+        result.data.rawPresignedUrlExpiresAt = presignedUrlObject.rawPresignedUrlExpiresAt;
+      }
       if (presignedUrlObject.mystiquePresignedUrl) {
         result.data.mystiquePresignedUrl = presignedUrlObject.mystiquePresignedUrl;
+      }
+      if (presignedUrlObject.mystiquePresignedUrlExpiresAt) {
+        result.data.mystiquePresignedUrlExpiresAt = presignedUrlObject
+          .mystiquePresignedUrlExpiresAt;
       }
     }
 

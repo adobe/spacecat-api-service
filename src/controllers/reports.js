@@ -40,8 +40,14 @@ async function generatePresignedUrl(s3, bucket, key) {
 
   // 7 days
   const expiresIn = 60 * 60 * 24 * 7;
+  const expiresAt = new Date(Date.now() + (expiresIn * 1000));
 
-  return getSignedUrl(s3Client, command, { expiresIn });
+  const url = await getSignedUrl(s3Client, command, { expiresIn });
+
+  return {
+    url,
+    expiresAt: expiresAt.toISOString(),
+  };
 }
 
 async function deleteS3Object(s3, bucket, key) {
@@ -267,15 +273,17 @@ function ReportsController(ctx, log, env) {
           try {
             const rawReportKey = `${report.getStoragePath()}raw/report.json`;
             const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
-            const rawPresignedUrl = await generatePresignedUrl(s3, bucketName, rawReportKey);
-            const mystiquePresignedUrl = await generatePresignedUrl(
+            const rawPresignedUrlResult = await generatePresignedUrl(s3, bucketName, rawReportKey);
+            const mystiquePresignedUrlResult = await generatePresignedUrl(
               s3,
               bucketName,
               mystiqueReportKey,
             );
             const presignedUrlObject = {
-              rawPresignedUrl,
-              mystiquePresignedUrl,
+              rawPresignedUrl: rawPresignedUrlResult.url,
+              rawPresignedUrlExpiresAt: rawPresignedUrlResult.expiresAt,
+              mystiquePresignedUrl: mystiquePresignedUrlResult.url,
+              mystiquePresignedUrlExpiresAt: mystiquePresignedUrlResult.expiresAt,
             };
             return ReportDto.toJSON(report, presignedUrlObject);
           } catch (urlError) {
@@ -350,11 +358,17 @@ function ReportsController(ctx, log, env) {
 
       const rawReportKey = `${report.getStoragePath()}raw/report.json`;
       const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
-      const rawPresignedUrl = await generatePresignedUrl(s3, bucketName, rawReportKey);
-      const mystiquePresignedUrl = await generatePresignedUrl(s3, bucketName, mystiqueReportKey);
+      const rawPresignedUrlResult = await generatePresignedUrl(s3, bucketName, rawReportKey);
+      const mystiquePresignedUrlResult = await generatePresignedUrl(
+        s3,
+        bucketName,
+        mystiqueReportKey,
+      );
       const presignedUrlObject = {
-        rawPresignedUrl,
-        mystiquePresignedUrl,
+        rawPresignedUrl: rawPresignedUrlResult.url,
+        rawPresignedUrlExpiresAt: rawPresignedUrlResult.expiresAt,
+        mystiquePresignedUrl: mystiquePresignedUrlResult.url,
+        mystiquePresignedUrlExpiresAt: mystiquePresignedUrlResult.expiresAt,
       };
       // Convert report to JSON using the DTO
       const reportJSON = ReportDto.toJSON(report, presignedUrlObject);
