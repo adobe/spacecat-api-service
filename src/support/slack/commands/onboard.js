@@ -81,7 +81,7 @@ function OnboardCommand(context) {
    * @returns {boolean} - True if import is enabled, false otherwise.
    */
   const isImportEnabled = (importType, imports) => {
-    const foundImport = imports.find((importConfig) => importConfig.type === importType);
+    const foundImport = imports?.find((importConfig) => importConfig.type === importType);
     // If import is found, check if it's enabled, otherwise assume it's not enabled (false)
     return foundImport ? foundImport.enabled : false;
   };
