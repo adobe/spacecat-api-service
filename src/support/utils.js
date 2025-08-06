@@ -466,42 +466,44 @@ export function getRequestHeaders() {
 }
 
 /**
- * Get the normalized URL for a given URL string and device type.
+ * Get the normalized URL for a given URL string.
  * @param {string} urlString - The URL string to normalize.
  * @param {Object} log - The logger object.
- * @returns {Promise<{ url: string, skipTlsCheck?: boolean }>} A Promise that resolves to an object
- * containing the normalized URL.
+ * @param {string} method - HTTP method to use ('HEAD' or 'GET').
+ * @returns {Promise<string>} A Promise that resolves to the normalized URL.
  */
-export async function getNormalizedUrl(urlString, log) {
+export async function getNormalizedUrl(urlString, log, method = 'HEAD') {
   const headers = getRequestHeaders();
   let resp;
 
-  // Try a HEAD request first
   try {
-    resp = await fetch(urlString, { headers, method: 'HEAD' });
+    resp = await fetch(urlString, { headers, method });
+
     if (resp.ok) {
       return ensureHttps(resp.url);
     }
-  } catch (err) {
-    // Do nothing
-    log.warn(`Failed to fetch URL ${urlString}: ${err.message}`);
-  }
 
-  // If HEAD fails, try a GET request
-  try {
-    resp = await fetch(urlString, { headers });
-    if (resp.ok) {
-      return ensureHttps(resp.headers.get('Location') || resp.url);
-    }
     // Handle redirect chains
     if (urlString !== resp.url) {
       log.info(`Redirected to ${resp.url}`);
-      return getNormalizedUrl(resp.url, log);
+      return getNormalizedUrl(resp.url, log, method);
     }
+
+    if (method === 'HEAD') {
+      log.warn(`HEAD request failed for ${urlString}, retrying with GET`);
+      return getNormalizedUrl(urlString, log, 'GET');
+    }
+
     // If the URL is not found, throw an error
     throw new Error(`HTTP error! status: ${resp.status}`);
-  } catch (getErr) {
-    throw new Error(`Failed to retrieve URL (${urlString}): ${getErr.message}`);
+  } catch (err) {
+    // If HEAD failed with network error and we haven't tried GET yet, retry with GET
+    if (method === 'HEAD') {
+      log.warn(`HEAD request failed for ${urlString}: ${err.message}, retrying with GET`);
+      return getNormalizedUrl(urlString, log, 'GET');
+    }
+
+    throw new Error(`Failed to retrieve URL (${urlString}): ${err.message}`);
   }
 }
 

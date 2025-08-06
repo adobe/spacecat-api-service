@@ -166,7 +166,7 @@ describe('getNormalizedUrl', () => {
     // Mock the global fetch
     global.fetch = fetchStub;
 
-    const result = await getNormalizedUrl('http://example.com', 'desktop', log);
+    const result = await getNormalizedUrl('http://example.com', log);
 
     expect(result).to.equal('https://example.com');
     expect(fetchStub.calledWith('http://example.com', {
@@ -198,7 +198,7 @@ describe('getNormalizedUrl', () => {
 
     global.fetch = fetchStub;
 
-    const result = await getNormalizedUrl('http://example.com', 'desktop', log);
+    const result = await getNormalizedUrl('http://example.com', log);
 
     expect(result).to.equal('https://example.com');
     expect(fetchStub.callCount).to.equal(2);
@@ -213,7 +213,7 @@ describe('getNormalizedUrl', () => {
 
     global.fetch = fetchStub;
 
-    const result = await getNormalizedUrl('http://example.com', 'desktop', log);
+    const result = await getNormalizedUrl('http://example.com', log);
 
     expect(result).to.equal('https://redirected.example.com');
   });
@@ -234,7 +234,7 @@ describe('getNormalizedUrl', () => {
 
     global.fetch = fetchStub;
 
-    const result = await getNormalizedUrl('http://example.com', 'desktop', log);
+    const result = await getNormalizedUrl('http://example.com', log);
 
     expect(result).to.equal('https://redirected.example.com');
   });
@@ -253,7 +253,7 @@ describe('getNormalizedUrl', () => {
 
     global.fetch = fetchStub;
 
-    const result = await getNormalizedUrl('http://example.com', 'desktop', log);
+    const result = await getNormalizedUrl('http://example.com', log);
 
     expect(result).to.equal('https://final.example.com');
     expect(log.info.calledWith('Redirected to https://redirect1.example.com')).to.be.true;
@@ -273,7 +273,7 @@ describe('getNormalizedUrl', () => {
     global.fetch = fetchStub;
 
     try {
-      await getNormalizedUrl('http://example.com', 'desktop', log);
+      await getNormalizedUrl('http://example.com', log);
       expect.fail('Should have thrown an error');
     } catch (error) {
       expect(error.message).to.include('HTTP error! status: 404');
@@ -286,7 +286,7 @@ describe('getNormalizedUrl', () => {
     global.fetch = fetchStub;
 
     try {
-      await getNormalizedUrl('http://example.com', 'desktop', log);
+      await getNormalizedUrl('http://example.com', log);
       expect.fail('Should have thrown an error');
     } catch (error) {
       expect(error.message).to.include('Failed to retrieve URL (http://example.com): Network error');
@@ -302,7 +302,7 @@ describe('getNormalizedUrl', () => {
 
     global.fetch = fetchStub;
 
-    const result = await getNormalizedUrl('invalid-url', 'desktop', log);
+    const result = await getNormalizedUrl('invalid-url', log);
 
     expect(result).to.equal('https://example.com');
     expect(log.warn.calledWith('Failed to parse URL invalid-url: Invalid URL')).to.be.true;
