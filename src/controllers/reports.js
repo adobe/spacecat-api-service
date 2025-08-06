@@ -22,6 +22,9 @@ import {
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import {
+  Report as ReportModel,
+} from '@adobe/spacecat-shared-data-access';
 
 import AccessControlUtil from '../support/access-control-util.js';
 import { ReportDto } from '../dto/report.js';
@@ -214,9 +217,13 @@ function ReportsController(ctx, log, env) {
 
       // Check if a report with the same parameters already exists
       const existingReports = await Report.allBySiteId(siteId);
-      // Filter out failed reports (only consider successful reports for duplicate checking)
-      const successfulReports = existingReports.filter((report) => report.getStatus() === 'success');
-      const existingReport = successfulReports.find((report) => {
+      // Filter out failed reports (only consider successful & processing reports
+      // for duplicate checking)
+      const filteredReports = existingReports.filter((report) => (
+        report.getStatus() === ReportModel.STATUSES.SUCCESS
+        || report.getStatus() === ReportModel.STATUSES.PROCESSING
+      ));
+      const existingReport = filteredReports.find((report) => {
         const reportData = report.getReportType();
         const reportPeriod = report.getReportPeriod();
         const comparisonPeriod = report.getComparisonPeriod();
@@ -319,7 +326,7 @@ function ReportsController(ctx, log, env) {
       // Convert reports to JSON using the DTO, with presigned URLs for successful reports
       const reportsJson = await Promise.all(reports.map(async (report) => {
         // Only generate presigned URLs for successful reports
-        if (report.getStatus() === 'success') {
+        if (report.getStatus() === ReportModel.STATUSES.SUCCESS) {
           try {
             const rawReportKey = `${report.getStoragePath()}raw/report.json`;
             const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
@@ -397,7 +404,7 @@ function ReportsController(ctx, log, env) {
         return notFound('Report not found');
       }
 
-      if (report.getStatus() !== 'success') {
+      if (report.getStatus() !== ReportModel.STATUSES.SUCCESS) {
         return badRequest('Report is still processing.');
       }
 
@@ -477,8 +484,7 @@ function ReportsController(ctx, log, env) {
         return badRequest('Report does not belong to the specified site');
       }
 
-      // Delete S3 files if they exist (only for successful reports)
-      if (report.getStatus() === 'success' && report.getStoragePath()) {
+      if (report.getStatus() === ReportModel.STATUSES.SUCCESS && report.getStoragePath()) {
         const rawReportKey = `${report.getStoragePath()}raw/report.json`;
         const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
 
