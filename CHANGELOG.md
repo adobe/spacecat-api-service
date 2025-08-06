@@ -1,3 +1,10 @@
+## [1.142.1](https://github.com/adobe/spacecat-api-service/compare/v1.142.0...v1.142.1) (2025-08-06)
+
+
+### Bug Fixes
+
+* upgrade dependency version for LLMO config ([#1120](https://github.com/adobe/spacecat-api-service/issues/1120)) ([762e86b](https://github.com/adobe/spacecat-api-service/commit/762e86bd0bc6c47caabe74676fda30c4f0174121))
+
 # [1.142.0](https://github.com/adobe/spacecat-api-service/compare/v1.141.0...v1.142.0) (2025-08-06)
 
 
