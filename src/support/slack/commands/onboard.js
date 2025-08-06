@@ -27,7 +27,9 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerImportRun, triggerAuditForSite } from '../../utils.js';
+import {
+  findDeliveryType, triggerImportRun, triggerAuditForSite, getNormalizedUrl, extractDomainFromUrl,
+} from '../../utils.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -283,6 +285,19 @@ function OnboardCommand(context) {
       }
 
       log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
+
+      // Build the normalized URL for the site from the base URL
+      const normalizedUrl = await getNormalizedUrl(baseURL, log);
+
+      // Extract domain from URL if it has paths, query parameters, or hash fragments
+      const finalUrl = extractDomainFromUrl(normalizedUrl, log);
+
+      log.info(`Final normalized URL for site ${siteID}: ${finalUrl}`);
+
+      // set the fetch config for the site to the normalized final url
+      siteConfig.setFetchConfig({
+        overrideBaseURL: finalUrl,
+      });
 
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {

@@ -12,7 +12,7 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
-import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import { hasText, tracingFetch as fetch, SPACECAT_USER_AGENT } from '@adobe/spacecat-shared-utils';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -437,4 +437,100 @@ export async function getCSPromiseToken(context) {
 export function buildS3Prefix(type, siteId, path = '') {
   const normalized = path ? `${path.replace(/^\/+/g, '').replace(/\/+$/g, '')}/` : '';
   return `${type}/${siteId}/${normalized}`;
+}
+
+/**
+ * Ensures the URL is HTTPS.
+ * @param {string} url - The URL to ensure is HTTPS.
+ * @returns {string} The HTTPS URL.
+ */
+export function ensureHttps(url) {
+  const urlObj = new URL(url);
+  urlObj.protocol = 'https';
+  return urlObj.toString();
+}
+
+/**
+ * Gets HTTP headers with appropriate user agent for the request type
+ * @returns {Object} - HTTP headers object
+ */
+export function getRequestHeaders() {
+  return {
+    Accept: 'text/html,application/xhtml+xml,application/xml,text/css,application/javascript,text/javascript;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    Referer: 'https://www.adobe.com/',
+    'User-Agent': SPACECAT_USER_AGENT,
+  };
+}
+
+/**
+ * Get the normalized URL for a given URL string and device type.
+ * @param {string} urlString - The URL string to normalize.
+ * @param {Object} log - The logger object.
+ * @returns {Promise<{ url: string, skipTlsCheck?: boolean }>} A Promise that resolves to an object
+ * containing the normalized URL.
+ */
+export async function getNormalizedUrl(urlString, log) {
+  const headers = getRequestHeaders();
+  let resp;
+
+  // Try a HEAD request first
+  try {
+    resp = await fetch(urlString, { headers, method: 'HEAD' });
+    if (resp.ok) {
+      return ensureHttps(resp.url);
+    }
+  } catch (err) {
+    // Do nothing
+    log.warn(`Failed to fetch URL ${urlString}: ${err.message}`);
+  }
+
+  // If HEAD fails, try a GET request
+  try {
+    resp = await fetch(urlString, { headers });
+    if (resp.ok) {
+      return ensureHttps(resp.headers.get('Location') || resp.url);
+    }
+    // Handle redirect chains
+    if (urlString !== resp.url) {
+      log.info(`Redirected to ${resp.url}`);
+      return getNormalizedUrl(resp.url, log);
+    }
+    // If the URL is not found, throw an error
+    throw new Error(`HTTP error! status: ${resp.status}`);
+  } catch (getErr) {
+    throw new Error(`Failed to retrieve URL (${urlString}): ${getErr.message}`);
+  }
+}
+
+/**
+ * Extracts the domain from a URL if it contains paths, query parameters, or hash fragments.
+ * This is useful when URLs redirect to specific paths that could cause import issues.
+ *
+ * @param {string} url - The URL to check and potentially extract domain from.
+ * @param {Object} log - The logger object for logging operations.
+ * @returns {string} The extracted domain URL or the original URL if no paths detected.
+ */
+export function extractDomainFromUrl(url, log) {
+  let finalUrl = url;
+  try {
+    const urlObj = new URL(url);
+    const hasPath = urlObj.pathname && urlObj.pathname !== '/';
+    const hasQuery = urlObj.search && urlObj.search !== '';
+    const hasHash = urlObj.hash && urlObj.hash !== '';
+
+    if (hasPath || hasQuery || hasHash) {
+      // Extract just the domain (protocol + hostname + port)
+      const port = urlObj.port ? `:${urlObj.port}` : '';
+      finalUrl = `${urlObj.protocol}//${urlObj.hostname}${port}`;
+      log.info(`URL had paths/query/hash, extracted domain: ${finalUrl}`);
+    }
+  } catch (error) {
+    log.warn(`Could not parse URL ${url}: ${error.message}`);
+    // Keep original URL if parsing fails
+    finalUrl = url;
+  }
+  return finalUrl;
 }
