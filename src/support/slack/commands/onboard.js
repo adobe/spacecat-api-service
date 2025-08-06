@@ -294,8 +294,8 @@ function OnboardCommand(context) {
 
       log.info(`Final normalized URL for site ${siteID}: ${finalUrl}`);
 
-      // set the fetch config for the site to the normalized final url
-      siteConfig.setFetchConfig({
+      // Update the fetch configuration with the normalized URL
+      siteConfig.updateFetchConfig({
         overrideBaseURL: finalUrl,
       });
 
