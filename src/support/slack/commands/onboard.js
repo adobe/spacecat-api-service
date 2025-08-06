@@ -169,8 +169,8 @@ function OnboardCommand(context) {
 
         // Check if the organization with IMS Org ID already exists; create if it doesn't
         let organization = await Organization.findByImsOrgId(imsOrgID);
-        const imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
         if (!organization) {
+          const imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
           if (!imsOrgDetails) {
             reportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
             reportLine.status = 'Failed';
