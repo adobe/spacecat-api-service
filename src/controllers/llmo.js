@@ -193,15 +193,33 @@ function LlmoController() {
     const { data } = context;
     const { site, config } = await getSiteAndValidateLlmo(context);
 
-    if (!data || !data.adobeProduct || !Array.isArray(data.cdnProvider)) {
-      return badRequest('Invalid customer intent data. Required: adobeProduct (string), cdnProvider (array)');
+    if (!data) {
+      return badRequest('No customer intent data provided in the request body');
     }
 
     // Validate the customer intent schema
-    const customerIntent = {
-      adobeProduct: data.adobeProduct,
-      cdnProvider: data.cdnProvider,
-    };
+    // all fields are optional but must have correct types when provided
+    if (data.adobeProduct && typeof data.adobeProduct !== 'string') {
+      return badRequest('adobeProduct must be a string');
+    }
+    if (data.cdnProvider && !Array.isArray(data.cdnProvider)) {
+      return badRequest('cdnProvider must be an array');
+    }
+    if (data.referralProvider && typeof data.referralProvider !== 'string') {
+      return badRequest('referralProvider must be a string');
+    }
+
+    // Build customer intent object with only provided fields
+    const customerIntent = {};
+    if (data.adobeProduct !== undefined) {
+      customerIntent.adobeProduct = data.adobeProduct;
+    }
+    if (data.cdnProvider !== undefined) {
+      customerIntent.cdnProvider = data.cdnProvider;
+    }
+    if (data.referralProvider !== undefined) {
+      customerIntent.referralProvider = data.referralProvider;
+    }
 
     // set the customer intent using the config method
     config.setLlmoCustomerIntent(customerIntent);
@@ -249,6 +267,9 @@ function LlmoController() {
     }
     if (data.cdnProvider && !Array.isArray(data.cdnProvider)) {
       return badRequest('cdnProvider must be an array');
+    }
+    if (data.referralProvider && typeof data.referralProvider !== 'string') {
+      return badRequest('referralProvider must be a string');
     }
 
     // update the customer intent using the config method
