@@ -49,6 +49,8 @@ tags:
     description: APIs for scraping web pages
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: sandbox
+    description: Sandbox audit operations
 
 paths:
   /audits/latest/{auditType}:
@@ -225,6 +227,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-questions'
   /sites/{siteId}/llmo/questions/{questionKey}:
     $ref: './llmo-api.yaml#/llmo-question'
+  /sandbox/audit:
+    $ref: './sandbox-audit-api.yaml#/sandbox-audit'
 
 components:
   securitySchemes:

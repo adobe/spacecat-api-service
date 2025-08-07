@@ -178,6 +178,10 @@ describe('getRouteHandlers', () => {
     getLlmoSheetData: () => null,
   };
 
+  const mockSandboxAuditController = {
+    triggerAudit: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -204,6 +208,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockSandboxAuditController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -231,6 +236,7 @@ describe('getRouteHandlers', () => {
       'POST /screenshots',
       'GET /mcp',
       'POST /mcp',
+      'GET /sandbox/audit',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -250,6 +256,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
     expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
+    expect(staticRoutes['GET /sandbox/audit']).to.equal(mockSandboxAuditController.triggerAudit);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
