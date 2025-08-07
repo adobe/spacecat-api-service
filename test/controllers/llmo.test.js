@@ -54,6 +54,10 @@ describe('LlmoController', () => {
       updateLlmoQuestion: sinon.stub(),
       getLlmoHumanQuestions: sinon.stub().returns(mockLlmoConfig.questions.Human),
       getLlmoAIQuestions: sinon.stub().returns(mockLlmoConfig.questions.AI),
+      getLlmoCustomerIntent: sinon.stub().returns(null),
+      setLlmoCustomerIntent: sinon.stub(),
+      removeLlmoCustomerIntent: sinon.stub(),
+      updateLlmoCustomerIntent: sinon.stub(),
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
       getLlmoDataFolder: sinon.stub().returns('test-folder'),
@@ -755,6 +759,482 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         'Error updating question for site\'s llmo config test-site-id: Database connection failed',
       );
+    });
+  });
+
+  describe('getCustomerIntent', () => {
+    it('should return customer intent successfully when it exists', async () => {
+      const mockCustomerIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare', 'fastly'],
+        referralProvider: 'google',
+      };
+      mockConfig.getLlmoCustomerIntent.returns(mockCustomerIntent);
+
+      const result = await controller.getCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockCustomerIntent);
+      expect(mockConfig.getLlmoCustomerIntent).to.have.been.calledOnce;
+    });
+
+    it('should return null when customer intent does not exist', async () => {
+      mockConfig.getLlmoCustomerIntent.returns(null);
+
+      const result = await controller.getCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.null;
+      expect(mockConfig.getLlmoCustomerIntent).to.have.been.calledOnce;
+    });
+
+    it('should throw error when LLMO is not enabled', async () => {
+      mockConfig.getLlmoConfig.returns(null);
+
+      try {
+        await controller.getCustomerIntent(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
+      }
+    });
+  });
+
+  describe('addCustomerIntent', () => {
+    it('should create customer intent with all fields successfully', async () => {
+      const customerIntentData = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare', 'fastly'],
+        referralProvider: 'google',
+      };
+      mockContext.data = customerIntentData;
+      mockConfig.getLlmoCustomerIntent.returns(customerIntentData);
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(customerIntentData);
+      expect(mockConfig.setLlmoCustomerIntent).to.have.been.calledWith(customerIntentData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should create customer intent with partial fields successfully', async () => {
+      const customerIntentData = {
+        adobeProduct: 'Target',
+      };
+      mockContext.data = customerIntentData;
+      mockConfig.getLlmoCustomerIntent.returns(customerIntentData);
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(customerIntentData);
+      expect(mockConfig.setLlmoCustomerIntent).to.have.been.calledWith(customerIntentData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should create customer intent with only cdnProvider', async () => {
+      const customerIntentData = {
+        cdnProvider: ['akamai'],
+      };
+      mockContext.data = customerIntentData;
+      mockConfig.getLlmoCustomerIntent.returns(customerIntentData);
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(customerIntentData);
+      expect(mockConfig.setLlmoCustomerIntent).to.have.been.calledWith(customerIntentData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should create customer intent with only referralProvider', async () => {
+      const customerIntentData = {
+        referralProvider: 'bing',
+      };
+      mockContext.data = customerIntentData;
+      mockConfig.getLlmoCustomerIntent.returns(customerIntentData);
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(customerIntentData);
+      expect(mockConfig.setLlmoCustomerIntent).to.have.been.calledWith(customerIntentData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should return bad request when no data provided', async () => {
+      mockContext.data = null;
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('No customer intent data provided in the request body');
+      expect(mockConfig.setLlmoCustomerIntent).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should return bad request when adobeProduct is not a string', async () => {
+      mockContext.data = {
+        adobeProduct: 123,
+        cdnProvider: ['cloudflare'],
+      };
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('adobeProduct must be a string');
+      expect(mockConfig.setLlmoCustomerIntent).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should return bad request when cdnProvider is not an array', async () => {
+      mockContext.data = {
+        adobeProduct: 'Analytics',
+        cdnProvider: 'cloudflare',
+      };
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('cdnProvider must be an array');
+      expect(mockConfig.setLlmoCustomerIntent).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should return bad request when referralProvider is not a string', async () => {
+      mockContext.data = {
+        adobeProduct: 'Analytics',
+        referralProvider: ['google'],
+      };
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('referralProvider must be a string');
+      expect(mockConfig.setLlmoCustomerIntent).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should handle site save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+      const customerIntentData = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+      };
+      mockContext.data = customerIntentData;
+      mockConfig.getLlmoCustomerIntent.returns(customerIntentData);
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(customerIntentData);
+      expect(mockConfig.setLlmoCustomerIntent).to.have.been.calledWith(customerIntentData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error setting customer intent for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should exclude undefined fields from customer intent object', async () => {
+      mockContext.data = {
+        adobeProduct: 'Analytics',
+        cdnProvider: undefined,
+        referralProvider: 'google',
+      };
+      const expectedCustomerIntent = {
+        adobeProduct: 'Analytics',
+        referralProvider: 'google',
+      };
+      mockConfig.getLlmoCustomerIntent.returns(expectedCustomerIntent);
+
+      const result = await controller.addCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(expectedCustomerIntent);
+      expect(mockConfig.setLlmoCustomerIntent).to.have.been.calledWith(expectedCustomerIntent);
+    });
+
+    it('should throw error when LLMO is not enabled', async () => {
+      mockConfig.getLlmoConfig.returns(null);
+      mockContext.data = { adobeProduct: 'Analytics' };
+
+      try {
+        await controller.addCustomerIntent(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
+      }
+    });
+  });
+
+  describe('removeCustomerIntent', () => {
+    it('should remove customer intent successfully', async () => {
+      const result = await controller.removeCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.null;
+      expect(mockConfig.removeLlmoCustomerIntent).to.have.been.calledOnce;
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should handle site save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+
+      const result = await controller.removeCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.null;
+      expect(mockConfig.removeLlmoCustomerIntent).to.have.been.calledOnce;
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error removing customer intent for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should throw error when LLMO is not enabled', async () => {
+      mockConfig.getLlmoConfig.returns(null);
+
+      try {
+        await controller.removeCustomerIntent(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
+      }
+    });
+  });
+
+  describe('patchCustomerIntent', () => {
+    it('should update customer intent successfully', async () => {
+      const existingCustomerIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+        referralProvider: 'google',
+      };
+      const updateData = {
+        adobeProduct: 'Target',
+        cdnProvider: ['akamai', 'fastly'],
+      };
+      const expectedUpdatedIntent = {
+        adobeProduct: 'Target',
+        cdnProvider: ['akamai', 'fastly'],
+        referralProvider: 'google',
+      };
+
+      mockConfig.getLlmoCustomerIntent.returns(existingCustomerIntent);
+      mockContext.data = updateData;
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(existingCustomerIntent);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith(expectedUpdatedIntent);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should update only adobeProduct field', async () => {
+      const existingCustomerIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+        referralProvider: 'google',
+      };
+      const updateData = {
+        adobeProduct: 'Experience Platform',
+      };
+      const expectedUpdatedIntent = {
+        adobeProduct: 'Experience Platform',
+        cdnProvider: ['cloudflare'],
+        referralProvider: 'google',
+      };
+
+      mockConfig.getLlmoCustomerIntent.returns(existingCustomerIntent);
+      mockContext.data = updateData;
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith(expectedUpdatedIntent);
+    });
+
+    it('should update only cdnProvider field', async () => {
+      const existingCustomerIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+        referralProvider: 'google',
+      };
+      const updateData = {
+        cdnProvider: ['akamai', 'cloudflare'],
+      };
+      const expectedUpdatedIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['akamai', 'cloudflare'],
+        referralProvider: 'google',
+      };
+
+      mockConfig.getLlmoCustomerIntent.returns(existingCustomerIntent);
+      mockContext.data = updateData;
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith(expectedUpdatedIntent);
+    });
+
+    it('should update only referralProvider field', async () => {
+      const existingCustomerIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+        referralProvider: 'google',
+      };
+      const updateData = {
+        referralProvider: 'bing',
+      };
+      const expectedUpdatedIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+        referralProvider: 'bing',
+      };
+
+      mockConfig.getLlmoCustomerIntent.returns(existingCustomerIntent);
+      mockContext.data = updateData;
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith(expectedUpdatedIntent);
+    });
+
+    it('should return bad request when no customer intent exists', async () => {
+      mockConfig.getLlmoCustomerIntent.returns(null);
+      mockContext.data = { adobeProduct: 'Target' };
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('No customer intent exists to patch. Use POST to create one first.');
+      expect(mockConfig.updateLlmoCustomerIntent).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should return bad request when adobeProduct is not a string', async () => {
+      const existingCustomerIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+      };
+      mockConfig.getLlmoCustomerIntent.returns(existingCustomerIntent);
+      mockContext.data = {
+        adobeProduct: 123,
+      };
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('adobeProduct must be a string');
+      expect(mockConfig.updateLlmoCustomerIntent).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should return bad request when cdnProvider is not an array', async () => {
+      const existingCustomerIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+      };
+      mockConfig.getLlmoCustomerIntent.returns(existingCustomerIntent);
+      mockContext.data = {
+        cdnProvider: 'not-an-array',
+      };
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('cdnProvider must be an array');
+      expect(mockConfig.updateLlmoCustomerIntent).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should return bad request when referralProvider is not a string', async () => {
+      const existingCustomerIntent = {
+        adobeProduct: 'Analytics',
+        referralProvider: 'google',
+      };
+      mockConfig.getLlmoCustomerIntent.returns(existingCustomerIntent);
+      mockContext.data = {
+        referralProvider: 123,
+      };
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('referralProvider must be a string');
+      expect(mockConfig.updateLlmoCustomerIntent).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+    });
+
+    it('should handle site save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+      const existingCustomerIntent = {
+        adobeProduct: 'Analytics',
+        cdnProvider: ['cloudflare'],
+      };
+      const updateData = {
+        adobeProduct: 'Target',
+      };
+      mockConfig.getLlmoCustomerIntent.returns(existingCustomerIntent);
+      mockContext.data = updateData;
+
+      const result = await controller.patchCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(existingCustomerIntent);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledOnce;
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error updating customer intent for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should throw error when LLMO is not enabled', async () => {
+      mockConfig.getLlmoConfig.returns(null);
+      mockContext.data = { adobeProduct: 'Target' };
+
+      try {
+        await controller.patchCustomerIntent(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
+      }
     });
   });
 });
