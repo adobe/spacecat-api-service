@@ -42,6 +42,11 @@ describe('LlmoController', () => {
           { key: 'ai-question', question: 'Analyze the page content and identify key themes.' },
         ],
       },
+      customerIntent: {
+        adobeProduct: 'test-adobe-product',
+        cdnProvider: ['test-cdn-provider'],
+        referralProvider: 'test-referral-provider',
+      },
     };
 
     // Create mock config
@@ -54,7 +59,7 @@ describe('LlmoController', () => {
       updateLlmoQuestion: sinon.stub(),
       getLlmoHumanQuestions: sinon.stub().returns(mockLlmoConfig.questions.Human),
       getLlmoAIQuestions: sinon.stub().returns(mockLlmoConfig.questions.AI),
-      getLlmoCustomerIntent: sinon.stub().returns(null),
+      getLlmoCustomerIntent: sinon.stub().returns(mockLlmoConfig.customerIntent),
       setLlmoCustomerIntent: sinon.stub(),
       removeLlmoCustomerIntent: sinon.stub(),
       updateLlmoCustomerIntent: sinon.stub(),
