@@ -65,12 +65,27 @@ function LlmoController() {
     const { llmoConfig } = await getSiteAndValidateLlmo(context);
     const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 
+    // Add limit, offset and sheet query params to the url
+    const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+    const { limit, offset, sheet } = context.data;
+    if (limit) {
+      url.searchParams.set('limit', limit);
+    }
+    if (offset) {
+      url.searchParams.set('offset', offset);
+    }
+    // allow fetching a specific sheet from the sheet data source
+    if (sheet) {
+      url.searchParams.set('sheet', sheet);
+    }
+
     try {
       // Fetch data from the external endpoint using the dataFolder from config
-      const response = await fetch(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`, {
+      const response = await fetch(url.toString(), {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
+          'Accept-Encoding': 'gzip',
         },
       });
 
@@ -83,9 +98,10 @@ function LlmoController() {
       const data = await response.json();
 
       log.info(`Successfully proxied data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
-
-      // Return the response as-is
-      return ok(data);
+      // Return the data and let the framework handle the compression
+      return ok(data, {
+        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
+      });
     } catch (error) {
       log.error(`Error proxying data for siteId: ${siteId}, sheetURL: ${sheetURL}`, error);
       throw error;
