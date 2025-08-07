@@ -37,13 +37,13 @@ describe('Sandbox Audit Controller', () => {
   const sites = [
     {
       getId: () => SITE_IDS[0],
+      getIsSandbox: () => true, // This is a sandbox site
       baseURL: 'https://sandbox.example.com',
-      isSandbox: true, // This is a sandbox site
     },
     {
       getId: () => SITE_IDS[1],
+      getIsSandbox: () => false, // This is NOT a sandbox site
       baseURL: 'https://production.example.com',
-      isSandbox: false, // This is NOT a sandbox site
     },
   ];
 

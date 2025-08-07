@@ -69,7 +69,7 @@ function SandboxAuditController(context) {
         return notFound(`Site not found for baseURL: ${baseURL}`);
       }
 
-      if (!site.isSandbox) {
+      if (!site.getIsSandbox()) {
         return badRequest(`Sandbox audit endpoint only supports sandbox sites. Site ${baseURL} is not a sandbox.`);
       }
 
