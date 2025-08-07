@@ -3431,4 +3431,47 @@ LlmoConfig:
     questions:
       description: The questions configuration containing both human and AI questions
       $ref: '#/LlmoQuestions'
+    customerIntent:
+      description: The customer intent configuration for the LLMO setup
+      $ref: '#/LlmoCustomerIntent'
+  additionalProperties: false
+
+LlmoCustomerIntent:
+  type: object
+  description: Customer intent configuration for LLMO optimization
+  properties:
+    adobeProduct:
+      description: The Adobe product being used or targeted
+      type: string
+      example: 'Analytics'
+    cdnProvider:
+      description: Array of CDN providers being used
+      type: array
+      items:
+        type: string
+      example: ['cloudflare', 'fastly']
+    referralProvider:
+      description: The referral provider or traffic source
+      type: string
+      example: 'google'
+  additionalProperties: false
+
+LlmoCustomerIntentInput:
+  type: object
+  description: Input schema for creating or updating customer intent
+  properties:
+    adobeProduct:
+      description: The Adobe product being used or targeted
+      type: string
+      example: 'Analytics'
+    cdnProvider:
+      description: Array of CDN providers being used
+      type: array
+      items:
+        type: string
+      example: ['cloudflare', 'fastly']
+    referralProvider:
+      description: The referral provider or traffic source
+      type: string
+      example: 'google'
   additionalProperties: false
