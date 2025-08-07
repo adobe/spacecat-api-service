@@ -34,7 +34,7 @@ preflight-jobs:
                 type: array
                 items:
                   type: string
-                  enum: [canonical, links, metatags, body-size, lorem-ipsum, h1-count, readability]
+                  enum: [canonical, links, metatags, body-size, lorem-ipsum, h1-count, readability, accessibility]
                 description: Optional array of specific checks to run. If not provided, all checks will be run.
             required:
               - urls
