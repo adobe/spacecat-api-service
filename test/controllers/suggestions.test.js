@@ -28,6 +28,7 @@ use(sinonChai);
 
 describe('Suggestions Controller', () => {
   const sandbox = sinon.createSandbox();
+
   const authContext = {
     attributes: {
       authInfo: new AuthInfo()
@@ -166,6 +167,7 @@ describe('Suggestions Controller', () => {
   let altTextSuggs;
   let context;
   let apikeyAuthAttributes;
+  let loggerStub;
 
   beforeEach(() => {
     context = {
@@ -177,6 +179,9 @@ describe('Suggestions Controller', () => {
           .withProfile({ is_admin: true, email: 'test@test.com' })
           .withAuthenticated(true),
       },
+    };
+    loggerStub = {
+      info: sandbox.stub().resolves(),
     };
     apikeyAuthAttributes = {
       attributes: {
@@ -217,6 +222,7 @@ describe('Suggestions Controller', () => {
         data: {
           info: 'sample data',
           url: 'https://example.com',
+          url_to: 'https://example.com/link1',
         },
         kpiDeltas: {
           conversionRate: 0.05,
@@ -233,6 +239,7 @@ describe('Suggestions Controller', () => {
         data: {
           url_from: 'https://example.com/old-link',
           info: 'broken back link data',
+          url_to: 'https://example.com/link1',
         },
         kpiDeltas: {
           conversionRate: 0.02,
@@ -248,6 +255,8 @@ describe('Suggestions Controller', () => {
         rank: 2,
         data: {
           info: 'broken back link data',
+          urlsSuggested: ['https://example.com/suggested-link'],
+          url_to: 'https://example.com/link1',
         },
         kpiDeltas: {
           conversionRate: 0.02,
@@ -255,7 +264,22 @@ describe('Suggestions Controller', () => {
         updatedBy: 'test@test.com',
         updatedAt: new Date(),
       },
-
+      {
+        id: SUGGESTION_IDS[3],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'FIX_LINK',
+        status: 'IN_PROGRESS',
+        rank: 2,
+        data: {
+          info: 'broken back link data',
+          urlsSuggested: ['https://example.com/suggested-link'],
+        },
+        kpiDeltas: {
+          conversionRate: 0.02,
+        },
+        updatedBy: 'test@test.com',
+        updatedAt: new Date(),
+      },
     ];
 
     altTextSuggs = [
@@ -351,7 +375,7 @@ describe('Suggestions Controller', () => {
       sendMessage: sandbox.stub().resolves(),
     };
 
-    suggestionsController = SuggestionsController({ dataAccess: mockSuggestionDataAccess, ...authContext }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    suggestionsController = SuggestionsController({ dataAccess: mockSuggestionDataAccess, ...authContext }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' }, loggerStub);
   });
 
   afterEach(() => {
@@ -556,7 +580,7 @@ describe('Suggestions Controller', () => {
   it('gets all suggestions for an opportunity by status returns not found if site ID passed does not match opportunity site id', async () => {
     const response = await suggestionsController.getByStatus({
       params: {
-        siteId: SITE_ID_NOT_ENABLED, // id does not exist
+        siteId: SITE_ID_NOT_ENABLED,
         opportunityId: OPPORTUNITY_ID,
         status: 'NEW',
       },
@@ -1573,31 +1597,77 @@ describe('Suggestions Controller', () => {
 
     it('autofix suggestion patches suggestion status fails passed suggestions not new', async () => {
       mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0]),
-        mockSuggestionEntity(suggs[1])]);
+        mockSuggestionEntity(suggs[1]),
+        mockSuggestionEntity(suggs[3])]);
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
         },
-        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[3]] },
         ...context,
       });
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse).to.have.property('suggestions');
       expect(bulkPatchResponse).to.have.property('metadata');
-      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('total', 3);
       expect(bulkPatchResponse.metadata).to.have.property('success', 1);
-      expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
-      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 2);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 3);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
       expect(bulkPatchResponse.suggestions[1]).to.have.property('index', 1);
+      expect(bulkPatchResponse.suggestions[2]).to.have.property('index', 2);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
       expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[2]).to.have.property('statusCode', 400);
       expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
+      expect(bulkPatchResponse.suggestions[2].suggestion).to.not.exist;
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
+      expect(bulkPatchResponse.suggestions[2]).to.have.property('message', 'Invalid suggestion ID format');
+    });
+
+    it('should skip broken-backlinks suggestion if no urlTo', async () => {
+      const suggsWithMissingUrlTo = [
+        {
+          ...suggs[1],
+          status: 'NEW',
+          data: {
+            info: 'broken back link data with no urlTo',
+            url_to: null,
+          },
+        },
+      ];
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggsWithMissingUrlTo[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggsWithMissingUrlTo[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[1]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 0);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 1);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('index', 0);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Missing mandatory field: url_to');
+      expect(mockSqs.sendMessage).to.not.have.been.called;
     });
   });
 
@@ -1636,7 +1706,7 @@ describe('Suggestions Controller', () => {
       suggestionsControllerWithIms = SuggestionsControllerWithIms({
         dataAccess: mockSuggestionDataAccess,
         ...authContext,
-      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' }, loggerStub);
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for CS', async () => {
@@ -1744,7 +1814,7 @@ describe('Suggestions Controller', () => {
       const suggestionsControllerWithFailedIms = SuggestionsControllerWithFailedIms({
         dataAccess: mockSuggestionDataAccess,
         ...authContext,
-      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' }, loggerStub);
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2])],
