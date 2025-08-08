@@ -67,7 +67,9 @@ function TrafficController(context, log, env) {
   }
 
   async function fetchPaidTrafficData(dimensions, mapper) {
-    log.info(`Fetching paid traffic data for the request: ${context.awsRequestId}`);
+    /* c8 ignore next 1 */
+    const requestId = context.invocation?.requestId;
+    log.info(`Fetching paid traffic data for the request: ${requestId}`);
 
     const siteId = context.params?.siteId;
     const site = await Site.findById(siteId);
@@ -133,7 +135,7 @@ function TrafficController(context, log, env) {
     );
     const thresholdConfig = env.CWV_THRESHOLDS || {};
     if (cachedResultUrl) {
-      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${context.awsRequestId}`);
+      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${requestId}`);
       return found(cachedResultUrl);
     }
 
@@ -153,7 +155,7 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly. Request ID: ${context.awsRequestId}`);
+    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly. Request ID: ${requestId}`);
     return ok(response, {
       'content-encoding': 'gzip',
     });
