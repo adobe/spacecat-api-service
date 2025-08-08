@@ -159,7 +159,8 @@ function TrafficController(context, log, env) {
     }
 
     if (isCached) {
-      // even though file is saved we need to check if it is available
+      // even though file is saved 503 are possible in short time window,
+      // verifying file is reachable before returning
       const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
       if (verifiedSignedUrl != null) {
         log.info(`Succesfully verified file existance, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
