@@ -1,3 +1,10 @@
+## [1.143.3](https://github.com/adobe/spacecat-api-service/compare/v1.143.2...v1.143.3) (2025-08-08)
+
+
+### Bug Fixes
+
+* include api-gateway request id in the logs ([#1126](https://github.com/adobe/spacecat-api-service/issues/1126)) ([c2c8ba0](https://github.com/adobe/spacecat-api-service/commit/c2c8ba0b33b0957c5c7dae4aa18c7aeb849803da))
+
 ## [1.143.2](https://github.com/adobe/spacecat-api-service/compare/v1.143.1...v1.143.2) (2025-08-08)
 
 
