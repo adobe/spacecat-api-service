@@ -236,6 +236,10 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
     'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
+    'GET /sites/:siteId/llmo/customerIntent': llmoController.getCustomerIntent,
+    'POST /sites/:siteId/llmo/customerIntent': llmoController.addCustomerIntent,
+    'DELETE /sites/:siteId/llmo/customerIntent': llmoController.removeCustomerIntent,
+    'PATCH /sites/:siteId/llmo/customerIntent': llmoController.patchCustomerIntent,
   };
 
   // Initialization of static and dynamic routes

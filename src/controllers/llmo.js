@@ -196,6 +196,107 @@ function LlmoController() {
     return ok(config.getLlmoConfig().questions);
   };
 
+  // Handles requests to get the LLMO customer intent
+  const getCustomerIntent = async (context) => {
+    const { config } = await getSiteAndValidateLlmo(context);
+    const customerIntent = config.getLlmoCustomerIntent();
+    return ok(customerIntent || null);
+  };
+
+  // Handles requests to add/set the LLMO customer intent
+  const addCustomerIntent = async (context) => {
+    const { log } = context;
+    const { data } = context;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    if (!data) {
+      return badRequest('No customer intent data provided in the request body');
+    }
+
+    // Validate the customer intent schema
+    // all fields are optional but must have correct types when provided
+    if (data.adobeProduct && typeof data.adobeProduct !== 'string') {
+      return badRequest('adobeProduct must be a string');
+    }
+    if (data.cdnProvider && !Array.isArray(data.cdnProvider)) {
+      return badRequest('cdnProvider must be an array');
+    }
+    if (data.referralProvider && typeof data.referralProvider !== 'string') {
+      return badRequest('referralProvider must be a string');
+    }
+
+    // Build customer intent object with only provided fields
+    const customerIntent = {};
+    if (data.adobeProduct !== undefined) {
+      customerIntent.adobeProduct = data.adobeProduct;
+    }
+    if (data.cdnProvider !== undefined) {
+      customerIntent.cdnProvider = data.cdnProvider;
+    }
+    if (data.referralProvider !== undefined) {
+      customerIntent.referralProvider = data.referralProvider;
+    }
+
+    // set the customer intent using the config method
+    config.setLlmoCustomerIntent(customerIntent);
+
+    await saveSiteConfig(site, config, log, 'setting customer intent');
+
+    // return the updated customer intent
+    return ok(config.getLlmoCustomerIntent());
+  };
+
+  // Handles requests to remove the LLMO customer intent
+  const removeCustomerIntent = async (context) => {
+    const { log } = context;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    // remove the customer intent using the config method
+    config.removeLlmoCustomerIntent();
+
+    await saveSiteConfig(site, config, log, 'removing customer intent');
+
+    // return success
+    return ok(null);
+  };
+
+  // Handles requests to patch/update the LLMO customer intent
+  const patchCustomerIntent = async (context) => {
+    const { log } = context;
+    const { data } = context;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    const currentIntent = config.getLlmoCustomerIntent();
+    if (!currentIntent) {
+      return badRequest('No customer intent exists to patch. Use POST to create one first.');
+    }
+
+    // Merge the updates with existing data
+    const updatedIntent = {
+      ...currentIntent,
+      ...data,
+    };
+
+    // Validate the merged result
+    if (data.adobeProduct && typeof data.adobeProduct !== 'string') {
+      return badRequest('adobeProduct must be a string');
+    }
+    if (data.cdnProvider && !Array.isArray(data.cdnProvider)) {
+      return badRequest('cdnProvider must be an array');
+    }
+    if (data.referralProvider && typeof data.referralProvider !== 'string') {
+      return badRequest('referralProvider must be a string');
+    }
+
+    // update the customer intent using the config method
+    config.updateLlmoCustomerIntent(updatedIntent);
+
+    await saveSiteConfig(site, config, log, 'updating customer intent');
+
+    // return the updated customer intent
+    return ok(config.getLlmoCustomerIntent());
+  };
+
   return {
     getLlmoSheetData,
     getLlmoConfig,
@@ -203,6 +304,10 @@ function LlmoController() {
     addLlmoQuestion,
     removeLlmoQuestion,
     patchLlmoQuestion,
+    getCustomerIntent,
+    addCustomerIntent,
+    removeCustomerIntent,
+    patchCustomerIntent,
   };
 }
 

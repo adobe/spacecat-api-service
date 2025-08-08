@@ -176,6 +176,15 @@ describe('getRouteHandlers', () => {
 
   const mockLlmoController = {
     getLlmoSheetData: () => null,
+    getLlmoConfig: () => null,
+    getLlmoQuestions: () => null,
+    addLlmoQuestion: () => null,
+    removeLlmoQuestion: () => null,
+    patchLlmoQuestion: () => null,
+    getCustomerIntent: () => null,
+    addCustomerIntent: () => null,
+    removeCustomerIntent: () => null,
+    patchCustomerIntent: () => null,
   };
 
   it('segregates static and dynamic routes', () => {
@@ -356,6 +365,10 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/questions',
       'DELETE /sites/:siteId/llmo/questions/:questionKey',
       'PATCH /sites/:siteId/llmo/questions/:questionKey',
+      'GET /sites/:siteId/llmo/customerIntent',
+      'POST /sites/:siteId/llmo/customerIntent',
+      'DELETE /sites/:siteId/llmo/customerIntent',
+      'PATCH /sites/:siteId/llmo/customerIntent',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -460,5 +473,13 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/llmo/questions/:questionKey'].paramNames).to.deep.equal(['siteId', 'questionKey']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/questions/:questionKey'].handler).to.equal(mockLlmoController.patchLlmoQuestion);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/questions/:questionKey'].paramNames).to.deep.equal(['siteId', 'questionKey']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/customerIntent'].handler).to.equal(mockLlmoController.getCustomerIntent);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/customerIntent'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/customerIntent'].handler).to.equal(mockLlmoController.addCustomerIntent);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/customerIntent'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['DELETE /sites/:siteId/llmo/customerIntent'].handler).to.equal(mockLlmoController.removeCustomerIntent);
+    expect(dynamicRoutes['DELETE /sites/:siteId/llmo/customerIntent'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customerIntent'].handler).to.equal(mockLlmoController.patchCustomerIntent);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customerIntent'].paramNames).to.deep.equal(['siteId']);
   });
 });

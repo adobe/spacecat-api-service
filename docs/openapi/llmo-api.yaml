@@ -224,3 +224,145 @@ llmo-question:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ] 
+
+llmo-customer-intent:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO customer intent
+    description: |
+      Retrieves the customer intent configuration for a specific site's LLMO setup.
+      Returns the Adobe product, CDN providers, and referral provider information.
+    operationId: getCustomerIntent
+    responses:
+      '200':
+        description: Customer intent retrieved successfully
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: './schemas.yaml#/LlmoCustomerIntent'
+                - type: 'null'
+              example:
+                adobeProduct: "Analytics"
+                cdnProvider: ["cloudflare", "fastly"]
+                referralProvider: "google"
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Create or set LLMO customer intent
+    description: |
+      Creates or sets the customer intent configuration for a specific site's LLMO setup.
+      All fields are optional and will be validated for correct types when provided.
+    operationId: addCustomerIntent
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoCustomerIntentInput'
+          examples:
+            complete:
+              summary: Complete customer intent
+              value:
+                adobeProduct: "Analytics"
+                cdnProvider: ["cloudflare", "fastly"]
+                referralProvider: "google"
+            partial:
+              summary: Partial customer intent
+              value:
+                adobeProduct: "Target"
+                cdnProvider: ["akamai"]
+            minimal:
+              summary: Single field
+              value:
+                adobeProduct: "Experience Manager"
+    responses:
+      '200':
+        description: Customer intent created/updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCustomerIntent'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  patch:
+    tags:
+      - llmo
+    summary: Update LLMO customer intent
+    description: |
+      Updates specific fields of the existing customer intent configuration.
+      Only provided fields will be updated, others remain unchanged.
+      A customer intent must already exist to use this endpoint.
+    operationId: patchCustomerIntent
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoCustomerIntentInput'
+          examples:
+            update_product:
+              summary: Update only Adobe product
+              value:
+                adobeProduct: "Experience Platform"
+            update_providers:
+              summary: Update CDN and referral providers
+              value:
+                cdnProvider: ["cloudflare", "akamai"]
+                referralProvider: "bing"
+    responses:
+      '200':
+        description: Customer intent updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCustomerIntent'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  delete:
+    tags:
+      - llmo
+    summary: Remove LLMO customer intent
+    description: |
+      Removes the entire customer intent configuration from the site's LLMO setup.
+      This operation cannot be undone.
+    operationId: removeCustomerIntent
+    responses:
+      '200':
+        description: Customer intent removed successfully
+        content:
+          application/json:
+            schema:
+              type: 'null'
+              example: null
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
