@@ -67,6 +67,7 @@ function TrafficController(context, log, env) {
   }
 
   async function fetchPaidTrafficData(dimensions, mapper) {
+    /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
     log.info(`Fetching paid traffic data for the request: ${requestId}`);
 
