@@ -1,3 +1,10 @@
+# [1.143.0](https://github.com/adobe/spacecat-api-service/compare/v1.142.2...v1.143.0) (2025-08-08)
+
+
+### Features
+
+* add preflight accesibility check ([#1070](https://github.com/adobe/spacecat-api-service/issues/1070)) ([7fdb5fc](https://github.com/adobe/spacecat-api-service/commit/7fdb5fcc1c94a0822031a1ddf3266e302506373e))
+
 ## [1.142.2](https://github.com/adobe/spacecat-api-service/compare/v1.142.1...v1.142.2) (2025-08-07)
 
 
