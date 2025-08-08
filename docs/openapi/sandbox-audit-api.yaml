@@ -1,0 +1,130 @@
+sandbox-audit:
+  get:
+    tags:
+      - sandbox
+    summary: Trigger audit for a sandbox site
+    operationId: triggerSandboxAudit
+    description: |
+      Triggers one or more audits for a specified sandbox site. This endpoint is designed for 
+      partners who need to trigger audits programmatically on sandbox environments only.
+      
+      **Behavior:**
+      - If `auditType` is specified: triggers that specific audit type
+      - If `auditType` is omitted: triggers all enabled audits for the site
+      
+      **Restrictions:**
+      - Only works with sandbox sites (sites with `isSandbox: true`)
+      - Regular production sites will be rejected with a 400 error
+      
+      **Supported Audit Types:**
+      - `broken-internal-links`: Check for broken internal links
+      - `meta-tags`: Validate meta tags and SEO elements  
+      - `alt-text`: Check for missing alt text in images
+    parameters:
+      - name: baseURL
+        in: query
+        required: true
+        description: The base URL of the sandbox site to audit
+        schema:
+          type: string
+          format: uri
+        example: "https://sandbox.example.com"
+      - name: auditType
+        in: query
+        required: false
+        description: The type of audit to run. If omitted, all enabled audits are triggered.
+        schema:
+          type: string
+          enum: 
+            - broken-internal-links
+            - meta-tags
+            - alt-text
+        example: "meta-tags"
+    responses:
+      '200':
+        description: Audit(s) triggered successfully
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  description: Response for single audit
+                  properties:
+                    message:
+                      type: string
+                      example: "Successfully triggered meta-tags audit for https://sandbox.example.com"
+                    siteId:
+                      type: string
+                      format: uuid
+                      example: "a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14"
+                    auditType:
+                      type: string
+                      example: "meta-tags"
+                    baseURL:
+                      type: string
+                      format: uri
+                      example: "https://sandbox.example.com"
+                - type: object
+                  description: Response for multiple audits (when auditType is omitted)
+                  properties:
+                    message:
+                      type: string
+                      example: "Triggered 3 audits for https://sandbox.example.com"
+                    siteId:
+                      type: string
+                      format: uuid
+                      example: "a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14"
+                    baseURL:
+                      type: string
+                      format: uri
+                      example: "https://sandbox.example.com"
+                    auditsTriggered:
+                      type: array
+                      items:
+                        type: string
+                      example: ["broken-internal-links", "meta-tags", "alt-text"]
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          auditType:
+                            type: string
+                          status:
+                            type: string
+                            enum: [triggered, failed]
+                          error:
+                            type: string
+                            description: Error message if status is failed
+      '400':
+        description: Bad request - invalid parameters or non-sandbox site
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  examples:
+                    - "baseURL query parameter is required"
+                    - "Invalid baseURL provided"
+                    - "Sandbox audit endpoint only supports sandbox sites. Site https://example.com is not a sandbox."
+                    - "Invalid auditType. Supported types: broken-internal-links, meta-tags, alt-text"
+                    - "No audits configured for site: https://sandbox.example.com"
+      '404':
+        description: Site not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Site not found for baseURL: https://sandbox.example.com"
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - scoped_api_key: [ ]
+      - ims_key: [ ]
