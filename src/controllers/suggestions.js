@@ -470,7 +470,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No updates provided');
     }
-    const { suggestionIds } = context.data;
+    const { suggestionIds, variationName: variation } = context.data;
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
     }
@@ -583,6 +583,8 @@ function SuggestionsController(ctx, sqs, env) {
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
     if (opportunity.getType() !== 'broken-backlinks') {
+      console.log('promiseTokenResponse', promiseTokenResponse);
+      console.log('sending autofix message for variation', variation);
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
           sqs,
@@ -591,6 +593,7 @@ function SuggestionsController(ctx, sqs, env) {
           opportunityId,
           groupedSuggestions.map((s) => s.getId()),
           promiseTokenResponse,
+          variation,
           { url },
         )),
       );
