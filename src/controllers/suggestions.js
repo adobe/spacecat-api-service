@@ -470,7 +470,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No updates provided');
     }
-    const { suggestionIds } = context.data;
+    const { suggestionIds, variationName: variation } = context.data;
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
     }
@@ -591,6 +591,7 @@ function SuggestionsController(ctx, sqs, env) {
           opportunityId,
           groupedSuggestions.map((s) => s.getId()),
           promiseTokenResponse,
+          variation,
           { url },
         )),
       );
