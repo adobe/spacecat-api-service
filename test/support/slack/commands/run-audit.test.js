@@ -49,7 +49,9 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`');
+      expect(command.description).to.equal(
+        'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`. Supports additional Data for certain audit types.',
+      );
     });
   });
 
@@ -277,6 +279,103 @@ describe('RunAuditCommand', () => {
 
       await command.handleExecution(['', 'all'], slackContext);
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: CSV processing failed: Authentication failed: Invalid Slack token.')).to.be.true;
+    });
+  });
+
+  describe('Run Audit with Additional Data', () => {
+    let command;
+    let site;
+    let config;
+
+    beforeEach(() => {
+      site = {
+        getId: () => 'site-123',
+        getBaseURL: () => 'https://example.com',
+      };
+      config = {
+        isHandlerEnabledForSite: sinon.stub().returns(true),
+      };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(config);
+      command = RunAuditCommand(context);
+    });
+
+    it('should pass additional data to triggerAuditForSite', async () => {
+      const args = [
+        'https://example.com',
+        'experimentation-opportunities',
+        'data1',
+        'data2',
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+
+      expect(queueUrl).to.equal('testQueueUrl');
+      expect(message.type).to.equal('experimentation-opportunities');
+      expect(message.siteId).to.equal('site-123');
+      expect(message.auditContext).to.have.property('additionalData');
+      expect(message.auditContext.additionalData).to.deep.equal(['data1', 'data2']);
+    });
+
+    it('should work normally without additional data', async () => {
+      const args = ['https://example.com', 'experimentation-opportunities'];
+
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [_, message] = sqsStub.sendMessage.firstCall.args;
+
+      expect(message.auditContext).to.not.have.property('additionalData');
+    });
+
+    it('should handle CSV processing without additional data', async () => {
+      const fileUrl = 'https://example.com/sites.csv';
+      slackContext.files = [
+        {
+          name: 'sites.csv',
+          url_private: fileUrl,
+        },
+      ];
+      nock(fileUrl)
+        .get('')
+        .reply(200, 'https://site1.com,uuid1\nhttps://site2.com,uuid2');
+
+      const args = ['lhs-mobile'];
+
+      await command.handleExecution(args, slackContext);
+      expect(slackContext.say).to.have.been.calledWith(
+        ':adobe-run: Triggering lhs-mobile audit for 2 sites.',
+      );
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+    });
+
+    it('should handle CSV processing with additional data', async () => {
+      const fileUrl = 'https://example.com/sites.csv';
+      slackContext.files = [
+        {
+          name: 'sites.csv',
+          url_private: fileUrl,
+        },
+      ];
+      nock(fileUrl)
+        .get('')
+        .reply(200, 'https://site1.com,uuid1\nhttps://site2.com,uuid2');
+
+      const args = ['lhs-mobile', 'data1', 'data2'];
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(
+        ':adobe-run: Triggering lhs-mobile audit for 2 sites with 2 additional parameters.',
+      );
+      expect(sqsStub.sendMessage).to.have.been.calledTwice;
+      const [, message1] = sqsStub.sendMessage.firstCall.args;
+      const [, message2] = sqsStub.sendMessage.secondCall.args;
+      expect(message1.auditContext.additionalData).to.deep.equal(['data1', 'data2']);
+      expect(message2.auditContext.additionalData).to.deep.equal(['data1', 'data2']);
     });
   });
 });
