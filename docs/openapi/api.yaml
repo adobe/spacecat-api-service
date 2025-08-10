@@ -219,6 +219,8 @@ paths:
     $ref: './tools-api.yaml#/import-job-result'
   /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
+  /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-sheet-data-with-type'
   /sites/{siteId}/llmo/config:
     $ref: './llmo-api.yaml#/llmo-config'
   /sites/{siteId}/llmo/questions:

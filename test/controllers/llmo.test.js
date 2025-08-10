@@ -161,9 +161,327 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
+    });
+
+    it('should add limit query parameter to URL when provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add limit to the context params
+      mockContext.data.limit = '10';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add offset query parameter to URL when provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add offset to the context params
+      mockContext.data.offset = '20';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?offset=20',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add sheet query parameter to URL when provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add sheet to the context params
+      mockContext.data.sheet = 'analytics-sheet';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?sheet=analytics-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add multiple query parameters to URL when provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add multiple query parameters to the context params
+      mockContext.data.limit = '10';
+      mockContext.data.offset = '20';
+      mockContext.data.sheet = 'analytics-sheet';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10&offset=20&sheet=analytics-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should not add query parameters when they are not provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Ensure no query parameters are set
+      delete mockContext.data.limit;
+      delete mockContext.data.offset;
+      delete mockContext.data.sheet;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle response with empty headers gracefully', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+        headers: {
+          entries: sinon.stub().returns([]), // Empty headers
+        },
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add query parameters with sheetType parameter', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'analytics-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add sheetType and query parameters to the context params
+      mockContext.params.sheetType = 'analytics';
+      mockContext.data.limit = '5';
+      mockContext.data.offset = '10';
+      mockContext.data.sheet = 'performance-sheet';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'analytics-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json?limit=5&offset=10&sheet=performance-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle empty string query parameters', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add empty string query parameters
+      mockContext.data.limit = '';
+      mockContext.data.offset = '';
+      mockContext.data.sheet = '';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      // Empty strings should be treated as falsy and not added to URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle null query parameters', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add null query parameters
+      mockContext.data.limit = null;
+      mockContext.data.offset = null;
+      mockContext.data.sheet = null;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      // Null values should be treated as falsy and not added to URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should proxy data with sheetType parameter successfully', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'analytics-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add sheetType to the context params
+      mockContext.params.sheetType = 'analytics';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'analytics-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle external API errors with sheetType parameter', async () => {
+      const mockResponse = {
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add sheetType to the context params
+      mockContext.data.sheetType = 'analytics';
+
+      try {
+        await controller.getLlmoSheetData(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('External API returned 404: Not Found');
+      }
+    });
+
+    it('should handle network errors with sheetType parameter', async () => {
+      const networkError = new Error('Network error');
+      tracingFetchStub.rejects(networkError);
+
+      // Add sheetType to the context params
+      mockContext.data.sheetType = 'analytics';
+
+      try {
+        await controller.getLlmoSheetData(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('Network error');
+      }
     });
 
     it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
@@ -185,6 +503,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token hlx_api_key_missing',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
           },
         },
       );

@@ -360,6 +360,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'PATCH /sites/:siteId/config/cdn-logs',
       'GET /sites/:siteId/llmo/sheet-data/:dataSource',
+      'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'GET /sites/:siteId/llmo/config',
       'GET /sites/:siteId/llmo/questions',
       'POST /sites/:siteId/llmo/questions',
@@ -465,6 +466,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/reports/:reportId'].paramNames).to.deep.equal(['siteId', 'reportId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].handler).to.equal(mockLlmoController.getLlmoConfig);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/questions'].handler).to.equal(mockLlmoController.getLlmoQuestions);

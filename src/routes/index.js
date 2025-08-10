@@ -232,6 +232,7 @@ export default function getRouteHandlers(
 
     // LLMO Specific Routes
     'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
+    'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.getLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
