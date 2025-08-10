@@ -246,7 +246,7 @@ function ReportsController(ctx, log, env) {
       }
 
       // Get the reports queue URL from environment
-      const reportsQueueUrl = env.REPORT_JOBS_QUEUE_URL;
+      const { REPORT_JOBS_QUEUE_URL: reportsQueueUrl } = context.env;
       if (!hasText(reportsQueueUrl)) {
         log.error('REPORT_JOBS_QUEUE_URL environment variable is not configured');
         return internalServerError('Reports queue is not configured');
