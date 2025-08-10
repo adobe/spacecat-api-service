@@ -264,18 +264,21 @@ describe('ReportsController', () => {
       expect(mockSqs.sendMessage).to.have.been.calledOnceWith(
         mockEnv.REPORT_JOBS_QUEUE_URL,
         sinon.match({
-          jobId: 'test-report-id',
-          siteId: '123e4567-e89b-12d3-a456-426614174000',
-          reportType: 'performance',
-          reportPeriod: {
-            startDate: '2025-01-01',
-            endDate: '2025-01-31',
-          },
-          comparisonPeriod: {
-            startDate: '2024-12-01',
-            endDate: '2024-12-31',
-          },
-          initiatedBy: 'test@example.com',
+          type: 'performance',
+          data: sinon.match({
+            jobId: 'test-report-id',
+            siteId: '123e4567-e89b-12d3-a456-426614174000',
+            reportType: 'performance',
+            reportPeriod: {
+              startDate: '2025-01-01',
+              endDate: '2025-01-31',
+            },
+            comparisonPeriod: {
+              startDate: '2024-12-01',
+              endDate: '2024-12-31',
+            },
+            initiatedBy: 'test@example.com',
+          }),
         }),
       );
     });
@@ -1031,7 +1034,10 @@ describe('ReportsController', () => {
       expect(mockSqs.sendMessage).to.have.been.calledWith(
         mockEnv.REPORT_JOBS_QUEUE_URL,
         sinon.match({
-          initiatedBy: 'unknown',
+          type: 'performance',
+          data: sinon.match({
+            initiatedBy: 'unknown',
+          }),
         }),
       );
     });

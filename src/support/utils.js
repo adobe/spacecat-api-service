@@ -137,6 +137,16 @@ export const sendInternalReportRunMessage = async (
   slackContext,
 });
 
+export const sendReportTriggerMessage = async (
+  sqs,
+  queueUrl,
+  data,
+  ReportType,
+) => sqs.sendMessage(queueUrl, {
+  type: ReportType,
+  data,
+});
+
 /**
  * Sends audit messages for each URL.
  *

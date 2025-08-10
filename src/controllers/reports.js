@@ -28,6 +28,7 @@ import {
 
 import AccessControlUtil from '../support/access-control-util.js';
 import { ReportDto } from '../dto/report.js';
+import { sendReportTriggerMessage } from '../support/utils.js';
 
 /**
  * Validates a period object (reportPeriod or comparisonPeriod)
@@ -273,7 +274,7 @@ function ReportsController(ctx, log, env) {
       const reportMessage = ReportDto.toQueueMessage(report, jobId, initiatedBy);
 
       // Send message to the report-jobs queue
-      await sqs.sendMessage(reportsQueueUrl, reportMessage);
+      await sendReportTriggerMessage(sqs, reportsQueueUrl, reportMessage, reportType);
 
       log.info(`Report job queued successfully for site ${siteId}, report type: ${reportType}, jobId: ${jobId}`);
 
