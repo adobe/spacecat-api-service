@@ -150,7 +150,7 @@ site-reports:
     summary: Get all reports for a site
     description: |
       Retrieves all reports generated for the specified site, including their current status and download links.
-      Reports can be in various states: queued, generated, or enhanced (with AI insights).
+      Reports can be in various states: processing, failed or success.
     operationId: getAllReportsBySiteId
     responses:
       '200':
