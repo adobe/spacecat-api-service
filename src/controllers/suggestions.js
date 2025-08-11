@@ -585,6 +585,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (opportunity.getType() !== 'broken-backlinks') {
       console.log('promiseTokenResponse', promiseTokenResponse);
       console.log('sending autofix message for variation', variation);
+      console.log('sqs queue url', queueUrl);
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
           sqs,
