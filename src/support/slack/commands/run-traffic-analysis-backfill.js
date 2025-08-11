@@ -65,10 +65,10 @@ function RunTrafficAnalysisBackfillCommand(context) {
     const { sqs } = context;
     const importQueueUrl = config.getQueues().imports;
 
-    log.info(`Import run of type ${TRAFFIC_ANALYSIS_IMPORT_TYPE} for site ${site.getBaseURL()} with input: `, { week, year });
+    log.info(`Import run of type ${TRAFFIC_ANALYSIS_IMPORT_TYPE} (backfill) for site ${site.getBaseURL()} with input: `, { week, year });
 
     await sqs.sendMessage(importQueueUrl, {
-      type: 'traffic-analysis',
+      type: TRAFFIC_ANALYSIS_IMPORT_TYPE,
       siteId: site.getId(),
       week,
       year,
