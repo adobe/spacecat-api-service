@@ -290,17 +290,16 @@ function OnboardCommand(context) {
 
       // Resolve canonical URL for the site from the base URL
       const resolvedUrl = await resolveCanonicalUrl(baseURL);
+      const { pathname: baseUrlPathName } = new URL(baseURL);
+      const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
 
-      // Extract origin from URL if it has paths, query parameters, or hash fragments
-      const { origin } = new URL(resolvedUrl);
+      log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
 
-      log.info(`Base url: ${baseURL} -> Resolved url: ${origin} for site ${siteID}`);
-
-      // Update the fetch configuration only if the origin is different from the resolved URL
+      // Update the fetch configuration only if the pathname is different from the resolved URL
       // (i.e., if the URL has paths, query parameters, or hash fragments)
-      if (origin !== resolvedUrl) {
+      if (baseUrlPathName !== resolvedUrlPathName) {
         siteConfig.updateFetchConfig({
-          overrideBaseURL: origin,
+          overrideBaseURL: resolvedUrlOrigin,
         });
       }
 
