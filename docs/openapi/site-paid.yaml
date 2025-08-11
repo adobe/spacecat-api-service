@@ -2,24 +2,25 @@ site-traffic-paid-type-channel-campaign:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'all'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by type, channel, and campaign
-    description: Returns paid traffic data for a site, grouped by type, channel, and campaign for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by type, channel, and campaign for a given week and year.
     operationId: getPaidTrafficByTypeChannelCampaign
     responses:
-      '200':
-        description: Paid traffic data by type, channel, and campaign
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficTypeChannelCampaignData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficTypeChannelCampaignData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -33,24 +34,25 @@ site-traffic-paid-type-channel:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'all'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by type and channel
-    description: Returns paid traffic data for a site, grouped by type and channel for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by type and channel for a given week and year.
     operationId: getPaidTrafficByTypeChannel
     responses:
-      '200':
-        description: Paid traffic data by type and channel
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficTypeChannelData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficTypeChannelData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -64,24 +66,25 @@ site-traffic-paid-type-campaign:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'all'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by type and campaign
-    description: Returns paid traffic data for a site, grouped by type and campaign for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by type and campaign for a given week and year.
     operationId: getPaidTrafficByTypeCampaign
     responses:
-      '200':
-        description: Paid traffic data by type and campaign
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficTypeCampaignData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficTypeCampaignData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -95,24 +98,25 @@ site-traffic-paid-type:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/weekNumber'
-    - $ref: './parameters.yaml#/month'
     - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'all'
   get:
     tags:
       - site
       - paid
     summary: Get paid traffic data grouped by type
-    description: Returns paid traffic data for a site, grouped by type for a given week, month, and year.
+    description: Returns paid traffic data for a site, grouped by type for a given week and year.
     operationId: getPaidTrafficByType
     responses:
-      '200':
-        description: Paid traffic data by type
-        content:
-          application/json:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficTypeData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
             schema:
-              type: array
-              items:
-                $ref: '#/PaidTrafficTypeData'
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -125,6 +129,8 @@ site-traffic-paid-type:
 site-traffic-paid-top-pages:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
   get:
     tags:
       - site
@@ -139,6 +145,134 @@ site-traffic-paid-top-pages:
           application/json:
             schema:
               $ref: './schemas.yaml#/PaidSiteTopPageList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-campaign-url-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by campaign, url, and device
+    description: Returns paid traffic data for a site, grouped by campaign, url, and device for a given week and year.
+    operationId: getPaidTrafficByCampaignUrlDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficCampaignUrlDeviceData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by campaign and device
+    description: Returns paid traffic data for a site, grouped by campaign and device for a given week and year.
+    operationId: getPaidTrafficByCampaignDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficCampaignDeviceData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-campaign-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by campaign and url
+    description: Returns paid traffic data for a site, grouped by campaign and url for a given week and year.
+    operationId: getPaidTrafficByCampaignUrl
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficCampaignUrlData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by campaign
+    description: Returns paid traffic data for a site, grouped by campaign for a given week and year.
+    operationId: getPaidTrafficByCampaign
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficCampaignData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
@@ -265,3 +399,482 @@ PaidTrafficTypeData:
       description: Bounce rate
 
 components: {}
+
+PaidTrafficCampaignUrlDeviceData:
+  type: object
+  properties:
+    campaign:
+      type: string
+      description: The campaign name or ID
+    url:
+      type: string
+      description: The URL
+    device:
+      type: string
+      description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficCampaignDeviceData:
+  type: object
+  properties:
+    campaign:
+      type: string
+      description: The campaign name or ID
+    device:
+      type: string
+      description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficCampaignUrlData:
+  type: object
+  properties:
+    campaign:
+      type: string
+      description: The campaign name or ID
+    url:
+      type: string
+      description: The URL
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficCampaignData:
+  type: object
+  properties:
+    campaign:
+      type: string
+      description: The campaign name or ID
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+site-traffic-paid-url-page-type-platform-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by URL, page type, platform, campaign, and device
+    description: Returns paid traffic data for a site, grouped by URL, page type, platform, campaign, and device for a given week and year.
+    operationId: getPaidTrafficByUrlPageTypePlatformCampaignDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficUrlPageTypePlatformCampaignDeviceData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-page-type-platform-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by page type, platform, campaign, and device
+    description: Returns paid traffic data for a site, grouped by page type, platform, campaign, and device for a given week and year.
+    operationId: getPaidTrafficByPageTypePlatformCampaignDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficPageTypePlatformCampaignDeviceData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-traffic-paid-page-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by page type
+    description: Returns paid traffic data for a site, grouped by page type for a given week and year.
+    operationId: getPaidTrafficByPageType
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficPageTypeData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+PaidTrafficUrlPageTypePlatformCampaignDeviceData:
+  type: object
+  properties:
+    url:
+      type: string
+      description: The URL
+    page_type:
+      type: string
+      description: The page type classification
+    platform:
+      type: string
+      description: The platform (e.g., desktop, mobile, tablet)
+    campaign:
+      type: string
+      description: The campaign name or ID
+    device:
+      type: string
+      description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficPageTypePlatformCampaignDeviceData:
+  type: object
+  properties:
+    page_type:
+      type: string
+      description: The page type classification
+    platform:
+      type: string
+      description: The platform (e.g., desktop, mobile, tablet)
+    campaign:
+      type: string
+      description: The campaign name or ID
+    device:
+      type: string
+      description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficPageTypeData:
+  type: object
+  properties:
+    page_type:
+      type: string
+      description: The page type classification
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)

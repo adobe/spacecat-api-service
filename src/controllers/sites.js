@@ -23,6 +23,7 @@ import {
   hasText,
   isBoolean,
   isObject,
+  isArray,
   getStoredMetrics,
   isValidUUID,
   deepEqual,
@@ -50,6 +51,42 @@ const AHREFS = 'ahrefs';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
+
+/**
+ * Validates that pageTypes array contains valid regex patterns
+ * @param {Array} pageTypes - Array of page type objects with name and pattern
+ * @returns {object} Validation result with isValid boolean and error message
+ */
+const validatePageTypes = (pageTypes) => {
+  const validationResults = pageTypes.map((pageType, index) => {
+    if (!isObject(pageType)) {
+      return { isValid: false, error: `pageTypes[${index}] must be an object` };
+    }
+
+    if (!hasText(pageType.name)) {
+      return { isValid: false, error: `pageTypes[${index}] must have a name` };
+    }
+
+    if (!hasText(pageType.pattern)) {
+      return { isValid: false, error: `pageTypes[${index}] must have a pattern` };
+    }
+
+    try {
+      // eslint-disable-next-line no-new
+      new RegExp(pageType.pattern);
+      return { isValid: true };
+    } catch (error) {
+      return {
+        isValid: false,
+        error: `pageTypes[${index}] has invalid regex pattern: ${error.message}`,
+      };
+    }
+  });
+
+  const firstError = validationResults.find((result) => !result.isValid);
+
+  return firstError || { isValid: true };
+};
 
 function SitesController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
@@ -314,6 +351,11 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
+    if (isBoolean(requestBody.isSandbox) && requestBody.isSandbox !== site.getIsSandbox()) {
+      site.setIsSandbox(requestBody.isSandbox);
+      updates = true;
+    }
+
     if (hasText(requestBody.organizationId)
       && requestBody.organizationId !== site.getOrganizationId()) {
       site.setOrganizationId(requestBody.organizationId);
@@ -358,11 +400,15 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
-    // Compute external IDs if any watched attributes were updated
-    if (updates && (requestBody.authoringType !== undefined
-      || requestBody.hlxConfig !== undefined
-      || requestBody.deliveryConfig !== undefined)) {
-      site.computeAndSetExternalIds();
+    if (isArray(requestBody.pageTypes) && !deepEqual(requestBody.pageTypes, site.getPageTypes())) {
+      // Validate pageTypes before setting
+      const validation = validatePageTypes(requestBody.pageTypes);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
+
+      site.setPageTypes(requestBody.pageTypes);
+      updates = true;
     }
 
     if (updates) {
