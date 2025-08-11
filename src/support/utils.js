@@ -12,7 +12,7 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
-import { hasText, tracingFetch as fetch, SPACECAT_USER_AGENT } from '@adobe/spacecat-shared-utils';
+import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -437,102 +437,4 @@ export async function getCSPromiseToken(context) {
 export function buildS3Prefix(type, siteId, path = '') {
   const normalized = path ? `${path.replace(/^\/+/g, '').replace(/\/+$/g, '')}/` : '';
   return `${type}/${siteId}/${normalized}`;
-}
-
-/**
- * Ensures the URL is HTTPS.
- * @param {string} url - The URL to ensure is HTTPS.
- * @returns {string} The HTTPS URL.
- */
-export function ensureHttps(url) {
-  const urlObj = new URL(url);
-  urlObj.protocol = 'https';
-  return urlObj.toString();
-}
-
-/**
- * Gets HTTP headers with appropriate user agent for the request type
- * @returns {Object} - HTTP headers object
- */
-export function getRequestHeaders() {
-  return {
-    Accept: 'text/html,application/xhtml+xml,application/xml,text/css,application/javascript,text/javascript;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Cache-Control': 'no-cache',
-    Pragma: 'no-cache',
-    Referer: 'https://www.adobe.com/',
-    'User-Agent': SPACECAT_USER_AGENT,
-  };
-}
-
-/**
- * Get the normalized URL for a given URL string.
- * @param {string} urlString - The URL string to normalize.
- * @param {Object} log - The logger object.
- * @param {string} method - HTTP method to use ('HEAD' or 'GET').
- * @returns {Promise<string>} A Promise that resolves to the normalized URL.
- */
-export async function getNormalizedUrl(urlString, log, method = 'HEAD') {
-  const headers = getRequestHeaders();
-  let resp;
-
-  try {
-    resp = await fetch(urlString, { headers, method });
-
-    if (resp.ok) {
-      return ensureHttps(resp.url);
-    }
-
-    // Handle redirect chains
-    if (urlString !== resp.url) {
-      log.info(`Redirected to ${resp.url}`);
-      return getNormalizedUrl(resp.url, log, method);
-    }
-
-    if (method === 'HEAD') {
-      log.warn(`HEAD request failed for ${urlString}, retrying with GET`);
-      return getNormalizedUrl(urlString, log, 'GET');
-    }
-
-    // If the URL is not found, throw an error
-    throw new Error(`HTTP error! status: ${resp.status}`);
-  } catch (err) {
-    // If HEAD failed with network error and we haven't tried GET yet, retry with GET
-    if (method === 'HEAD') {
-      log.warn(`HEAD request failed for ${urlString}: ${err.message}, retrying with GET`);
-      return getNormalizedUrl(urlString, log, 'GET');
-    }
-
-    throw new Error(`Failed to retrieve URL (${urlString}): ${err.message}`);
-  }
-}
-
-/**
- * Extracts the domain from a URL if it contains paths, query parameters, or hash fragments.
- * This is useful when URLs redirect to specific paths that could cause import issues.
- *
- * @param {string} url - The URL to check and potentially extract domain from.
- * @param {Object} log - The logger object for logging operations.
- * @returns {string} The extracted domain URL or the original URL if no paths detected.
- */
-export function extractDomainFromUrl(url, log) {
-  let finalUrl = url;
-  try {
-    const urlObj = new URL(url);
-    const hasPath = urlObj.pathname && urlObj.pathname !== '/';
-    const hasQuery = urlObj.search && urlObj.search !== '';
-    const hasHash = urlObj.hash && urlObj.hash !== '';
-
-    if (hasPath || hasQuery || hasHash) {
-      // Extract just the domain (protocol + hostname + port)
-      const port = urlObj.port ? `:${urlObj.port}` : '';
-      finalUrl = `${urlObj.protocol}//${urlObj.hostname}${port}`;
-      log.info(`URL had paths/query/hash, extracted domain: ${finalUrl}`);
-    }
-  } catch (error) {
-    log.warn(`Could not parse URL ${url}: ${error.message}`);
-    // Keep original URL if parsing fails
-    finalUrl = url;
-  }
-  return finalUrl;
 }

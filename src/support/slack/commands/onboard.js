@@ -14,7 +14,9 @@
 /* c8 ignore start */
 import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import {
+  isValidUrl, isObject, isNonEmptyArray, resolveCanonicalUrl,
+} from '@adobe/spacecat-shared-utils';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import os from 'os';
 import path from 'path';
@@ -28,7 +30,7 @@ import {
 } from '../../../utils/slack/base.js';
 
 import {
-  findDeliveryType, triggerImportRun, triggerAuditForSite, getNormalizedUrl, extractDomainFromUrl,
+  findDeliveryType, triggerImportRun, triggerAuditForSite,
 } from '../../utils.js';
 import BaseCommand from './base.js';
 
@@ -286,18 +288,21 @@ function OnboardCommand(context) {
 
       log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
 
-      // Build the normalized URL for the site from the base URL
-      const normalizedUrl = await getNormalizedUrl(baseURL, log);
+      // Resolve canonical URL for the site from the base URL
+      const resolvedUrl = await resolveCanonicalUrl(baseURL);
 
-      // Extract domain from URL if it has paths, query parameters, or hash fragments
-      const finalUrl = extractDomainFromUrl(normalizedUrl, log);
+      // Extract origin from URL if it has paths, query parameters, or hash fragments
+      const { origin } = new URL(resolvedUrl);
 
-      log.info(`Final normalized URL for site ${siteID}: ${finalUrl}`);
+      log.info(`Base url: ${baseURL} -> Resolved url: ${origin} for site ${siteID}`);
 
-      // Update the fetch configuration with the normalized URL
-      siteConfig.updateFetchConfig({
-        overrideBaseURL: finalUrl,
-      });
+      // Update the fetch configuration only if the origin is different from the resolved URL
+      // (i.e., if the URL has paths, query parameters, or hash fragments)
+      if (origin !== resolvedUrl) {
+        siteConfig.updateFetchConfig({
+          overrideBaseURL: origin,
+        });
+      }
 
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
