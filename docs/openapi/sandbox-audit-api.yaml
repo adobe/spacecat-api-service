@@ -126,5 +126,4 @@ sandbox-audit:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - scoped_api_key: [ ]
       - ims_key: [ ]
