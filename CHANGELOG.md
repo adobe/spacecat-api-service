@@ -1,3 +1,10 @@
+# [1.145.0](https://github.com/adobe/spacecat-api-service/compare/v1.144.1...v1.145.0) (2025-08-11)
+
+
+### Features
+
+* unable to import top pages... missed opportunities/suggestions ([#1121](https://github.com/adobe/spacecat-api-service/issues/1121)) ([58a73af](https://github.com/adobe/spacecat-api-service/commit/58a73af2dce501f3f3b23f01f4d86c3313b9d462))
+
 ## [1.144.1](https://github.com/adobe/spacecat-api-service/compare/v1.144.0...v1.144.1) (2025-08-11)
 
 
