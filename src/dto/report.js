@@ -94,6 +94,7 @@ export const ReportDto = {
     siteId: report.getSiteId(),
     reportType: report.getReportType(),
     reportPeriod: report.getReportPeriod(),
+    storagePath: report.getStoragePath(),
     comparisonPeriod: report.getComparisonPeriod(),
     timestamp: new Date().toISOString(),
     initiatedBy,
