@@ -1,3 +1,10 @@
+# [1.144.0](https://github.com/adobe/spacecat-api-service/compare/v1.143.7...v1.144.0) (2025-08-11)
+
+
+### Features
+
+* support import 'llmo-prompts-ahref' ([#1132](https://github.com/adobe/spacecat-api-service/issues/1132)) ([092df7d](https://github.com/adobe/spacecat-api-service/commit/092df7dc2cf6ebd55b0c39e033a6feb1af9ac859))
+
 ## [1.143.7](https://github.com/adobe/spacecat-api-service/compare/v1.143.6...v1.143.7) (2025-08-11)
 
 
