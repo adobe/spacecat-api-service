@@ -15,7 +15,7 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import {
-  isValidUrl, isObject, isNonEmptyArray, isValidIMSOrgId,
+  isValidUrl, isObject, isNonEmptyArray, isValidIMSOrgId, resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import os from 'os';
@@ -29,7 +29,9 @@ import {
   parseCSV,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerImportRun, triggerAuditForSite } from '../../utils.js';
+import {
+  findDeliveryType, triggerImportRun, triggerAuditForSite,
+} from '../../utils.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -264,6 +266,21 @@ function OnboardCommand(context) {
         log.info(`Enabled the following imports for ${siteID}: ${importsEnabled.join(', ')}`);
       } else {
         log.info(`All imports are already enabled for ${siteID}`);
+      }
+
+      // Resolve canonical URL for the site from the base URL
+      const resolvedUrl = await resolveCanonicalUrl(baseURL);
+      const { pathname: baseUrlPathName } = new URL(baseURL);
+      const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
+
+      log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
+
+      // Update the fetch configuration only if the pathname is different from the resolved URL
+      // (i.e., if the URL has paths, query parameters, or hash fragments)
+      if (baseUrlPathName !== resolvedUrlPathName) {
+        siteConfig.updateFetchConfig({
+          overrideBaseURL: resolvedUrlOrigin,
+        });
       }
 
       site.setConfig(Config.toDynamoItem(siteConfig));
