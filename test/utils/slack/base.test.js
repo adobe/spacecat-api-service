@@ -30,11 +30,38 @@ import {
   loadProfileConfig,
   parseCSV,
   fetchFile,
+  getMessageFromEvent,
 } from '../../../src/utils/slack/base.js';
 
 use(chaiAsPromised);
 
 describe('Base Slack Utils', () => {
+  describe('getMessageFromEvent ignores whitespace', () => {
+    it('should return the message text without leading or trailing whitespace', () => {
+      const event = {
+        text: '   Hello, World!   ',
+      };
+      const result = getMessageFromEvent(event);
+      expect(result).to.equal('Hello, World!');
+    });
+
+    it('should return the message text without added whitespace', () => {
+      const event = {
+        text: 'Hello,World!',
+      };
+      const result = getMessageFromEvent(event);
+      expect(result).to.equal('Hello,World!');
+    });
+
+    it('should return the message text without multiple whitespaces between words', () => {
+      const event = {
+        text: 'Hello,    World!',
+      };
+      const result = getMessageFromEvent(event);
+      expect(result).to.equal('Hello, World!');
+    });
+  });
+
   describe('extractBaseURLFromInput', () => {
     it('extractURLFromSlackInput when empty', async () => {
       expect(extractURLFromSlackInput('')).to.be.null;
