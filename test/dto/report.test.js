@@ -221,7 +221,7 @@ describe('Report DTO', () => {
       const result = ReportDto.toQueueMessage(mockReport, jobId, initiatedBy);
 
       expect(result).to.deep.include({
-        jobId: 'test-job-id',
+        reportId: 'test-job-id',
         siteId: 'test-site-id',
         reportType: 'performance',
         reportPeriod: {

@@ -266,7 +266,7 @@ describe('ReportsController', () => {
         sinon.match({
           type: 'performance',
           data: sinon.match({
-            jobId: 'test-report-id',
+            reportId: 'test-report-id',
             siteId: '123e4567-e89b-12d3-a456-426614174000',
             reportType: 'performance',
             reportPeriod: {
