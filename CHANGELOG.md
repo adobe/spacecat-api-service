@@ -1,3 +1,31 @@
+## [1.145.4](https://github.com/adobe/spacecat-api-service/compare/v1.145.3...v1.145.4) (2025-08-12)
+
+
+### Bug Fixes
+
+* naming of the new llmo prompts import ([#1140](https://github.com/adobe/spacecat-api-service/issues/1140)) ([06019c4](https://github.com/adobe/spacecat-api-service/commit/06019c4e5bab3171caa69b661516282a78137c72))
+
+## [1.145.3](https://github.com/adobe/spacecat-api-service/compare/v1.145.2...v1.145.3) (2025-08-12)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1139](https://github.com/adobe/spacecat-api-service/issues/1139)) ([33403eb](https://github.com/adobe/spacecat-api-service/commit/33403eb00131f4e38980bb7f06ea58f5a535e778))
+
+## [1.145.2](https://github.com/adobe/spacecat-api-service/compare/v1.145.1...v1.145.2) (2025-08-12)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1138](https://github.com/adobe/spacecat-api-service/issues/1138)) ([81af88e](https://github.com/adobe/spacecat-api-service/commit/81af88ef569ad630bd166245072f35ceee5de241))
+
+## [1.145.1](https://github.com/adobe/spacecat-api-service/compare/v1.145.0...v1.145.1) (2025-08-12)
+
+
+### Bug Fixes
+
+* avoid 503 on succesful put ([#1124](https://github.com/adobe/spacecat-api-service/issues/1124)) ([977c4ef](https://github.com/adobe/spacecat-api-service/commit/977c4ef98d76b19abc4c257d20a7f970b9ae30bc))
+
 # [1.145.0](https://github.com/adobe/spacecat-api-service/compare/v1.144.1...v1.145.0) (2025-08-11)
 
 
