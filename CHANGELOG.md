@@ -1,3 +1,10 @@
+# [1.146.0](https://github.com/adobe/spacecat-api-service/compare/v1.145.4...v1.146.0) (2025-08-12)
+
+
+### Features
+
+* add top-forms slack command ([#1086](https://github.com/adobe/spacecat-api-service/issues/1086)) ([e48a455](https://github.com/adobe/spacecat-api-service/commit/e48a4559d9c801bc26c38229815683b650429fef))
+
 ## [1.145.4](https://github.com/adobe/spacecat-api-service/compare/v1.145.3...v1.145.4) (2025-08-12)
 
 
