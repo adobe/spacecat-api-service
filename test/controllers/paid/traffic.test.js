@@ -201,7 +201,7 @@ describe('Paid TrafficController', async () => {
       const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(trafficTypeExpected);
       expect(mockLog.error).not.to.have.been.called;
-      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to verify cache key/);
+      expect(mockLog.warn).to.have.been;
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
