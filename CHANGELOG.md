@@ -1,3 +1,10 @@
+## [1.145.1](https://github.com/adobe/spacecat-api-service/compare/v1.145.0...v1.145.1) (2025-08-12)
+
+
+### Bug Fixes
+
+* avoid 503 on succesful put ([#1124](https://github.com/adobe/spacecat-api-service/issues/1124)) ([977c4ef](https://github.com/adobe/spacecat-api-service/commit/977c4ef98d76b19abc4c257d20a7f970b9ae30bc))
+
 # [1.145.0](https://github.com/adobe/spacecat-api-service/compare/v1.144.1...v1.145.0) (2025-08-11)
 
 
