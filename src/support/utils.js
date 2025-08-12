@@ -98,6 +98,7 @@ export const sentRunScraperMessage = async (
  * @param {string} endDate
  * @param {Object} slackContext
  * @param {string} [pageUrl] - Optional page URL for the import
+ * @param {Object} [data] - Optional data object for import-specific data
  */
 export const sendRunImportMessage = async (
   sqs,
@@ -108,6 +109,7 @@ export const sendRunImportMessage = async (
   endDate,
   slackContext,
   pageUrl = undefined,
+  data = undefined,
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   siteId,
@@ -115,6 +117,7 @@ export const sendRunImportMessage = async (
   endDate,
   slackContext,
   pageUrl,
+  ...(data && { data }),
 });
 
 export const sendAutofixMessage = async (
@@ -244,6 +247,7 @@ export const triggerScraperRun = async (
  * @param {Object} slackContext
  * @param {Object} lambdaContext
  * @param {string} [pageUrl] - Optional page URL for the import
+ * @param {Object} [data] - Optional data object for import-specific data
  */
 export const triggerImportRun = async (
   config,
@@ -254,6 +258,7 @@ export const triggerImportRun = async (
   slackContext,
   lambdaContext,
   pageUrl,
+  data,
 ) => sendRunImportMessage(
   lambdaContext.sqs,
   config.getQueues().imports,
@@ -266,6 +271,7 @@ export const triggerImportRun = async (
     threadTs: slackContext.threadTs,
   },
   pageUrl,
+  data,
 );
 /* c8 ignore end */
 
