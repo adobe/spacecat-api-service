@@ -362,3 +362,62 @@ file-download:
         $ref: './responses.yaml#/500'
     security:
       - scoped_api_key: [ ]
+
+cdn-logs-buckets:
+  put:
+    tags:
+      - cdn-logs
+    summary: Create or return CDN logs bucket for organization
+    description: |
+      Creates a new CDN logs S3 bucket with full configuration for an organization, or returns existing bucket details.
+      
+      The CDN logs bucket name is generated from the organization name and ID using AWS naming conventions.
+      Organization names must contain only letters, numbers, and hyphens.
+      Organization IDs must contain only uppercase letters, numbers, and optionally end with @AdobeOrg.
+      
+      For new CDN logs infrastructure, creates:
+      - S3 bucket with encryption and security settings optimized for CDN logs
+      - IAM policy and user for CDN logs access
+      - CDN logs access credentials stored in AWS Secrets Manager
+      
+      If the CDN logs bucket already exists, returns the existing bucket information.
+    operationId: provisionCdnLogsBucket
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+    parameters:
+      - name: imsOrgName
+        in: path
+        required: true
+        description: IMS Organization name (letters, numbers, and hyphens only)
+        schema:
+          type: string
+          pattern: '^[a-zA-Z0-9-]+$'
+        example: "adobe"
+      - name: imsOrgId
+        in: path
+        required: true
+        description: IMS Organization identifier (uppercase letters, numbers, optionally ending with @AdobeOrg)
+        schema:
+          type: string
+          pattern: '^[A-Z0-9]+(@AdobeOrg)?$'
+        example: "1234567890ABCDEF12345678@AdobeOrg"
+    responses:
+      '200':
+        description: CDN logs bucket and/or credentials already exist, returning details
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CdnLogsBucketResponse'
+      '201':
+        description: CDN logs bucket and/or credentials created successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CdnLogsBucketResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '500':
+        $ref: './responses.yaml#/500'
+
+

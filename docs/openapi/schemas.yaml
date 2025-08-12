@@ -3490,3 +3490,64 @@ LlmoConfig:
       description: The customer intent configuration containing key-value pairs
       $ref: '#/LlmoCustomerIntent'
   additionalProperties: false
+
+CdnLogsBucketResponse:
+  type: object
+  description: Response from CDN logs bucket provisioning operation
+  required:
+    - message
+    - imsOrgName
+    - imsOrgId
+    - bucketName
+    - bucketArn
+    - bucketExists
+    - configuration
+  properties:
+    message:
+      type: string
+      description: Descriptive message about what was created or retrieved
+      example: "Successfully created CDN logs bucket and credentials for organization: adobe (ID: 1234567890ABCDEF12345678@AdobeOrg)"
+    imsOrgName:
+      type: string
+      description: Organization name
+      example: "adobe"
+    imsOrgId:
+      type: string
+      description: Organization identifier
+      example: "1234567890ABCDEF12345678@AdobeOrg"
+    bucketName:
+      type: string
+      description: Generated CDN logs bucket name
+      example: "cdn-logs-adobe-1234567890"
+    bucketArn:
+      type: string
+      description: CDN logs bucket ARN
+      example: "arn:aws:s3:::cdn-logs-adobe-1234567890"
+    bucketExists:
+      type: boolean
+      description: Whether the bucket already existed before this request
+      example: false
+    credentials:
+      type: object
+      description: CDN logs access credentials
+      properties:
+        accessKey:
+          type: string
+          description: AWS access key ID for CDN logs
+          example: "AKIAIOSFODNN7EXAMPLE"
+        secretKey:
+          type: string
+          description: AWS secret access key for CDN logs (only returned during creation)
+          example: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        secretArn:
+          type: string
+          description: AWS Secrets Manager ARN where CDN logs credentials are stored
+          example: "arn:aws:secretsmanager:us-east-1:123456789012:secret:adobe-1234567890-AbCdEf"
+        secretPath:
+          type: string
+          description: AWS Secrets Manager path for CDN logs credentials
+          example: "/helix-deploy/spacecat-services/customer-secrets/adobe_1234567890/latest"
+      additionalProperties: false
+  additionalProperties: false
+
+

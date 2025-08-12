@@ -70,6 +70,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} cdnLogsProvisionerController - The CDN logs provisioner controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -97,6 +98,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  cdnLogsProvisionerController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -240,6 +242,9 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/customer-intent': llmoController.addLlmoCustomerIntent,
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
+
+    // CDN Logs Provisioner Routes
+    'PUT /tools/cdn-logs/buckets/:imsOrgName/:imsOrgId': cdnLogsProvisionerController.provisionBucket,
   };
 
   // Initialization of static and dynamic routes
