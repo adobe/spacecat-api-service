@@ -11,7 +11,12 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
-import { SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import {
+  SPACECAT_USER_AGENT,
+  tracingFetch as fetch,
+  hasText,
+  isObject,
+} from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 
@@ -223,11 +228,8 @@ function LlmoController() {
 
     // Validate structure of each customer intent item
     for (const intent of newCustomerIntent) {
-      if (!intent.key || !intent.value) {
+      if (!hasText(intent.key) || !hasText(intent.value)) {
         return badRequest('Each customer intent item must have both key and value properties');
-      }
-      if (typeof intent.key !== 'string' || typeof intent.value !== 'string') {
-        return badRequest('Customer intent key and value must be strings');
       }
     }
 
@@ -265,16 +267,16 @@ function LlmoController() {
     validateCustomerIntentKey(config, intentKey);
 
     // Validate the update data
-    if (!data || typeof data !== 'object') {
+    if (!isObject(data)) {
       return badRequest('Update data must be provided as an object');
     }
 
-    if (data.key !== undefined && typeof data.key !== 'string') {
-      return badRequest('Customer intent key must be a string');
+    if (data.key !== undefined && !hasText(data.key)) {
+      return badRequest('Customer intent key must be a non-empty string');
     }
 
-    if (data.value !== undefined && typeof data.value !== 'string') {
-      return badRequest('Customer intent value must be a string');
+    if (data.value !== undefined && !hasText(data.value)) {
+      return badRequest('Customer intent value must be a non-empty string');
     }
 
     // update the customer intent using the config method
