@@ -222,7 +222,7 @@ function LlmoController() {
     const { site, config } = await getSiteAndValidateLlmo(context);
 
     const newCustomerIntent = context.data;
-    if (!newCustomerIntent || !Array.isArray(newCustomerIntent)) {
+    if (!Array.isArray(newCustomerIntent)) {
       return badRequest('Customer intent must be provided as an array');
     }
 
