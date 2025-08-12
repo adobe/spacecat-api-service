@@ -329,8 +329,8 @@ function ReportsController(ctx, log, env) {
         // Only generate presigned URLs for successful reports
         if (report.getStatus() === ReportModel.STATUSES.SUCCESS) {
           try {
-            const rawReportKey = `${report.getStoragePath()}raw/report.json`;
-            const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
+            const rawReportKey = `${report.getRawStoragePath()}/report.json`;
+            const mystiqueReportKey = `${report.getEnhancedStoragePath()}/report.json`;
             const rawPresignedUrlResult = await generatePresignedUrl(s3, bucketName, rawReportKey);
             const mystiquePresignedUrlResult = await generatePresignedUrl(
               s3,
