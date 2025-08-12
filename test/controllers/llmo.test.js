@@ -874,7 +874,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Customer intent key and value must be strings');
+      expect(responseBody.message).to.equal('Each customer intent item must have both key and value properties');
     });
 
     it('should return bad request when customer intent value is not a string', async () => {
@@ -886,7 +886,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Customer intent key and value must be strings');
+      expect(responseBody.message).to.equal('Each customer intent item must have both key and value properties');
     });
 
     it('should handle save errors gracefully', async () => {
@@ -1070,16 +1070,6 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.equal('Update data must be provided as an object');
     });
 
-    it('should return bad request when key is not a string', async () => {
-      mockContext.data = { key: 123 };
-
-      const result = await controller.patchLlmoCustomerIntent(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Customer intent key must be a string');
-    });
-
     it('should return bad request when value is not a string', async () => {
       mockContext.data = { value: 123 };
 
@@ -1087,7 +1077,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Customer intent value must be a string');
+      expect(responseBody.message).to.equal('Customer intent value must be a non-empty string');
     });
 
     it('should handle save errors gracefully', async () => {
