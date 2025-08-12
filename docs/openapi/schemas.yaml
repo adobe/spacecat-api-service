@@ -3413,6 +3413,61 @@ LlmoQuestionUpdate:
       example: ['product', 'pricing', 'features']
   additionalProperties: true
 
+LlmoCustomerIntentItem:
+  type: object
+  description: A single customer intent key-value pair
+  required:
+    - key
+    - value
+  properties:
+    key:
+      description: The customer intent key identifier
+      type: string
+      example: 'target_audience'
+    value:
+      description: The customer intent value
+      type: string
+      example: 'small business owners'
+  additionalProperties: false
+
+LlmoCustomerIntent:
+  type: array
+  description: Array of customer intent key-value pairs
+  items:
+    $ref: '#/LlmoCustomerIntentItem'
+  example:
+    - key: 'target_audience'
+      value: 'small business owners'
+    - key: 'primary_goal'
+      value: 'increase conversions'
+    - key: 'user_persona'
+      value: 'marketing director'
+
+LlmoCustomerIntentInput:
+  type: array
+  description: Input format for adding new customer intent items
+  items:
+    $ref: '#/LlmoCustomerIntentItem'
+  example:
+    - key: 'target_audience'
+      value: 'small business owners'
+    - key: 'primary_goal'
+      value: 'increase conversions'
+
+LlmoCustomerIntentUpdate:
+  type: object
+  description: Update format for modifying an existing customer intent item
+  properties:
+    key:
+      description: Updated customer intent key
+      type: string
+      example: 'updated_target_audience'
+    value:
+      description: Updated customer intent value
+      type: string
+      example: 'enterprise customers'
+  additionalProperties: false
+
 LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
@@ -3431,4 +3486,7 @@ LlmoConfig:
     questions:
       description: The questions configuration containing both human and AI questions
       $ref: '#/LlmoQuestions'
+    customerIntent:
+      description: The customer intent configuration containing key-value pairs
+      $ref: '#/LlmoCustomerIntent'
   additionalProperties: false

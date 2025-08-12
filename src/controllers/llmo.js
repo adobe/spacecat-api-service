@@ -56,6 +56,15 @@ function LlmoController() {
     }
   };
 
+  // Helper function to validate customer intent key
+  const validateCustomerIntentKey = (config, intentKey) => {
+    const customerIntent = config.getLlmoCustomerIntent() || [];
+
+    if (!customerIntent.some((intent) => intent.key === intentKey)) {
+      throw new Error('Invalid customer intent key, please provide a valid customer intent key');
+    }
+  };
+
   // Handles requests to the LLMO sheet data endpoint
   const getLlmoSheetData = async (context) => {
     const { log } = context;
@@ -196,6 +205,87 @@ function LlmoController() {
     return ok(config.getLlmoConfig().questions);
   };
 
+  // Handles requests to the LLMO customer intent endpoint, returns customer intent array
+  const getLlmoCustomerIntent = async (context) => {
+    const { llmoConfig } = await getSiteAndValidateLlmo(context);
+    return ok(llmoConfig.customerIntent || []);
+  };
+
+  // Handles requests to the LLMO customer intent endpoint, adds new customer intent items
+  const addLlmoCustomerIntent = async (context) => {
+    const { log } = context;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    const newCustomerIntent = context.data;
+    if (!newCustomerIntent || !Array.isArray(newCustomerIntent)) {
+      return badRequest('Customer intent must be provided as an array');
+    }
+
+    // Validate structure of each customer intent item
+    for (const intent of newCustomerIntent) {
+      if (!intent.key || !intent.value) {
+        return badRequest('Each customer intent item must have both key and value properties');
+      }
+      if (typeof intent.key !== 'string' || typeof intent.value !== 'string') {
+        return badRequest('Customer intent key and value must be strings');
+      }
+    }
+
+    config.addLlmoCustomerIntent(newCustomerIntent);
+    await saveSiteConfig(site, config, log, 'adding customer intent');
+
+    // return the updated llmoConfig customer intent
+    return ok(config.getLlmoConfig().customerIntent || []);
+  };
+
+  // Handles requests to the LLMO customer intent endpoint, removes a customer intent item
+  const removeLlmoCustomerIntent = async (context) => {
+    const { log } = context;
+    const { intentKey } = context.params;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    validateCustomerIntentKey(config, intentKey);
+
+    // remove the customer intent using the config method
+    config.removeLlmoCustomerIntent(intentKey);
+
+    await saveSiteConfig(site, config, log, 'removing customer intent');
+
+    // return the updated llmoConfig customer intent
+    return ok(config.getLlmoConfig().customerIntent || []);
+  };
+
+  // Handles requests to the LLMO customer intent endpoint, updates a customer intent item
+  const patchLlmoCustomerIntent = async (context) => {
+    const { log } = context;
+    const { intentKey } = context.params;
+    const { data } = context;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    validateCustomerIntentKey(config, intentKey);
+
+    // Validate the update data
+    if (!data || typeof data !== 'object') {
+      return badRequest('Update data must be provided as an object');
+    }
+
+    if (data.key !== undefined && typeof data.key !== 'string') {
+      return badRequest('Customer intent key must be a string');
+    }
+
+    if (data.value !== undefined && typeof data.value !== 'string') {
+      return badRequest('Customer intent value must be a string');
+    }
+
+    // update the customer intent using the config method
+    config.updateLlmoCustomerIntent(intentKey, data);
+
+    await saveSiteConfig(site, config, log, 'updating customer intent');
+
+    // return the updated llmoConfig customer intent
+    return ok(config.getLlmoConfig().customerIntent || []);
+  };
+
   return {
     getLlmoSheetData,
     getLlmoConfig,
@@ -203,6 +293,10 @@ function LlmoController() {
     addLlmoQuestion,
     removeLlmoQuestion,
     patchLlmoQuestion,
+    getLlmoCustomerIntent,
+    addLlmoCustomerIntent,
+    removeLlmoCustomerIntent,
+    patchLlmoCustomerIntent,
   };
 }
 
