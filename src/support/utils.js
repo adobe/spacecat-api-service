@@ -12,10 +12,11 @@
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
-import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import {
-  STATUS_BAD_REQUEST,
-} from '../utils/constants.js';
+  hasText,
+  tracingFetch as fetch,
+} from '@adobe/spacecat-shared-utils';
+import { STATUS_BAD_REQUEST } from '../utils/constants.js';
 
 /**
  * Checks if the url parameter "url" equals "ALL".
@@ -167,6 +168,7 @@ export const sendAuditMessages = async (
  * @param {string} auditType - The type of audit.
  * @param {Object} slackContext - The Slack context object.
  * @param {Object} lambdaContext - The Lambda context object.
+ * @param {Object|null} [additionalData] - Additional data.
  * @return {Promise} - A promise representing the audit trigger operation.
  */
 export const triggerAuditForSite = async (
@@ -174,18 +176,27 @@ export const triggerAuditForSite = async (
   auditType,
   slackContext,
   lambdaContext,
-) => sendAuditMessage(
-  lambdaContext.sqs,
-  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
-  auditType,
-  {
+  additionalData = null,
+) => {
+  const auditContext = {
     slackContext: {
       channelId: slackContext.channelId,
       threadTs: slackContext.threadTs,
     },
-  },
-  site.getId(),
-);
+  };
+
+  if (additionalData) {
+    auditContext.additionalData = additionalData;
+  }
+
+  return sendAuditMessage(
+    lambdaContext.sqs,
+    lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+    auditType,
+    auditContext,
+    site.getId(),
+  );
+};
 
 // todo: prototype - untested
 /* c8 ignore start */
