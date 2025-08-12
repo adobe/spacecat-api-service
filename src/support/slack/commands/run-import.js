@@ -32,6 +32,7 @@ import { isValidDateInterval } from '../../../utils/date-utils.js';
 const PHRASES = ['run import'];
 
 const SUPPORTS_PAGE_URLS = [
+  'llmo-prompts-ahrefs',
   'organic-keywords',
   'organic-keywords-nonbranded',
   'organic-keywords-ai-overview',
