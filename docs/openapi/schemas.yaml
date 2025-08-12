@@ -3483,7 +3483,7 @@ Report:
     storagePath:
       type: string
       description: Storage path for the report files
-      example: '/reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/'
+      example: 'reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/'
     createdAt:
       $ref: '#/DateTime'
       description: When the report was initially created

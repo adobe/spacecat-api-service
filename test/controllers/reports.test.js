@@ -197,7 +197,7 @@ describe('ReportsController', () => {
             endDate: '2024-12-31',
           }),
           getStatus: () => 'success',
-          getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/test-report-id/',
+          getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/test-report-id/',
           getCreatedAt: () => '2025-01-15T10:00:00Z',
           getUpdatedAt: () => '2025-01-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1052,7 +1052,7 @@ describe('ReportsController', () => {
           getReportType: () => 'performance',
           getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
           getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
-          getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/',
+          getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/',
           getCreatedAt: () => '2025-01-15T10:00:00Z',
           getUpdatedAt: () => '2025-01-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1064,7 +1064,7 @@ describe('ReportsController', () => {
           getReportType: () => 'optimization',
           getReportPeriod: () => ({ startDate: '2025-02-01', endDate: '2025-02-28' }),
           getComparisonPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
-          getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/',
+          getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/',
           getCreatedAt: () => '2025-02-15T10:00:00Z',
           getUpdatedAt: () => '2025-02-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1155,7 +1155,7 @@ describe('ReportsController', () => {
         getReportType: () => 'performance',
         getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
         getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
-        getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
+        getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
         getCreatedAt: () => '2025-01-15T10:00:00Z',
         getUpdatedAt: () => '2025-01-15T10:30:00Z',
         getUpdatedBy: () => 'test@example.com',
@@ -1253,7 +1253,7 @@ describe('ReportsController', () => {
         getId: () => '987e6543-e21b-12d3-a456-426614174001',
         getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
         getStatus: () => 'success',
-        getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
+        getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
         remove: sinon.stub().resolves(),
       };
 
@@ -1302,8 +1302,8 @@ describe('ReportsController', () => {
 
       // Verify the correct S3 keys were used
       const deleteCommands = mockContext.s3.DeleteObjectCommand.getCalls();
-      const rawReportKey = '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/raw/report.json';
-      const mystiqueReportKey = '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/mystique/report.json';
+      const rawReportKey = 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/raw/report.json';
+      const mystiqueReportKey = 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/mystique/report.json';
 
       expect(deleteCommands[0].args[0]).to.deep.include({
         Bucket: 'test-bucket',
@@ -1458,9 +1458,9 @@ describe('ReportsController', () => {
           getReportType: () => 'performance',
           getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
           getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
-          getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/',
-          getRawStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/raw/',
-          getEnhancedStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/enhanced/',
+          getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/',
+          getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/raw/',
+          getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/enhanced/',
           getCreatedAt: () => '2025-01-15T10:00:00Z',
           getUpdatedAt: () => '2025-01-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1472,9 +1472,9 @@ describe('ReportsController', () => {
           getReportType: () => 'optimization',
           getReportPeriod: () => ({ startDate: '2025-02-01', endDate: '2025-02-28' }),
           getComparisonPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
-          getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/',
-          getRawStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/report-2/raw/',
-          getEnhancedStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/report-2/enhanced/',
+          getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/',
+          getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-2/raw/',
+          getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-2/enhanced/',
           getCreatedAt: () => '2025-02-15T10:00:00Z',
           getUpdatedAt: () => '2025-02-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1511,7 +1511,7 @@ describe('ReportsController', () => {
           getReportType: () => 'performance',
           getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
           getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
-          getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/',
+          getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/',
           getCreatedAt: () => '2025-01-15T10:00:00Z',
           getUpdatedAt: () => '2025-01-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1546,7 +1546,7 @@ describe('ReportsController', () => {
         getReportType: () => 'performance',
         getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
         getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
-        getStoragePath: () => '/reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
+        getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
         getCreatedAt: () => '2025-01-15T10:00:00Z',
         getUpdatedAt: () => '2025-01-15T10:30:00Z',
         getUpdatedBy: () => 'test@example.com',
