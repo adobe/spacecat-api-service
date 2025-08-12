@@ -80,7 +80,7 @@ export const ReportDto = {
    * @param {string} jobId - The job ID for tracking.
    * @param {string} initiatedBy - The user who initiated the report.
    * @returns {{
-   * jobId: string,
+   * reportId: string,
    * siteId: string,
    * reportType: string,
    * reportPeriod: { startDate: string, endDate: string },
@@ -90,7 +90,7 @@ export const ReportDto = {
    * }}
    */
   toQueueMessage: (report, jobId, initiatedBy) => ({
-    jobId,
+    reportId: jobId,
     siteId: report.getSiteId(),
     reportType: report.getReportType(),
     reportPeriod: report.getReportPeriod(),
