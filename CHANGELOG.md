@@ -1,3 +1,10 @@
+## [1.145.4](https://github.com/adobe/spacecat-api-service/compare/v1.145.3...v1.145.4) (2025-08-12)
+
+
+### Bug Fixes
+
+* naming of the new llmo prompts import ([#1140](https://github.com/adobe/spacecat-api-service/issues/1140)) ([06019c4](https://github.com/adobe/spacecat-api-service/commit/06019c4e5bab3171caa69b661516282a78137c72))
+
 ## [1.145.3](https://github.com/adobe/spacecat-api-service/compare/v1.145.2...v1.145.3) (2025-08-12)
 
 
