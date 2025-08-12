@@ -271,11 +271,11 @@ function LlmoController() {
       return badRequest('Update data must be provided as an object');
     }
 
-    if (data.key && !hasText(data.key)) {
+    if (!hasText(data.key)) {
       return badRequest('Customer intent key must be a non-empty string');
     }
 
-    if (data.value && !hasText(data.value)) {
+    if (!hasText(data.value)) {
       return badRequest('Customer intent value must be a non-empty string');
     }
 
