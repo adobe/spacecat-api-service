@@ -1,3 +1,10 @@
+# [1.151.0](https://github.com/adobe/spacecat-api-service/compare/v1.150.0...v1.151.0) (2025-08-13)
+
+
+### Features
+
+* referral traffic enablement and backfill during llmo-onboard ([#1147](https://github.com/adobe/spacecat-api-service/issues/1147)) ([cf5c95d](https://github.com/adobe/spacecat-api-service/commit/cf5c95da246ae9658fce3a05e88539cb9c4d0315))
+
 # [1.150.0](https://github.com/adobe/spacecat-api-service/compare/v1.149.0...v1.150.0) (2025-08-13)
 
 
