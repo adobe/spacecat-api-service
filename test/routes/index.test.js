@@ -187,6 +187,10 @@ describe('getRouteHandlers', () => {
     patchLlmoCustomerIntent: () => null,
   };
 
+  const mockCdnLogsProvisionerController = {
+    provisionBucket: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -213,6 +217,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockCdnLogsProvisionerController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -369,6 +374,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/customer-intent',
       'DELETE /sites/:siteId/llmo/customer-intent/:intentKey',
       'PATCH /sites/:siteId/llmo/customer-intent/:intentKey',
+      'PUT /tools/cdn-logs/buckets/:imsOrgName/:imsOrgId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -481,5 +487,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].handler).to.equal(mockLlmoController.patchLlmoCustomerIntent);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
+    expect(dynamicRoutes['PUT /tools/cdn-logs/buckets/:imsOrgName/:imsOrgId'].handler).to.equal(mockCdnLogsProvisionerController.provisionBucket);
+    expect(dynamicRoutes['PUT /tools/cdn-logs/buckets/:imsOrgName/:imsOrgId'].paramNames).to.deep.equal(['imsOrgName', 'imsOrgId']);
   });
 });
