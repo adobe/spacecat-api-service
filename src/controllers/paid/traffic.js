@@ -15,132 +15,192 @@ import {
   notFound,
   forbidden,
   badRequest,
+  found,
 } from '@adobe/spacecat-shared-http-utils';
-import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
-import crypto from 'crypto';
-import { getStaticContent } from '@adobe/spacecat-shared-utils';
-import AccessControlUtil from '../../support/access-control-util.js';
-import { TrafficDataResponseDto } from '../../dto/traffic-data-base-response.js';
-import { TrafficDataWithCWVDto } from '../../dto/traffic-data-response-with-cwv.js';
 import {
-  parseCsvToJson,
+  AWSAthenaClient, TrafficDataResponseDto, getTrafficAnalysisQuery,
+  TrafficDataWithCWVDto, getTrafficAnalysisQueryPlaceholdersFilled,
+} from '@adobe/spacecat-shared-athena-client';
+import crypto from 'crypto';
+import AccessControlUtil from '../../support/access-control-util.js';
+import {
   getS3CachedResult,
-  copyOneNewestCsvToCache,
+  addResultJsonToCache,
+  fileExists,
+  getSignedUrlWithRetries,
 } from './caching-helper.js';
 
-async function loadSql(variables) {
-  return getStaticContent(variables, './src/controllers/paid/channel-query.sql.tpl');
+function getCacheKey(siteId, query, cacheLocation) {
+  const outPrefix = crypto.createHash('md5').update(query).digest('hex');
+  const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
+  return { cacheKey, outPrefix };
 }
 
-async function tryGetCacheResult(siteid, s3, cacheBucket, query, log) {
-  const outPrefix = `${crypto.createHash('md5').update(query).digest('hex')}`;
-  const cacheKey = `${cacheBucket}/${siteid}/${outPrefix}.csv`;
-  const cached = await getS3CachedResult(s3, cacheKey, log);
-  if (cached) {
-    log.info(`Found cached result. Returning cached Athena result from S3: ${cacheKey}`);
-    const parsedJson = await parseCsvToJson(cached);
-
-    return { parsedJson, cacheKey, outPrefix };
-  }
-  return { parsedJson: null, cacheKey, outPrefix };
-}
+const isTrue = (value) => value === true || value === 'true';
 
 function TrafficController(context, log, env) {
-  const { dataAccess } = context;
+  const { dataAccess, s3 } = context;
   const { Site } = dataAccess;
 
+  const {
+    RUM_METRICS_DATABASE: rumMetricsDatabase,
+    RUM_METRICS_COMPACT_TABLE: rumMetricsCompactTable,
+    S3_BUCKET_NAME: bucketName,
+  } = env;
+
+  // constants
+  const ATHENA_TEMP_FOLDER = `s3://${bucketName}/rum-metrics-compact/temp/out`;
+  const CACHE_LOCATION = `s3://${bucketName}/rum-metrics-compact/cache`;
+
+  async function tryGetCacheResult(siteId, query, noCache) {
+    const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
+    if (isTrue(noCache)) {
+      log.info(`Skipping cache check for file: ${cacheKey} because param noCache is: ${noCache}`);
+      return { cachedResultUrl: null, cacheKey, outPrefix };
+    }
+    const maxAttempts = 1;
+    if (await fileExists(s3, cacheKey, log, maxAttempts)) {
+      log.info(`Found cached result. Fetching signed URL for Athena result from S3: ${cacheKey}`);
+      const ignoreNotFound = true;
+      const cachedUrl = await getS3CachedResult(s3, cacheKey, log, ignoreNotFound);
+      return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
+    }
+    log.info(`Cached result for file: ${cacheKey} does not exist`);
+    return { cachedResultUrl: null, cacheKey, outPrefix };
+  }
+
   async function fetchPaidTrafficData(dimensions, mapper) {
+    /* c8 ignore next 1 */
+    const requestId = context.invocation?.requestId;
+    log.info(`Fetching paid traffic data for the request: ${requestId}`);
+
     const siteId = context.params?.siteId;
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
+    const baseURL = await site.getBaseURL();
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can view paid traffic metrics');
     }
 
+    // validate input params
     const {
-      siteKey, year, week, month,
+      year, week, noCache, trafficType,
     } = context.data;
-    if (!siteKey || !year || !week || !month) {
-      const badReqMessagge = 'siteKey, year, month and week are required parameters';
-      log.info(badReqMessagge);
-      return badRequest(badReqMessagge);
+    if (!year || !week) {
+      return badRequest('Year and week are required parameters');
     }
-    const dbName = env.PAID_TRAFFIC_DATABASE;
-    const tableName = env.PAID_TRAFFIC_TABLE_NAME;
-    const fullTableName = `${dbName}.${tableName}`;
-    const groupBy = dimensions;
-    const dimensionColumns = groupBy.join(', ');
-    const dimensionColumnsPrefixed = `${groupBy.map((col) => `a.${col}`).join(', ')}, `;
-    const description = `fetch paid channel data | db: ${dbName} | siteKey: ${siteKey} | year: ${year} | month: ${month} | week: ${week} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
-    log.info(`Processing query: ${description}`);
 
-    const query = await loadSql({
-      siteId: siteKey,
-      year,
-      month,
+    const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
+
+    let pageTypes = null;
+    if (dimensions.includes('page_type')) {
+      pageTypes = await site.getPageTypes();
+    }
+
+    let trfTypes = null;
+    if (trafficType && ['owned', 'earned', 'paid'].includes(trafficType)) {
+      trfTypes = [trafficType];
+    }
+
+    // no filter supplied and api is not for traffic type default to paid
+    if (trafficType == null && !dimensions.includes('trf_type')) {
+      trfTypes = ['paid'];
+    }
+
+    const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
       week,
-      groupBy: groupBy.join(', '),
-      dimensionColumns,
-      dimensionColumnsPrefixed,
-      tableName: fullTableName,
+      year,
+      siteId,
+      dimensions,
+      tableName,
+      pageTypes,
+      pageTypeMatchColumn: 'path',
+      trfTypes,
     });
 
-    log.debug(`Fetching paid data with query ${query}`);
-    const outputFolder = env.PAID_TRAFFIC_S3_OUTPUT_URI || 's3://spacecat-dev-segments/temp/out';
-    const cacheBucket = env.PAID_TRAFFIC_S3_CACHE_BUCKET_URI || 's3://spacecat-dev-segments/cache';
-    const s3 = context.s3?.s3Client;
-    const {
-      parsedJson,
-      cacheKey,
-      outPrefix,
-    } = await tryGetCacheResult(siteId, s3, cacheBucket, query, log);
+    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
+
+    log.info(`Processing query: ${description}`);
+
+    // build query
+    const query = getTrafficAnalysisQuery(quereyParams);
+
+    log.debug(`Fetching paid data with query: ${query}`);
+
+    // first try to get from cache
+    const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(
+      siteId,
+      query,
+      noCache,
+    );
     const thresholdConfig = env.CWV_THRESHOLDS || {};
-    if (parsedJson) {
-      const responseCashed = parsedJson.map((row) => mapper.toJSON(row, thresholdConfig));
-      log.info(`Succesfully fetched results of size ${responseCashed?.length} from cache`);
-      return ok(responseCashed);
+    if (cachedResultUrl) {
+      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${requestId}`);
+      return found(cachedResultUrl);
     }
 
-    const resultLocation = `${outputFolder}/${outPrefix}`;
+    // if not cached, query Athena
+    const resultLocation = `${ATHENA_TEMP_FOLDER}/${outPrefix}`;
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
-    log.info(`Fetching paid data directly from athena bucket ${outputFolder} and table ${fullTableName}`);
-    const results = await athenaClient.query(
-      query,
-      dbName,
-      description,
-    );
+    log.info(`Fetching paid data directly from Athena table: ${tableName}`);
+    const results = await athenaClient.query(query, rumMetricsDatabase, description);
+    const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
+    log.info(`Successfully fetched results of length ${response?.length}`);
 
-    if (results && results.length > 0) {
-      const isCached = await copyOneNewestCsvToCache(s3, resultLocation, cacheKey, log);
-      log.info(`Is Copy Athena result CSV to S3 cche: ${cacheKey} succesful was : ${isCached}`);
+    // add to cache
+    let isCached = false;
+    if (response) {
+      isCached = await addResultJsonToCache(s3, cacheKey, response, log);
+      log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
-    const response = results.map((row) => mapper.toJSON(row, thresholdConfig));
-    log.info(`Succesfully fetched results of size ${response?.length}`);
-    return ok(response);
+
+    if (isCached) {
+      // even though file is saved 503 are possible in short time window,
+      // verifying file is reachable before returning
+      const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
+      if (verifiedSignedUrl != null) {
+        log.info(`Succesfully verified file existance, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
+        return found(
+          verifiedSignedUrl,
+        );
+      }
+    }
+
+    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly. Request ID: ${requestId}`);
+    return ok(response, {
+      'content-encoding': 'gzip',
+    });
   }
 
-  const getPaidTrafficByCampaignUrlDevice = async () => fetchPaidTrafficData(['campaign', 'url', 'device'], TrafficDataWithCWVDto);
-  const getPaidTrafficByCampaignDevice = async () => fetchPaidTrafficData(['campaign', 'device'], TrafficDataWithCWVDto);
-  const getPaidTrafficByCampaignUrl = async () => fetchPaidTrafficData(['campaign', 'url'], TrafficDataWithCWVDto);
-  const getPaidTrafficByCampaign = async () => fetchPaidTrafficData(['campaign'], TrafficDataWithCWVDto);
-  const getPaidTrafficByTypeChannelCampaign = async () => fetchPaidTrafficData(['type', 'channel', 'campaign'], TrafficDataResponseDto);
-  const getPaidTrafficByTypeChannel = async () => fetchPaidTrafficData(['type', 'channel'], TrafficDataResponseDto);
-  const getPaidTrafficByTypeCampaign = async () => fetchPaidTrafficData(['type', 'campaign'], TrafficDataResponseDto);
-  const getPaidTrafficByType = async () => fetchPaidTrafficData(['type'], TrafficDataResponseDto);
-
   return {
-    getPaidTrafficByCampaignUrlDevice,
-    getPaidTrafficByCampaignDevice,
-    getPaidTrafficByCampaignUrl,
-    getPaidTrafficByCampaign,
-    getPaidTrafficByTypeChannelCampaign,
-    getPaidTrafficByTypeChannel,
-    getPaidTrafficByTypeCampaign,
-    getPaidTrafficByType,
+    getPaidTrafficByCampaignUrlDevice: async () => fetchPaidTrafficData(['utm_campaign', 'path', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignDevice: async () => fetchPaidTrafficData(['utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignUrl: async () => fetchPaidTrafficData(['utm_campaign', 'path'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaign: async () => fetchPaidTrafficData(['utm_campaign'], TrafficDataWithCWVDto),
+    getPaidTrafficByTypeChannelCampaign: async () => fetchPaidTrafficData(['trf_type', 'trf_channel', 'utm_campaign'], TrafficDataResponseDto),
+    getPaidTrafficByTypeChannel: async () => fetchPaidTrafficData(['trf_type', 'trf_channel'], TrafficDataResponseDto),
+    getPaidTrafficByTypeCampaign: async () => fetchPaidTrafficData(['trf_type', 'utm_campaign'], TrafficDataResponseDto),
+    getPaidTrafficByType: async () => fetchPaidTrafficData(['trf_type'], TrafficDataResponseDto),
+    getPaidTrafficByUrlPageTypePlatformCampaignDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatformCampaignDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypeCampaignDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypeDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypeCampaign: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypePlatform: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypeCampaignPlatform: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'trf_platform'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlPageTypePlatformDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageType: async () => fetchPaidTrafficData(['page_type'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypeCampaignDevice: async () => fetchPaidTrafficData(['page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypeDevice: async () => fetchPaidTrafficData(['page_type', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypeCampaign: async () => fetchPaidTrafficData(['page_type', 'utm_campaign'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatform: async () => fetchPaidTrafficData(['page_type', 'trf_platform'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatformDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatformCampaign: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign'], TrafficDataWithCWVDto),
+
   };
 }
 

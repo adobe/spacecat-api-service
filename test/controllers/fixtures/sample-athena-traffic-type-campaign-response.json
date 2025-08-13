@@ -1,6 +1,6 @@
 [
     {
-        "type": "owned",
+        "trf_type": "owned",
         "pageviews": "1965521",
         "pct_pageviews": "0.5697292778588263",
         "click_rate": "0.5091057075999593",
@@ -11,7 +11,7 @@
         "p70_inp": "121"
     },
     {
-        "type": "paid",
+        "trf_type": "paid",
         "pageviews": "47700111",
         "pct_pageviews": "0.12977108751185898",
         "click_rate": "0.8012061648414285",
@@ -22,7 +22,7 @@
         "p70_inp": "133"
     },
     {
-        "type": "paid",
+        "trf_type": "paid",
         "campaign": "Sample-Sale",
         "pageviews": "360300",
         "pct_pageviews": "0.1044371740686236",
@@ -34,7 +34,7 @@
         "p70_inp": "120"
     },
     {
-        "type": "earned",
+        "trf_type": "earned",
         "pageviews": "745",
         "pct_pageviews": "0.0215946973858242",
         "click_rate": "0.7516778523489933",
@@ -45,7 +45,7 @@
         "p70_inp": "108"
     },
     {
-        "type": "paid",
+        "trf_type": "paid",
         "campaign": "84119",
         "pageviews": "100",
         "pct_pageviews": "2.8986170987683485E-5",
@@ -54,7 +54,7 @@
         "bounce_rate": "1.0"
     },
     {
-        "type": "paid",
+        "trf_type": "paid",
         "campaign": "26311963",
         "pageviews": "100",
         "pct_pageviews": "2.8986170987683485E-5",
@@ -63,7 +63,7 @@
         "bounce_rate": "0.0"
     },
     {
-        "type": "owned",
+        "trf_type": "owned",
         "campaign": "IT-FOCUSED",
         "pageviews": "100",
         "pct_pageviews": "2.8986170987683485E-5",

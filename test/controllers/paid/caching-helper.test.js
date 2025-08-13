@@ -17,126 +17,160 @@ import sinon from 'sinon';
 import chaiAsPromised from 'chai-as-promised';
 import { describe } from 'mocha';
 import {
-  parseCsvToJson,
-  copyOneNewestCsvToCache,
+  fileExists,
+  parseS3Uri,
+  getS3CachedResult,
+  addResultJsonToCache,
+  getSignedUrlWithRetries,
 } from '../../../src/controllers/paid/caching-helper.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
 describe('Paid TrafficController caching-helper', () => {
-  describe('parseCsvToJson', () => {
-    it('parses valid CSV correctly', async () => {
-      const csv = 'id,name\n1,Alice\n2,Bob';
-      const result = await parseCsvToJson(csv);
-      expect(result).to.deep.equal([
-        { id: '1', name: 'Alice' },
-        { id: '2', name: 'Bob' },
-      ]);
-    });
+  let sandbox;
+  let mockS3;
+  let mockLog;
 
-    it('rejects on parse error', async () => {
-      const invalidCsv = '"bad,unclosed';
-      try {
-        await parseCsvToJson(invalidCsv);
-        throw new Error('Expected to fail');
-      } catch (err) {
-        expect(err).to.be.instanceOf(Error);
-      }
+  beforeEach(() => {
+    sandbox = sinon.createSandbox();
+    mockS3 = {
+      s3Client: { send: sandbox.stub() },
+      getSignedUrl: sandbox.stub().resolves('fakeSignedUrl'),
+    };
+    mockLog = {
+      info: sandbox.stub(),
+      error: sandbox.stub(),
+    };
+  });
+
+  afterEach(() => {
+    sandbox.restore();
+  });
+
+  describe('parseS3Uri', () => {
+    it('parses s3 uri with prefix', () => {
+      const result = parseS3Uri('s3://my-bucket/some/path/file.json');
+      expect(result).to.deep.equal({ bucket: 'my-bucket', prefix: 'some/path/file.json' });
+    });
+    it('parses s3 uri with only bucket', () => {
+      const result = parseS3Uri('s3://my-bucket');
+      expect(result).to.deep.equal({ bucket: 'my-bucket', prefix: '' });
     });
   });
 
-  describe('copyOneNewestCsvToCache', () => {
-    let s3Mock;
-    let log;
-
-    beforeEach(() => {
-      s3Mock = { send: sinon.stub() };
-      log = { error: sinon.spy(), info: sinon.spy() };
-    });
-
-    it('keeps latest when next file is older', async () => {
-      const listResponse = {
-        Contents: [
-          { Key: 'latest.csv', LastModified: new Date('2025-01-01') },
-          { Key: 'older.csv', LastModified: new Date('2024-01-01') },
-        ],
-      };
-
-      s3Mock = { send: sinon.stub().resolves(listResponse) };
-
-      const result = await copyOneNewestCsvToCache(
-        s3Mock,
-        's3://bucket/output',
-        's3://cache-bucket/key.csv',
-        log,
-      );
-
+  describe('fileExists', () => {
+    it('returns true if HeadObjectCommand succeeds', async () => {
+      mockS3.s3Client.send.resolves();
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog);
       expect(result).to.be.true;
-
-      const copyCall = s3Mock.send.getCall(1).args[0];
-      expect(copyCall.input.CopySource).to.equal('bucket/latest.csv');
+      expect(mockLog.info).to.have.been.calledWithMatch('Checking if cached result exists');
     });
+    it('returns false if HeadObjectCommand throws NotFound', async () => {
+      const err = new Error('not found');
+      err.name = 'NotFound';
+      mockS3.s3Client.send.rejects(err);
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog);
+      expect(result).to.be.false;
+    });
+    it('logs and returns false on other errors', async () => {
+      const err = new Error('fail');
+      err.name = 'OtherError';
+      mockS3.s3Client.send.rejects(err);
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog);
+      expect(result).to.be.false;
+      expect(mockLog.error).to.have.been.calledWithMatch('Unexpected error');
+    });
+  });
 
-    it('copies the most recent CSV file to cache', async () => {
-      const listResponse = {
-        Contents: [
-          { Key: 'old.csv', LastModified: new Date('2024-01-01') },
-          { Key: 'new.csv', LastModified: new Date('2025-01-01') },
-          { Key: 'notcsv.txt', LastModified: new Date('2026-01-01') },
-        ],
-      };
-      const expectedCopySource = 'bucket/new.csv';
+  describe('getS3CachedResult', () => {
+    it('returns presigned url if getSignedUrl succeeds', async () => {
+      mockS3.getSignedUrl.resolves('https://signed-url');
+      const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
+      expect(url).to.equal('https://signed-url');
+      expect(mockLog.info).to.have.been.calledWithMatch('Fetching cached result key');
+    });
+    it('returns null if error is NoSuchKey', async () => {
+      mockS3.getSignedUrl.rejects(Object.assign(new Error('no such key'), { name: 'NoSuchKey' }));
+      const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
+      expect(url).to.be.null;
+    });
+    it('logs and returns null on other errors', async () => {
+      mockS3.getSignedUrl.rejects(Object.assign(new Error('fail'), { name: 'OtherError' }));
+      const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
+      expect(url).to.be.null;
+      expect(mockLog.error).to.have.been.calledWithMatch('Unepected exception');
+    });
+  });
 
-      s3Mock.send
-        .onFirstCall().resolves(listResponse)
-        .onSecondCall().resolves(); // for copy
-
-      const result = await copyOneNewestCsvToCache(
-        s3Mock,
-        's3://bucket/output/path',
-        's3://cache-bucket/cache/key.csv',
-        log,
-      );
-
+  describe('addResultJsonToCache', () => {
+    it('returns true if PutObjectCommand succeeds', async () => {
+      mockS3.s3Client.send.resolves();
+      const result = await addResultJsonToCache(mockS3, 's3://bucket/key.json', { foo: 'bar' }, mockLog);
       expect(result).to.be.true;
-      const copyParams = s3Mock.send.getCall(1).args[0].input;
-      expect(copyParams).to.include({
-        Bucket: 'cache-bucket',
-        Key: 'cache/key.csv',
-        CopySource: expectedCopySource,
-        ContentType: 'text/csv',
-      });
+    });
+    it('logs and returns false if PutObjectCommand fails', async () => {
+      mockS3.s3Client.send.rejects(new Error('fail'));
+      const result = await addResultJsonToCache(mockS3, 's3://bucket/key.json', { foo: 'bar' }, mockLog);
+      expect(result).to.be.false;
+      expect(mockLog.error).to.have.been.calledWithMatch('Failed to add result json to cache');
+    });
+  });
+
+  describe('fileExists retries', () => {
+    it('retries on ServiceUnavailable error and eventually succeeds', async () => {
+      const serviceUnavailableError = new Error('Service unavailable');
+      serviceUnavailableError.name = 'ServiceUnavailable';
+
+      mockS3.s3Client.send
+        .onFirstCall().rejects(serviceUnavailableError)
+        .onSecondCall().resolves();
+
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog, 2, 10);
+      expect(result).to.be.true;
+      expect(mockS3.s3Client.send).to.have.been.calledTwice;
     });
 
-    it('returns false and logs error if no CSV found', async () => {
-      s3Mock.send.resolves({ Contents: [] });
+    it('retries on 503 error and eventually fails after max attempts', async () => {
+      const error503 = new Error('Service unavailable');
+      error503.$metadata = { httpStatusCode: 503 };
 
-      const result = await copyOneNewestCsvToCache(
-        s3Mock,
-        's3://bucket/output/',
-        's3://cache-bucket/key.csv',
-        log,
-      );
+      mockS3.s3Client.send.rejects(error503);
 
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog, 2, 10);
       expect(result).to.be.false;
-      expect(log.error.calledOnce).to.be.true;
-      expect(log.error.firstCall.args[0]).to.match(/No CSV result found/);
+      expect(mockS3.s3Client.send).to.have.been.calledTwice;
+      expect(mockLog.error).to.have.been.calledWithMatch('Unexpected error when checking cache (attempt 2)');
     });
 
-    it('handles unexpected exceptions and logs them', async () => {
-      s3Mock.send.throws(new Error('Something broke'));
+    it('exhausts all retry attempts and returns false', async () => {
+      const retryableError = new Error('Service unavailable');
+      retryableError.name = 'ServiceUnavailable';
 
-      const result = await copyOneNewestCsvToCache(
-        s3Mock,
-        's3://bucket/output/',
-        's3://cache-bucket/key.csv',
-        log,
-      );
+      mockS3.s3Client.send.rejects(retryableError);
 
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog, 3, 10);
       expect(result).to.be.false;
-      expect(log.error.calledOnce).to.be.true;
-      expect(log.error.firstCall.args[0]).to.include('Something broke');
+      expect(mockS3.s3Client.send).to.have.been.calledThrice;
+    });
+  });
+
+  describe('getSignedUrlWithRetries', () => {
+    it('returns signed url when file exists', async () => {
+      mockS3.s3Client.send.resolves();
+      mockS3.getSignedUrl.resolves('https://signed-url');
+
+      const result = await getSignedUrlWithRetries(mockS3, 's3://bucket/key.json', mockLog, 1);
+      expect(result).to.equal('https://signed-url');
+    });
+
+    it('returns null when file does not exist', async () => {
+      const notFoundError = new Error('not found');
+      notFoundError.name = 'NotFound';
+      mockS3.s3Client.send.rejects(notFoundError);
+
+      const result = await getSignedUrlWithRetries(mockS3, 's3://bucket/key.json', mockLog, 1);
+      expect(result).to.be.null;
     });
   });
 });
