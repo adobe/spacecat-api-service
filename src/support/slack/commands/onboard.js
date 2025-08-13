@@ -108,9 +108,15 @@ function OnboardCommand(context) {
     // Check if site already exists
     if (site) {
       const siteOrgId = site.getOrganizationId();
+      organizationId = siteOrgId; // Set organizationId for existing site
       const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
       await say(message);
       log.info(message);
+
+      // Update reportLine with existing site information
+      localReportLine.spacecatOrgId = organizationId;
+      localReportLine.existingSite = 'Yes';
+      localReportLine.deliveryType = site.getDeliveryType(); // Get existing delivery type
     } else {
       // New site - handle organization logic
       log.info(`Site ${baseURL} doesn't exist. Processing organization...`);
@@ -287,15 +293,30 @@ function OnboardCommand(context) {
       }
 
       // Resolve canonical URL for the site from the base URL
-      const resolvedUrl = await resolveCanonicalUrl(baseURL);
+      // Only do this for new sites or when we need to update the configuration
+      let resolvedUrl = baseURL;
+      let shouldUpdateFetchConfig = false;
+
+      // Only resolve canonical URL when needed (new sites or sites with import updates)
+      if ((!reportLine.existingSite || reportLine.existingSite === 'No') || importsEnabled.length > 0) {
+        try {
+          resolvedUrl = await resolveCanonicalUrl(baseURL);
+          shouldUpdateFetchConfig = true;
+        } catch (error) {
+          log.warn(`Failed to resolve canonical URL for ${baseURL}: ${error.message}. Using original URL.`);
+          resolvedUrl = baseURL; // Fallback to original URL
+          shouldUpdateFetchConfig = false; // Don't update fetch config
+        }
+      }
+
       const { pathname: baseUrlPathName } = new URL(baseURL);
       const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
 
       log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
 
-      // Update the fetch configuration only if the pathname is different from the resolved URL
-      // (i.e., if the URL has paths, query parameters, or hash fragments)
-      if (baseUrlPathName !== resolvedUrlPathName) {
+      // Update the fetch configuration only if needed and if the pathname is different
+      // from the resolved URL
+      if (shouldUpdateFetchConfig && baseUrlPathName !== resolvedUrlPathName) {
         siteConfig.updateFetchConfig({
           overrideBaseURL: resolvedUrlOrigin,
         });
