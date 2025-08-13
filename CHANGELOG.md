@@ -1,3 +1,10 @@
+# [1.150.0](https://github.com/adobe/spacecat-api-service/compare/v1.149.0...v1.150.0) (2025-08-13)
+
+
+### Features
+
+* llmo onboard for site. ([#1146](https://github.com/adobe/spacecat-api-service/issues/1146)) ([fa4b0e7](https://github.com/adobe/spacecat-api-service/commit/fa4b0e7bec940ff0fb6a306377175fddaec90d6f))
+
 # [1.149.0](https://github.com/adobe/spacecat-api-service/compare/v1.148.0...v1.149.0) (2025-08-13)
 
 
