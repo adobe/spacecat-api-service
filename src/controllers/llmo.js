@@ -226,11 +226,26 @@ function LlmoController() {
       return badRequest('Customer intent must be provided as an array');
     }
 
-    // Validate structure of each customer intent item
+    // Get existing customer intent keys to check for duplicates
+    const existingCustomerIntent = config.getLlmoCustomerIntent() || [];
+    const existingKeys = new Set(existingCustomerIntent.map((item) => item.key));
+    const newKeys = new Set();
+
+    // Validate structure of each customer intent item and check for duplicates
     for (const intent of newCustomerIntent) {
       if (!hasText(intent.key) || !hasText(intent.value)) {
         return badRequest('Each customer intent item must have both key and value properties');
       }
+
+      if (existingKeys.has(intent.key)) {
+        return badRequest(`Customer intent key '${intent.key}' already exists`);
+      }
+
+      if (newKeys.has(intent.key)) {
+        return badRequest(`Duplicate customer intent key '${intent.key}' in request`);
+      }
+
+      newKeys.add(intent.key);
     }
 
     config.addLlmoCustomerIntent(newCustomerIntent);

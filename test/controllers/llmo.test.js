@@ -891,7 +891,7 @@ describe('LlmoController', () => {
 
     it('should handle save errors gracefully', async () => {
       mockContext.data = [
-        { key: 'target_audience', value: 'enterprise customers' },
+        { key: 'new_unique_key', value: 'enterprise customers' },
       ];
       const saveError = new Error('Database connection failed');
       mockSite.save.rejects(saveError);
@@ -911,7 +911,7 @@ describe('LlmoController', () => {
 
     it('should handle null customer intent in response', async () => {
       mockContext.data = [
-        { key: 'target_audience', value: 'enterprise customers' },
+        { key: 'another_unique_key', value: 'enterprise customers' },
       ];
 
       // Mock getLlmoConfig to return null customerIntent after adding
@@ -926,6 +926,47 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal([]);
+      expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledWith(mockContext.data);
+    });
+
+    it('should return bad request when customer intent key already exists', async () => {
+      mockContext.data = [
+        { key: 'target_audience', value: 'new value' }, // This key already exists in mockLlmoConfig
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("Customer intent key 'target_audience' already exists");
+    });
+
+    it('should return bad request when duplicate keys in same request', async () => {
+      mockContext.data = [
+        { key: 'new_key', value: 'value1' },
+        { key: 'new_key', value: 'value2' }, // Duplicate key in same request
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("Duplicate customer intent key 'new_key' in request");
+    });
+
+    it('should handle null customer intent when checking for duplicates', async () => {
+      // Mock getLlmoCustomerIntent to return null to test the || [] fallback
+      mockConfig.getLlmoCustomerIntent.returns(null);
+
+      mockContext.data = [
+        { key: 'new_key', value: 'new value' },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
       expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledWith(mockContext.data);
     });
   });
