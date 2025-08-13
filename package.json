@@ -78,7 +78,7 @@
     "@adobe/spacecat-shared-http-utils": "1.15.2",
     "@adobe/spacecat-shared-ims-client": "1.8.8",
     "@adobe/spacecat-shared-rum-api-client": "2.36.3",
-    "@adobe/spacecat-shared-scrape-client": "1.0.7",
+    "@adobe/spacecat-shared-scrape-client": "https://gitpkg.vercel.app/adobe/spacecat-shared/packages/spacecat-shared-scrape-client?feat-rescrape-check",
     "@adobe/spacecat-shared-slack-client": "1.5.23",
     "@adobe/spacecat-shared-utils": "1.45.0",
     "@aws-sdk/client-s3": "3.864.0",
