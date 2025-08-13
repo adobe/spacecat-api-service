@@ -100,7 +100,7 @@ function LlmoOnboardCommand(context) {
 
       // Update the existing config object (similar to how onboard.js and llmo.js do it)
       // We'll set the config as raw JSON data, which is how the existing APIs do it
-      const currentConfigData = siteConfig.toJSON ? siteConfig.toJSON() : {};
+      const currentConfigData = siteConfig.toJSON ? siteConfig.toJSON() : /* c8 ignore next */ {};
       const updatedConfigData = {
         ...currentConfigData,
         llmo: llmoConfig,

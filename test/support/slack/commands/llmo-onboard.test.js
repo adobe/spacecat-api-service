@@ -178,5 +178,17 @@ describe('LlmoOnboardCommand', () => {
         ':x: Failed to save LLMO configuration: Database error',
       );
     });
+
+    it('sends a message for all other errors', async () => {
+      const error = new Error('Unexpected error');
+      mockDataAccess.Site.findByBaseURL.rejects(error);
+
+      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
+
+      expect(mockLog.error).to.have.been.calledWith('Error in LLMO onboarding:', error);
+      expect(slackContext.say).to.have.been.calledWith(
+        ':nuclear-warning: Oops! Something went wrong: Unexpected error',
+      );
+    });
   });
 });
