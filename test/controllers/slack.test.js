@@ -46,6 +46,7 @@ describe('SlackController', () => {
       constructor(opts) {
         this.event = sinon.stub();
         this.action = sinon.stub();
+        this.view = sinon.stub();
         this.use = (middleware) => {
           middlewares.push(middleware);
         };
@@ -186,6 +187,7 @@ describe('SlackController', () => {
       expect(context.boltApp).to.not.be.undefined;
       expect(context.boltApp).to.have.property('use');
       expect(context.boltApp).to.have.property('event');
+      expect(context.boltApp).to.have.property('view');
       expect(context.boltApp).to.have.property('processEvent');
 
       await middlewares[0]({ context, next: () => true });

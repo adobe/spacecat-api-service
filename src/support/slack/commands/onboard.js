@@ -49,9 +49,22 @@ function OnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-site',
     name: 'Onboard Site(s)',
-    description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
+    description: 'Onboards a new site (or batch of sites from CSV) to AEM Sites Optimizer using an interactive modal interface.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [imsOrgId] [profile] [workflowWaitTime]`,
+    usageText: `${PHRASES[0]}
+
+*Interactive Onboarding:* This command opens a modal form where you can configure:
+• Site URL (required)
+• IMS Organization ID (optional)
+• Configuration profile (demo/production)
+• Delivery type (auto-detect/manual)
+• Authoring type (optional)
+• Workflow wait time (optional)
+• Preview environment URL (optional)
+
+*Batch Processing:* Upload a CSV file with this command using the format:
+\`Site URL, IMS Org ID, [Reserved], Delivery Type, Authoring Type\`
+`,
   });
 
   const {
@@ -68,6 +81,7 @@ function OnboardCommand(context) {
       { id: 'profile', title: 'Profile' },
       { id: 'existingSite', title: 'Already existing site?' },
       { id: 'deliveryType', title: 'Delivery Type' },
+      { id: 'authoringType', title: 'Authoring Type' },
       { id: 'audits', title: 'Audits' },
       { id: 'imports', title: 'Imports' },
       { id: 'errors', title: 'Errors' },
@@ -120,6 +134,9 @@ function OnboardCommand(context) {
    * @param {string} profileName - The profile name.
    * @param {number} workflowWaitTime - Optional wait time in seconds.
    * @param {Object} slackContext - Slack context.
+   * @param {Object} additionalParams - Additional onboarding parameters.
+   * @param {string} additionalParams.deliveryType - Forced delivery type.
+   * @param {string} additionalParams.authoringType - Authoring type.
    * @returns {Promise<Object>} - A report line containing execution details.
    */
   const onboardSingleSite = async (
@@ -129,6 +146,7 @@ function OnboardCommand(context) {
     profileName,
     workflowWaitTime,
     slackContext,
+    additionalParams = {},
   ) => {
     const { say } = slackContext;
     const sfnClient = new SFNClient();
@@ -159,6 +177,7 @@ function OnboardCommand(context) {
       siteId: '',
       profile: profileName,
       deliveryType: '',
+      authoringType: additionalParams.authoringType || '',
       imports: '',
       audits: '',
       errors: '',
@@ -230,15 +249,38 @@ function OnboardCommand(context) {
         }
       } else {
         log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
-        const deliveryType = await findDeliveryType(baseURL);
-        log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
+
+        // Use forced delivery type if provided, otherwise detect it
+        let deliveryType;
+        if (additionalParams.deliveryType
+          && Object.values(SiteModel.DELIVERY_TYPES).includes(additionalParams.deliveryType)) {
+          deliveryType = additionalParams.deliveryType;
+          log.info(`Using forced delivery type for site ${baseURL}: ${deliveryType}`);
+        } else {
+          deliveryType = await findDeliveryType(baseURL);
+          log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
+        }
+
         reportLine.deliveryType = deliveryType;
         const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
+        const siteCreateParams = {
+          baseURL,
+          deliveryType,
+          isLive,
+          organizationId,
+        };
+
+        // Add authoring type if provided
+        if (additionalParams.authoringType
+          && Object.values(SiteModel.AUTHORING_TYPES || {})
+            .includes(additionalParams.authoringType)) {
+          siteCreateParams.authoringType = additionalParams.authoringType;
+          log.info(`Setting authoring type for site ${baseURL}: ${additionalParams.authoringType}`);
+        }
+
         try {
-          site = await Site.create({
-            baseURL, deliveryType, isLive, organizationId,
-          });
+          site = await Site.create(siteCreateParams);
         } catch (error) {
           log.error(`Error creating site: ${error.message}`);
           reportLine.errors = error.message;
@@ -496,6 +538,7 @@ function OnboardCommand(context) {
             profileName,
             env.WORKFLOW_WAIT_TIME_IN_SECONDS, // Use environment default wait time in batch mode
             slackContext,
+            {},
           );
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
@@ -524,45 +567,39 @@ function OnboardCommand(context) {
 
         await say(':white_check_mark: Batch onboarding process finished successfully.');
       } else {
-        if (args.length < 1) {
-          await say(':warning: Missing required argument. Please provide at least *Site URL*.');
-          return;
-        }
+        // No arguments or files - show button to start onboarding
+        const message = {
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: ':rocket: *Site Onboarding*\n\nClick the button below to start the interactive onboarding process.',
+              },
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: 'Start Onboarding',
+                  },
+                  value: 'start_onboarding',
+                  action_id: 'start_onboarding',
+                  style: 'primary',
+                },
+              ],
+            },
+          ],
+          thread_ts: threadTs,
+        };
 
-        const [baseURLInput, imsOrgID = env.DEMO_IMS_ORG, profileName = 'demo', workflowWaitTime] = args;
-        const parsedWaitTime = workflowWaitTime ? Number(workflowWaitTime) : undefined;
-
-        const configuration = await Configuration.findLatest();
-
-        const reportLine = await onboardSingleSite(
-          baseURLInput,
-          imsOrgID,
-          configuration,
-          profileName,
-          parsedWaitTime,
-          slackContext,
-        );
-
-        await configuration.save();
-
-        if (reportLine.errors) {
-          await say(`:warning: ${reportLine.errors}`);
-        }
-
-        const message = `
-        :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
-        :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
-        :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
-        :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
-        :question: *Already existing:* ${reportLine.existingSite}
-        :gear: *Profile:* ${reportLine.profile}
-        :hourglass_flowing_sand: *Wait Time:* ${parsedWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS} seconds (${parsedWaitTime === env.WORKFLOW_WAIT_TIME_IN_SECONDS ? 'default' : 'custom'})
-        :clipboard: *Audits:* ${reportLine.audits || 'None'}
-        :inbox_tray: *Imports:* ${reportLine.imports || 'None'}
-        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : ':hourglass_flowing_sand: *Status:* In-Progress'}
-        `;
-
-        await say(message);
+        await client.chat.postMessage({
+          channel: channelId,
+          ...message,
+        });
       }
     } catch (error) {
       log.error(error);

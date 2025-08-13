@@ -16,12 +16,16 @@ import approveSiteCandidate from './approve-site-candidate.js';
 import ignoreSiteCandidate from './ignore-site-candidate.js';
 import rejectOrg from './reject-org.js';
 
+import { onboardSiteModal, startOnboarding } from './onboard-modal.js';
+
 const actions = {
   approveFriendsFamily,
   approveOrg,
   approveSiteCandidate,
   ignoreSiteCandidate,
   rejectOrg,
+  onboardSiteModal,
+  start_onboarding: startOnboarding,
 };
 
 export default actions;
