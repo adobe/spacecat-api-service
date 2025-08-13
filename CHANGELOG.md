@@ -1,3 +1,10 @@
+# [1.147.0](https://github.com/adobe/spacecat-api-service/compare/v1.146.1...v1.147.0) (2025-08-13)
+
+
+### Features
+
+* Onboard command improvements ([#1082](https://github.com/adobe/spacecat-api-service/issues/1082)) ([bd1d583](https://github.com/adobe/spacecat-api-service/commit/bd1d583af25cf1b8a6ed639483f439f5db9a6dbb))
+
 ## [1.146.1](https://github.com/adobe/spacecat-api-service/compare/v1.146.0...v1.146.1) (2025-08-12)
 
 
