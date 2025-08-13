@@ -1,3 +1,10 @@
+# [1.149.0](https://github.com/adobe/spacecat-api-service/compare/v1.148.0...v1.149.0) (2025-08-13)
+
+
+### Features
+
+* slack 'run audit' command supports extra arg  ([#1143](https://github.com/adobe/spacecat-api-service/issues/1143)) ([7abda9d](https://github.com/adobe/spacecat-api-service/commit/7abda9d63dbb00cf02b2451e40caff2ecb39e84a))
+
 # [1.148.0](https://github.com/adobe/spacecat-api-service/compare/v1.147.1...v1.148.0) (2025-08-13)
 
 
