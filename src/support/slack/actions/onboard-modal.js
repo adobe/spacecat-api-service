@@ -29,8 +29,8 @@ function extractDeliveryConfigFromPreviewUrl(previewUrl) {
 
     if (programId && envId) {
       return {
-        programId: `p${programId}`,
-        environmentId: `e${envId}`,
+        programId: `${programId}`,
+        environmentId: `${envId}`,
         authorURL: previewUrl,
       };
     }
@@ -102,12 +102,20 @@ export function startOnboarding(lambdaContext) {
         replace_original: true,
       });
 
+      // Capture original channel and thread context
+      const originalChannel = body.channel?.id;
+      const originalThreadTs = body.message?.thread_ts || body.message?.ts;
+
       // Open the onboarding modal
       await client.views.open({
         trigger_id: body.trigger_id,
         view: {
           type: 'modal',
           callback_id: 'onboard_site_modal',
+          private_metadata: JSON.stringify({
+            originalChannel,
+            originalThreadTs,
+          }),
           title: {
             type: 'plain_text',
             text: 'Onboard Site',
@@ -400,6 +408,17 @@ export function onboardSiteModal(lambdaContext) {
       const { view, user } = body;
       const { values } = view.state;
 
+      // Extract original channel and thread context from private metadata
+      let originalChannel;
+      let originalThreadTs;
+      try {
+        const metadata = JSON.parse(view.private_metadata || '{}');
+        originalChannel = metadata.originalChannel;
+        originalThreadTs = metadata.originalThreadTs;
+      } catch (error) {
+        log.warn('Failed to parse private metadata:', error);
+      }
+
       const siteUrl = values.site_url_input.site_url.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
       const profile = values.profile_input.profile.selected_option?.value || 'demo';
@@ -448,16 +467,21 @@ export function onboardSiteModal(lambdaContext) {
       await ack();
 
       // Create a slack context for the onboarding process
+      // Use original channel/thread if available, otherwise fall back to DM
+      const responseChannel = originalChannel || body.user.id;
+      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+
       const slackContext = {
         say: async (message) => {
           await client.chat.postMessage({
-            channel: body.user.id, // Send as DM
+            channel: responseChannel,
             text: message,
+            thread_ts: responseThreadTs,
           });
         },
         client,
-        channelId: body.user.id,
-        threadTs: undefined,
+        channelId: responseChannel,
+        threadTs: responseThreadTs,
       };
 
       const configuration = await Configuration.findLatest();
@@ -473,8 +497,9 @@ export function onboardSiteModal(lambdaContext) {
       const parsedWaitTime = waitTime ? parseInt(waitTime, 10) : undefined;
 
       await client.chat.postMessage({
-        channel: body.user.id,
+        channel: responseChannel,
         text: `:gear: Starting onboarding for site ${siteUrl}...`,
+        thread_ts: responseThreadTs,
       });
 
       const reportLine = await onboardSingleSiteFromModal(
@@ -512,8 +537,9 @@ export function onboardSiteModal(lambdaContext) {
 
       if (reportLine.errors) {
         await client.chat.postMessage({
-          channel: body.user.id,
+          channel: responseChannel,
           text: `:warning: ${reportLine.errors}`,
+          thread_ts: responseThreadTs,
         });
       } else {
         const site = reportLine.siteId ? await Site.findById(reportLine.siteId) : null;
@@ -544,8 +570,9 @@ ${deliveryConfigInfo}${previewConfigInfo}
         `;
 
         await client.chat.postMessage({
-          channel: body.user.id,
+          channel: responseChannel,
           text: message,
+          thread_ts: responseThreadTs,
         });
       }
 
