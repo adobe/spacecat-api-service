@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { getLastNumberOfWeeks, isValidUrl } from '@adobe/spacecat-shared-utils';
 
 import {
   extractURLFromSlackInput,
@@ -19,7 +19,31 @@ import {
 
 import BaseCommand from './base.js';
 
+const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
+const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
+
 const PHRASES = ['onboard-llmo'];
+
+async function triggerReferralTrafficBackfill(context, configuration, siteId) {
+  const { log, sqs } = context;
+
+  const last4Weeks = getLastNumberOfWeeks(4);
+
+  for (const last4Week of last4Weeks) {
+    const { week, year } = last4Week;
+    const message = {
+      type: REFERRAL_TRAFFIC_IMPORT,
+      siteId,
+      auditContext: {
+        auditType: REFERRAL_TRAFFIC_AUDIT,
+        week,
+        year,
+      },
+    };
+    sqs.sendMessage(configuration.getQueues().imports, message);
+    log.info(`Successfully triggered import ${REFERRAL_TRAFFIC_IMPORT} with message: ${JSON.stringify(message)}`);
+  }
+}
 
 /**
  * Factory function to create the LlmoOnboardCommand object.
@@ -40,7 +64,7 @@ function LlmoOnboardCommand(context) {
   const {
     dataAccess, log,
   } = context;
-  const { Site } = dataAccess;
+  const { Site, Configuration } = dataAccess;
 
   /**
    * Handles LLMO onboarding for a single site.
@@ -109,9 +133,19 @@ function LlmoOnboardCommand(context) {
       // Set the config directly as a plain object
       site.setConfig(updatedConfigData);
 
+      // enable the traffic-analysis import for referral-traffic
+      siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
+
+      // enable the llmo-referral-traffic import for referral-traffic
+      const configuration = await Configuration.findLatest();
+      configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
+
       try {
+        await configuration.save();
         await site.save();
         log.info(`Successfully updated LLMO config for site ${siteId}`);
+
+        await triggerReferralTrafficBackfill(context, configuration, siteId);
 
         const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
