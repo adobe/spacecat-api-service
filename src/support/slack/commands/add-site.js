@@ -98,7 +98,7 @@ function AddSiteCommand(context) {
 
       // we still check for auditConfig.auditsDisabled() here as the default audit config may change
       if (configuration.isHandlerEnabledForSite(auditType, newSite)) {
-        await triggerAuditForSite(newSite, auditType, slackContext, context);
+        await triggerAuditForSite(newSite, auditType, undefined, slackContext, context);
         message += 'First PSI check is triggered! :adobe-run:\'\n';
         message += `In a minute, you can run _@spacecat get site ${baseURL}_`;
       } else {

@@ -365,6 +365,7 @@ function OnboardCommand(context) {
           await triggerAuditForSite(
             site,
             auditType,
+            undefined,
             slackContext,
             context,
           );
