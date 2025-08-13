@@ -27,6 +27,7 @@ import {
   getS3CachedResult,
   addResultJsonToCache,
   fileExists,
+  getSignedUrlWithRetries,
 } from './caching-helper.js';
 
 function getCacheKey(siteId, query, cacheLocation) {
@@ -57,9 +58,11 @@ function TrafficController(context, log, env) {
       log.info(`Skipping cache check for file: ${cacheKey} because param noCache is: ${noCache}`);
       return { cachedResultUrl: null, cacheKey, outPrefix };
     }
-    if (await fileExists(s3, cacheKey, log)) {
+    const maxAttempts = 1;
+    if (await fileExists(s3, cacheKey, log, maxAttempts)) {
       log.info(`Found cached result. Fetching signed URL for Athena result from S3: ${cacheKey}`);
-      const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
+      const ignoreNotFound = true;
+      const cachedUrl = await getS3CachedResult(s3, cacheKey, log, ignoreNotFound);
       return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
     }
     log.info(`Cached result for file: ${cacheKey} does not exist`);
@@ -67,6 +70,10 @@ function TrafficController(context, log, env) {
   }
 
   async function fetchPaidTrafficData(dimensions, mapper) {
+    /* c8 ignore next 1 */
+    const requestId = context.invocation?.requestId;
+    log.info(`Fetching paid traffic data for the request: ${requestId}`);
+
     const siteId = context.params?.siteId;
     const site = await Site.findById(siteId);
     if (!site) {
@@ -131,7 +138,7 @@ function TrafficController(context, log, env) {
     );
     const thresholdConfig = env.CWV_THRESHOLDS || {};
     if (cachedResultUrl) {
-      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}`);
+      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${requestId}`);
       return found(cachedResultUrl);
     }
 
@@ -151,7 +158,19 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly.`);
+    if (isCached) {
+      // even though file is saved 503 are possible in short time window,
+      // verifying file is reachable before returning
+      const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
+      if (verifiedSignedUrl != null) {
+        log.info(`Succesfully verified file existance, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
+        return found(
+          verifiedSignedUrl,
+        );
+      }
+    }
+
+    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly. Request ID: ${requestId}`);
     return ok(response, {
       'content-encoding': 'gzip',
     });

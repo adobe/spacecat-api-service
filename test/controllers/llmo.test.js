@@ -42,6 +42,10 @@ describe('LlmoController', () => {
           { key: 'ai-question', question: 'Analyze the page content and identify key themes.' },
         ],
       },
+      customerIntent: [
+        { key: 'target_audience', value: 'small business owners' },
+        { key: 'primary_goal', value: 'increase conversions' },
+      ],
     };
 
     // Create mock config
@@ -54,6 +58,10 @@ describe('LlmoController', () => {
       updateLlmoQuestion: sinon.stub(),
       getLlmoHumanQuestions: sinon.stub().returns(mockLlmoConfig.questions.Human),
       getLlmoAIQuestions: sinon.stub().returns(mockLlmoConfig.questions.AI),
+      getLlmoCustomerIntent: sinon.stub().returns(mockLlmoConfig.customerIntent),
+      addLlmoCustomerIntent: sinon.stub(),
+      removeLlmoCustomerIntent: sinon.stub(),
+      updateLlmoCustomerIntent: sinon.stub(),
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
       getLlmoDataFolder: sinon.stub().returns('test-folder'),
@@ -161,6 +169,263 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add limit query parameter to URL when provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add limit to the context params
+      mockContext.data.limit = '10';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add offset query parameter to URL when provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add offset to the context params
+      mockContext.data.offset = '20';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?offset=20',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add sheet query parameter to URL when provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add sheet to the context params
+      mockContext.data.sheet = 'analytics-sheet';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?sheet=analytics-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add multiple query parameters to URL when provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add multiple query parameters to the context params
+      mockContext.data.limit = '10';
+      mockContext.data.offset = '20';
+      mockContext.data.sheet = 'analytics-sheet';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10&offset=20&sheet=analytics-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should not add query parameters when they are not provided', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Ensure no query parameters are set
+      delete mockContext.data.limit;
+      delete mockContext.data.offset;
+      delete mockContext.data.sheet;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle response with empty headers gracefully', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+        headers: {
+          entries: sinon.stub().returns([]), // Empty headers
+        },
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should add query parameters with sheetType parameter', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'analytics-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add sheetType and query parameters to the context params
+      mockContext.params.sheetType = 'analytics';
+      mockContext.data.limit = '5';
+      mockContext.data.offset = '10';
+      mockContext.data.sheet = 'performance-sheet';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'analytics-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/analytics/test-data.json?limit=5&offset=10&sheet=performance-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle empty string query parameters', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add empty string query parameters
+      mockContext.data.limit = '';
+      mockContext.data.offset = '';
+      mockContext.data.sheet = '';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      // Empty strings should be treated as falsy and not added to URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle null query parameters', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add null query parameters
+      mockContext.data.limit = null;
+      mockContext.data.offset = null;
+      mockContext.data.sheet = null;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      // Null values should be treated as falsy and not added to URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
@@ -187,6 +452,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token test-api-key',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
@@ -201,7 +467,7 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add sheetType to the context params
-      mockContext.params.sheetType = 'analytics';
+      mockContext.data.sheetType = 'analytics';
 
       try {
         await controller.getLlmoSheetData(mockContext);
@@ -216,7 +482,7 @@ describe('LlmoController', () => {
       tracingFetchStub.rejects(networkError);
 
       // Add sheetType to the context params
-      mockContext.params.sheetType = 'analytics';
+      mockContext.data.sheetType = 'analytics';
 
       try {
         await controller.getLlmoSheetData(mockContext);
@@ -245,6 +511,7 @@ describe('LlmoController', () => {
           headers: {
             Authorization: 'token hlx_api_key_missing',
             'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
           },
         },
       );
@@ -496,6 +763,400 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         'Error updating question for site\'s llmo config test-site-id: Database connection failed',
       );
+    });
+  });
+
+  describe('getLlmoCustomerIntent', () => {
+    it('should return LLMO customer intent successfully', async () => {
+      const result = await controller.getLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+    });
+
+    it('should return empty array when customer intent is not set', async () => {
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+      });
+
+      const result = await controller.getLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal([]);
+    });
+
+    it('should return empty array when customer intent is null in config', async () => {
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+        customerIntent: null,
+      });
+
+      const result = await controller.getLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal([]);
+    });
+  });
+
+  describe('addLlmoCustomerIntent', () => {
+    it('should add customer intent successfully', async () => {
+      mockContext.data = [
+        { key: 'new_target', value: 'enterprise customers' },
+        { key: 'new_goal', value: 'lead generation' },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+      expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledOnce;
+      expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledWith(mockContext.data);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should return bad request when no customer intent provided', async () => {
+      mockContext.data = null;
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Customer intent must be provided as an array');
+    });
+
+    it('should return bad request when customer intent is not an array', async () => {
+      mockContext.data = { key: 'target', value: 'customers' };
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Customer intent must be provided as an array');
+    });
+
+    it('should return bad request when customer intent item is missing key', async () => {
+      mockContext.data = [
+        { value: 'enterprise customers' },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Each customer intent item must have both key and value properties');
+    });
+
+    it('should return bad request when customer intent item is missing value', async () => {
+      mockContext.data = [
+        { key: 'target_audience' },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Each customer intent item must have both key and value properties');
+    });
+
+    it('should return bad request when customer intent key is not a string', async () => {
+      mockContext.data = [
+        { key: 123, value: 'enterprise customers' },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Each customer intent item must have both key and value properties');
+    });
+
+    it('should return bad request when customer intent value is not a string', async () => {
+      mockContext.data = [
+        { key: 'target_audience', value: 123 },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Each customer intent item must have both key and value properties');
+    });
+
+    it('should handle save errors gracefully', async () => {
+      mockContext.data = [
+        { key: 'new_unique_key', value: 'enterprise customers' },
+      ];
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+      expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledWith(mockContext.data);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error adding customer intent for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should handle null customer intent in response', async () => {
+      mockContext.data = [
+        { key: 'another_unique_key', value: 'enterprise customers' },
+      ];
+
+      // Mock getLlmoConfig to return null customerIntent after adding
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+        customerIntent: null,
+      });
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal([]);
+      expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledWith(mockContext.data);
+    });
+
+    it('should return bad request when customer intent key already exists', async () => {
+      mockContext.data = [
+        { key: 'target_audience', value: 'new value' }, // This key already exists in mockLlmoConfig
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("Customer intent key 'target_audience' already exists");
+    });
+
+    it('should return bad request when duplicate keys in same request', async () => {
+      mockContext.data = [
+        { key: 'new_key', value: 'value1' },
+        { key: 'new_key', value: 'value2' }, // Duplicate key in same request
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("Duplicate customer intent key 'new_key' in request");
+    });
+
+    it('should handle null customer intent when checking for duplicates', async () => {
+      // Mock getLlmoCustomerIntent to return null to test the || [] fallback
+      mockConfig.getLlmoCustomerIntent.returns(null);
+
+      mockContext.data = [
+        { key: 'new_key', value: 'new value' },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+      expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledWith(mockContext.data);
+    });
+  });
+
+  describe('removeLlmoCustomerIntent', () => {
+    beforeEach(() => {
+      mockContext.params.intentKey = 'target_audience';
+    });
+
+    it('should remove customer intent successfully', async () => {
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+      expect(mockConfig.removeLlmoCustomerIntent).to.have.been.calledWith('target_audience');
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should throw error for invalid customer intent key', async () => {
+      mockConfig.getLlmoCustomerIntent.returns([]);
+
+      try {
+        await controller.removeLlmoCustomerIntent(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('Invalid customer intent key');
+      }
+    });
+
+    it('should handle save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+      expect(mockConfig.removeLlmoCustomerIntent).to.have.been.calledWith('target_audience');
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error removing customer intent for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should handle null/undefined customer intent gracefully', async () => {
+      mockConfig.getLlmoCustomerIntent.returns(null);
+
+      // Use an invalid intent key so the validation will fail
+      mockContext.params.intentKey = 'invalid-intent-key';
+
+      try {
+        await controller.removeLlmoCustomerIntent(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('Invalid customer intent key');
+      }
+    });
+
+    it('should handle null customer intent in response after removal', async () => {
+      // Mock getLlmoConfig to return null customerIntent after removal
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+        customerIntent: null,
+      });
+
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal([]);
+      expect(mockConfig.removeLlmoCustomerIntent).to.have.been.calledWith('target_audience');
+    });
+  });
+
+  describe('patchLlmoCustomerIntent', () => {
+    beforeEach(() => {
+      mockContext.params.intentKey = 'target_audience';
+      mockContext.data = { value: 'updated value' };
+    });
+
+    it('should update customer intent successfully', async () => {
+      const updateData = { value: 'updated value' };
+      mockContext.data = updateData;
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith('target_audience', updateData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should update customer intent key successfully', async () => {
+      const updateData = { key: 'updated_target_audience', value: 'updated value' };
+      mockContext.data = updateData;
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith('target_audience', updateData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should throw error for invalid customer intent key', async () => {
+      mockConfig.getLlmoCustomerIntent.returns([]);
+
+      try {
+        await controller.patchLlmoCustomerIntent(mockContext);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.include('Invalid customer intent key');
+      }
+    });
+
+    it('should return bad request when no update data provided', async () => {
+      mockContext.data = null;
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Update data must be provided as an object');
+    });
+
+    it('should return bad request when update data is not an object', async () => {
+      mockContext.data = 'invalid data';
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Update data must be provided as an object');
+    });
+
+    it('should return bad request when value is not a string', async () => {
+      mockContext.data = { value: 123 };
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Customer intent value must be a non-empty string');
+    });
+
+    it('should handle save errors gracefully', async () => {
+      const updateData = { value: 'updated value' };
+      mockContext.data = updateData;
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith('target_audience', updateData);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error updating customer intent for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should handle null customer intent in response after update', async () => {
+      const updateData = { value: 'updated value' };
+      mockContext.data = updateData;
+
+      // Mock getLlmoConfig to return null customerIntent after update
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+        customerIntent: null,
+      });
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal([]);
+      expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith('target_audience', updateData);
     });
   });
 });
