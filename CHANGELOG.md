@@ -1,3 +1,10 @@
+# [1.148.0](https://github.com/adobe/spacecat-api-service/compare/v1.147.1...v1.148.0) (2025-08-13)
+
+
+### Features
+
+* add endpoints for customerIntent llmo config ([#1141](https://github.com/adobe/spacecat-api-service/issues/1141)) ([96d7bd6](https://github.com/adobe/spacecat-api-service/commit/96d7bd68cb18aed8160dfd0c45790411c4681dc2))
+
 ## [1.147.1](https://github.com/adobe/spacecat-api-service/compare/v1.147.0...v1.147.1) (2025-08-13)
 
 
