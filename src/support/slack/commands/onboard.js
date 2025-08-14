@@ -309,8 +309,8 @@ function OnboardCommand(context) {
       // If fetch config exists, we don't need to resolve canonical URL
       // If no fetch config exists, we need to resolve canonical URL to set up proper configuration
       const existingFetchConfig = siteConfig.getFetchConfig();
-      const len = Object.keys(existingFetchConfig).length;
-      const hasExistingFetchConfig = existingFetchConfig && len > 0;
+      const configLength = Object.keys(existingFetchConfig).length;
+      const hasExistingFetchConfig = existingFetchConfig != null && configLength > 0;
 
       if (!hasExistingFetchConfig) {
         // No existing fetch config, try to resolve canonical URL
