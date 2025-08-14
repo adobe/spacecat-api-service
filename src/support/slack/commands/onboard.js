@@ -303,49 +303,35 @@ function OnboardCommand(context) {
       // Resolve canonical URL for the site from the base URL
       // Only do this if we need to update the fetch configuration (no existing config found)
       let resolvedUrl = baseURL;
-      let shouldUpdateFetchConfig = false;
-
-      // Check if fetch configuration is already set up
-      // If fetch config exists, we don't need to resolve canonical URL
-      // If no fetch config exists, we need to resolve canonical URL to set up proper configuration
-      let hasExistingFetchConfig = false;
       const existingFetchConfig = siteConfig.getFetchConfig();
-      if (existingFetchConfig != null) {
-        const configLength = Object.keys(existingFetchConfig).length;
-        hasExistingFetchConfig = configLength > 0;
-      }
 
-      if (!hasExistingFetchConfig) {
-        // No existing fetch config, try to resolve canonical URL
-        log.info(`No existing fetch config for ${baseURL}. Attempting to resolve canonical URL...`);
+      if (existingFetchConfig == null || Object.keys(existingFetchConfig).length === 0) {
+        log.info(`No existing fetch configuration found for ${baseURL}. Attempting to resolve canonical URL...`);
 
         const canonicalUrl = await resolveCanonicalUrl(baseURL);
-        if (canonicalUrl) {
-          resolvedUrl = canonicalUrl;
-          shouldUpdateFetchConfig = true;
-          log.info(`Successfully resolved canonical URL: ${baseURL} -> ${canonicalUrl}`);
-          await say(`:white_check_mark: Successfully resolved canonical URL: ${baseURL} -> ${canonicalUrl}`);
-        } else {
-          // resolveCanonicalUrl returned null (failed to resolve)
+        if (canonicalUrl == null) {
           log.warn(`Could not resolve canonical URL for ${baseURL}. Fetch configuration will not be updated.`);
           await say(`:warning: Could not resolve canonical URL for ${baseURL}. Fetch configuration will not be updated.`);
+        } else {
+          resolvedUrl = canonicalUrl;
+          const { pathname: baseUrlPathName } = new URL(baseURL);
+          const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
+
+          if (baseUrlPathName !== resolvedUrlPathName) {
+            siteConfig.updateFetchConfig({
+              overrideBaseURL: resolvedUrlOrigin,
+            });
+            log.info(`Updated fetch configuration with resolved URL origin: ${resolvedUrlOrigin}`);
+            await say(`:white_check_mark: Successfully resolved canonical URL: ${baseURL} -> ${resolvedUrl}`);
+          } else {
+            log.info('Canonical URL resolved but pathnames are the same, no fetch config update needed');
+          }
         }
       } else {
         log.info(`Existing fetch configuration found for ${baseURL}. Skipping canonical URL resolution.`);
       }
 
-      const { pathname: baseUrlPathName } = new URL(baseURL);
-      const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
-
       log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
-
-      // Update the fetch configuration only if needed and if the pathname is different
-      // from the resolved URL
-      if (shouldUpdateFetchConfig && baseUrlPathName !== resolvedUrlPathName) {
-        siteConfig.updateFetchConfig({
-          overrideBaseURL: resolvedUrlOrigin,
-        });
-      }
 
       site.setConfig(Config.toDynamoItem(siteConfig));
       try {
