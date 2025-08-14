@@ -108,15 +108,14 @@ function OnboardCommand(context) {
     // Check if site already exists
     if (site) {
       const siteOrgId = site.getOrganizationId();
-      organizationId = siteOrgId; // Set organizationId for existing site
       const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
       await say(message);
       log.info(message);
 
       // Update reportLine with existing site information
-      localReportLine.spacecatOrgId = organizationId;
+      localReportLine.spacecatOrgId = siteOrgId;
       localReportLine.existingSite = 'Yes';
-      localReportLine.deliveryType = site.getDeliveryType(); // Get existing delivery type
+      localReportLine.deliveryType = site.getDeliveryType();
     } else {
       // New site - handle organization logic
       log.info(`Site ${baseURL} doesn't exist. Processing organization...`);
@@ -327,13 +326,9 @@ function OnboardCommand(context) {
           // resolveCanonicalUrl returned null (failed to resolve)
           log.warn(`Could not resolve canonical URL for ${baseURL}. Fetch configuration will not be updated.`);
           await say(`:warning: Could not resolve canonical URL for ${baseURL}. Fetch configuration will not be updated.`);
-          resolvedUrl = baseURL;
-          shouldUpdateFetchConfig = false;
         }
       } else {
         log.info(`Existing fetch configuration found for ${baseURL}. Skipping canonical URL resolution.`);
-        resolvedUrl = baseURL;
-        shouldUpdateFetchConfig = false;
       }
 
       const { pathname: baseUrlPathName } = new URL(baseURL);
