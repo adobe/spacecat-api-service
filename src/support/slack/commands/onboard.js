@@ -147,8 +147,17 @@ function OnboardCommand(context) {
 
       // Create new site
       log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
-      const deliveryType = await findDeliveryType(baseURL);
-      log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
+
+      let deliveryType;
+      try {
+        deliveryType = await findDeliveryType(baseURL);
+        log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
+      } catch (error) {
+        log.warn(`Could not determine delivery type for ${baseURL}: ${error.message}. Using default type 'OTHER'.`);
+        await say(`:warning: Could not determine delivery type for ${baseURL}. Using default type 'OTHER'.`);
+        deliveryType = SiteModel.DELIVERY_TYPES.OTHER;
+      }
+
       localReportLine.deliveryType = deliveryType;
       const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
@@ -293,20 +302,38 @@ function OnboardCommand(context) {
       }
 
       // Resolve canonical URL for the site from the base URL
-      // Only do this for new sites or when we need to update the configuration
+      // Only do this if we need to update the fetch configuration (no existing config found)
       let resolvedUrl = baseURL;
       let shouldUpdateFetchConfig = false;
 
-      // Only resolve canonical URL when needed (new sites or sites with import updates)
-      if ((!reportLine.existingSite || reportLine.existingSite === 'No') || importsEnabled.length > 0) {
-        try {
-          resolvedUrl = await resolveCanonicalUrl(baseURL);
+      // Check if fetch configuration is already set up
+      // If fetch config exists, we don't need to resolve canonical URL
+      // If no fetch config exists, we need to resolve canonical URL to set up proper configuration
+      const existingFetchConfig = siteConfig.getFetchConfig();
+      const len = Object.keys(existingFetchConfig).length;
+      const hasExistingFetchConfig = existingFetchConfig && len > 0;
+
+      if (!hasExistingFetchConfig) {
+        // No existing fetch config, try to resolve canonical URL
+        log.info(`No existing fetch config for ${baseURL}. Attempting to resolve canonical URL...`);
+
+        const canonicalUrl = await resolveCanonicalUrl(baseURL);
+        if (canonicalUrl) {
+          resolvedUrl = canonicalUrl;
           shouldUpdateFetchConfig = true;
-        } catch (error) {
-          log.warn(`Failed to resolve canonical URL for ${baseURL}: ${error.message}. Using original URL.`);
-          resolvedUrl = baseURL; // Fallback to original URL
-          shouldUpdateFetchConfig = false; // Don't update fetch config
+          log.info(`Successfully resolved canonical URL: ${baseURL} -> ${canonicalUrl}`);
+          await say(`:white_check_mark: Successfully resolved canonical URL: ${baseURL} -> ${canonicalUrl}`);
+        } else {
+          // resolveCanonicalUrl returned null (failed to resolve)
+          log.warn(`Could not resolve canonical URL for ${baseURL}. Fetch configuration will not be updated.`);
+          await say(`:warning: Could not resolve canonical URL for ${baseURL}. Fetch configuration will not be updated.`);
+          resolvedUrl = baseURL;
+          shouldUpdateFetchConfig = false;
         }
+      } else {
+        log.info(`Existing fetch configuration found for ${baseURL}. Skipping canonical URL resolution.`);
+        resolvedUrl = baseURL;
+        shouldUpdateFetchConfig = false;
       }
 
       const { pathname: baseUrlPathName } = new URL(baseURL);
