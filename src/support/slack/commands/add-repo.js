@@ -125,7 +125,7 @@ function AddRepoCommand(context) {
       const isAuditEnabled = configuration.isHandlerEnabledForSite(auditType, site);
 
       if (isAuditEnabled) {
-        await triggerAuditForSite(site, auditType, slackContext, context);
+        await triggerAuditForSite(site, auditType, undefined, slackContext, context);
       }
 
       await say(`

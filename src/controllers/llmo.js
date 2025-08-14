@@ -11,7 +11,12 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
-import { SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import {
+  SPACECAT_USER_AGENT,
+  tracingFetch as fetch,
+  hasText,
+  isObject,
+} from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 
@@ -53,6 +58,15 @@ function LlmoController() {
     if (!humanQuestions.some((question) => question.key === questionKey)
         && !aiQuestions.some((question) => question.key === questionKey)) {
       throw new Error('Invalid question key, please provide a valid question key');
+    }
+  };
+
+  // Helper function to validate customer intent key
+  const validateCustomerIntentKey = (config, intentKey) => {
+    const customerIntent = config.getLlmoCustomerIntent() || [];
+
+    if (!customerIntent.some((intent) => intent.key === intentKey)) {
+      throw new Error('Invalid customer intent key, please provide a valid customer intent key');
     }
   };
 
@@ -196,6 +210,95 @@ function LlmoController() {
     return ok(config.getLlmoConfig().questions);
   };
 
+  // Handles requests to the LLMO customer intent endpoint, returns customer intent array
+  const getLlmoCustomerIntent = async (context) => {
+    const { llmoConfig } = await getSiteAndValidateLlmo(context);
+    return ok(llmoConfig.customerIntent || []);
+  };
+
+  // Handles requests to the LLMO customer intent endpoint, adds new customer intent items
+  const addLlmoCustomerIntent = async (context) => {
+    const { log } = context;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    const newCustomerIntent = context.data;
+    if (!Array.isArray(newCustomerIntent)) {
+      return badRequest('Customer intent must be provided as an array');
+    }
+
+    // Get existing customer intent keys to check for duplicates
+    const existingCustomerIntent = config.getLlmoCustomerIntent() || [];
+    const existingKeys = new Set(existingCustomerIntent.map((item) => item.key));
+    const newKeys = new Set();
+
+    // Validate structure of each customer intent item and check for duplicates
+    for (const intent of newCustomerIntent) {
+      if (!hasText(intent.key) || !hasText(intent.value)) {
+        return badRequest('Each customer intent item must have both key and value properties');
+      }
+
+      if (existingKeys.has(intent.key)) {
+        return badRequest(`Customer intent key '${intent.key}' already exists`);
+      }
+
+      if (newKeys.has(intent.key)) {
+        return badRequest(`Duplicate customer intent key '${intent.key}' in request`);
+      }
+
+      newKeys.add(intent.key);
+    }
+
+    config.addLlmoCustomerIntent(newCustomerIntent);
+    await saveSiteConfig(site, config, log, 'adding customer intent');
+
+    // return the updated llmoConfig customer intent
+    return ok(config.getLlmoConfig().customerIntent || []);
+  };
+
+  // Handles requests to the LLMO customer intent endpoint, removes a customer intent item
+  const removeLlmoCustomerIntent = async (context) => {
+    const { log } = context;
+    const { intentKey } = context.params;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    validateCustomerIntentKey(config, intentKey);
+
+    // remove the customer intent using the config method
+    config.removeLlmoCustomerIntent(intentKey);
+
+    await saveSiteConfig(site, config, log, 'removing customer intent');
+
+    // return the updated llmoConfig customer intent
+    return ok(config.getLlmoConfig().customerIntent || []);
+  };
+
+  // Handles requests to the LLMO customer intent endpoint, updates a customer intent item
+  const patchLlmoCustomerIntent = async (context) => {
+    const { log } = context;
+    const { intentKey } = context.params;
+    const { data } = context;
+    const { site, config } = await getSiteAndValidateLlmo(context);
+
+    validateCustomerIntentKey(config, intentKey);
+
+    // Validate the update data
+    if (!isObject(data)) {
+      return badRequest('Update data must be provided as an object');
+    }
+
+    if (!hasText(data.value)) {
+      return badRequest('Customer intent value must be a non-empty string');
+    }
+
+    // update the customer intent using the config method
+    config.updateLlmoCustomerIntent(intentKey, data);
+
+    await saveSiteConfig(site, config, log, 'updating customer intent');
+
+    // return the updated llmoConfig customer intent
+    return ok(config.getLlmoConfig().customerIntent || []);
+  };
+
   return {
     getLlmoSheetData,
     getLlmoConfig,
@@ -203,6 +306,10 @@ function LlmoController() {
     addLlmoQuestion,
     removeLlmoQuestion,
     patchLlmoQuestion,
+    getLlmoCustomerIntent,
+    addLlmoCustomerIntent,
+    removeLlmoCustomerIntent,
+    patchLlmoCustomerIntent,
   };
 }
 

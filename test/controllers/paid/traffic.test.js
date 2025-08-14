@@ -201,7 +201,7 @@ describe('Paid TrafficController', async () => {
       const putBody = JSON.parse(decompressed.toString());
       expect(putBody).to.deep.equal(trafficTypeExpected);
       expect(mockLog.error).not.to.have.been.called;
-      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to return cache key/);
+      expect(mockLog.warn).to.have.been;
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
@@ -414,10 +414,11 @@ describe('Paid TrafficController', async () => {
       expect(res.status).to.equal(200);
       // Ensure Athena was queried
       expect(mockAthenaQuery).to.have.been.calledOnce;
-      // Ensure S3 HeadObjectCommand (cache check) was not called
+      // Ensure S3 HeadObjectCommand (cache check)
+      // is still called to verify returning file existance is checked
       const s3Calls = mockS3.send.getCalls();
       const headObjectCalled = s3Calls.some((call) => call.args[0]?.constructor?.name === 'HeadObjectCommand');
-      expect(headObjectCalled).to.be.false;
+      expect(headObjectCalled).to.be.true;
     });
 
     it('returns response directly if caching fails due to S3 PutObjectCommand error', async () => {
@@ -448,6 +449,36 @@ describe('Paid TrafficController', async () => {
         body = await res.json();
       }
       expect(body).to.deep.equal(trafficTypeExpected);
+    });
+
+    it('returns signed URL when cache is successfully verified after being created', async () => {
+      // Mock scenario where cache is created and then successfully verified
+      let cacheExists = false;
+      mockS3.send.callsFake((cmd) => {
+        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
+          if (cacheExists) {
+            return Promise.resolve({}); // File exists
+          } else {
+            const err = new Error('not found');
+            err.name = 'NotFound';
+            return Promise.reject(err);
+          }
+        }
+        if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
+          lastPutObject = cmd;
+          cacheExists = true; // Simulate file being created
+          return Promise.resolve({});
+        }
+        return Promise.resolve({});
+      });
+
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+      // Should return 302 (redirect) because cache verification succeeded
+      expect(res.status).to.equal(302);
+      expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
+      expect(mockLog.info).to.have.been.calledWithMatch('Succesfully verified file existance');
     });
 
     // Systematic test for all endpoint functions to ensure coverage

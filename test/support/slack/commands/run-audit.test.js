@@ -67,7 +67,7 @@ describe('RunAuditCommand', () => {
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
-      expect(sqsStub.sendMessage.called).to.be.true;
+      expect(sqsStub.sendMessage).called;
     });
 
     it('does not trigger an audit when audit for type is disabled', async () => {
@@ -129,7 +129,7 @@ describe('RunAuditCommand', () => {
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for https://validsite.com');
-      expect(sqsStub.sendMessage.called).to.be.true;
+      expect(sqsStub.sendMessage).called;
     });
 
     it('triggers all audits for all sites specified in a CSV file', async () => {
@@ -160,7 +160,7 @@ describe('RunAuditCommand', () => {
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for 2 sites.');
-      expect(sqsStub.sendMessage.called).to.be.true;
+      expect(sqsStub.sendMessage).called;
     });
 
     it('handles both site URL and CSV file', async () => {
