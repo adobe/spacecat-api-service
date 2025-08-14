@@ -1,3 +1,10 @@
+## [1.154.1](https://github.com/adobe/spacecat-api-service/compare/v1.154.0...v1.154.1) (2025-08-14)
+
+
+### Bug Fixes
+
+* set right value to organizationId ([#1155](https://github.com/adobe/spacecat-api-service/issues/1155)) ([9986e48](https://github.com/adobe/spacecat-api-service/commit/9986e481cbe1eac8eb91e5e75d9229c4980e7d66))
+
 # [1.154.0](https://github.com/adobe/spacecat-api-service/compare/v1.153.1...v1.154.0) (2025-08-14)
 
 
