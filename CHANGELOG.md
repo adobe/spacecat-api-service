@@ -1,3 +1,10 @@
+# [1.153.0](https://github.com/adobe/spacecat-api-service/compare/v1.152.0...v1.153.0) (2025-08-14)
+
+
+### Features
+
+* **slack:** add source to import logs ([#1136](https://github.com/adobe/spacecat-api-service/issues/1136)) ([dc99c47](https://github.com/adobe/spacecat-api-service/commit/dc99c479591743ee1ca0b556b8c200988c28993d))
+
 # [1.152.0](https://github.com/adobe/spacecat-api-service/compare/v1.151.0...v1.152.0) (2025-08-14)
 
 
