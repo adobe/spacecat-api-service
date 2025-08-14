@@ -1,3 +1,10 @@
+# [1.154.0](https://github.com/adobe/spacecat-api-service/compare/v1.153.1...v1.154.0) (2025-08-14)
+
+
+### Features
+
+* add additional checks around redirects logic to avoid 403 errors ([#1151](https://github.com/adobe/spacecat-api-service/issues/1151)) ([e2082e3](https://github.com/adobe/spacecat-api-service/commit/e2082e32bd6d27dfee47d998d88cda55aab83438))
+
 ## [1.153.1](https://github.com/adobe/spacecat-api-service/compare/v1.153.0...v1.153.1) (2025-08-14)
 
 
