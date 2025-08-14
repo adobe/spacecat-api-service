@@ -384,6 +384,30 @@ describe('Sandbox Audit Controller', () => {
 
       expect(loggerStub.error).to.have.been.called;
     });
+
+    it('logs error when one audit fails', async () => {
+      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+
+      const configMock = {
+        isHandlerEnabledForSite: sandbox.stub().returns(true),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(configMock);
+
+      // meta-tags succeeds, alt-text fails
+      mockSqs.sendMessage.onFirstCall().resolves();
+      mockSqs.sendMessage.onSecondCall().rejects(new Error('SQS boom'));
+
+      const request = {
+        data: {
+          baseURL: 'https://sandbox.example.com',
+          auditType: 'meta-tags,alt-text',
+        },
+      };
+
+      const response = await sandboxAuditController.triggerAudit(request);
+      expect(response.status).to.equal(200);
+      expect(loggerStub.error).to.have.been.calledWithMatch(sinon.match(/Error running audit/));
+    });
   });
 
   describe('controller interface', () => {
