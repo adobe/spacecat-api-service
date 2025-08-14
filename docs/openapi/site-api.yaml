@@ -444,6 +444,98 @@ site-report:
       - api_key: [ ]
       - ims_key: [ ]
       - scoped_api_key: [ ]
+  patch:
+    tags:
+      - reports
+    summary: Update enhanced report data
+    description: |
+      Updates the enhanced report data in S3 storage for a specific report.
+      This endpoint only updates the enhanced report (Mystique analysis) and leaves the raw report unchanged.
+      Only reports with 'success' status can be updated.
+    operationId: patchReport
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - data
+            properties:
+              data:
+                type: object
+                description: The enhanced report data to update
+                additionalProperties: true
+            example:
+              data:
+                summary: "Updated performance analysis"
+                insights: ["Improved Core Web Vitals", "Better SEO optimization"]
+                recommendations: ["Optimize images", "Minimize CSS"]
+    responses:
+      '200':
+        description: Enhanced report data updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Enhanced report data updated successfully"
+                siteId:
+                  type: string
+                  format: uuid
+                reportId:
+                  type: string
+                  format: uuid
+      '400':
+        description: Bad request - validation errors or report not ready
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message
+                  examples:
+                    - "Valid site ID is required"
+                    - "Valid report ID is required"
+                    - "Report does not have a valid storage path"
+                    - "Request data is required"
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        description: Report not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Report not found"
+      '500':
+        description: Internal server error - S3 operation failed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  examples:
+                    - "Failed to update enhanced report data: S3 error"
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
   delete:
     tags:
       - reports
