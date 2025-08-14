@@ -1,3 +1,10 @@
+# [1.152.0](https://github.com/adobe/spacecat-api-service/compare/v1.151.0...v1.152.0) (2025-08-14)
+
+
+### Features
+
+* update API spec with customerIntent endpoints ([#1152](https://github.com/adobe/spacecat-api-service/issues/1152)) ([37ba972](https://github.com/adobe/spacecat-api-service/commit/37ba972a617d12b09666275eda4fbad4a9a6a655))
+
 # [1.151.0](https://github.com/adobe/spacecat-api-service/compare/v1.150.0...v1.151.0) (2025-08-13)
 
 
