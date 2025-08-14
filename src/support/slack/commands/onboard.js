@@ -305,7 +305,7 @@ function OnboardCommand(context) {
       let resolvedUrl = baseURL;
       const existingFetchConfig = siteConfig.getFetchConfig();
 
-      if (existingFetchConfig == null || Object.keys(existingFetchConfig).length === 0) {
+      if (!existingFetchConfig?.overrideBaseURL) {
         log.info(`No existing fetch configuration found for ${baseURL}. Attempting to resolve canonical URL...`);
 
         const canonicalUrl = await resolveCanonicalUrl(baseURL);
