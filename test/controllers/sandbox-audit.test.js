@@ -423,4 +423,64 @@ describe('Sandbox Audit Controller', () => {
       });
     });
   });
+
+  describe('additional coverage', () => {
+    it('throws when context is missing', () => {
+      expect(() => SandboxAuditController()).to.throw('Context required');
+    });
+
+    it('throws when context is missing dataAccess', () => {
+      const badContext = { log: loggerStub };
+      expect(() => SandboxAuditController(badContext)).to.throw('Data access required');
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      // Override stub to simulate no access
+      AccessControlUtil.fromContext.restore();
+      sandbox.stub(AccessControlUtil, 'fromContext').returns({ hasAccess: () => false });
+
+      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+
+      // re-create controller to capture new access control behaviour
+      const denyController = SandboxAuditController(context);
+
+      const response = await denyController.triggerAudit({ data: { baseURL: 'https://sandbox.example.com' } });
+      const body = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(body).to.have.property('message', 'User does not have access to this site');
+    });
+
+    it('logs error when one audit fails in all-audits mode', async () => {
+      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+
+      // Both audits enabled
+      const configMock = {
+        isHandlerEnabledForSite: sandbox.stub().returns(true),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(configMock);
+
+      // meta-tags succeeds, alt-text fails
+      mockSqs.sendMessage.onFirstCall().resolves();
+      mockSqs.sendMessage.onSecondCall().rejects(new Error('SQS alt-text failure'));
+
+      const req = { data: { baseURL: 'https://sandbox.example.com' } };
+      const res = await sandboxAuditController.triggerAudit(req);
+      const body = await res.json();
+
+      expect(res.status).to.equal(200);
+      expect(body.message).to.equal('Triggered 1 audits for https://sandbox.example.com');
+      expect(loggerStub.error).to.have.been.calledWithMatch(sinon.match(/alt-text/));
+    });
+
+    it('controller catch block logs and rethrows on unexpected error', async () => {
+      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      // Force Configuration.findLatest to throw
+      mockDataAccess.Configuration.findLatest.rejects(new Error('Config fail'));
+
+      const req = { data: { baseURL: 'https://sandbox.example.com' } };
+      await expect(sandboxAuditController.triggerAudit(req)).to.be.rejectedWith('Config fail');
+      expect(loggerStub.error).to.have.been.calledWithMatch(sinon.match('Error triggering audit'));
+    });
+  });
 });
