@@ -247,6 +247,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/reports': reportsController.createReport,
     'GET /sites/:siteId/reports': reportsController.getAllReportsBySiteId,
     'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
+    'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
   };
 

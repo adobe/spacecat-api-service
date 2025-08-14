@@ -131,6 +131,22 @@ async function deleteS3Object(s3, bucket, key) {
   return s3Client.send(command);
 }
 
+async function uploadS3Object(s3, bucket, key, data) {
+  const {
+    s3Client,
+    PutObjectCommand,
+  } = s3;
+
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: JSON.stringify(data, null, 2),
+    ContentType: 'application/json',
+  });
+
+  return s3Client.send(command);
+}
+
 /**
  * Reports controller. Provides methods to create and manage report generation jobs.
  * @param {object} ctx - Context of the request.
@@ -329,8 +345,8 @@ function ReportsController(ctx, log, env) {
         // Only generate presigned URLs for successful reports
         if (report.getStatus() === ReportModel.STATUSES.SUCCESS) {
           try {
-            const rawReportKey = `${report.getRawStoragePath()}/report.json`;
-            const mystiqueReportKey = `${report.getEnhancedStoragePath()}/report.json`;
+            const rawReportKey = `${report.getRawStoragePath()}report.json`;
+            const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
             const rawPresignedUrlResult = await generatePresignedUrl(s3, bucketName, rawReportKey);
             const mystiquePresignedUrlResult = await generatePresignedUrl(
               s3,
@@ -414,8 +430,8 @@ function ReportsController(ctx, log, env) {
         return badRequest('Report does not belong to the specified site');
       }
 
-      const rawReportKey = `${report.getStoragePath()}raw/report.json`;
-      const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
+      const rawReportKey = `${report.getRawStoragePath()}report.json`;
+      const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
       const rawPresignedUrlResult = await generatePresignedUrl(s3, bucketName, rawReportKey);
       const mystiquePresignedUrlResult = await generatePresignedUrl(
         s3,
@@ -485,9 +501,9 @@ function ReportsController(ctx, log, env) {
         return badRequest('Report does not belong to the specified site');
       }
 
-      if (report.getStatus() === ReportModel.STATUSES.SUCCESS && report.getStoragePath()) {
-        const rawReportKey = `${report.getStoragePath()}raw/report.json`;
-        const mystiqueReportKey = `${report.getStoragePath()}mystique/report.json`;
+      if (report.getStatus() === ReportModel.STATUSES.SUCCESS && report.getRawStoragePath()) {
+        const rawReportKey = `${report.getRawStoragePath()}report.json`;
+        const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
 
         try {
           // Delete both S3 files
@@ -518,11 +534,102 @@ function ReportsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Updates the enhanced report data in S3 for a specific report.
+   * @param {object} context - Context of the request.
+   * @param {object} context.params - Request parameters.
+   * @param {string} context.params.siteId - The site ID.
+   * @param {string} context.params.reportId - The report ID to update.
+   * @param {object} context.data - Request body data containing the new report data.
+   * @return {Promise<Response>} Response confirming report update.
+   */
+  const patchReport = async (context) => {
+    const { siteId, reportId } = context.params;
+    const { data } = context;
+    const { S3_REPORT_BUCKET: bucketName } = env;
+
+    // Validate site ID
+    if (!isValidUUID(siteId)) {
+      return badRequest('Valid site ID is required');
+    }
+
+    // Validate report ID
+    if (!isValidUUID(reportId)) {
+      return badRequest('Valid report ID is required');
+    }
+
+    // Validate request data
+    if (!isNonEmptyObject(data)) {
+      return badRequest('Request data is required');
+    }
+
+    try {
+      // Check if site exists
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      // Check access control
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      // Check if report exists
+      const report = await Report.findById(reportId);
+      if (!report) {
+        return notFound('Report not found');
+      }
+
+      // Verify the report belongs to the specified site
+      if (report.getSiteId() !== siteId) {
+        return badRequest('Report does not belong to the specified site');
+      }
+
+      // Only allow updates for successful reports
+      if (report.getStatus() !== ReportModel.STATUSES.SUCCESS) {
+        return badRequest('Can only update reports that are in success status');
+      }
+
+      // Check if report has a storage path
+      if (!report.getEnhancedStoragePath()) {
+        return badRequest('Report does not have a valid storage path');
+      }
+
+      // Upload the new enhanced report data to S3
+      const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
+
+      try {
+        await uploadS3Object(s3, bucketName, mystiqueReportKey, data);
+        log.info(`Enhanced report updated successfully for report ${reportId} at key: ${mystiqueReportKey}`);
+      } catch (s3Error) {
+        log.error(`Failed to upload enhanced report to S3 for report ${reportId}: ${s3Error.message}`);
+        return internalServerError(`Failed to update report in S3: ${s3Error.message}`);
+      }
+
+      // Update the report's lastModified timestamp
+      await report.save();
+
+      log.info(`Report ${reportId} enhanced data updated successfully for site ${siteId}`);
+
+      return ok({
+        message: 'Enhanced report updated successfully',
+        siteId,
+        reportId,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      log.error(`Failed to update enhanced report ${reportId} for site ${siteId}: ${error.message}`);
+      return internalServerError(`Failed to update report: ${error.message}`);
+    }
+  };
+
   return {
     createReport,
     getAllReportsBySiteId,
     getReport,
     deleteReport,
+    patchReport,
   };
 }
 

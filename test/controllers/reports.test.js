@@ -90,8 +90,8 @@ describe('ReportsController', () => {
       mockDataAccess.Site.findById = sinon.stub().resolves(null);
 
       const context = createValidContext('123e4567-e89b-12d3-a456-426614174000', requiresReportId ? validReportId : null);
-      // Only delete data for non-createReport methods
-      if (methodName !== 'createReport') delete context.data;
+      // Only delete data for non-createReport and non-patchReport methods
+      if (methodName !== 'createReport' && methodName !== 'patchReport') delete context.data;
 
       const result = await reportsController[methodName](context);
 
@@ -108,8 +108,8 @@ describe('ReportsController', () => {
       mockAccessControlUtil.hasAccess = sinon.stub().resolves(false);
 
       const context = createValidContext('123e4567-e89b-12d3-a456-426614174000', requiresReportId ? validReportId : null);
-      // Only delete data for non-createReport methods
-      if (methodName !== 'createReport') delete context.data;
+      // Only delete data for non-createReport and non-patchReport methods
+      if (methodName !== 'createReport' && methodName !== 'patchReport') delete context.data;
 
       const result = await reportsController[methodName](context);
 
@@ -198,6 +198,8 @@ describe('ReportsController', () => {
           }),
           getStatus: () => 'success',
           getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/test-report-id/',
+          getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/test-report-id/raw/',
+          getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/test-report-id/enhanced/',
           getCreatedAt: () => '2025-01-15T10:00:00Z',
           getUpdatedAt: () => '2025-01-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -223,6 +225,7 @@ describe('ReportsController', () => {
         getSignedUrl: sinon.stub().resolves('https://presigned-url.com'),
         GetObjectCommand: sinon.stub(),
         DeleteObjectCommand: sinon.stub(),
+        PutObjectCommand: sinon.stub(),
       },
       dataAccess: mockDataAccess,
       sqs: mockSqs,
@@ -1053,6 +1056,8 @@ describe('ReportsController', () => {
           getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
           getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
           getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/',
+          getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/raw/',
+          getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/enhanced/',
           getCreatedAt: () => '2025-01-15T10:00:00Z',
           getUpdatedAt: () => '2025-01-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1065,6 +1070,8 @@ describe('ReportsController', () => {
           getReportPeriod: () => ({ startDate: '2025-02-01', endDate: '2025-02-28' }),
           getComparisonPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
           getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/',
+          getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/raw/',
+          getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/enhanced/',
           getCreatedAt: () => '2025-02-15T10:00:00Z',
           getUpdatedAt: () => '2025-02-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1156,6 +1163,8 @@ describe('ReportsController', () => {
         getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
         getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
         getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
+        getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/raw/',
+        getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/enhanced/',
         getCreatedAt: () => '2025-01-15T10:00:00Z',
         getUpdatedAt: () => '2025-01-15T10:30:00Z',
         getUpdatedBy: () => 'test@example.com',
@@ -1254,6 +1263,8 @@ describe('ReportsController', () => {
         getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
         getStatus: () => 'success',
         getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
+        getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/raw/',
+        getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/enhanced/',
         remove: sinon.stub().resolves(),
       };
 
@@ -1303,7 +1314,7 @@ describe('ReportsController', () => {
       // Verify the correct S3 keys were used
       const deleteCommands = mockContext.s3.DeleteObjectCommand.getCalls();
       const rawReportKey = 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/raw/report.json';
-      const mystiqueReportKey = 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/mystique/report.json';
+      const mystiqueReportKey = 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/enhanced/report.json';
 
       expect(deleteCommands[0].args[0]).to.deep.include({
         Bucket: 'test-bucket',
@@ -1449,6 +1460,228 @@ describe('ReportsController', () => {
     });
   });
 
+  describe('patchReport', () => {
+    let mockReport;
+
+    beforeEach(() => {
+      mockReport = {
+        getId: () => '987e6543-e21b-12d3-a456-426614174001',
+        getSiteId: () => '123e4567-e89b-12d3-a456-426614174000',
+        getStatus: () => 'success',
+        getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
+        getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/raw/',
+        getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/enhanced/',
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Report.findById = sinon.stub().resolves(mockReport);
+    });
+
+    it('should successfully update enhanced report data', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: {
+          summary: 'Updated report summary',
+          metrics: { performance: 95 },
+          recommendations: ['Updated recommendation 1', 'Updated recommendation 2'],
+        },
+        s3: mockContext.s3,
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include({
+        message: 'Enhanced report updated successfully',
+        siteId: '123e4567-e89b-12d3-a456-426614174000',
+        reportId: '987e6543-e21b-12d3-a456-426614174001',
+      });
+      expect(responseBody.updatedAt).to.be.a('string');
+
+      // Verify S3 upload was called with correct parameters
+      expect(mockContext.s3.PutObjectCommand).to.have.been.calledOnce;
+      expect(mockContext.s3.s3Client.send).to.have.been.calledOnce;
+
+      const putCommand = mockContext.s3.PutObjectCommand.getCall(0).args[0];
+      const mystiqueReportKey = 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/enhanced/report.json';
+
+      expect(putCommand).to.deep.include({
+        Bucket: 'test-bucket',
+        Key: mystiqueReportKey,
+        ContentType: 'application/json',
+      });
+
+      // Verify the uploaded data matches the request data
+      const uploadedData = JSON.parse(putCommand.Body);
+      expect(uploadedData).to.deep.equal(context.data);
+
+      // Verify report was saved to update timestamp
+      expect(mockReport.save).to.have.been.calledOnce;
+    });
+
+    it('should return bad request when report is not in success status', async () => {
+      const processingReport = {
+        ...mockReport,
+        getStatus: () => 'processing',
+      };
+      mockDataAccess.Report.findById.resolves(processingReport);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: { summary: 'Updated summary' },
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Can only update reports that are in success status');
+    });
+
+    it('should return bad request when report has no storage path', async () => {
+      const reportWithoutStoragePath = {
+        ...mockReport,
+        getStoragePath: () => null,
+        getRawStoragePath: () => null,
+        getEnhancedStoragePath: () => null,
+      };
+      mockDataAccess.Report.findById.resolves(reportWithoutStoragePath);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: { summary: 'Updated summary' },
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report does not have a valid storage path');
+    });
+
+    it('should return bad request when request data is missing', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: null,
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Request data is required');
+    });
+
+    it('should return bad request when request data is empty', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: {},
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Request data is required');
+    });
+
+    it('should return internal server error when S3 upload fails', async () => {
+      mockContext.s3.s3Client.send.rejects(new Error('S3 upload failed'));
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: { summary: 'Updated summary' },
+        s3: mockContext.s3,
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(500);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Failed to update report in S3: S3 upload failed');
+    });
+
+    it('should return internal server error when database operation fails', async () => {
+      mockDataAccess.Report.findById.rejects(new Error('Database error'));
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: { summary: 'Updated summary' },
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(500);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Failed to update report: Database error');
+    });
+
+    // Common validation tests
+    testCommonValidations('patchReport', true);
+
+    it('should return not found for non-existent report', async () => {
+      mockDataAccess.Report.findById.resolves(null);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174002',
+        },
+        data: { summary: 'Updated summary' },
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report not found');
+    });
+
+    it('should return bad request when report does not belong to site', async () => {
+      const mockReportFromDifferentSite = {
+        ...mockReport,
+        getSiteId: () => '456e7890-e12b-34d5-a678-901234567890',
+      };
+      mockDataAccess.Report.findById.resolves(mockReportFromDifferentSite);
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: { summary: 'Updated summary' },
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report does not belong to the specified site');
+    });
+  });
+
   describe('getAllReportsBySiteId with presigned URLs', () => {
     it('should generate presigned URLs for reports with success status', async () => {
       const mockReportsWithSuccess = [
@@ -1473,8 +1706,8 @@ describe('ReportsController', () => {
           getReportPeriod: () => ({ startDate: '2025-02-01', endDate: '2025-02-28' }),
           getComparisonPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
           getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/',
-          getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-2/raw/',
-          getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-2/enhanced/',
+          getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/raw/',
+          getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/optimization/report-2/enhanced/',
           getCreatedAt: () => '2025-02-15T10:00:00Z',
           getUpdatedAt: () => '2025-02-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1512,6 +1745,8 @@ describe('ReportsController', () => {
           getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
           getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
           getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/',
+          getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/raw/',
+          getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/report-1/enhanced/',
           getCreatedAt: () => '2025-01-15T10:00:00Z',
           getUpdatedAt: () => '2025-01-15T10:30:00Z',
           getUpdatedBy: () => 'test@example.com',
@@ -1547,8 +1782,10 @@ describe('ReportsController', () => {
         getReportPeriod: () => ({ startDate: '2025-01-01', endDate: '2025-01-31' }),
         getComparisonPeriod: () => ({ startDate: '2024-12-01', endDate: '2024-12-31' }),
         getStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/',
+        getRawStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/raw/',
+        getEnhancedStoragePath: () => 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/enhanced/',
         getCreatedAt: () => '2025-01-15T10:00:00Z',
-        getUpdatedAt: () => '2025-01-15T10:30:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
         getUpdatedBy: () => 'test@example.com',
         getStatus: () => 'success',
       };
