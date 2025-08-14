@@ -107,13 +107,13 @@ function OnboardCommand(context) {
 
     // Check if site already exists
     if (site) {
-      const siteOrgId = site.getOrganizationId();
-      const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
+      organizationId = site.getOrganizationId();
+      const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${organizationId}`;
       await say(message);
       log.info(message);
 
       // Update reportLine with existing site information
-      localReportLine.spacecatOrgId = siteOrgId;
+      localReportLine.spacecatOrgId = organizationId;
       localReportLine.existingSite = 'Yes';
       localReportLine.deliveryType = site.getDeliveryType();
     } else {
@@ -243,6 +243,8 @@ function OnboardCommand(context) {
         slackContext,
         reportLine,
       );
+
+      log.info(`Site: ${site} and organizationId: ${organizationId}`);
 
       const siteID = site.getId();
       log.info(`Site ${baseURL} was successfully retrieved or created. Site ID: ${siteID}`);
