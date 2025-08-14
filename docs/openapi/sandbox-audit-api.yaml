@@ -17,7 +17,6 @@ sandbox-audit:
       - Regular production sites will be rejected with a 400 error
       
       **Supported Audit Types:**
-      - `broken-internal-links`: Check for broken internal links
       - `meta-tags`: Validate meta tags and SEO elements  
       - `alt-text`: Check for missing alt text in images
     parameters:
@@ -32,14 +31,17 @@ sandbox-audit:
       - name: auditType
         in: query
         required: false
-        description: The type of audit to run. If omitted, all enabled audits are triggered.
+        description: |
+          The audit type(s) to trigger. Accepts:
+          • a single value (e.g. `meta-tags`)
+          • a comma-separated list (e.g. `meta-tags,alt-text`)
+          If omitted, all enabled audits are triggered.
         schema:
           type: string
           enum: 
-            - broken-internal-links
             - meta-tags
             - alt-text
-        example: "meta-tags"
+        example: "meta-tags,alt-text"
     responses:
       '200':
         description: Audit(s) triggered successfully
@@ -69,7 +71,7 @@ sandbox-audit:
                   properties:
                     message:
                       type: string
-                      example: "Triggered 3 audits for https://sandbox.example.com"
+                      example: "Triggered 2 of 2 audits for https://sandbox.example.com"
                     siteId:
                       type: string
                       format: uuid
@@ -82,7 +84,7 @@ sandbox-audit:
                       type: array
                       items:
                         type: string
-                      example: ["broken-internal-links", "meta-tags", "alt-text"]
+                      example: ["alt-text", "meta-tags"]
                     results:
                       type: array
                       items:
@@ -96,6 +98,11 @@ sandbox-audit:
                           error:
                             type: string
                             description: Error message if status is failed
+                      example:
+                        - auditType: alt-text
+                          status: triggered
+                        - auditType: meta-tags
+                          status: triggered
       '400':
         description: Bad request - invalid parameters or non-sandbox site
         content:
@@ -109,7 +116,7 @@ sandbox-audit:
                     - "baseURL query parameter is required"
                     - "Invalid baseURL provided"
                     - "Sandbox audit endpoint only supports sandbox sites. Site https://example.com is not a sandbox."
-                    - "Invalid auditType. Supported types: broken-internal-links, meta-tags, alt-text"
+                    - "Invalid auditType. Supported types: meta-tags, alt-text"
                     - "No audits configured for site: https://sandbox.example.com"
       '404':
         description: Site not found
