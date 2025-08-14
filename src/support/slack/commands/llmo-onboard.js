@@ -136,9 +136,13 @@ function LlmoOnboardCommand(context) {
       // enable the traffic-analysis import for referral-traffic
       siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
 
-      // enable the llmo-referral-traffic import for referral-traffic
+      // enable the llmo-prompts-ahrefs import
+      siteConfig.enableImport('llmo-prompts-ahrefs', { limit: 25 });
+
+      // enable all necessary handlers
       const configuration = await Configuration.findLatest();
       configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
+      configuration.enableHandlerForSite('geo-brand-presence', site);
 
       try {
         await configuration.save();
