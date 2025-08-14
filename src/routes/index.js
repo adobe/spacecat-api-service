@@ -70,6 +70,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} reportsController - The reports controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -97,6 +98,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  reportsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -240,6 +242,13 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/customer-intent': llmoController.addLlmoCustomerIntent,
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
+
+    // Reports
+    'POST /sites/:siteId/reports': reportsController.createReport,
+    'GET /sites/:siteId/reports': reportsController.getAllReportsBySiteId,
+    'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
+    'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
+    'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
   };
 
   // Initialization of static and dynamic routes
