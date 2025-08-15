@@ -155,10 +155,16 @@ describe('LlmoOnboardCommand', () => {
       // enable traffic-analysis import on the site config
       expect(mockConfig.enableImport).to.have.been.calledWith('traffic-analysis');
 
-      // enable handler for site in Configuration and save it
+      // enable llmo-prompts-ahrefs import on the site confing
+      expect(mockConfig.enableImport).calledWith('llmo-prompts-ahrefs', { limit: 25 });
+
+      // enable handlers for site in Configuration and save it
       expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).calledWith('geo-brand-presence', mockSite);
       expect(mockConfiguration.save).to.have.been.calledOnce;
+
+      // configuration got saved
 
       // save site config after configuration saved
       expect(mockSite.save).to.have.been.calledOnce;
