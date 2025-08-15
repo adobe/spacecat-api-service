@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
 
@@ -20,22 +21,21 @@ export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
  * @param {string} previewUrl - The preview URL to parse
  * @returns {Object|null} Object with programId and environmentId, or null if not extractable
  */
-function extractDeliveryConfigFromPreviewUrl(previewUrl) {
+export function extractDeliveryConfigFromPreviewUrl(previewUrl) {
   try {
+    if (!isValidUrl(previewUrl)) {
+      return null;
+    }
     const url = new URL(previewUrl);
     const { hostname } = url;
 
     const [, programId, envId] = AEM_CS_HOST.exec(hostname);
 
-    if (programId && envId) {
-      return {
-        programId: `${programId}`,
-        environmentId: `${envId}`,
-        authorURL: previewUrl,
-      };
-    }
-
-    return null;
+    return {
+      programId: `${programId}`,
+      environmentId: `${envId}`,
+      authorURL: previewUrl,
+    };
   } catch (error) {
     return null;
   }
@@ -421,7 +421,7 @@ export function onboardSiteModal(lambdaContext) {
 
       const siteUrl = values.site_url_input.site_url.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
-      const profile = values.profile_input.profile.selected_option?.value || 'demo';
+      const profile = values.profile_input.profile.selected_option?.value || 'default';
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
       const authoringType = values.authoring_type_input.authoring_type.selected_option?.value;
       const waitTime = values.wait_time_input.wait_time.value;
@@ -535,7 +535,7 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
-      if (reportLine.errors) {
+      if (reportLine.errors.length > 0) {
         await client.chat.postMessage({
           channel: responseChannel,
           text: `:warning: ${reportLine.errors}`,
