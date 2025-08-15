@@ -20,7 +20,7 @@ import {
   forbidden,
   notFound,
 } from '@adobe/spacecat-shared-http-utils';
-import { triggerAudits } from '../support/sandbox-audit-service.js';
+import { triggerAudits, normalizeAuditTypes, enforceRateLimit } from '../support/sandbox-audit-service.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
@@ -72,6 +72,9 @@ function SandboxAuditController(ctx) {
     return { site };
   };
 
+  // Default gap (hrs) between audit runs when env var is not set
+  const DEFAULT_RATE_LIMIT_HOURS = 4;
+
   /**
    * Triggers audit(s) for a sandbox site by baseURL.
    * GET /sandbox/audit?baseURL=https://example.com&auditType=meta-tags
@@ -82,18 +85,22 @@ function SandboxAuditController(ctx) {
   const triggerAudit = async (context) => {
     try {
       const { baseURL, auditType: auditTypeRaw } = context.data || {};
-      let auditType = auditTypeRaw;
-      if (typeof auditTypeRaw === 'string' && auditTypeRaw.includes(',')) {
-        auditType = auditTypeRaw.split(',').map((s) => s.trim()).filter(Boolean);
-      }
+      const auditTypes = normalizeAuditTypes(auditTypeRaw);
       const validation = await validateRequest(baseURL);
       if (validation.site === undefined) {
         return validation;
       }
       const { site } = validation;
+      const rateLimitHours = Number.parseFloat(ctx.env?.SANDBOX_AUDIT_RATE_LIMIT_HOURS)
+        || DEFAULT_RATE_LIMIT_HOURS;
+      const rateLimitResp = await enforceRateLimit(site, auditTypes, rateLimitHours, log);
+      if (rateLimitResp) {
+        return rateLimitResp;
+      }
+
       const configuration = await Configuration.findLatest();
       log.info(`SandboxAudit: Triggering audit(s) for ${baseURL}`);
-      return triggerAudits(site, configuration, auditType, ctx, baseURL);
+      return triggerAudits(site, configuration, auditTypes, ctx, baseURL);
     } catch (error) {
       log.error(`Error triggering audit: ${error.message}`, error);
       throw error;

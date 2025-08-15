@@ -26,6 +26,78 @@ export const ALL_AUDITS = [
 ];
 
 /**
+ * Normalize raw auditType query parameter into an array of strings or null.
+ * @param {string|string[]|undefined} auditTypeRaw
+ * @returns {string[]|null}
+ */
+export function normalizeAuditTypes(auditTypeRaw) {
+  if (!auditTypeRaw) {
+    return null;
+  }
+  if (Array.isArray(auditTypeRaw)) {
+    return auditTypeRaw;
+  }
+  return auditTypeRaw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Enforce a minimum time gap between audits for the given site.
+ * Returns an HTTP 400 Response if the limit is violated, otherwise null.
+ *
+ * @param {Readonly<Site>} site
+ * @param {string[]|null} auditTypes – list of audits to check; null ⇒ ALL_AUDITS
+ * @param {number} rateLimitHours – minimum gap in hours
+ * @param {object} log – logger
+ * @returns {Promise<import('@adobe/spacecat-shared-http-utils').Response|null>}
+ */
+export async function enforceRateLimit(site, auditTypes, rateLimitHours, log) {
+  if (!Number.isFinite(rateLimitHours) || rateLimitHours <= 0) {
+    return null; // rate limiting disabled
+  }
+
+  const now = Date.now();
+  const windowMs = rateLimitHours * 60 * 60 * 1000;
+  const typesToCheck = auditTypes && auditTypes.length > 0 ? auditTypes : ALL_AUDITS;
+
+  const siteId = site.getId?.();
+  const baseURL = site.getBaseURL?.();
+
+  // eslint-disable-next-line no-restricted-syntax
+  for (const auditType of typesToCheck) {
+    // eslint-disable-next-line no-await-in-loop
+    const lastAudit = await site.getLatestAuditByAuditType?.(auditType);
+    if (lastAudit) {
+      const lastRunMs = new Date(lastAudit.getAuditedAt()).getTime();
+      const delta = now - lastRunMs;
+      if (delta < windowMs) {
+        const hrsAgo = (delta / (1000 * 60 * 60)).toFixed(2);
+        log.info(
+          {
+            siteId,
+            baseURL,
+            auditType,
+            hoursSinceLastRun: hrsAgo,
+            rateLimitHours,
+          },
+          'Rate-limit hit: audit ran too recently',
+        );
+        return badRequest(`Rate limit exceeded: Audit '${auditType}' was run less than ${rateLimitHours}h ago`);
+      }
+    }
+  }
+
+  log.info(
+    {
+      siteId,
+      baseURL,
+      rateLimitHours,
+    },
+    'Rate-limit check passed',
+  );
+  return null;
+}
+
+/**
  * Enqueue an individual audit for the given site.
  */
 async function triggerAuditForSiteAPI(site, auditType, ctx) {
@@ -39,110 +111,79 @@ async function triggerAuditForSiteAPI(site, auditType, ctx) {
 }
 
 /**
- * Trigger all configuration-enabled audits for a site.
+ * Execute a batch of audits and collect per-audit status information.
+ * @param {Readonly<Site>} site
+ * @param {string[]} auditTypes – list of audit identifiers to run
+ * @param {object} ctx – universal context (sqs, env, log)
+ * @param {string} baseURL – site base URL (for logging)
+ * @returns {Promise<Array<{auditType:string,status:string,error?:string}>>}
  */
-async function triggerAllEnabledAudits(site, configuration, ctx, baseURL) {
+async function runAuditBatch(site, auditTypes, ctx, baseURL) {
   const { log } = ctx;
-  const enabledAudits = ALL_AUDITS.filter(
-    (audit) => configuration.isHandlerEnabledForSite(audit, site),
-  );
-
-  log.info(`SandboxAuditService: enabled audits for ${baseURL}: ${enabledAudits.join(', ')}`);
-
-  if (!isNonEmptyArray(enabledAudits)) {
-    return badRequest(`No audits configured for site: ${baseURL}`);
-  }
-
   const results = [];
-  await Promise.all(
-    enabledAudits.map(async (auditType) => {
-      try {
-        await triggerAuditForSiteAPI(site, auditType, ctx);
-        results.push({ auditType, status: 'triggered' });
-      } catch (error) {
-        log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
-        results.push({ auditType, status: 'failed', error: error.message });
-      }
-    }),
-  );
 
-  const successCount = results.filter((r) => r.status === 'triggered').length;
-
-  return ok({
-    message: `Triggered ${successCount} audits for ${baseURL}`,
-    siteId: site.getId(),
-    baseURL,
-    auditsTriggered: results.filter((r) => r.status === 'triggered').map((r) => r.auditType),
-    results,
-  });
-}
-
-/**
- * Trigger a specific list of audit types for a site.
- */
-async function triggerSpecificAudits(site, configuration, auditTypesInput, ctx, baseURL) {
-  const { log } = ctx;
-  const auditTypes = Array.isArray(auditTypesInput) ? auditTypesInput : [auditTypesInput];
-
-  log.info(`SandboxAuditService: requested audits [${auditTypes.join(', ')}] for ${baseURL}`);
-
-  // Validate audit types
-  const invalidTypes = auditTypes.filter((t) => !ALL_AUDITS.includes(t));
-  if (invalidTypes.length > 0) {
-    return badRequest(`Invalid audit types: ${invalidTypes.join(', ')}. Supported types: ${ALL_AUDITS.join(', ')}`);
-  }
-
-  // Ensure they are enabled
-  const disabledTypes = auditTypes.filter((t) => !configuration.isHandlerEnabledForSite(t, site));
-  if (disabledTypes.length > 0) {
-    return badRequest(`The following audit types are disabled for this site: ${disabledTypes.join(', ')}`);
-  }
-
-  const results = [];
   await Promise.all(
     auditTypes.map(async (type) => {
       try {
         await triggerAuditForSiteAPI(site, type, ctx);
         results.push({ auditType: type, status: 'triggered' });
-      } catch (error) {
-        log.error(`Error running audit ${type} for site ${baseURL}`, error);
-        results.push({ auditType: type, status: 'failed', error: error.message });
+      } catch (err) {
+        log.error(`Error running audit ${type} for site ${baseURL}`, err);
+        results.push({ auditType: type, status: 'failed', error: err.message });
       }
     }),
   );
 
-  const successCount = results.filter((r) => r.status === 'triggered').length;
+  return results;
+}
 
-  if (auditTypes.length === 1) {
+function buildAuditResponse(site, baseURL, results) {
+  const triggered = results.filter((r) => r.status === 'triggered');
+  if (results.length === 1) {
+    const { auditType } = results[0];
     return ok({
-      message: `Successfully triggered ${auditTypes[0]} audit for ${baseURL}`,
+      message: `Successfully triggered ${auditType} audit for ${baseURL}`,
       siteId: site.getId(),
-      auditType: auditTypes[0],
+      auditType,
       baseURL,
     });
   }
-
   return ok({
-    message: `Triggered ${successCount} of ${auditTypes.length} audits for ${baseURL}`,
+    message: `Triggered ${triggered.length} of ${results.length} audits for ${baseURL}`,
     siteId: site.getId(),
     baseURL,
-    auditsTriggered: results.filter((r) => r.status === 'triggered').map((r) => r.auditType),
+    auditsTriggered: triggered.map((r) => r.auditType),
     results,
   });
 }
 
 /**
- * Public API combining the above helpers.
- *
- * @param {Site} site
- * @param {Configuration} configuration
- * @param {string|Array|undefined} auditType – undefined = all enabled audits
- * @param {object} ctx – universal context (sqs, env, log…)
- * @param {string} baseURL – original base URL (for messaging only)
+ * Trigger all configuration-enabled audits for a site.
  */
-export async function triggerAudits(site, configuration, auditType, ctx, baseURL) {
-  if (!auditType) {
-    return triggerAllEnabledAudits(site, configuration, ctx, baseURL);
+export async function triggerAudits(site, configuration, auditTypeRaw, ctx, baseURL) {
+  const { log } = ctx;
+  let auditTypes;
+  if (!auditTypeRaw) {
+    auditTypes = ALL_AUDITS.filter((a) => configuration.isHandlerEnabledForSite(a, site));
+    log.info(`SandboxAuditService: enabled audits for ${baseURL}: ${auditTypes.join(', ')}`);
+    if (!isNonEmptyArray(auditTypes)) {
+      return badRequest(`No audits configured for site: ${baseURL}`);
+    }
+  } else if (Array.isArray(auditTypeRaw)) {
+    auditTypes = auditTypeRaw;
+  } else {
+    auditTypes = auditTypeRaw.split(',').map((s) => s.trim()).filter(Boolean);
   }
-  return triggerSpecificAudits(site, configuration, auditType, ctx, baseURL);
+
+  const invalid = auditTypes.filter((t) => !ALL_AUDITS.includes(t));
+  if (invalid.length) {
+    return badRequest(`Invalid audit types: ${invalid.join(', ')}. Supported types: ${ALL_AUDITS.join(', ')}`);
+  }
+  const disabled = auditTypes.filter((t) => !configuration.isHandlerEnabledForSite(t, site));
+  if (disabled.length) {
+    return badRequest(`The following audit types are disabled for this site: ${disabled.join(', ')}`);
+  }
+
+  const results = await runAuditBatch(site, auditTypes, ctx, baseURL);
+  return buildAuditResponse(site, baseURL, results);
 }

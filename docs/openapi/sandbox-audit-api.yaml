@@ -14,6 +14,8 @@ sandbox-audit:
       
       **Restrictions:**
       - Only works with sandbox sites (sites with `isSandbox: true`)
+      - Audits are rate-limited (default **4 hours** between runs for the same site/audit type). If the
+        limit is hit the endpoint responds with HTTP 400 and an explanatory message.
       - Regular production sites will be rejected with a 400 error
       
       **Supported Audit Types:**
@@ -118,6 +120,7 @@ sandbox-audit:
                     - "Sandbox audit endpoint only supports sandbox sites. Site https://example.com is not a sandbox."
                     - "Invalid auditType. Supported types: meta-tags, alt-text"
                     - "No audits configured for site: https://sandbox.example.com"
+                    - "Rate limit exceeded: Audit 'meta-tags' was run less than 4h ago"
       '404':
         description: Site not found
         content:
