@@ -14,7 +14,6 @@
 
 import { expect } from 'chai';
 import sinon from 'sinon';
-import { badRequest } from '@adobe/spacecat-shared-http-utils';
 import { normalizeAuditTypes, enforceRateLimit } from '../../src/support/sandbox-audit-service.js';
 
 // Helper to create a mock Site with controllable audit history
@@ -47,24 +46,27 @@ describe('sandbox-audit-service helpers', () => {
   describe('enforceRateLimit()', () => {
     const logger = { info: () => {} };
 
-    it('returns null when rate limit disabled (0 hours)', async () => {
+    it('allows all audits when rate limit disabled (0 hours)', async () => {
       const site = createMockSite(new Date().toISOString());
-      const result = await enforceRateLimit(site, ['meta-tags'], 0, logger);
-      expect(result).to.equal(null);
+      const { allowed, skipped } = await enforceRateLimit(site, ['meta-tags'], 0, logger);
+      expect(allowed).to.deep.equal(['meta-tags']);
+      expect(skipped).to.be.empty;
     });
 
-    it('returns badRequest when audit too recent', async () => {
+    it('skips audit that is too recent', async () => {
       const recent = new Date();
       const site = createMockSite(recent.toISOString());
-      const res = await enforceRateLimit(site, ['meta-tags'], 1, logger);
-      expect(res.status).to.equal(badRequest().status);
+      const { allowed, skipped } = await enforceRateLimit(site, ['meta-tags'], 1, logger);
+      expect(allowed).to.be.empty;
+      expect(skipped[0]).to.include({ auditType: 'meta-tags' });
     });
 
-    it('returns null when audit older than window', async () => {
+    it('allows audit older than window', async () => {
       const old = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3 hours ago
       const site = createMockSite(old.toISOString());
-      const res = await enforceRateLimit(site, ['meta-tags'], 1, logger);
-      expect(res).to.equal(null);
+      const { allowed, skipped } = await enforceRateLimit(site, ['meta-tags'], 1, logger);
+      expect(allowed).to.deep.equal(['meta-tags']);
+      expect(skipped).to.be.empty;
     });
   });
 
@@ -86,6 +88,52 @@ describe('sandbox-audit-service helpers', () => {
       const { triggerAudits } = await import('../../src/support/sandbox-audit-service.js');
       const res = await triggerAudits(site, configuration, 'meta-tags', ctx, site.getBaseURL());
       expect(res.status).to.equal(200);
+    });
+
+    it('merges skippedDetail into results', async () => {
+      const ctx = {
+        env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.url/queue' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        log: { info: () => {}, error: () => {} },
+      };
+
+      const site = {
+        getId: () => 'site-123',
+        getBaseURL: () => 'https://sandbox.example.com',
+      };
+
+      const configuration = {
+        isHandlerEnabledForSite: () => true,
+      };
+
+      const skipped = [{ auditType: 'alt-text', nextAllowedAt: new Date().toISOString(), minutesRemaining: 10 }];
+
+      const { triggerAudits } = await import('../../src/support/sandbox-audit-service.js');
+      const res = await triggerAudits(site, configuration, 'meta-tags', ctx, site.getBaseURL(), skipped);
+      const body = await res.json();
+
+      expect(body.results.some((r) => r.auditType === 'alt-text' && r.status === 'skipped')).to.be.true;
+    });
+
+    it('returns badRequest when no audits enabled for site', async () => {
+      const ctx = {
+        env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.url/queue' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        log: { info: () => {}, error: () => {} },
+      };
+
+      const site = {
+        getId: () => 'site-123',
+        getBaseURL: () => 'https://sandbox.example.com',
+      };
+
+      const configuration = {
+        isHandlerEnabledForSite: () => false, // all audits disabled
+      };
+
+      const { triggerAudits } = await import('../../src/support/sandbox-audit-service.js');
+      const res = await triggerAudits(site, configuration, null, ctx, site.getBaseURL());
+      expect(res.status).to.equal(400);
     });
   });
 });

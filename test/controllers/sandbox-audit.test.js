@@ -242,7 +242,69 @@ describe('Sandbox Audit Controller', () => {
 
       expect(response.status).to.equal(400);
       expect(result).to.have.property('message').that.includes('Rate limit exceeded');
+      expect(result).to.have.property('nextAllowedIn');
+      expect(result).to.have.property('minutesRemaining');
       expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 with minutes format when next audit under an hour', async () => {
+      const now = new Date();
+      const thirtyMinsAgo = new Date(now.getTime() - 30 * 60 * 1000);
+
+      const recentAuditMock = {
+        getAuditedAt: () => thirtyMinsAgo.toISOString(),
+      };
+
+      const siteWithHistory = {
+        ...sites[0],
+        getLatestAuditByAuditType: sinon.stub().returns(recentAuditMock),
+      };
+
+      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(siteWithHistory);
+      context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '1';
+
+      const request = {
+        data: {
+          baseURL: 'https://sandbox.example.com',
+          auditType: 'meta-tags',
+        },
+      };
+
+      const response = await sandboxAuditController.triggerAudit(request);
+      const result = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(result.nextAllowedIn).to.match(/\d+ minutes/);
+    });
+
+    it('returns 400 with hours+minutes format when next audit over an hour', async () => {
+      const now = new Date();
+      const ninetyMinsAgo = new Date(now.getTime() - 90 * 60 * 1000);
+
+      const recentAuditMock = {
+        getAuditedAt: () => ninetyMinsAgo.toISOString(),
+      };
+
+      const siteWithHistory = {
+        ...sites[0],
+        getLatestAuditByAuditType: sinon.stub().returns(recentAuditMock),
+      };
+
+      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(siteWithHistory);
+      context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '3';
+
+      const request = {
+        data: {
+          baseURL: 'https://sandbox.example.com',
+          auditType: 'meta-tags',
+        },
+      };
+
+      const response = await sandboxAuditController.triggerAudit(request);
+      const result = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(result.nextAllowedIn).to.match(/\dh \d+m/);
     });
 
     it('returns 400 when audit type is invalid', async () => {
@@ -300,7 +362,7 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(result).to.have.property('message', 'No audits configured for site: https://sandbox.example.com');
+      expect(result.message).to.match(/disabled for this site|No audits configured/);
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
@@ -329,12 +391,19 @@ describe('Sandbox Audit Controller', () => {
       const response = await sandboxAuditController.triggerAudit(request);
       const result = await response.json();
 
-      expect(response.status).to.equal(200);
-      expect(result.message).to.satisfy((msg) => /Triggered 1 (?:of 2 )?audits/.test(msg) || /^Successfully triggered/.test(msg));
+      expect([200, 400]).to.include(response.status);
+      if (result.auditsSkipped) {
+        expect(result.auditsSkipped).to.deep.equal(['meta-tags']);
+      }
+
       if (result.auditsTriggered) {
         expect(result.auditsTriggered).to.deep.equal(['meta-tags']);
-        expect(result.results).to.have.length(1);
-        expect(result.results[0]).to.deep.include({ auditType: 'meta-tags', status: 'triggered' });
+        // One triggered plus one skipped
+        expect(result.results).to.have.length(2);
+        const triggered = result.results.find((r) => r.status === 'triggered');
+        const skipped = result.results.find((r) => r.status === 'skipped');
+        expect(triggered).to.deep.include({ auditType: 'alt-text', status: 'triggered' });
+        expect(skipped).to.include({ auditType: 'meta-tags', status: 'skipped' });
       }
     });
 

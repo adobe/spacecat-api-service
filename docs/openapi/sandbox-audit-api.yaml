@@ -73,7 +73,7 @@ sandbox-audit:
                   properties:
                     message:
                       type: string
-                      example: "Triggered 2 of 2 audits for https://sandbox.example.com"
+                      example: "Triggered 1 of 2 audits for https://sandbox.example.com"
                     siteId:
                       type: string
                       format: uuid
@@ -86,7 +86,12 @@ sandbox-audit:
                       type: array
                       items:
                         type: string
-                      example: ["alt-text", "meta-tags"]
+                      example: ["meta-tags"]
+                    auditsSkipped:
+                      type: array
+                      items:
+                        type: string
+                      example: ["alt-text"]
                     results:
                       type: array
                       items:
@@ -96,15 +101,24 @@ sandbox-audit:
                             type: string
                           status:
                             type: string
-                            enum: [triggered, failed]
+                            enum: [triggered, skipped, failed]
+                          nextAllowedAt:
+                            type: string
+                            format: date-time
+                            description: Present when status is "skipped"
+                          minutesRemaining:
+                            type: number
+                            description: Present when status is "skipped"
                           error:
                             type: string
                             description: Error message if status is failed
                       example:
-                        - auditType: alt-text
-                          status: triggered
                         - auditType: meta-tags
                           status: triggered
+                        - auditType: alt-text
+                          status: skipped
+                          nextAllowedAt: "2025-08-15T15:37:48.419Z"
+                          minutesRemaining: 1
       '400':
         description: Bad request - invalid parameters or non-sandbox site
         content:
@@ -120,7 +134,30 @@ sandbox-audit:
                     - "Sandbox audit endpoint only supports sandbox sites. Site https://example.com is not a sandbox."
                     - "Invalid auditType. Supported types: meta-tags, alt-text"
                     - "No audits configured for site: https://sandbox.example.com"
-                    - "Rate limit exceeded: Audit 'meta-tags' was run less than 4h ago"
+                    - "Rate limit exceeded: audits meta-tags, alt-text were run less than 4h ago."
+                nextAllowedIn:
+                  type: string
+                  example: "3h 5m"
+                minutesRemaining:
+                  type: number
+                  example: 185
+                auditsSkipped:
+                  type: array
+                  items:
+                    type: string
+                  example: ["meta-tags", "alt-text"]
+                skippedDetail:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      auditType:
+                        type: string
+                      nextAllowedAt:
+                        type: string
+                        format: date-time
+                      minutesRemaining:
+                        type: number
       '404':
         description: Site not found
         content:

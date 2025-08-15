@@ -19,6 +19,7 @@ import {
   badRequest,
   forbidden,
   notFound,
+  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { triggerAudits, normalizeAuditTypes, enforceRateLimit } from '../support/sandbox-audit-service.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -93,14 +94,31 @@ function SandboxAuditController(ctx) {
       const { site } = validation;
       const rateLimitHours = Number.parseFloat(ctx.env?.SANDBOX_AUDIT_RATE_LIMIT_HOURS)
         || DEFAULT_RATE_LIMIT_HOURS;
-      const rateLimitResp = await enforceRateLimit(site, auditTypes, rateLimitHours, log);
-      if (rateLimitResp) {
-        return rateLimitResp;
+      const { allowed, skipped } = await enforceRateLimit(site, auditTypes, rateLimitHours, log);
+
+      if (!allowed.length) {
+        // Compute soonest time an audit can run again
+        const minMins = Math.min(...skipped.map((s) => s.minutesRemaining));
+        const hrs = Math.floor(minMins / 60);
+        const mins = minMins % 60;
+        const timeStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} minutes`;
+
+        const msg = `Rate limit exceeded: audits ${skipped
+          .map((s) => s.auditType)
+          .join(', ')} were run less than ${rateLimitHours}h ago.`;
+
+        return createResponse({
+          message: msg,
+          nextAllowedIn: timeStr,
+          minutesRemaining: minMins,
+          auditsSkipped: skipped.map((s) => s.auditType),
+          skippedDetail: skipped,
+        }, 400, { 'x-error': msg });
       }
 
       const configuration = await Configuration.findLatest();
       log.info(`SandboxAudit: Triggering audit(s) for ${baseURL}`);
-      return triggerAudits(site, configuration, auditTypes, ctx, baseURL);
+      return triggerAudits(site, configuration, allowed, ctx, baseURL, skipped);
     } catch (error) {
       log.error(`Error triggering audit: ${error.message}`, error);
       throw error;

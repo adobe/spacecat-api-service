@@ -51,50 +51,47 @@ export function normalizeAuditTypes(auditTypeRaw) {
  * @returns {Promise<import('@adobe/spacecat-shared-http-utils').Response|null>}
  */
 export async function enforceRateLimit(site, auditTypes, rateLimitHours, log) {
+  const types = auditTypes && auditTypes.length > 0 ? auditTypes : ALL_AUDITS;
+  // rate-limit disabled → everything allowed
   if (!Number.isFinite(rateLimitHours) || rateLimitHours <= 0) {
-    return null; // rate limiting disabled
+    return { allowed: types, skipped: [] };
   }
 
   const now = Date.now();
   const windowMs = rateLimitHours * 60 * 60 * 1000;
-  const typesToCheck = auditTypes && auditTypes.length > 0 ? auditTypes : ALL_AUDITS;
 
-  const siteId = site.getId?.();
-  const baseURL = site.getBaseURL?.();
+  const allowed = [];
+  const skipped = [];
 
-  // eslint-disable-next-line no-restricted-syntax
-  for (const auditType of typesToCheck) {
+  for (const auditType of types) {
     // eslint-disable-next-line no-await-in-loop
     const lastAudit = await site.getLatestAuditByAuditType?.(auditType);
+    let isSkipped = false;
     if (lastAudit) {
       const lastRunMs = new Date(lastAudit.getAuditedAt()).getTime();
       const delta = now - lastRunMs;
       if (delta < windowMs) {
-        const hrsAgo = (delta / (1000 * 60 * 60)).toFixed(2);
-        log.info(
-          {
-            siteId,
-            baseURL,
-            auditType,
-            hoursSinceLastRun: hrsAgo,
-            rateLimitHours,
-          },
-          'Rate-limit hit: audit ran too recently',
-        );
-        return badRequest(`Rate limit exceeded: Audit '${auditType}' was run less than ${rateLimitHours}h ago`);
+        const nextAllowedMs = lastRunMs + windowMs;
+        const minutesRemaining = Math.ceil((nextAllowedMs - now) / 60000);
+        skipped.push({
+          auditType,
+          nextAllowedAt: new Date(nextAllowedMs).toISOString(),
+          minutesRemaining,
+        });
+        isSkipped = true;
       }
+    }
+    if (!isSkipped) {
+      allowed.push(auditType);
     }
   }
 
-  log.info(
-    {
-      siteId,
-      baseURL,
-      rateLimitHours,
-    },
-    'Rate-limit check passed',
-  );
-  return null;
+  if (skipped.length) {
+    const baseURL = site.getBaseURL?.();
+    log.info({ skipped: skipped.map((s) => s.auditType), baseURL, rateLimitHours }, 'Rate-limit: some audits skipped');
+  }
+
+  return { allowed, skipped };
 }
 
 /**
@@ -137,7 +134,7 @@ async function runAuditBatch(site, auditTypes, ctx, baseURL) {
   return results;
 }
 
-function buildAuditResponse(site, baseURL, results) {
+function buildAuditResponse(site, baseURL, results, skippedDetail = []) {
   const triggered = results.filter((r) => r.status === 'triggered');
   if (results.length === 1) {
     const { auditType } = results[0];
@@ -153,6 +150,7 @@ function buildAuditResponse(site, baseURL, results) {
     siteId: site.getId(),
     baseURL,
     auditsTriggered: triggered.map((r) => r.auditType),
+    auditsSkipped: skippedDetail.map((s) => s.auditType),
     results,
   });
 }
@@ -160,7 +158,14 @@ function buildAuditResponse(site, baseURL, results) {
 /**
  * Trigger all configuration-enabled audits for a site.
  */
-export async function triggerAudits(site, configuration, auditTypeRaw, ctx, baseURL) {
+export async function triggerAudits(
+  site,
+  configuration,
+  auditTypeRaw,
+  ctx,
+  baseURL,
+  skippedDetail = [],
+) {
   const { log } = ctx;
   let auditTypes;
   if (!auditTypeRaw) {
@@ -185,5 +190,17 @@ export async function triggerAudits(site, configuration, auditTypeRaw, ctx, base
   }
 
   const results = await runAuditBatch(site, auditTypes, ctx, baseURL);
-  return buildAuditResponse(site, baseURL, results);
+
+  if (skippedDetail.length) {
+    skippedDetail.forEach((s) => {
+      results.push({
+        auditType: s.auditType,
+        status: 'skipped',
+        nextAllowedAt: s.nextAllowedAt,
+        minutesRemaining: s.minutesRemaining,
+      });
+    });
+  }
+
+  return buildAuditResponse(site, baseURL, results, skippedDetail);
 }
