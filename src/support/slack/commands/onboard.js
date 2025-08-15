@@ -55,7 +55,7 @@ function OnboardCommand(context) {
 • Workflow wait time (optional)
 • Preview environment URL (optional)
 
-*Batch Processing:* Upload a CSV file with this command using the format:
+*Batch Processing:* Upload a CSV file with ${PHRASES[1]} using the format:
 \`Site URL, IMS Org ID, [Reserved], Delivery Type, Authoring Type\`
 `,
   });
@@ -186,6 +186,14 @@ function OnboardCommand(context) {
             slackContext,
             {},
           );
+
+          // Add individual site status reporting for CSV processing
+          if (reportLine.errors) {
+            await say(`:warning: Site ${baseURL}: ${reportLine.errors}`);
+          } else {
+            await say(`:white_check_mark: Site ${baseURL}: Onboarding started`);
+          }
+
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
@@ -202,7 +210,7 @@ function OnboardCommand(context) {
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
               title: 'Spacecat Onboarding Report',
-              initial_comment: ':spacecat: *Onboarding complete!* :satellite:\nHere you can find the *execution report*. :memo:',
+              initial_comment: ':spacecat: *Batch onboarding in progress!* :satellite:\nHere you can find the *execution report*. :memo:',
               thread_ts: threadTs,
             });
             log.info(uploadResponse);
@@ -210,8 +218,6 @@ function OnboardCommand(context) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
           }
         });
-
-        await say(':white_check_mark: Batch onboarding process finished successfully.');
       } else {
         // Handle backwards compatibility with command line arguments
         const [site, imsOrgId, profile, workflowWaitTime] = args;

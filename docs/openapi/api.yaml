@@ -225,6 +225,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-questions'
   /sites/{siteId}/llmo/questions/{questionKey}:
     $ref: './llmo-api.yaml#/llmo-question'
+  /sites/{siteId}/llmo/customer-intent:
+    $ref: './llmo-api.yaml#/llmo-customer-intent'
+  /sites/{siteId}/llmo/customer-intent/{intentKey}:
+    $ref: './llmo-api.yaml#/llmo-customer-intent-item'
 
 components:
   securitySchemes:
