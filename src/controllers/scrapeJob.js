@@ -66,9 +66,6 @@ function ScrapeJobController(context) {
       log.error(error.message);
       if (error?.message?.includes('Invalid request')) {
         return badRequest(error);
-      } else if (error?.message?.includes('Service Unavailable')) {
-        error.status = 503;
-        return createErrorResponse(error);
       }
       return createErrorResponse(error);
     }
