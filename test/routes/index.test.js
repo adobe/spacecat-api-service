@@ -236,7 +236,6 @@ describe('getRouteHandlers', () => {
       'POST /screenshots',
       'GET /mcp',
       'POST /mcp',
-      'GET /sandbox/audit',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -256,7 +255,6 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
     expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
-    expect(staticRoutes['GET /sandbox/audit']).to.equal(mockSandboxAuditController.triggerAudit);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
@@ -363,6 +361,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/questions',
       'DELETE /sites/:siteId/llmo/questions/:questionKey',
       'PATCH /sites/:siteId/llmo/questions/:questionKey',
+      'POST /sites/:siteId/sandbox/audit',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -467,5 +466,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/llmo/questions/:questionKey'].paramNames).to.deep.equal(['siteId', 'questionKey']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/questions/:questionKey'].handler).to.equal(mockLlmoController.patchLlmoQuestion);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/questions/:questionKey'].paramNames).to.deep.equal(['siteId', 'questionKey']);
+    expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].handler).to.equal(mockSandboxAuditController.triggerAudit);
+    expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].paramNames).to.deep.equal(['siteId']);
   });
 });

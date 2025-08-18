@@ -39,12 +39,12 @@ describe('Sandbox Audit Controller', () => {
     {
       getId: () => SITE_IDS[0],
       getIsSandbox: () => true, // This is a sandbox site
-      baseURL: 'https://sandbox.example.com',
+      getBaseURL: () => 'https://sandbox.example.com',
     },
     {
       getId: () => SITE_IDS[1],
       getIsSandbox: () => false, // This is NOT a sandbox site
-      baseURL: 'https://production.example.com',
+      getBaseURL: () => 'https://production.example.com',
     },
   ];
 
@@ -63,7 +63,7 @@ describe('Sandbox Audit Controller', () => {
 
     mockDataAccess = {
       Site: {
-        findByBaseURL: sandbox.stub(),
+        findById: sandbox.stub(),
       },
       Configuration: {
         findLatest: sandbox.stub().resolves({
@@ -93,11 +93,13 @@ describe('Sandbox Audit Controller', () => {
 
   describe('triggerAudit', () => {
     it('successfully triggers a single audit for a sandbox site', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -122,12 +124,13 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('successfully triggers all audits for a sandbox site when no auditType specified', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
 
       const request = {
-        data: {
-          baseURL: 'https://sandbox.example.com',
+        params: {
+          siteId: SITE_IDS[0],
         },
+        data: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -143,7 +146,7 @@ describe('Sandbox Audit Controller', () => {
       expect(mockSqs.sendMessage).to.have.been.calledTwice;
     });
 
-    it('returns 400 when baseURL is missing', async () => {
+    it('returns 400 when siteId is missing', async () => {
       const request = {
         data: {
           auditType: 'meta-tags',
@@ -154,14 +157,16 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(result).to.have.property('message', 'baseURL query parameter is required');
+      expect(result).to.have.property('message', 'siteId path parameter is required');
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
-    it('returns 400 when baseURL is invalid', async () => {
+    it('returns 400 when siteId is invalid', async () => {
       const request = {
+        params: {
+          siteId: 'not-a-valid-uuid',
+        },
         data: {
-          baseURL: 'not-a-valid-url',
           auditType: 'meta-tags',
         },
       };
@@ -170,16 +175,20 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(result).to.have.property('message', 'Invalid baseURL provided');
+      expect(result).to.have.property('message', 'Invalid siteId provided');
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
     it('returns 404 when site is not found', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://nonexistent.example.com').resolves(null);
+      // Use a valid UUID format that doesn't exist in our mock data
+      const nonexistentSiteId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+      mockDataAccess.Site.findById.withArgs(nonexistentSiteId).resolves(null);
 
       const request = {
+        params: {
+          siteId: nonexistentSiteId,
+        },
         data: {
-          baseURL: 'https://nonexistent.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -188,16 +197,18 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(404);
-      expect(result).to.have.property('message', 'Site not found for baseURL: https://nonexistent.example.com');
+      expect(result).to.have.property('message', `Site not found for siteId: ${nonexistentSiteId}`);
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
     it('returns 400 when site is not a sandbox', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://production.example.com').resolves(sites[1]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[1]).resolves(sites[1]);
 
       const request = {
+        params: {
+          siteId: SITE_IDS[1],
+        },
         data: {
-          baseURL: 'https://production.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -206,7 +217,7 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(result).to.have.property('message', 'Sandbox audit endpoint only supports sandbox sites. Site https://production.example.com is not a sandbox.');
+      expect(result).to.have.property('message', `Sandbox audit endpoint only supports sandbox sites. Site ${SITE_IDS[1]} is not a sandbox.`);
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
@@ -225,14 +236,16 @@ describe('Sandbox Audit Controller', () => {
         getLatestAuditByAuditType: sinon.stub().returns(recentAuditMock),
       };
 
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(siteWithHistory);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(siteWithHistory);
 
       // Reduce rate limit for test brevity to 0.5 hours
       context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '0.5';
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -240,7 +253,7 @@ describe('Sandbox Audit Controller', () => {
       const response = await sandboxAuditController.triggerAudit(request);
       const result = await response.json();
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(429);
       expect(result).to.have.property('message').that.includes('Rate limit exceeded');
       expect(result).to.have.property('nextAllowedIn');
       expect(result).to.have.property('minutesRemaining');
@@ -260,12 +273,14 @@ describe('Sandbox Audit Controller', () => {
         getLatestAuditByAuditType: sinon.stub().returns(recentAuditMock),
       };
 
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(siteWithHistory);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(siteWithHistory);
       context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '1';
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -273,7 +288,7 @@ describe('Sandbox Audit Controller', () => {
       const response = await sandboxAuditController.triggerAudit(request);
       const result = await response.json();
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(429);
       expect(result.nextAllowedIn).to.match(/\d+ minutes/);
     });
 
@@ -290,12 +305,14 @@ describe('Sandbox Audit Controller', () => {
         getLatestAuditByAuditType: sinon.stub().returns(recentAuditMock),
       };
 
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(siteWithHistory);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(siteWithHistory);
       context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '3';
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -303,16 +320,18 @@ describe('Sandbox Audit Controller', () => {
       const response = await sandboxAuditController.triggerAudit(request);
       const result = await response.json();
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(429);
       expect(result.nextAllowedIn).to.match(/\dh \d+m/);
     });
 
     it('returns 400 when audit type is invalid', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'invalid-audit-type',
         },
       };
@@ -326,14 +345,16 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('returns 400 when audit type is disabled for the site', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
       mockDataAccess.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: sandbox.stub().returns(false),
       });
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -347,15 +368,16 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('returns 400 when no audits are configured for the site (all audits case)', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
       mockDataAccess.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: sandbox.stub().returns(false), // All audits disabled
       });
 
       const request = {
-        data: {
-          baseURL: 'https://sandbox.example.com',
+        params: {
+          siteId: SITE_IDS[0],
         },
+        data: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -367,7 +389,7 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('handles partial failures when triggering all audits', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
 
       // Configure so only some audits are enabled
       const configMock = {
@@ -383,9 +405,10 @@ describe('Sandbox Audit Controller', () => {
       mockSqs.sendMessage.onSecondCall().rejects(new Error('SQS error'));
 
       const request = {
-        data: {
-          baseURL: 'https://sandbox.example.com',
+        params: {
+          siteId: SITE_IDS[0],
         },
+        data: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -408,12 +431,14 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('handles SQS errors gracefully', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
       mockSqs.sendMessage.rejects(new Error('SQS connection failed'));
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -433,7 +458,7 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(result).to.have.property('message', 'baseURL query parameter is required');
+      expect(result).to.have.property('message', 'siteId path parameter is required');
     });
 
     it('handles missing request data', async () => {
@@ -443,18 +468,20 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(result).to.have.property('message', 'baseURL query parameter is required');
+      expect(result).to.have.property('message', 'siteId path parameter is required');
     });
 
     it('verifies all supported audit types are handled', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
 
       const supportedAudits = ['meta-tags', 'alt-text'];
 
       const auditPromises = supportedAudits.map(async (auditType) => {
         const request = {
+          params: {
+            siteId: SITE_IDS[0],
+          },
           data: {
-            baseURL: 'https://sandbox.example.com',
             auditType,
           },
         };
@@ -472,12 +499,14 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('logs errors appropriately', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
       mockSqs.sendMessage.rejects(new Error('Test error'));
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'meta-tags',
         },
       };
@@ -492,7 +521,7 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('logs error when one audit fails', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
 
       const configMock = {
         isHandlerEnabledForSite: sandbox.stub().returns(true),
@@ -504,8 +533,10 @@ describe('Sandbox Audit Controller', () => {
       mockSqs.sendMessage.onSecondCall().rejects(new Error('SQS boom'));
 
       const request = {
+        params: {
+          siteId: SITE_IDS[0],
+        },
         data: {
-          baseURL: 'https://sandbox.example.com',
           auditType: 'meta-tags,alt-text',
         },
       };
@@ -545,12 +576,15 @@ describe('Sandbox Audit Controller', () => {
       AccessControlUtil.fromContext.restore();
       sandbox.stub(AccessControlUtil, 'fromContext').returns({ hasAccess: () => false });
 
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
 
       // re-create controller to capture new access control behaviour
       const denyController = SandboxAuditController(context);
 
-      const response = await denyController.triggerAudit({ data: { baseURL: 'https://sandbox.example.com' } });
+      const response = await denyController.triggerAudit({
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      });
       const body = await response.json();
 
       expect(response.status).to.equal(403);
@@ -558,7 +592,7 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('logs error when one audit fails in all-audits mode', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
 
       // Both audits enabled
       const configMock = {
@@ -570,7 +604,10 @@ describe('Sandbox Audit Controller', () => {
       mockSqs.sendMessage.onFirstCall().resolves();
       mockSqs.sendMessage.onSecondCall().rejects(new Error('SQS alt-text failure'));
 
-      const req = { data: { baseURL: 'https://sandbox.example.com' } };
+      const req = {
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      };
       const res = await sandboxAuditController.triggerAudit(req);
       const body = await res.json();
 
@@ -580,11 +617,14 @@ describe('Sandbox Audit Controller', () => {
     });
 
     it('controller catch block logs and rethrows on unexpected error', async () => {
-      mockDataAccess.Site.findByBaseURL.withArgs('https://sandbox.example.com').resolves(sites[0]);
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
       // Force Configuration.findLatest to throw
       mockDataAccess.Configuration.findLatest.rejects(new Error('Config fail'));
 
-      const req = { data: { baseURL: 'https://sandbox.example.com' } };
+      const req = {
+        params: { siteId: SITE_IDS[0] },
+        data: {},
+      };
       await expect(sandboxAuditController.triggerAudit(req)).to.be.rejectedWith('Config fail');
       expect(loggerStub.error).to.have.been.calledWithMatch(sinon.match('Error triggering audit'));
     });
