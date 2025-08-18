@@ -13,7 +13,7 @@
 import {
   hasText,
   isNonEmptyObject,
-  isValidUrl,
+  isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest,
@@ -48,18 +48,18 @@ function SandboxAuditController(ctx) {
    * @param {string} baseURL
    * @returns {Promise<{site: object}|import('@adobe/spacecat-shared-http-utils').Response>}
    */
-  const validateRequest = async (baseURL) => {
-    if (!hasText(baseURL)) {
-      return badRequest('baseURL query parameter is required');
+  const validateRequest = async (siteId) => {
+    if (!hasText(siteId)) {
+      return badRequest('siteId path parameter is required');
     }
 
-    if (!isValidUrl(baseURL)) {
-      return badRequest('Invalid baseURL provided');
+    if (!isValidUUID(siteId)) {
+      return badRequest('Invalid siteId provided');
     }
 
-    const site = await Site.findByBaseURL(baseURL);
+    const site = await Site.findById(siteId);
     if (!isNonEmptyObject(site)) {
-      return notFound(`Site not found for baseURL: ${baseURL}`);
+      return notFound(`Site not found for siteId: ${siteId}`);
     }
 
     if (!await accessControlUtil.hasAccess(site)) {
@@ -67,7 +67,7 @@ function SandboxAuditController(ctx) {
     }
 
     if (!site.getIsSandbox()) {
-      return badRequest(`Sandbox audit endpoint only supports sandbox sites. Site ${baseURL} is not a sandbox.`);
+      return badRequest(`Sandbox audit endpoint only supports sandbox sites. Site ${siteId} is not a sandbox.`);
     }
 
     return { site };
@@ -85,9 +85,10 @@ function SandboxAuditController(ctx) {
    */
   const triggerAudit = async (context) => {
     try {
-      const { baseURL, auditType: auditTypeRaw } = context.data || {};
+      const { auditType: auditTypeRaw } = context.data || {};
+      const { siteId } = context.params || {};
       const auditTypes = normalizeAuditTypes(auditTypeRaw);
-      const validation = await validateRequest(baseURL);
+      const validation = await validateRequest(siteId);
       if (validation.site === undefined) {
         return validation;
       }
@@ -113,11 +114,12 @@ function SandboxAuditController(ctx) {
           minutesRemaining: minMins,
           auditsSkipped: skipped.map((s) => s.auditType),
           skippedDetail: skipped,
-        }, 400, { 'x-error': msg });
+        }, 429, { 'x-error': msg });
       }
 
       const configuration = await Configuration.findLatest();
-      log.info(`SandboxAudit: Triggering audit(s) for ${baseURL}`);
+      const baseURL = site.getBaseURL();
+      log.info(`SandboxAudit: Triggering audit(s) for siteId ${siteId}`);
       return triggerAudits(site, configuration, allowed, ctx, baseURL, skipped);
     } catch (error) {
       log.error(`Error triggering audit: ${error.message}`, error);

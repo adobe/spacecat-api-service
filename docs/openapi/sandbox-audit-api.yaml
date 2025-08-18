@@ -1,5 +1,5 @@
 sandbox-audit:
-  get:
+  post:
     tags:
       - sandbox
     summary: Trigger audit for a sandbox site
@@ -14,22 +14,23 @@ sandbox-audit:
       
       **Restrictions:**
       - Only works with sandbox sites (sites with `isSandbox: true`)
-      - Audits are rate-limited (default **4 hours** between runs for the same site/audit type). If the
-        limit is hit the endpoint responds with HTTP 400 and an explanatory message.
+      - Audits are rate-limited (default **4&nbsp;hours**, configurable via the
+        `SANDBOX_AUDIT_RATE_LIMIT_HOURS` environment variable). If the limit is hit the
+        endpoint responds with HTTP 429 and an explanatory message.
       - Regular production sites will be rejected with a 400 error
       
       **Supported Audit Types:**
       - `meta-tags`: Validate meta tags and SEO elements  
       - `alt-text`: Check for missing alt text in images
     parameters:
-      - name: baseURL
-        in: query
+      - name: siteId
+        in: path
         required: true
-        description: The base URL of the sandbox site to audit
+        description: UUID of the sandbox site
         schema:
           type: string
-          format: uri
-        example: "https://sandbox.example.com"
+          format: uuid
+        example: "a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14"
       - name: auditType
         in: query
         required: false
@@ -120,11 +121,12 @@ sandbox-audit:
                           nextAllowedAt: "2025-08-15T15:37:48.419Z"
                           minutesRemaining: 1
       '400':
-        description: Bad request - invalid parameters or non-sandbox site
+        description: Bad request – missing or invalid parameters / non-sandbox site
         content:
           application/json:
             schema:
               type: object
+              required: [error]
               properties:
                 error:
                   type: string
@@ -134,18 +136,25 @@ sandbox-audit:
                     - "Sandbox audit endpoint only supports sandbox sites. Site https://example.com is not a sandbox."
                     - "Invalid auditType. Supported types: meta-tags, alt-text"
                     - "No audits configured for site: https://sandbox.example.com"
-                    - "Rate limit exceeded: audits meta-tags, alt-text were run less than 4h ago."
+
+      '429':
+        description: Rate limit exceeded
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
                 nextAllowedIn:
                   type: string
-                  example: "3h 5m"
                 minutesRemaining:
                   type: number
-                  example: 185
                 auditsSkipped:
                   type: array
                   items:
                     type: string
-                  example: ["meta-tags", "alt-text"]
                 skippedDetail:
                   type: array
                   items:

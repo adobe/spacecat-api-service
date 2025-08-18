@@ -227,7 +227,7 @@ paths:
     $ref: './llmo-api.yaml#/llmo-questions'
   /sites/{siteId}/llmo/questions/{questionKey}:
     $ref: './llmo-api.yaml#/llmo-question'
-  /sandbox/audit:
+  /sites/{siteId}/sandbox/audit:
     $ref: './sandbox-audit-api.yaml#/sandbox-audit'
 
 components:

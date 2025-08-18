@@ -109,7 +109,7 @@ Default is 4 hrs. Set the variable to 0 to disable the rate-limit
 entirely.
 
 ```plaintext
-SANDBOX_AUDIT_RATE_LIMIT_HOURS=24
+SANDBOX_AUDIT_RATE_LIMIT_HOURS=4
 ```
 
 Import controller requires the following env variables:

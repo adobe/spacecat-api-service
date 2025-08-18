@@ -240,7 +240,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
 
     // Sandbox audit route
-    'GET /sandbox/audit': sandboxAuditController.triggerAudit,
+    'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
   };
 
   // Initialization of static and dynamic routes
