@@ -144,7 +144,7 @@ function ConsentBannerController(ctx) {
       return ok({
         jobId,
         results: {
-          ...results, scrapeJson: await generatePresignedUrl(s3, bucketName, result.path),
+          ...results, scrape_json: await generatePresignedUrl(s3, bucketName, result.path),
         },
       });
     } catch (error) {

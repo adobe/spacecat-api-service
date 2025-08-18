@@ -158,7 +158,7 @@ screenshots:
                       format: url
                       description: Pre-signed URL for mobile screenshot without consent banner
                       example: 'https://s3.amazonaws.com/bucket/screenshots/mobile-off.png?signature=...'
-                    scrapeJson:
+                    scrape_json:
                       type: string
                       format: url
                       description: Pre-signed URL for accessing the raw scrape data JSON
@@ -176,7 +176,7 @@ screenshots:
                     desktop_cookie_banner_off: 'https://s3.amazonaws.com/bucket/screenshots/desktop-off.png?signature=def456'
                     mobile_cookie_banner_on: 'https://s3.amazonaws.com/bucket/screenshots/mobile-on.png?signature=ghi789'
                     mobile_cookie_banner_off: 'https://s3.amazonaws.com/bucket/screenshots/mobile-off.png?signature=jkl012'
-                    scrapeJson: 'https://s3.amazonaws.com/bucket/scrape-data/job-12345.json?signature=mno345'
+                    scrape_json: 'https://s3.amazonaws.com/bucket/scrape-data/job-12345.json?signature=mno345'
       '400':
         description: Bad request - Missing or invalid jobId
         content:
