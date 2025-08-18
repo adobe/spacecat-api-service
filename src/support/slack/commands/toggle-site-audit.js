@@ -21,6 +21,70 @@ const PHRASE = 'audit';
 const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
 const ERROR_MESSAGE_PREFIX = ':x: ';
 
+/**
+ * Posts a message with a button to configure preflight audit requirements
+ * @param {Object} slackContext - The Slack context object
+ * @param {Object} site - The site object
+ * @param {string} auditType - The audit type (should be 'preflight')
+ */
+const promptPreflightConfig = async (slackContext, site, auditType) => {
+  const { say } = slackContext;
+
+  const currentAuthoringType = site.getAuthoringType();
+  const currentDeliveryConfig = site.getDeliveryConfig() || {};
+  const currentHelixConfig = site.getHlxConfig() || {};
+
+  const missingItems = [];
+  if (!currentAuthoringType) {
+    missingItems.push('Authoring Type');
+    missingItems.push('Preview URL');
+  } else if (currentAuthoringType === 'documentauthoring') {
+    // Document authoring require helix config
+    const hasHelixConfig = currentHelixConfig.rso;
+    if (!hasHelixConfig) {
+      missingItems.push('Helix Preview URL');
+    }
+  } else if (currentAuthoringType === 'cs' || currentAuthoringType === 'cs/crosswalk') {
+    // CS authoring types require delivery config
+    const hasDeliveryConfig = currentDeliveryConfig.programId
+      && currentDeliveryConfig.environmentId;
+    if (!hasDeliveryConfig) {
+      missingItems.push('AEM CS Preview URL');
+    }
+  }
+
+  await say({
+    text: `⚠️ Preflight audit requires additional configuration for \`${site.getBaseURL()}\``,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `⚠️ *Preflight audit requires additional configuration for:*\n\`${site.getBaseURL()}\`\n\n*Missing:*\n${missingItems.map((item) => `• ${item}`).join('\n')}`,
+        },
+      },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: 'Configure & Enable',
+            },
+            style: 'primary',
+            action_id: 'open_preflight_config',
+            value: JSON.stringify({
+              siteId: site.getId(),
+              auditType,
+            }),
+          },
+        ],
+      },
+    ],
+  });
+};
+
 export default (context) => {
   const baseCommand = BaseCommand({
     id: 'configurations-sites--toggle-site-audit',
@@ -149,6 +213,38 @@ export default (context) => {
           }
 
           if (isEnableAudit) {
+            if (singleAuditType === 'preflight') {
+              const authoringType = site.getAuthoringType();
+              const deliveryConfig = site.getDeliveryConfig();
+              const helixConfig = site.getHlxConfig();
+
+              let configMissing = false;
+
+              if (!authoringType) {
+                configMissing = true;
+              } else if (authoringType === 'documentauthoring' || authoringType === 'ue') {
+                // Document authoring and UE require helix config
+                const hasHelixConfig = helixConfig
+                  && helixConfig.rso && Object.keys(helixConfig.rso).length > 0;
+                if (!hasHelixConfig) {
+                  configMissing = true;
+                }
+              } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
+                // CS authoring types require delivery config
+                const hasDeliveryConfig = deliveryConfig
+                  && deliveryConfig.programId && deliveryConfig.environmentId;
+                if (!hasDeliveryConfig) {
+                  configMissing = true;
+                }
+              }
+
+              if (configMissing) {
+                // Prompt user to configure missing requirements
+                await promptPreflightConfig(slackContext, site, singleAuditType);
+                return;
+              }
+            }
+
             configuration.enableHandlerForSite(singleAuditType, site);
           } else {
             configuration.disableHandlerForSite(singleAuditType, site);
