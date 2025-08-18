@@ -1,3 +1,10 @@
+# [1.155.0](https://github.com/adobe/spacecat-api-service/compare/v1.154.4...v1.155.0) (2025-08-18)
+
+
+### Features
+
+* Screenshots endpoint ([#1160](https://github.com/adobe/spacecat-api-service/issues/1160)) ([a637afb](https://github.com/adobe/spacecat-api-service/commit/a637afb93c490b7b78620150d69e57ea46a3443d))
+
 ## [1.154.4](https://github.com/adobe/spacecat-api-service/compare/v1.154.3...v1.154.4) (2025-08-18)
 
 
