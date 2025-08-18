@@ -485,13 +485,15 @@ export function onboardSiteModal(lambdaContext) {
       };
 
       const configuration = await Configuration.findLatest();
-
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
         additionalParams.deliveryType = deliveryType;
       }
       if (authoringType && authoringType !== 'default') {
         additionalParams.authoringType = authoringType;
+      }
+      if (deliveryConfigFromPreview) {
+        additionalParams.deliveryConfig = deliveryConfigFromPreview;
       }
 
       const parsedWaitTime = waitTime ? parseInt(waitTime, 10) : undefined;
@@ -514,26 +516,6 @@ export function onboardSiteModal(lambdaContext) {
       );
 
       await configuration.save();
-
-      // Apply preview configuration if provided
-      if (deliveryConfigFromPreview && reportLine.siteId) {
-        const site = await Site.findById(reportLine.siteId);
-        if (site) {
-          const currentDeliveryConfig = site.getDeliveryConfig() || {};
-          const updatedDeliveryConfig = {
-            ...currentDeliveryConfig,
-            ...deliveryConfigFromPreview,
-          };
-          site.setDeliveryConfig(updatedDeliveryConfig);
-
-          if (authoringType) {
-            site.setAuthoringType(authoringType);
-          }
-
-          await site.save();
-          log.info(`Applied preview configuration for site ${reportLine.siteId}:`, { deliveryConfig: deliveryConfigFromPreview, authoringType });
-        }
-      }
 
       if (reportLine.errors.length > 0) {
         await client.chat.postMessage({

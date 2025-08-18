@@ -481,17 +481,23 @@ const isImportEnabled = (importType, imports) => {
  *
  * @param {string} baseURL - The site base URL.
  * @param {string} imsOrgID - The IMS Organization ID.
+ * @param {string} authoringType - The authoring type of the site.
+ * @param {string} customDeliveryType - The delivery type of the site.
  * @param {Object} slackContext - The Slack context object.
  * @param {Object} reportLine - The report line object to update.
-  * @param {Object} context - The Lambda context containing dataAccess, log, etc.
+ * @param {Object} context - The Lambda context containing dataAccess, log, etc.
+ * @param {Object} deliveryConfig - Optional delivery config to set on the site.
  * @returns {Promise<Object>} - Object containing the site and organizationId.
  */
 const createSiteAndOrganization = async (
   baseURL,
   imsOrgID,
+  authoringType,
+  customDeliveryType,
   slackContext,
   reportLine,
   context,
+  deliveryConfig,
 ) => {
   const { imsClient, dataAccess, log } = context;
   const { Site, Organization } = dataAccess;
@@ -538,15 +544,25 @@ const createSiteAndOrganization = async (
 
     // Create new site
     log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
-    const deliveryType = await findDeliveryType(baseURL);
+    const deliveryType = customDeliveryType || await findDeliveryType(baseURL);
     log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
     localReportLine.deliveryType = deliveryType;
     const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
     try {
       site = await Site.create({
-        baseURL, deliveryType, isLive, organizationId,
+        baseURL, deliveryType, isLive, organizationId, authoringType,
       });
+
+      if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
+        site.setDeliveryConfig(deliveryConfig);
+        // Also set authoring type if provided (needed when setting delivery config)
+        if (authoringType) {
+          site.setAuthoringType(authoringType);
+        }
+        await site.save();
+        log.info(`Applied delivery configuration for site ${site.getId()}:`, { deliveryConfig, authoringType });
+      }
     } catch (error) {
       log.error(`Error creating site: ${error.message}`);
       localReportLine.errors = error.message;
@@ -613,7 +629,7 @@ export const onboardSingleSite = async (
     spacecatOrgId: '',
     siteId: '',
     profile: profileName,
-    deliveryType: '',
+    deliveryType: additionalParams.deliveryType || '',
     authoringType: additionalParams.authoringType || '',
     imports: '',
     audits: '',
@@ -639,9 +655,12 @@ export const onboardSingleSite = async (
     const { site, organizationId } = await createSiteAndOrganization(
       baseURL,
       imsOrgID,
+      additionalParams.authoringType,
+      additionalParams.deliveryType,
       slackContext,
       reportLine,
       context,
+      additionalParams.deliveryConfig,
     );
 
     const siteID = site.getId();
@@ -779,6 +798,7 @@ export const onboardSingleSite = async (
         await triggerAuditForSite(
           site,
           auditType,
+          undefined,
           slackContext,
           context,
         );

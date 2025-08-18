@@ -560,7 +560,7 @@ describe('onboard-modal', () => {
       });
 
       expect(ackMock).to.have.been.calledOnce;
-      expect(deliveryTypeConfigMock).to.have.been.calledWith(deliveryConfig);
+      // Note: delivery config is now set during site creation, not afterward
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: ':gear: Starting onboarding for site https://example.com...',
