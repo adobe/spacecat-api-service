@@ -38,6 +38,7 @@ describe('LlmoOnboardCommand', () => {
     // Create mock site
     mockSite = {
       getId: sinon.stub().returns('test-site-id'),
+      getOrganizationId: sinon.stub().returns('test-org-id'),
       getConfig: sinon.stub().returns(mockConfig),
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
@@ -54,6 +55,7 @@ describe('LlmoOnboardCommand', () => {
     mockDataAccess = {
       Site: {
         findByBaseURL: sinon.stub().resolves(mockSite),
+        allByOrganizationId: sinon.stub().resolves([]),
       },
       Configuration: {
         findLatest: sinon.stub().resolves(mockConfiguration),
@@ -79,6 +81,8 @@ describe('LlmoOnboardCommand', () => {
     slackContext = {
       say: sinon.stub(),
     };
+
+    mockDataAccess.Site.allByOrganizationId.resolves([mockSite]);
 
     command = LlmoOnboardCommand(mockContext);
   });
@@ -136,7 +140,7 @@ describe('LlmoOnboardCommand', () => {
       );
     });
 
-    it('should successfully onboard LLMO for a valid site and enable referral traffic processing + backfill', async () => {
+    it('should successfully onboard LLMO for a valid site (first site in org) and enable all audits', async () => {
       await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
 
       // site lookup and config update
@@ -148,11 +152,14 @@ describe('LlmoOnboardCommand', () => {
 
       // enable llmo-prompts-ahrefs import on the site confing
       expect(mockConfig.enableImport).calledWith('llmo-prompts-ahrefs', { limit: 25 });
+      // check organization sites for existing agentic traffic config
+      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith('test-org-id');
 
-      // enable handlers for site in Configuration and save it
+      // enable handler for site in Configuration and save it
       expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
-      expect(mockConfiguration.enableHandlerForSite).calledWith('geo-brand-presence', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('cdn-analysis', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(mockConfiguration.save).to.have.been.calledOnce;
       // configuration was saved
 
@@ -176,6 +183,43 @@ describe('LlmoOnboardCommand', () => {
       expect(slackContext.say).to.have.been.calledWith(
         sinon.match.string.and(sinon.match(/LLMO onboarding completed successfully/)),
       );
+    });
+
+    it('should skip enabling cdn-analysis when already enabled in organization', async () => {
+      const existingSiteConfig = {
+        isHandlerEnabledForSite: sinon.stub().returns(true), // returns true for cdn-analysis
+        getLlmoConfig: sinon.stub().returns(null),
+        toJSON: sinon.stub().returns({}),
+        getSlackConfig: sinon.stub().returns(null),
+        getHandlers: sinon.stub().returns({}),
+        getHandlerConfig: sinon.stub().returns({}),
+        getContentAiConfig: sinon.stub().returns({}),
+        getImports: sinon.stub().returns([]),
+        getCdnLogsConfig: sinon.stub().returns({}),
+        enableImport: sinon.stub(),
+      };
+
+      const existingSite = {
+        getId: sinon.stub().returns('existing-site-id'),
+        getOrganizationId: sinon.stub().returns('test-org-id'),
+        getConfig: sinon.stub().returns(existingSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Site.allByOrganizationId.resolves([existingSite, mockSite]);
+
+      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
+
+      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith('test-org-id');
+
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
+
+      expect(mockConfiguration.enableHandlerForSite).to.not.have.been.calledWith('cdn-analysis', mockSite);
+
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
     });
 
     it('should handle brand names with spaces', async () => {
