@@ -16,23 +16,59 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import * as sfn from '@aws-sdk/client-sfn';
-import {
-  startOnboarding,
-  onboardSiteModal,
-  extractDeliveryConfigFromPreviewUrl,
-} from '../../../../src/support/slack/actions/onboard-modal.js';
+import esmock from 'esmock';
+import nock from 'nock';
 
 use(chaiAsPromised);
 use(sinonChai);
 
+// Mock the onboard-modal module with network dependencies stubbed
+let startOnboarding;
+let onboardSiteModal;
+let extractDeliveryConfigFromPreviewUrl;
+
 describe('onboard-modal', () => {
   let sandbox;
 
+  before(async () => {
+    // Mock the network-dependent modules before importing
+    const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+      '../../../../src/utils/slack/base.js': {
+        loadProfileConfig: sinon.stub().resolves({
+          audits: ['scrape-top-pages', 'broken-backlinks', 'broken-internal-links', 'experimentation-opportunities', 'meta-tags', 'sitemap', 'cwv', 'alt-text', 'broken-backlinks-auto-suggest', 'meta-tags-auto-suggest', 'broken-internal-links-auto-suggest'],
+          imports: ['organic-traffic', 'top-pages', 'organic-keywords', 'all-traffic'],
+          profile: 'demo',
+        }),
+      },
+      '../../../../src/support/utils.js': {
+        onboardSingleSite: sinon.stub().resolves({
+          siteId: 'site123',
+          imsOrgId: '1234567894ABCDEF12345678@AdobeOrg',
+          spacecatOrgId: 'org123',
+          deliveryType: 'aem_edge',
+          authoringType: 'documentauthoring',
+          existingSite: 'No',
+          profile: 'demo',
+          audits: 'scrape-top-pages, broken-backlinks, broken-internal-links, experimentation-opportunities, meta-tags, sitemap, cwv, alt-text, broken-backlinks-auto-suggest, meta-tags-auto-suggest, broken-internal-links-auto-suggest',
+          imports: 'organic-traffic, top-pages, organic-keywords, all-traffic',
+          errors: [],
+        }),
+      },
+    });
+
+    ({ startOnboarding, onboardSiteModal, extractDeliveryConfigFromPreviewUrl } = mockedModule);
+  });
+
   beforeEach(() => {
+    // Block all network requests
+    nock.disableNetConnect();
     sandbox = sinon.createSandbox();
   });
 
   afterEach(() => {
+    // Clean up after each test
+    nock.cleanAll();
+    nock.enableNetConnect();
     sandbox.restore();
   });
 
@@ -533,7 +569,21 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n\n:ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n:space-cat: *Spacecat Org ID:* n/a\n:identification_card: *Site ID:* site123\n:cat-egory-white: *Delivery Type:* n/a\n:writing_hand: *Authoring Type:* documentauthoring\n:gear: *Delivery Config:* Program 12345, Environment 67890\n:globe_with_meridians: *Preview Environment:* Configured with Program 12345, Environment 67890\n:question: *Already existing:* No\n:gear: *Profile:* demo\n:hourglass_flowing_sand: *Wait Time:* 30 seconds\n:clipboard: *Audits:* scrape-top-pages, broken-backlinks, broken-internal-links, experimentation-opportunities, meta-tags, sitemap, cwv, alt-text, broken-backlinks-auto-suggest, meta-tags-auto-suggest, broken-internal-links-auto-suggest\n:inbox_tray: *Imports:* organic-traffic, top-pages, organic-keywords, all-traffic\n        ',
+        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
+          + '\n'
+          + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
+          + ':space-cat: *Spacecat Org ID:* org123\n'
+          + ':identification_card: *Site ID:* site123\n'
+          + ':cat-egory-white: *Delivery Type:* aem_edge\n'
+          + ':writing_hand: *Authoring Type:* documentauthoring\n'
+          + ':gear: *Delivery Config:* Program 12345, Environment 67890\n'
+          + ':globe_with_meridians: *Preview Environment:* Configured with Program 12345, Environment 67890\n'
+          + ':question: *Already existing:* No\n'
+          + ':gear: *Profile:* demo\n'
+          + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
+          + ':clipboard: *Audits:* scrape-top-pages, broken-backlinks, broken-internal-links, experimentation-opportunities, meta-tags, sitemap, cwv, alt-text, broken-backlinks-auto-suggest, meta-tags-auto-suggest, broken-internal-links-auto-suggest\n'
+          + ':inbox_tray: *Imports:* organic-traffic, top-pages, organic-keywords, all-traffic\n'
+          + '        ',
         thread_ts: '1234567890.123456',
       });
     });
@@ -626,7 +676,20 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':information_source: Site https://example.com already exists. Organization ID: org123',
+        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
+          + '\n'
+          + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
+          + ':space-cat: *Spacecat Org ID:* org123\n'
+          + ':identification_card: *Site ID:* site123\n'
+          + ':cat-egory-white: *Delivery Type:* aem_edge\n'
+          + ':writing_hand: *Authoring Type:* documentauthoring\n'
+          + '\n'
+          + ':question: *Already existing:* No\n'
+          + ':gear: *Profile:* demo\n'
+          + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
+          + ':clipboard: *Audits:* scrape-top-pages, broken-backlinks, broken-internal-links, experimentation-opportunities, meta-tags, sitemap, cwv, alt-text, broken-backlinks-auto-suggest, meta-tags-auto-suggest, broken-internal-links-auto-suggest\n'
+          + ':inbox_tray: *Imports:* organic-traffic, top-pages, organic-keywords, all-traffic\n'
+          + '        ',
         thread_ts: '1234567890.123456',
       });
     });
@@ -647,6 +710,235 @@ describe('onboard-modal', () => {
         },
       });
       expect(clientMock.chat.postMessage).to.not.have.been.called;
+    });
+
+    it('should post error message when onboarding returns errors', async () => {
+      const mockedModuleWithErrors = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().resolves({
+            siteId: 'site123',
+            errors: ['Error during site creation', 'Configuration failed'],
+          }),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalWithErrors } = mockedModuleWithErrors;
+      const onboardSiteModalAction = onboardSiteModalWithErrors(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.calledOnce;
+      expect(clientMock.chat.postMessage).to.have.been.calledWith({
+        channel: 'C12345',
+        text: ':warning: Error during site creation,Configuration failed',
+        thread_ts: '1234567890.123456',
+      });
+    });
+
+    it('should handle errors when slackContext.say is called during onboarding process', async () => {
+      const mockedModuleWithSayUsage = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().callsFake(
+            async (url, imsOrgId, config, profile, waitTime, slackContext) => {
+              await slackContext.say('Test error message from onboarding process');
+              return {
+                siteId: 'site123',
+                errors: [],
+              };
+            },
+          ),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalWithSayUsage } = mockedModuleWithSayUsage;
+      const onboardSiteModalAction = onboardSiteModalWithSayUsage(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.calledOnce;
+      expect(clientMock.chat.postMessage).to.have.been.calledWith({
+        channel: 'C12345',
+        text: 'Test error message from onboarding process',
+        thread_ts: '1234567890.123456',
+      });
+    });
+
+    it('should handle case where site has no delivery config (getDeliveryConfig returns null)', async () => {
+      body.view.state.values.preview_url_input.preview_url.value = 'https://author-p12345-e67890.adobeaemcloud.com';
+
+      siteMock.findById.resolves({
+        getDeliveryConfig: sandbox.stub().returns(null), // Test || {} fallback
+        setDeliveryConfig: sandbox.stub(),
+        setAuthoringType: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+      configurationMock.findLatest.resolves(configurationMock);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+      expect(siteMock.findById).to.have.been.calledWith('site123');
+    });
+
+    it('should handle case where reportLine has no siteId', async () => {
+      const mockedModuleNoSiteId = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().resolves({
+            siteId: null, // No siteId returned
+            errors: [],
+          }),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalNoSiteId } = mockedModuleNoSiteId;
+      const onboardSiteModalAction = onboardSiteModalNoSiteId(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+      expect(clientMock.chat.postMessage).to.have.been.calledWith(
+        sinon.match({
+          text: sinon.match(':identification_card: *Site ID:* n/a'),
+        }),
+      );
+    });
+
+    it('should handle case where site has empty delivery config', async () => {
+      const mockedModuleEmptyDelivery = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().resolves({
+            siteId: 'site123',
+            errors: [],
+          }),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalEmptyDelivery } = mockedModuleEmptyDelivery;
+      const siteWithNoDeliveryInfo = {
+        getDeliveryConfig: sandbox.stub().returns({}), // Empty delivery config
+      };
+
+      const contextWithEmptyDelivery = {
+        ...context,
+        dataAccess: {
+          ...context.dataAccess,
+          Site: {
+            findById: sandbox.stub().resolves(siteWithNoDeliveryInfo),
+          },
+        },
+      };
+
+      const onboardSiteModalAction = onboardSiteModalEmptyDelivery(contextWithEmptyDelivery);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+      const postMessageCalls = clientMock.chat.postMessage.getCalls();
+      const messages = postMessageCalls.map((call) => call.args[0].text);
+      const hasDeliveryConfigInfo = messages.some((text) => text.includes(':gear: *Delivery Config:*'));
+      expect(hasDeliveryConfigInfo).to.be.false;
+    });
+
+    it('should handle delivery config with only programId', async () => {
+      const mockedModulePartialDelivery = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({
+            audits: ['scrape-top-pages'],
+            imports: ['organic-traffic'],
+            profile: 'demo',
+          }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().resolves({
+            siteId: 'site123',
+            errors: [],
+          }),
+        },
+      });
+
+      const { onboardSiteModal: onboardSiteModalPartialDelivery } = mockedModulePartialDelivery;
+      const siteWithPartialDelivery = {
+        getDeliveryConfig: sandbox.stub().returns({
+          programId: '12345',
+        }),
+      };
+
+      const contextWithPartialDelivery = {
+        ...context,
+        dataAccess: {
+          ...context.dataAccess,
+          Site: {
+            findById: sandbox.stub().resolves(siteWithPartialDelivery),
+          },
+        },
+      };
+
+      const onboardSiteModalAction = onboardSiteModalPartialDelivery(contextWithPartialDelivery);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      const postMessageCalls = clientMock.chat.postMessage.getCalls();
+      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding completed successfully'));
+      expect(successMessages.length).to.be.greaterThan(0);
+
+      const hasDeliveryConfigWithProgramId = successMessages.some((call) => call.args[0].text.includes(':gear: *Delivery Config:* Program 12345'));
+      expect(hasDeliveryConfigWithProgramId).to.be.true;
     });
   });
 });
