@@ -174,6 +174,11 @@ describe('getRouteHandlers', () => {
     removeFix: () => null,
   };
 
+  const mockConsentBannerController = {
+    getScreenshots: () => null,
+    takeScreenshots: () => null,
+  };
+
   const mockLlmoController = {
     getLlmoSheetData: () => null,
     getLlmoConfig: () => null,
@@ -206,6 +211,7 @@ describe('getRouteHandlers', () => {
       mockBrandsController,
       mockPreflightController,
       mockDemoController,
+      mockConsentBannerController,
       mockScrapeController,
       mockScrapeJobController,
       mockMcpController,
@@ -255,7 +261,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /trigger']).to.equal(mockTrigger);
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
-    expect(staticRoutes['GET /screenshots']).to.equal(mockDemoController.getScreenshots);
+    expect(staticRoutes['GET /screenshots']).to.equal(mockConsentBannerController.getScreenshots);
     expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
     expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
