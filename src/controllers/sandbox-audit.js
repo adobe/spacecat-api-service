@@ -77,15 +77,16 @@ function SandboxAuditController(ctx) {
   const DEFAULT_RATE_LIMIT_HOURS = 4;
 
   /**
-   * Triggers audit(s) for a sandbox site by baseURL.
-   * GET /sandbox/audit?baseURL=https://example.com&auditType=meta-tags
-   * GET /sandbox/audit?baseURL=https://example.com&auditType=[meta-tags,broken-internal-links]
+   * Triggers audit(s) for a sandbox site by siteId.
+   * POST /sites/:siteId/sandbox/audit?auditType=meta-tags
+   * POST /sites/:siteId/sandbox/audit?auditType=meta-tags,alt-text
    * OR
-   * GET /sandbox/audit?baseURL=https://example.com (runs all audits)
+   * POST /sites/:siteId/sandbox/audit (runs all audits)
    */
   const triggerAudit = async (context) => {
     try {
-      const { auditType: auditTypeRaw } = context.data || {};
+      // Extract auditType from query parameters, not from body data
+      const { auditType: auditTypeRaw } = context.query || {};
       const { siteId } = context.params || {};
       const auditTypes = normalizeAuditTypes(auditTypeRaw);
       const validation = await validateRequest(siteId);

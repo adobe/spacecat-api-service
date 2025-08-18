@@ -99,7 +99,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -130,7 +130,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {},
+        query: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -148,7 +148,7 @@ describe('Sandbox Audit Controller', () => {
 
     it('returns 400 when siteId is missing', async () => {
       const request = {
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -166,7 +166,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: 'not-a-valid-uuid',
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -188,7 +188,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: nonexistentSiteId,
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -245,7 +245,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -262,10 +262,10 @@ describe('Sandbox Audit Controller', () => {
 
     it('returns 400 with minutes format when next audit under an hour', async () => {
       const now = new Date();
-      const thirtyMinsAgo = new Date(now.getTime() - 30 * 60 * 1000);
+      const twentyNineMinsAgo = new Date(now.getTime() - 29 * 60 * 1000);
 
       const recentAuditMock = {
-        getAuditedAt: () => thirtyMinsAgo.toISOString(),
+        getAuditedAt: () => twentyNineMinsAgo.toISOString(),
       };
 
       const siteWithHistory = {
@@ -274,13 +274,13 @@ describe('Sandbox Audit Controller', () => {
       };
 
       mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(siteWithHistory);
-      context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '1';
+      context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '0.5';
 
       const request = {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -294,10 +294,10 @@ describe('Sandbox Audit Controller', () => {
 
     it('returns 400 with hours+minutes format when next audit over an hour', async () => {
       const now = new Date();
-      const ninetyMinsAgo = new Date(now.getTime() - 90 * 60 * 1000);
+      const eightyNineMinsAgo = new Date(now.getTime() - 89 * 60 * 1000);
 
       const recentAuditMock = {
-        getAuditedAt: () => ninetyMinsAgo.toISOString(),
+        getAuditedAt: () => eightyNineMinsAgo.toISOString(),
       };
 
       const siteWithHistory = {
@@ -312,7 +312,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -331,7 +331,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'invalid-audit-type',
         },
       };
@@ -354,7 +354,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -377,7 +377,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {},
+        query: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -408,7 +408,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {},
+        query: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -438,7 +438,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -451,7 +451,7 @@ describe('Sandbox Audit Controller', () => {
 
     it('handles empty request data', async () => {
       const request = {
-        data: {},
+        query: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -481,7 +481,7 @@ describe('Sandbox Audit Controller', () => {
           params: {
             siteId: SITE_IDS[0],
           },
-          data: {
+          query: {
             auditType,
           },
         };
@@ -506,7 +506,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'meta-tags',
         },
       };
@@ -536,7 +536,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        data: {
+        query: {
           auditType: 'meta-tags,alt-text',
         },
       };
@@ -583,7 +583,7 @@ describe('Sandbox Audit Controller', () => {
 
       const response = await denyController.triggerAudit({
         params: { siteId: SITE_IDS[0] },
-        data: {},
+        query: {},
       });
       const body = await response.json();
 
@@ -606,7 +606,7 @@ describe('Sandbox Audit Controller', () => {
 
       const req = {
         params: { siteId: SITE_IDS[0] },
-        data: {},
+        query: {},
       };
       const res = await sandboxAuditController.triggerAudit(req);
       const body = await res.json();
@@ -623,7 +623,7 @@ describe('Sandbox Audit Controller', () => {
 
       const req = {
         params: { siteId: SITE_IDS[0] },
-        data: {},
+        query: {},
       };
       await expect(sandboxAuditController.triggerAudit(req)).to.be.rejectedWith('Config fail');
       expect(loggerStub.error).to.have.been.calledWithMatch(sinon.match('Error triggering audit'));
