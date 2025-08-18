@@ -553,8 +553,7 @@ export function onboardSiteModal(lambdaContext) {
           ? `\n:globe_with_meridians: *Preview Environment:* Configured with Program ${deliveryConfigFromPreview.programId}, Environment ${deliveryConfigFromPreview.environmentId}`
           : '';
 
-        const message = `
-:white_check_mark: *Onboarding completed successfully by ${user.name}!*
+        const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
 
 :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
 :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}

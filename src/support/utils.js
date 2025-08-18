@@ -9,7 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
@@ -18,7 +18,7 @@ import {
   tracingFetch as fetch,
   isValidUrl,
   isObject,
-  resolveCanonicalUrl,
+  resolveCanonicalUrl, isValidIMSOrgId,
 } from '@adobe/spacecat-shared-utils';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
@@ -464,40 +464,101 @@ export function buildS3Prefix(type, siteId, path = '') {
 }
 
 /**
- * Checks if a site is in the LA_CUSTOMERS list and returns appropriate response if it is.
+ * Checks if an import type is already enabled for a site.
+ *
+ * @param {string} importType - The import type to check.
+ * @param {Array} imports - Array of import configurations.
+ * @returns {boolean} - True if import is enabled, false otherwise.
  */
-const checkLACustomerRestriction = async (
+const isImportEnabled = (importType, imports) => {
+  const foundImport = imports?.find((importConfig) => importConfig.type === importType);
+  // If import is found, check if it's enabled, otherwise assume it's not enabled (false)
+  return foundImport ? foundImport.enabled : false;
+};
+
+/**
+ * Creates or retrieves a site and its associated organization.
+ *
+ * @param {string} baseURL - The site base URL.
+ * @param {string} imsOrgID - The IMS Organization ID.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} reportLine - The report line object to update.
+  * @param {Object} context - The Lambda context containing dataAccess, log, etc.
+ * @returns {Promise<Object>} - Object containing the site and organizationId.
+ */
+const createSiteAndOrganization = async (
   baseURL,
   imsOrgID,
-  profileName,
   slackContext,
-  env,
-  log,
+  reportLine,
+  context,
 ) => {
+  const { imsClient, dataAccess, log } = context;
+  const { Site, Organization } = dataAccess;
   const { say } = slackContext;
+  // Create a local copy to avoid modifying the parameter directly
+  const localReportLine = { ...reportLine };
 
-  if (env.LA_CUSTOMERS) {
-    const laCustomers = env.LA_CUSTOMERS.split(',').map((url) => url.trim());
-    const isLACustomer = laCustomers.some(
-      (url) => baseURL.toLowerCase().endsWith(url.toLowerCase()),
-    );
+  let site = await Site.findByBaseURL(baseURL);
+  let organizationId;
 
-    if (isLACustomer) {
-      const message = `:warning: Cannot onboard site ${baseURL} - it's already onboarded and live!`;
-      log.warn(message);
-      await say(message);
-      return {
-        site: baseURL,
+  // Check if site already exists
+  if (site) {
+    const siteOrgId = site.getOrganizationId();
+    const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
+    await say(message);
+    log.info(message);
+  } else {
+    // New site - handle organization logic
+    log.info(`Site ${baseURL} doesn't exist. Processing organization...`);
+
+    // Check if the organization with IMS Org ID already exists; create if it doesn't
+    let organization = await Organization.findByImsOrgId(imsOrgID);
+    if (!organization) {
+      const imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
+      if (!imsOrgDetails) {
+        localReportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
+        localReportLine.status = 'Failed';
+        throw new Error(localReportLine.errors);
+      }
+      log.info(`IMS Org Details: ${imsOrgDetails}`);
+      organization = await Organization.create({
+        name: imsOrgDetails.orgName,
         imsOrgId: imsOrgID,
-        profile: profileName,
-        errors: 'Site is a Live customer',
-        status: 'Failed',
-        existingSite: 'Yes',
-      };
+      });
+
+      const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
+      await say(message);
+      log.info(message);
+    }
+
+    organizationId = organization.getId(); // Set organizationId for new site
+    log.info(`Organization ${organizationId} was successfully retrieved or created`);
+    localReportLine.spacecatOrgId = organizationId;
+
+    // Create new site
+    log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
+    const deliveryType = await findDeliveryType(baseURL);
+    log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
+    localReportLine.deliveryType = deliveryType;
+    const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
+
+    try {
+      site = await Site.create({
+        baseURL, deliveryType, isLive, organizationId,
+      });
+    } catch (error) {
+      log.error(`Error creating site: ${error.message}`);
+      localReportLine.errors = error.message;
+      localReportLine.status = 'Failed';
+      await say(`:x: *Errors:* ${error.message}`);
+
+      throw error;
     }
   }
 
-  return null;
+  Object.assign(reportLine, localReportLine);
+  return { site, organizationId };
 };
 
 /**
@@ -530,9 +591,9 @@ export const onboardSingleSite = async (
 ) => {
   const { say } = slackContext;
   const {
-    dataAccess, log, imsClient, env,
+    dataAccess, log, env,
   } = context;
-  const { Site, Organization } = dataAccess;
+  const { Configuration } = dataAccess;
   const sfnClient = new SFNClient();
 
   // Process URL - allow customization for different input formats
@@ -541,19 +602,6 @@ export const onboardSingleSite = async (
 
   // Extract profile name for logging and reporting (assume it's passed in options)
   const profileName = options.profileName || 'unknown';
-
-  // Check if site is in LA_CUSTOMERS list
-  const laCustomerCheck = await checkLACustomerRestriction(
-    baseURL,
-    imsOrgID,
-    profileName,
-    slackContext,
-    env,
-    log,
-  );
-  if (laCustomerCheck) {
-    return laCustomerCheck;
-  }
 
   log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
   await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
@@ -581,98 +629,20 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
-    if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
+    if (!isValidIMSOrgId(imsOrgID)) {
       reportLine.errors = 'Invalid IMS Org ID';
       reportLine.status = 'Failed';
       return reportLine;
     }
 
-    // check if the organization with IMS Org ID already exists; create if it doesn't
-    let organization = await Organization.findByImsOrgId(imsOrgID);
-    if (!organization) {
-      let imsOrgDetails;
-      try {
-        imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
-        log.info(`IMS Org Details: ${imsOrgDetails}`);
-      } catch (error) {
-        log.error(`Error retrieving IMS Org details: ${error.message}`);
-        reportLine.errors = `Error retrieving IMS org with the ID *${imsOrgID}*.`;
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-
-      if (!imsOrgDetails) {
-        reportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-
-      organization = await Organization.create({
-        name: imsOrgDetails.orgName,
-        imsOrgId: imsOrgID,
-      });
-
-      const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
-      await say(message);
-      log.info(message);
-    }
-
-    const organizationId = organization.getId();
-    log.info(`Organization ${organizationId} was successfully retrieved or created`);
-    reportLine.spacecatOrgId = organizationId;
-
-    let site = await Site.findByBaseURL(baseURL);
-    if (site) {
-      reportLine.existingSite = 'Yes';
-      reportLine.deliveryType = site.getDeliveryType();
-      log.info(`Site ${baseURL} already exists. Site ID: ${site.getId()}, Delivery Type: ${reportLine.deliveryType}`);
-
-      const siteOrgId = site.getOrganizationId();
-      if (siteOrgId !== organizationId) {
-        log.info(`:warning: :alert: Site ${baseURL} organization ID mismatch. Run below slack command to update site organization to ${organizationId}`);
-        log.info(`:fire: @spacecat set imsorg ${baseURL} ${organizationId}`);
-      }
-    } else {
-      log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
-
-      // Use forced delivery type if provided, otherwise detect it
-      let deliveryType;
-      if (additionalParams.deliveryType
-        && Object.values(SiteModel.DELIVERY_TYPES).includes(additionalParams.deliveryType)) {
-        deliveryType = additionalParams.deliveryType;
-        log.info(`Using forced delivery type for site ${baseURL}: ${deliveryType}`);
-      } else {
-        deliveryType = await findDeliveryType(baseURL);
-        log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
-      }
-
-      reportLine.deliveryType = deliveryType;
-      const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
-
-      const siteCreateParams = {
-        baseURL,
-        deliveryType,
-        isLive,
-        organizationId,
-      };
-
-      // Add authoring type if provided
-      if (additionalParams.authoringType
-        && Object.values(SiteModel.AUTHORING_TYPES || {})
-          .includes(additionalParams.authoringType)) {
-        siteCreateParams.authoringType = additionalParams.authoringType;
-        log.info(`Setting authoring type for site ${baseURL}: ${additionalParams.authoringType}`);
-      }
-
-      try {
-        site = await Site.create(siteCreateParams);
-      } catch (error) {
-        log.error(`Error creating site: ${error.message}`);
-        reportLine.errors = error.message;
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-    }
+    // Create or retrieve site and organization
+    const { site, organizationId } = await createSiteAndOrganization(
+      baseURL,
+      imsOrgID,
+      slackContext,
+      reportLine,
+      context,
+    );
 
     const siteID = site.getId();
     log.info(`Site ${baseURL} was successfully retrieved or created. Site ID: ${siteID}`);
@@ -707,8 +677,25 @@ export const onboardSingleSite = async (
     const importTypes = Object.keys(profile.imports);
     reportLine.imports = importTypes.join(', ');
     const siteConfig = site.getConfig();
+
+    // Enabled imports only if there are not already enabled
+    const imports = siteConfig.getImports();
+    const importsEnabled = [];
     for (const importType of importTypes) {
-      siteConfig.enableImport(importType);
+      const isEnabled = isImportEnabled(importType, imports);
+      if (!isEnabled) {
+        log.info(`Enabling import: ${importType}`);
+        siteConfig.enableImport(importType);
+        importsEnabled.push(importType);
+      } else {
+        log.info(`Import '${importType}' is already enabled, skipping`);
+      }
+    }
+
+    if (importsEnabled.length > 0) {
+      log.info(`Enabled the following imports for ${siteID}: ${importsEnabled.join(', ')}`);
+    } else {
+      log.info(`All imports are already enabled for ${siteID}`);
     }
 
     log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
@@ -756,21 +743,37 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
-    auditTypes.forEach((auditType) => {
-      configuration.enableHandlerForSite(auditType, site);
-    });
+    // Get current configuration for audit operations
+    const auditConfiguration = await Configuration.findLatest();
+
+    // Check which audits are not already enabled
+    const auditsEnabled = [];
+    for (const auditType of auditTypes) {
+      /* eslint-disable no-await-in-loop */
+      const isEnabled = auditConfiguration.isHandlerEnabledForSite(auditType, site);
+      if (!isEnabled) {
+        auditConfiguration.enableHandlerForSite(auditType, site);
+        auditsEnabled.push(auditType);
+      }
+    }
+
+    if (auditsEnabled.length > 0) {
+      log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+    } else {
+      log.info(`All audits are already enabled for site ${siteID}`);
+    }
 
     reportLine.audits = auditTypes.join(', ');
     log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
 
-    await say(`:white_check_mark: *Enabled imports*: ${reportLine.imports} *and audits*: ${reportLine.audits}`);
+    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
 
     // trigger audit runs
     log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
     await say(`:gear: Starting audits: ${auditTypes}`);
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
+      if (!auditConfiguration.isHandlerEnabledForSite(auditType, site)) {
         await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
       } else {
         await triggerAuditForSite(
@@ -798,7 +801,7 @@ export const onboardSingleSite = async (
       },
     };
 
-    // Disable imports and audits job
+    // Disable imports and audits job - only disable what was enabled during onboarding
     const disableImportAndAuditJob = {
       type: 'disable-import-audit-processor',
       siteId: siteID,
@@ -806,8 +809,8 @@ export const onboardSingleSite = async (
       imsOrgId: imsOrgID,
       organizationId,
       taskContext: {
-        importTypes,
-        auditTypes,
+        importTypes: importsEnabled || [],
+        auditTypes: auditsEnabled || [],
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,

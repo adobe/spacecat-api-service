@@ -261,10 +261,7 @@ function OnboardCommand(context) {
           thread_ts: threadTs,
         };
 
-        await client.chat.postMessage({
-          channel: channelId,
-          ...message,
-        });
+        await say(message);
       }
     } catch (error) {
       log.error(error);

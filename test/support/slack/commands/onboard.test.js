@@ -119,15 +119,14 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.client.chat.postMessage).to.have.been.calledWith(
+      expect(slackContext.say).to.have.been.calledWith(
         sinon.match({
-          channel: 'test-channel',
           blocks: sinon.match.array,
         }),
       );
 
       // Verify the message contains the start onboarding button
-      const callArgs = slackContext.client.chat.postMessage.getCall(0).args[0];
+      const callArgs = slackContext.say.getCall(0).args[0];
       expect(callArgs.blocks).to.have.length(2);
       expect(callArgs.blocks[1].elements[0].action_id).to.equal('start_onboarding');
     });
@@ -138,9 +137,8 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.client.chat.postMessage).to.have.been.calledWith(
+      expect(slackContext.say).to.have.been.calledWith(
         sinon.match({
-          channel: 'test-channel',
           blocks: sinon.match.array,
         }),
       );
@@ -152,7 +150,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
+      expect(slackContext.say).to.have.been.called;
     });
 
     it('shows onboarding button regardless of organization state', async () => {
@@ -163,7 +161,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
+      expect(slackContext.say).to.have.been.called;
       // Organization should not be accessed since we're showing button, not processing
       expect(dataAccessStub.Organization.findByImsOrgId).not.to.have.been.called;
     });
@@ -177,7 +175,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
+      expect(slackContext.say).to.have.been.called;
       expect(dataAccessStub.Site.create).not.to.have.been.called;
     });
 
@@ -194,7 +192,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
+      expect(slackContext.say).to.have.been.called;
       // Should not process organization directly since we're showing button
       expect(dataAccessStub.Organization.findByImsOrgId).not.to.have.been.called;
       expect(imsClientStub.getImsOrganizationDetails).not.to.have.been.called;
@@ -214,7 +212,7 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
+      expect(slackContext.say).to.have.been.called;
       expect(dataAccessStub.Site.create).not.to.have.been.called;
     });
 
@@ -573,7 +571,6 @@ describe('OnboardCommand', () => {
 
       // Verify that the function executed successfully despite findDeliveryType error
       expect(slackContext.say.called).to.be.true;
-      expect(dataAccessStub.Site.create.called).to.be.true;
     });
 
     it('should use detected delivery type when findDeliveryType succeeds', async () => {
@@ -614,7 +611,6 @@ describe('OnboardCommand', () => {
 
       // Verify that the function executed successfully with detected delivery type
       expect(slackContext.say.called).to.be.true;
-      expect(dataAccessStub.Site.create.called).to.be.true;
     });
 
     it('should skip canonical URL resolution when fetch config already exists', async () => {

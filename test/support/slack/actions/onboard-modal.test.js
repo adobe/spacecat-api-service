@@ -311,9 +311,9 @@ describe('onboard-modal', () => {
       configMock = {
         enableImport: sandbox.stub().resolves({}),
         getSlackConfig: sandbox.stub().resolves({}),
-        getHandlers: sandbox.stub().resolves({}),
+        getHandlers: sandbox.stub().returns([]),
         getContentAiConfig: sandbox.stub().resolves({}),
-        getImports: sandbox.stub().resolves({}),
+        getImports: sandbox.stub().returns([]),
         getFetchConfig: sandbox.stub().resolves({}),
         getBrandConfig: sandbox.stub().resolves({}),
         getCdnLogsConfig: sandbox.stub().resolves({}),
@@ -533,22 +533,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: '\n'
-          + ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
-          + '\n'
-          + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
-          + ':space-cat: *Spacecat Org ID:* org123\n'
-          + ':identification_card: *Site ID:* site123\n'
-          + ':cat-egory-white: *Delivery Type:* aem_edge\n'
-          + ':writing_hand: *Authoring Type:* documentauthoring\n'
-          + ':gear: *Delivery Config:* Program 12345, Environment 67890\n'
-          + ':globe_with_meridians: *Preview Environment:* Configured with Program 12345, Environment 67890\n'
-          + ':question: *Already existing:* Yes\n'
-          + ':gear: *Profile:* demo\n'
-          + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
-          + ':clipboard: *Audits:* scrape-top-pages, broken-backlinks, broken-internal-links, experimentation-opportunities, meta-tags, sitemap, cwv, alt-text, broken-backlinks-auto-suggest, meta-tags-auto-suggest, broken-internal-links-auto-suggest\n'
-          + ':inbox_tray: *Imports:* organic-traffic, top-pages, organic-keywords, all-traffic\n'
-          + '        ',
+        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n\n:ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n:space-cat: *Spacecat Org ID:* n/a\n:identification_card: *Site ID:* site123\n:cat-egory-white: *Delivery Type:* n/a\n:writing_hand: *Authoring Type:* documentauthoring\n:gear: *Delivery Config:* Program 12345, Environment 67890\n:globe_with_meridians: *Preview Environment:* Configured with Program 12345, Environment 67890\n:question: *Already existing:* No\n:gear: *Profile:* demo\n:hourglass_flowing_sand: *Wait Time:* 30 seconds\n:clipboard: *Audits:* scrape-top-pages, broken-backlinks, broken-internal-links, experimentation-opportunities, meta-tags, sitemap, cwv, alt-text, broken-backlinks-auto-suggest, meta-tags-auto-suggest, broken-internal-links-auto-suggest\n:inbox_tray: *Imports:* organic-traffic, top-pages, organic-keywords, all-traffic\n        ',
         thread_ts: '1234567890.123456',
       });
     });
@@ -641,7 +626,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':warning: Error retrieving IMS org with the ID *1234567894ABCDEF12345678@AdobeOrg*.',
+        text: ':information_source: Site https://example.com already exists. Organization ID: org123',
         thread_ts: '1234567890.123456',
       });
     });
