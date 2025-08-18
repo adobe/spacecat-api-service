@@ -265,7 +265,7 @@ describe('Paid TrafficController', async () => {
         expect(rest.status).to.equal(400);
         // eslint-disable-next-line no-await-in-loop
         const body = await rest.json();
-        expect(body.message).to.equal('Year and week are required parameters');
+        expect(body.message).to.equal('Year and (week or month) are required parameters');
       }
     });
 

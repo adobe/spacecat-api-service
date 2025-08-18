@@ -87,10 +87,10 @@ function TrafficController(context, log, env) {
 
     // validate input params
     const {
-      year, week, noCache, trafficType,
+      year, week, month, noCache, trafficType,
     } = context.data;
-    if (!year || !week) {
-      return badRequest('Year and week are required parameters');
+    if (!year || (!week && !month)) {
+      return badRequest('Year and (week or month) are required parameters');
     }
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
@@ -110,9 +110,14 @@ function TrafficController(context, log, env) {
       trfTypes = ['paid'];
     }
 
+    // build query
+    const weekInt = parseInt(week, 10) || 0;
+    const monthInt = parseInt(month, 10) || 0;
+    const yearInt = parseInt(year, 10) || new Date().getFullYear();
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
-      week,
-      year,
+      week: weekInt,
+      month: monthInt,
+      year: yearInt,
       siteId,
       dimensions,
       tableName,
@@ -121,13 +126,11 @@ function TrafficController(context, log, env) {
       trfTypes,
     });
 
-    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
+    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
     log.info(`Processing query: ${description}`);
-
     // build query
     const query = getTrafficAnalysisQuery(quereyParams);
-
     log.debug(`Fetching paid data with query: ${query}`);
 
     // first try to get from cache
