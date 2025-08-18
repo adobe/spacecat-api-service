@@ -205,7 +205,7 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/:jobId/progress': importController.getImportJobProgress,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
-    'GET /screenshots': consentBannerController.getScreenshots,
+    'GET /screenshots/:jobId': consentBannerController.getScreenshots,
     'POST /screenshots': consentBannerController.takeScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
