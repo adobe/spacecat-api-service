@@ -14,3 +14,4 @@ admin-idp-p*.json
 *.code-workspace
 .prettierrc
 .vscode/settings.json
+.cursor
