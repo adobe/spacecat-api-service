@@ -1,3 +1,10 @@
+## [1.155.1](https://github.com/adobe/spacecat-api-service/compare/v1.155.0...v1.155.1) (2025-08-18)
+
+
+### Bug Fixes
+
+* add auto fix audits ([#1150](https://github.com/adobe/spacecat-api-service/issues/1150)) ([b6fdb73](https://github.com/adobe/spacecat-api-service/commit/b6fdb73f2a5b2c823fb10c9e71599fc99e4e6fdf))
+
 # [1.155.0](https://github.com/adobe/spacecat-api-service/compare/v1.154.4...v1.155.0) (2025-08-18)
 
 
