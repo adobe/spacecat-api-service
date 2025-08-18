@@ -1,0 +1,227 @@
+screenshots:
+  post:
+    tags:
+      - screenshots
+    security:
+      - api_key: []
+    summary: Take screenshots for consent banner analysis
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+
+      Creates a new scrape job specifically for taking consent banner screenshots.
+      This endpoint captures webpage screenshots in different states (with/without consent banners)
+      across different devices (desktop and mobile).
+
+      The job generates four distinct screenshot variants:
+      - Desktop with consent banner visible
+      - Desktop with consent banner dismissed/hidden
+      - Mobile with consent banner visible
+      - Mobile with consent banner dismissed/hidden
+
+      The returned jobId can be used with the GET /screenshots endpoint to retrieve the results.
+    operationId: takeScreenshots
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - url
+            properties:
+              url:
+                type: string
+                format: url
+                description: The URL of the webpage to capture screenshots from
+                example: 'https://example.com'
+          examples:
+            basic:
+              summary: Basic screenshot request
+              value:
+                url: 'https://example.com'
+    responses:
+      '202':
+        description: Screenshot job accepted and started
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  description: The ID of the screenshot job
+                status:
+                  type: string
+                  description: The status of the screenshot job
+                  enum:
+                    - 'COMPLETE'
+                    - 'FAILED'
+                    - 'PENDING'
+                message:
+                  type: string
+                  description: A message describing the job status
+              required:
+                - jobId
+                - status
+            examples:
+              success:
+                summary: Job accepted
+                value:
+                  jobId: 'screenshot-job-12345'
+                  status: 'PENDING'
+                  message: 'Screenshot job has been queued for processing'
+      '400':
+        description: Bad request - Invalid or missing URL
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'No valid URL provided: invalid-url'
+      '401':
+        $ref: './responses.yaml#/401'
+      '503':
+        description: Service temporarily unavailable
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Service Unavailable'
+      '500':
+        $ref: './responses.yaml#/500'
+  get:
+    tags:
+      - screenshots
+    security:
+      - api_key: []
+    summary: Get consent banner screenshots
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+
+      Retrieves the results of a consent banner screenshot job. Returns pre-signed URLs
+      for accessing the generated screenshot images and associated scrape data.
+
+      The response includes four screenshot variants:
+      - `desktop_cookie_banner_on`: Desktop screenshot with consent banner visible
+      - `desktop_cookie_banner_off`: Desktop screenshot with consent banner hidden
+      - `mobile_cookie_banner_on`: Mobile screenshot with consent banner visible
+      - `mobile_cookie_banner_off`: Mobile screenshot with consent banner hidden
+
+      Additionally provides access to the raw scrape JSON data for further analysis.
+    operationId: getScreenshots
+    parameters:
+      - name: jobId
+        in: query
+        required: true
+        description: The ID of the screenshot job to retrieve results for
+        schema:
+          type: string
+        example: 'screenshot-job-12345'
+    responses:
+      '200':
+        description: Screenshot results retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  description: The ID of the completed screenshot job
+                  example: 'screenshot-job-12345'
+                results:
+                  type: object
+                  description: Collection of screenshot URLs and scrape data
+                  properties:
+                    desktop_cookie_banner_on:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for desktop screenshot with consent banner
+                      example: 'https://s3.amazonaws.com/bucket/screenshots/desktop-on.png?signature=...'
+                    desktop_cookie_banner_off:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for desktop screenshot without consent banner
+                      example: 'https://s3.amazonaws.com/bucket/screenshots/desktop-off.png?signature=...'
+                    mobile_cookie_banner_on:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for mobile screenshot with consent banner
+                      example: 'https://s3.amazonaws.com/bucket/screenshots/mobile-on.png?signature=...'
+                    mobile_cookie_banner_off:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for mobile screenshot without consent banner
+                      example: 'https://s3.amazonaws.com/bucket/screenshots/mobile-off.png?signature=...'
+                    scrape_json:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for accessing the raw scrape data JSON
+                      example: 'https://s3.amazonaws.com/bucket/scrape-data/job-12345.json?signature=...'
+              required:
+                - jobId
+                - results
+            examples:
+              success:
+                summary: Successful screenshot retrieval
+                value:
+                  jobId: 'screenshot-job-12345'
+                  results:
+                    desktop_cookie_banner_on: 'https://s3.amazonaws.com/bucket/screenshots/desktop-on.png?signature=abc123'
+                    desktop_cookie_banner_off: 'https://s3.amazonaws.com/bucket/screenshots/desktop-off.png?signature=def456'
+                    mobile_cookie_banner_on: 'https://s3.amazonaws.com/bucket/screenshots/mobile-on.png?signature=ghi789'
+                    mobile_cookie_banner_off: 'https://s3.amazonaws.com/bucket/screenshots/mobile-off.png?signature=jkl012'
+                    scrape_json: 'https://s3.amazonaws.com/bucket/scrape-data/job-12345.json?signature=mno345'
+      '400':
+        description: Bad request - Missing or invalid jobId
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Job ID is required'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Screenshot job not found or still processing
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+            examples:
+              still_processing:
+                summary: Job still processing
+                value:
+                  error: 'Scrape job is still running. Try again in a few secs.'
+              not_found:
+                summary: Job not found
+                value:
+                  error: 'Screenshot job not found'
+      '500':
+        description: Internal server error or job failed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+            examples:
+              job_failed:
+                summary: Job execution failed
+                value:
+                  error: 'Scrape job failed: timeout'
+              server_error:
+                summary: Server error
+                value:
+                  error: 'Internal server error'
