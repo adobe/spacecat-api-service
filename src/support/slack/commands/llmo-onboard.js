@@ -11,6 +11,7 @@
  */
 
 import { getLastNumberOfWeeks, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import {
   extractURLFromSlackInput,
@@ -113,32 +114,24 @@ function LlmoOnboardCommand(context) {
 
       // Get current site config
       const siteConfig = site.getConfig();
-      const existingLlmoConfig = siteConfig.getLlmoConfig();
 
-      // Prepare LLMO config, preserving existing questions
-      const llmoConfig = {
-        dataFolder: dataFolder.trim(),
-        brand: brandName.trim(),
-        ...(existingLlmoConfig?.questions && { questions: existingLlmoConfig.questions }),
-      };
-
-      // Update the existing config object (similar to how onboard.js and llmo.js do it)
-      // We'll set the config as raw JSON data, which is how the existing APIs do it
-      const currentConfigData = siteConfig.toJSON ? siteConfig.toJSON() : /* c8 ignore next */ {};
-      const updatedConfigData = {
-        ...currentConfigData,
-        llmo: llmoConfig,
-      };
-
-      // Set the config directly as a plain object
-      site.setConfig(updatedConfigData);
+      // Update brand and data directory
+      siteConfig.updateLlmoBrand(brandName.trim());
+      siteConfig.updateLlmoDataFolder(dataFolder.trim());
 
       // enable the traffic-analysis import for referral-traffic
       siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
 
-      // enable the llmo-referral-traffic import for referral-traffic
+      // enable the llmo-prompts-ahrefs import
+      siteConfig.enableImport('llmo-prompts-ahrefs', { limit: 25 });
+
+      // update the site config object
+      site.setConfig(Config.toDynamoItem(siteConfig));
+
+      // enable all necessary handlers
       const configuration = await Configuration.findLatest();
       configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
+      configuration.enableHandlerForSite('geo-brand-presence', site);
 
       try {
         await configuration.save();
