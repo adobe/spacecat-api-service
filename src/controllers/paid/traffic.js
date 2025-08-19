@@ -154,6 +154,8 @@ function TrafficController(context, log, env) {
     if (trafficType == null && !dimensions.includes('trf_type')) {
       trfTypes = ['paid'];
     }
+    const pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
+
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
       week: weekInt,
       month: monthInt,
@@ -164,6 +166,7 @@ function TrafficController(context, log, env) {
       pageTypes,
       pageTypeMatchColumn: 'path',
       trfTypes,
+      pageViewThreshold,
     });
 
     const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
@@ -179,7 +182,20 @@ function TrafficController(context, log, env) {
       query,
       noCache,
     );
-    const thresholdConfig = env.CWV_THRESHOLDS || {};
+    let thresholdConfig = {};
+    if (env.CWV_THRESHOLDS) {
+      if (typeof env.CWV_THRESHOLDS === 'string') {
+        try {
+          thresholdConfig = JSON.parse(env.CWV_THRESHOLDS);
+        } catch (e) {
+          log.warn('Invalid CWV_THRESHOLDS JSON. Falling back to defaults.');
+          thresholdConfig = {};
+        }
+      } else if (typeof env.CWV_THRESHOLDS === 'object') {
+        thresholdConfig = env.CWV_THRESHOLDS;
+      }
+    }
+
     if (cachedResultUrl) {
       log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${requestId}`);
       return found(cachedResultUrl);
