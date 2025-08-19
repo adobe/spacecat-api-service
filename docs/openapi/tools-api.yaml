@@ -362,3 +362,51 @@ file-download:
         $ref: './responses.yaml#/500'
     security:
       - scoped_api_key: [ ]
+
+cdn-logs-bucket:
+  put:
+    tags:
+      - cdn-logs
+      - tools
+    summary: Provision CDN logs S3 bucket
+    description: |
+      Provisions an S3 bucket for CDN logs with associated IAM credentials.
+      This endpoint requires admin access and follows an idempotent pattern:
+      
+      If the bucket does NOT exist: Creates a new S3 bucket with proper encryption, access controls, 
+      IAM policy, IAM user, and stores credentials in AWS Secrets Manager.
+      
+      If the bucket already exists: Retrieves the existing bucket and credentials without creating duplicates.
+      
+      This ensures that calling the endpoint multiple times with the same organization ID will not create 
+      duplicate resources, making it safe for automated provisioning workflows.
+      
+      AWS resources created include:
+      - S3 bucket with proper encryption and access controls
+      - IAM policy for bucket access
+      - IAM user with access keys
+      - Stored credentials in AWS Secrets Manager
+    operationId: provisionCdnLogsBucket
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/CdnLogsBucketRequest'
+    responses:
+      '200':
+        description: Bucket and credentials created/retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CdnLogsBucketResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - admin_key: []
