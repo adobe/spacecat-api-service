@@ -513,11 +513,13 @@ function SuggestionsController(ctx, sqs, env) {
 
     let suggestionGroups;
     if (opportunity.getType() !== 'broken-backlinks') {
+      const opportunityData = opportunity.getData();
       const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
         const data = suggestion.getData();
         const url = data?.url || data?.recommendations?.[0]?.pageUrl
             || data?.url_from
-            || data?.urlFrom;
+            || data?.urlFrom
+            || opportunityData?.page; // for high-organic-low-ctr
         if (!url) return acc;
 
         if (!acc[url]) {

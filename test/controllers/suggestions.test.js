@@ -191,6 +191,7 @@ describe('Suggestions Controller', () => {
       getId: sandbox.stub().returns(OPPORTUNITY_ID),
       getSiteId: sandbox.stub().returns(SITE_ID),
       getType: sandbox.stub().returns('broken-backlinks'),
+      getData: sandbox.stub().returns({}),
     };
     opportunityNotEnabled = {
       getId: sandbox.stub().returns(OPPORTUNITY_ID_NOT_ENABLED),
