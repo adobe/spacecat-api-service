@@ -21,7 +21,7 @@
     "build": "hedy -v --test-bundle",
     "deploy": "hedy -v --deploy --aws-deploy-bucket=spacecat-prod-deploy --pkgVersion=latest",
     "deploy-stage": "hedy -v --deploy --aws-deploy-bucket=spacecat-stage-deploy --pkgVersion=latest",
-    "deploy-dev": "hedy -v --deploy --pkgVersion=latest$CI_BUILD_NUM -l djc --aws-deploy-bucket=spacecat-dev-deploy --cleanup-ci=24h --aws-api vldld6qz1d",
+    "deploy-dev": "hedy -v --deploy --pkgVersion=latest$CI_BUILD_NUM -l latest --aws-deploy-bucket=spacecat-dev-deploy --cleanup-ci=24h --aws-api vldld6qz1d",
     "deploy-secrets": "hedy --aws-update-secrets --params-file=secrets/secrets.env",
     "docs": "npm run docs:lint && npm run docs:build",
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
