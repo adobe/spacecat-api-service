@@ -48,8 +48,8 @@ export function preflightConfigModal(lambdaContext) {
   const { Site, Configuration } = dataAccess;
 
   return async ({ ack, body, client }) => {
+    log.info(`Handling preflight config modal submission ${JSON.stringify(body)}`);
     try {
-      // Parse the private metadata
       let metadata = {};
       try {
         metadata = JSON.parse(body.view.private_metadata);

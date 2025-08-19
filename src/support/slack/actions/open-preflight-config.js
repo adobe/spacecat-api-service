@@ -115,7 +115,7 @@ export default function openPreflightConfig(lambdaContext) {
               action_id: 'preview_url',
               placeholder: {
                 type: 'plain_text',
-                text: 'AEM CS: https://author-p12345-e67890.adobeaemcloud.com | Helix: https://main--site--owner.hlx.live',
+                text: 'AEM CS or EDS URL',
               },
               initial_value: currentDeliveryConfig.authorURL || '',
             },
@@ -125,7 +125,7 @@ export default function openPreflightConfig(lambdaContext) {
             },
             hint: {
               type: 'plain_text',
-              text: 'Document Authoring: Helix URL (main--site--owner.aem.live). CS/CS-Crosswalk: AEM CS URL (author-p12345-e67890.adobeaemcloud.com).',
+              text: 'Document Authoring: main--site--owner.aem.live. CS/CS-Crosswalk: AEM CS URL (author-p12345-e67890.adobeaemcloud.com).',
             },
           },
         ],
