@@ -16,6 +16,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import LlmoOnboardCommand from '../../../../src/support/slack/commands/llmo-onboard.js';
 
 use(sinonChai);
@@ -32,17 +33,7 @@ describe('LlmoOnboardCommand', () => {
 
   beforeEach(() => {
     // Create mock config
-    mockConfig = {
-      getLlmoConfig: sinon.stub().returns(null),
-      toJSON: sinon.stub().returns({}),
-      getSlackConfig: sinon.stub().returns(null),
-      getHandlers: sinon.stub().returns({}),
-      getHandlerConfig: sinon.stub().returns({}),
-      getContentAiConfig: sinon.stub().returns({}),
-      getImports: sinon.stub().returns([]),
-      getCdnLogsConfig: sinon.stub().returns({}),
-      enableImport: sinon.stub(),
-    };
+    mockConfig = sinon.stub({ ...Config() }); // spread needed b/c the config object gets frozen
 
     // Create mock site
     mockSite = {
