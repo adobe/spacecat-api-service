@@ -154,8 +154,7 @@ describe('LlmoOnboardCommand', () => {
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
       expect(mockConfiguration.enableHandlerForSite).calledWith('geo-brand-presence', mockSite);
       expect(mockConfiguration.save).to.have.been.calledOnce;
-
-      // configuration got saved
+      // configuration was saved
 
       // save site config after configuration saved
       expect(mockSite.save).to.have.been.calledOnce;
