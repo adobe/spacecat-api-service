@@ -49,6 +49,8 @@ tags:
     description: APIs for scraping web pages
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: cdn-logs
+    description: APIs for CDN logs infrastructure
 
 paths:
   /audits/latest/{auditType}:
@@ -229,6 +231,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-customer-intent'
   /sites/{siteId}/llmo/customer-intent/{intentKey}:
     $ref: './llmo-api.yaml#/llmo-customer-intent-item'
+  /tools/cdn-logs/bucket:
+    $ref: './tools-api.yaml#/cdn-logs-bucket'
 
 components:
   securitySchemes:
