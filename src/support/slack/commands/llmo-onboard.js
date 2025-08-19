@@ -112,7 +112,7 @@ function LlmoOnboardCommand(context) {
       log.info(`Found site ${baseURL} with ID: ${siteId}`);
 
       // Get current site config
-      const siteConfig = site.getConfig();
+      let siteConfig = site.getConfig();
       const existingLlmoConfig = siteConfig.getLlmoConfig();
 
       // Prepare LLMO config, preserving existing questions
@@ -132,6 +132,9 @@ function LlmoOnboardCommand(context) {
 
       // Set the config directly as a plain object
       site.setConfig(updatedConfigData);
+
+      // Get current site config again to deal with mutability
+      siteConfig = site.getConfig();
 
       // enable the traffic-analysis import for referral-traffic
       siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
