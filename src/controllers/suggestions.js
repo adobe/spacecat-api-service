@@ -586,19 +586,16 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (opportunity.getType() !== 'broken-backlinks') {
       await Promise.all(
-        suggestionGroups.map(({ groupedSuggestions, url }) => {
-          console.log(`sending autofix message for variation ${variation} for url ${url}`);
-          return sendAutofixMessage(
-            sqs,
-            queueUrl,
-            siteId,
-            opportunityId,
-            groupedSuggestions.map((s) => s.getId()),
-            promiseTokenResponse,
-            variation,
-            { url },
-          );
-        }),
+        suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
+          sqs,
+          queueUrl,
+          siteId,
+          opportunityId,
+          groupedSuggestions.map((s) => s.getId()),
+          promiseTokenResponse,
+          variation,
+          { url },
+        )),
       );
     } else {
       await sendAutofixMessage(
