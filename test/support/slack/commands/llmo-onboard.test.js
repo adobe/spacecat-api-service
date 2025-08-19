@@ -49,6 +49,7 @@ describe('LlmoOnboardCommand', () => {
       enableHandlerForSite: sinon.stub(),
       save: sinon.stub().resolves(),
       getQueues: sinon.stub().returns({ imports: 'queue-imports' }),
+      isHandlerEnabledForSite: sinon.stub().returns(false),
     };
 
     // Create mock data access
@@ -187,7 +188,6 @@ describe('LlmoOnboardCommand', () => {
 
     it('should skip enabling cdn-analysis when already enabled in organization', async () => {
       const existingSiteConfig = {
-        isHandlerEnabledForSite: sinon.stub().returns(true), // returns true for cdn-analysis
         getLlmoConfig: sinon.stub().returns(null),
         toJSON: sinon.stub().returns({}),
         getSlackConfig: sinon.stub().returns(null),
@@ -206,6 +206,8 @@ describe('LlmoOnboardCommand', () => {
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
       };
+
+      mockConfiguration.isHandlerEnabledForSite.callsFake((auditType, site) => auditType === 'cdn-analysis' && site.getId() === 'existing-site-id');
 
       mockDataAccess.Site.allByOrganizationId.resolves([existingSite, mockSite]);
 

@@ -139,10 +139,9 @@ function LlmoOnboardCommand(context) {
       const organizationId = site.getOrganizationId();
       const sitesInOrg = await Site.allByOrganizationId(organizationId);
 
-      const hasAgenticTrafficEnabled = sitesInOrg.some((orgSite) => {
-        const eachSiteConfig = orgSite.getConfig();
-        return eachSiteConfig.isHandlerEnabledForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT);
-      });
+      const hasAgenticTrafficEnabled = sitesInOrg.some(
+        (orgSite) => configuration.isHandlerEnabledForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, orgSite),
+      );
 
       if (!hasAgenticTrafficEnabled) {
         log.info(`Enabling agentic traffic audits for organization ${organizationId} (first site in org)`);
