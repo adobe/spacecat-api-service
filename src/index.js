@@ -54,6 +54,9 @@ import FulfillmentController from './controllers/event/fulfillment.js';
 import { FixesController } from './controllers/fixes.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
+import { ssmClientWrapper } from './support/ssm.js';
+import { iamClientWrapper } from './support/iam.js';
+import { secretsClientWrapper } from './support/secrets.js';
 import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
@@ -69,6 +72,7 @@ import ScrapeJobController from './controllers/scrapeJob.js';
 import LlmoController from './controllers/llmo.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
+import CdnLogsInfrastructureController from './controllers/cdn-logs-infrastructure.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -125,6 +129,7 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
+    const cdnLogsInfrastructureController = CdnLogsInfrastructureController(context, log);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
@@ -161,6 +166,7 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
+      cdnLogsInfrastructureController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -202,6 +208,9 @@ export const main = wrap(run)
   .with(enrichPathInfo)
   .with(sqs)
   .with(s3ClientWrapper)
+  .with(ssmClientWrapper)
+  .with(iamClientWrapper)
+  .with(secretsClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(secrets, { name: resolveSecretsName })

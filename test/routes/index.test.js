@@ -192,6 +192,10 @@ describe('getRouteHandlers', () => {
     patchLlmoCustomerIntent: () => null,
   };
 
+  const mockCdnLogsInfrastructureController = {
+    provisionBucket: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -219,6 +223,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockCdnLogsInfrastructureController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -243,6 +248,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
+      'PUT /cdn-logs-infrastructure/provision',
       'GET /mcp',
       'POST /mcp',
     );
@@ -261,6 +267,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
+    expect(staticRoutes['PUT /cdn-logs-infrastructure/provision']).to.equal(mockCdnLogsInfrastructureController.provisionBucket);
     expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
     expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);

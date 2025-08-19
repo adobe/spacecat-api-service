@@ -3506,3 +3506,42 @@ LlmoConfig:
       description: The CDN logs filter configuration for filtering log entries
       $ref: '#/LlmoCdnLogsFilter'
   additionalProperties: false
+
+# CDN Logs Infrastructure Schemas
+CdnLogsInfrastructureProvisionRequest:
+  type: object
+  required:
+    - orgId
+  properties:
+    orgId:
+      type: string
+      description: Organization identifier (alphanumeric, optionally ending with @AdobeOrg)
+      example: "adobe123"
+    orgName:
+      type: string
+      description: Organization name (optional)
+      example: "Adobe Inc"
+
+CdnLogsInfrastructureProvisionResponse:
+  type: object
+  properties:
+    message:
+      type: string
+      description: Success message describing what was created/retrieved
+      example: "Bucket 'cdn-logs-adobe123' created successfully with new credentials"
+    bucketName:
+      type: string
+      description: The S3 bucket name
+      example: "cdn-logs-adobe"
+    accessKey:
+      type: string
+      description: AWS access key for the bucket
+      example: "AKIAIOSFODNN7EXAMPLE"
+    secretKey:
+      type: string
+      description: AWS secret key for the bucket
+      example: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    region:
+      type: string
+      description: AWS region where the bucket was created
+      example: "us-east-1"
