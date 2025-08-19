@@ -69,7 +69,7 @@ function ConsentBannerController(ctx) {
 
   async function takeScreenshots(requestContext) {
     const { data } = requestContext;
-    const { url } = data;
+    const { url, force = false } = data;
 
     try {
       if (!hasText(url) || !URL.canParse(url)) {
@@ -79,6 +79,7 @@ function ConsentBannerController(ctx) {
       const job = await scrapeClient.createScrapeJob({
         urls: [url],
         processingType: 'consent-banner',
+        maxScrapeAge: force ? 0 : undefined,
         options: {
           enableJavaScript: true,
           screenshotTypes: ['viewport'],
