@@ -275,6 +275,7 @@ describe('ConsentBannerController', () => {
       expect(mockScrapeClient.createScrapeJob).to.have.been.calledWith({
         urls: ['https://example.com'],
         processingType: 'consent-banner',
+        maxScrapeAge: undefined,
         options: {
           enableJavaScript: true,
           screenshotTypes: ['viewport'],
@@ -417,6 +418,74 @@ describe('ConsentBannerController', () => {
       await consentBannerController.takeScreenshots(requestContext);
 
       expect(mockContext.log.error).to.have.been.calledWith(error);
+    });
+
+    it('should create scrape job with force=true setting maxScrapeAge to 0', async () => {
+      const mockJob = {
+        id: 'job-123',
+        status: 'PENDING',
+        urls: ['https://example.com'],
+      };
+
+      mockScrapeClient.createScrapeJob.resolves(mockJob);
+
+      const requestContext = {
+        data: {
+          url: 'https://example.com',
+          force: true,
+        },
+      };
+
+      const response = await consentBannerController.takeScreenshots(requestContext);
+
+      expect(response.status).to.equal(202);
+      expect(mockScrapeClient.createScrapeJob).to.have.been.calledWith({
+        urls: ['https://example.com'],
+        processingType: 'consent-banner',
+        maxScrapeAge: 0,
+        options: {
+          enableJavaScript: true,
+          screenshotTypes: ['viewport'],
+          rejectRedirects: false,
+        },
+      });
+
+      const job = await response.json();
+      expect(job).to.deep.equal(mockJob);
+    });
+
+    it('should create scrape job with force=false setting maxScrapeAge to undefined', async () => {
+      const mockJob = {
+        id: 'job-123',
+        status: 'PENDING',
+        urls: ['https://example.com'],
+      };
+
+      mockScrapeClient.createScrapeJob.resolves(mockJob);
+
+      const requestContext = {
+        data: {
+          url: 'https://example.com',
+          force: false,
+        },
+      };
+
+      const response = await consentBannerController.takeScreenshots(requestContext);
+
+      expect(response.status).to.equal(202);
+      expect(mockScrapeClient.createScrapeJob).to.have.been.calledWith({
+        urls: ['https://example.com'],
+        processingType: 'consent-banner',
+        maxScrapeAge: undefined,
+        options: {
+          enableJavaScript: true,
+          screenshotTypes: ['viewport'],
+          rejectRedirects: false,
+        },
+      });
+
+      const job = await response.json();
+      expect(job).to.deep.equal(mockJob);
     });
   });
 
