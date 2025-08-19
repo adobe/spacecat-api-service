@@ -1,3 +1,10 @@
+# [1.159.0](https://github.com/adobe/spacecat-api-service/compare/v1.158.0...v1.159.0) (2025-08-19)
+
+
+### Features
+
+* screenshots endpoint now supports force flag ([#1165](https://github.com/adobe/spacecat-api-service/issues/1165)) ([5678345](https://github.com/adobe/spacecat-api-service/commit/56783453f3c98af623a48391295598deea46cc4b))
+
 # [1.158.0](https://github.com/adobe/spacecat-api-service/compare/v1.157.0...v1.158.0) (2025-08-19)
 
 
