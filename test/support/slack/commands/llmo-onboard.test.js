@@ -187,22 +187,10 @@ describe('LlmoOnboardCommand', () => {
     });
 
     it('should skip enabling cdn-analysis when already enabled in organization', async () => {
-      const existingSiteConfig = {
-        getLlmoConfig: sinon.stub().returns(null),
-        toJSON: sinon.stub().returns({}),
-        getSlackConfig: sinon.stub().returns(null),
-        getHandlers: sinon.stub().returns({}),
-        getHandlerConfig: sinon.stub().returns({}),
-        getContentAiConfig: sinon.stub().returns({}),
-        getImports: sinon.stub().returns([]),
-        getCdnLogsConfig: sinon.stub().returns({}),
-        enableImport: sinon.stub(),
-      };
-
       const existingSite = {
         getId: sinon.stub().returns('existing-site-id'),
         getOrganizationId: sinon.stub().returns('test-org-id'),
-        getConfig: sinon.stub().returns(existingSiteConfig),
+        getConfig: sinon.stub().returns(mockConfig),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
       };
