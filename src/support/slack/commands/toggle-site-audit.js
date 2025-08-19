@@ -54,13 +54,13 @@ const promptPreflightConfig = async (slackContext, site, auditType) => {
   }
 
   await say({
-    text: `⚠️ Preflight audit requires additional configuration for \`${site.getBaseURL()}\``,
+    text: `:warning: Preflight audit requires additional configuration for \`${site.getBaseURL()}\``,
     blocks: [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `⚠️ *Preflight audit requires additional configuration for:*\n\`${site.getBaseURL()}\`\n\n*Missing:*\n${missingItems.map((item) => `• ${item}`).join('\n')}`,
+          text: `:warning: *Preflight audit requires additional configuration for:*\n\`${site.getBaseURL()}\`\n\n*Missing:*\n${missingItems.map((item) => `• ${item}`).join('\n')}`,
         },
       },
       {
@@ -189,7 +189,6 @@ export default (context) => {
       if (isNonEmptyArray(files) === false) {
         const [, baseURLInput, singleAuditType] = args;
 
-        await say('No CSV Provided, entering single URL behavior');
         const baseURL = extractURLFromSlackInput(baseURLInput);
 
         validateInput(enableAudit, singleAuditType);

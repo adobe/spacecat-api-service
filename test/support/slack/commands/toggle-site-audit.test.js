@@ -597,7 +597,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
 
       expect(slackContextMock.say.calledWith({
-        text: '⚠️ Preflight audit requires additional configuration for `https://example.com`',
+        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
         blocks: sinon.match.array,
       })).to.be.true;
       expect(configurationMock.enableHandlerForSite.called).to.be.false;
