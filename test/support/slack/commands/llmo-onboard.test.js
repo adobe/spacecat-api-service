@@ -27,6 +27,7 @@ describe('LlmoOnboardCommand', () => {
   let mockConfig;
   let mockDataAccess;
   let mockLog;
+  let mockConfiguration;
   let slackContext;
 
   beforeEach(() => {
@@ -40,6 +41,7 @@ describe('LlmoOnboardCommand', () => {
       getContentAiConfig: sinon.stub().returns({}),
       getImports: sinon.stub().returns([]),
       getCdnLogsConfig: sinon.stub().returns({}),
+      enableImport: sinon.stub(),
     };
 
     // Create mock site
@@ -50,10 +52,20 @@ describe('LlmoOnboardCommand', () => {
       save: sinon.stub().resolves(),
     };
 
+    // Mock global Configuration
+    mockConfiguration = {
+      enableHandlerForSite: sinon.stub(),
+      save: sinon.stub().resolves(),
+      getQueues: sinon.stub().returns({ imports: 'queue-imports' }),
+    };
+
     // Create mock data access
     mockDataAccess = {
       Site: {
         findByBaseURL: sinon.stub().resolves(mockSite),
+      },
+      Configuration: {
+        findLatest: sinon.stub().resolves(mockConfiguration),
       },
     };
 
@@ -67,6 +79,9 @@ describe('LlmoOnboardCommand', () => {
     mockContext = {
       dataAccess: mockDataAccess,
       log: mockLog,
+      sqs: {
+        sendMessage: sinon.stub(),
+      },
     };
 
     // Create slack context
@@ -130,12 +145,38 @@ describe('LlmoOnboardCommand', () => {
       );
     });
 
-    it('should successfully onboard LLMO for a valid site', async () => {
+    it('should successfully onboard LLMO for a valid site and enable referral traffic processing + backfill', async () => {
       await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
 
+      // site lookup and config update
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.setConfig).to.have.been.called;
-      expect(mockSite.save).to.have.been.called;
+
+      // enable traffic-analysis import on the site config
+      expect(mockConfig.enableImport).to.have.been.calledWith('traffic-analysis');
+
+      // enable handler for site in Configuration and save it
+      expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+
+      // save site config after configuration saved
+      expect(mockSite.save).to.have.been.calledOnce;
+      sinon.assert.callOrder(mockConfiguration.save, mockSite.save);
+
+      // referral-traffic backfill should enqueue 4 messages (last 4 weeks)
+      expect(mockContext.sqs.sendMessage.callCount).to.equal(4);
+      const calls = mockContext.sqs.sendMessage.getCalls();
+      calls.forEach((call) => {
+        const [queue, payload] = call.args;
+        expect(queue).to.equal('queue-imports');
+        expect(payload).to.include({ type: 'traffic-analysis', siteId: 'test-site-id' });
+        expect(payload.auditContext).to.include({ auditType: 'llmo-referral-traffic' });
+        expect(payload.auditContext.week).to.be.a('number');
+        expect(payload.auditContext.year).to.be.a('number');
+      });
+
+      // success message
       expect(slackContext.say).to.have.been.calledWith(
         sinon.match.string.and(sinon.match(/LLMO onboarding completed successfully/)),
       );
@@ -165,7 +206,7 @@ describe('LlmoOnboardCommand', () => {
       expect(mockSite.save).to.have.been.called;
     });
 
-    it('should handle save errors gracefully', async () => {
+    it('should handle site save errors gracefully', async () => {
       const saveError = new Error('Database error');
       mockSite.save.rejects(saveError);
 
@@ -177,6 +218,22 @@ describe('LlmoOnboardCommand', () => {
       expect(slackContext.say).to.have.been.calledWith(
         ':x: Failed to save LLMO configuration: Database error',
       );
+    });
+
+    it('should handle configuration save errors gracefully', async () => {
+      const saveError = new Error('Conf DB error');
+      mockConfiguration.save.rejects(saveError);
+
+      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Error saving LLMO config for site test-site-id/),
+      );
+      expect(slackContext.say).to.have.been.calledWith(
+        ':x: Failed to save LLMO configuration: Conf DB error',
+      );
+      // site.save should not be called when configuration.save fails
+      expect(mockSite.save).to.not.have.been.called;
     });
 
     it('sends a message for all other errors', async () => {

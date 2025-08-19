@@ -47,6 +47,8 @@ tags:
     description: APIs for importing content to Edge Delivery Services
   - name: scrape
     description: APIs for scraping web pages
+  - name: screenshots
+    description: APIs for taking and retrieving webpage screenshots, specifically for consent banner analysis
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
 
@@ -103,6 +105,8 @@ paths:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url'
   /tools/scrape/jobs/by-base-url/{base64BaseUrl}/by-processingtype/{processingType}:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url-and-processing-type'
+  /screenshots:
+    $ref: './screenshots-api.yaml#/screenshots'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites/by-delivery-type/{deliveryType}:
