@@ -572,5 +572,113 @@ describe('Paid TrafficController', async () => {
         expect(query).to.include(test.expectedFilter, `trafficType=${test.value} should apply correct filter`);
       }
     });
+
+    it('returns 400 error for invalid week parameter', async () => {
+      const contextWithInvalidWeek = {
+        ...mockContext,
+        data: {
+          year: '2024',
+          week: 'invalid-text', // This should cause parseInt to return NaN, triggering validation error
+        },
+      };
+
+      const controller = TrafficController(contextWithInvalidWeek, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Week must be a valid number');
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('returns 400 error for invalid year parameter', async () => {
+      const contextWithInvalidYear = {
+        ...mockContext,
+        data: {
+          year: 'not-a-number', // This should cause parseInt to return NaN, triggering validation error
+          week: '30',
+        },
+      };
+
+      const controller = TrafficController(contextWithInvalidYear, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Year must be a valid number');
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('returns 400 error for invalid month parameter', async () => {
+      const contextWithInvalidMonth = {
+        ...mockContext,
+        data: {
+          year: '2024',
+          month: 'invalid-month-text', // This should cause parseInt to return NaN, triggering validation error
+        },
+      };
+
+      const controller = TrafficController(contextWithInvalidMonth, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Month must be a valid number');
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('returns 400 error for multiple invalid parameters', async () => {
+      const contextWithInvalidParams = {
+        ...mockContext,
+        data: {
+          year: 'invalid-year-text',
+          week: 'invalid-week-text',
+        },
+      };
+
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(contextWithInvalidParams, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Year must be a valid number'); // Year validation comes first
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('accepts valid numeric strings for parameters', async () => {
+      const contextWithValidStrings = {
+        ...mockContext,
+        data: {
+          year: '2024', // Valid numeric string
+          week: '30', // Valid numeric string
+        },
+      };
+
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(contextWithValidStrings, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+    });
+
+    it('accepts null or undefined for optional week/month parameters', async () => {
+      const contextWithNullWeek = {
+        ...mockContext,
+        data: {
+          year: '2024',
+          week: null, // null should be allowed
+          month: '12', // Valid month instead
+        },
+      };
+
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(contextWithNullWeek, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+    });
   });
 });

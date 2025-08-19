@@ -36,6 +36,47 @@ function getCacheKey(siteId, query, cacheLocation) {
   return { cacheKey, outPrefix };
 }
 
+function validateTemporalParams({ year, week, month }) {
+  if (year === undefined) {
+    return { ok: false, error: 'Year is a required parameter' };
+  }
+  // Treat null as equivalent to undefined for week/month validation
+  if ((week === undefined || week === null) && (month === undefined || month === null)) {
+    return { ok: false, error: 'Either week or month must be provided' };
+  }
+
+  const tryParse = (value, name) => {
+    if (value === undefined || value === null) {
+      return { ok: true, value: 0 };
+    }
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+      return { ok: false, error: `${name} must be a valid number` };
+    }
+    return { ok: true, value: parsed };
+  };
+
+  const yearParsed = tryParse(year, 'Year');
+  if (!yearParsed.ok) return yearParsed;
+  const weekParsed = tryParse(week, 'Week');
+  if (!weekParsed.ok) return weekParsed;
+  const monthParsed = tryParse(month, 'Month');
+  if (!monthParsed.ok) return monthParsed;
+
+  if (weekParsed.value === 0 && monthParsed.value === 0) {
+    return { ok: false, error: 'Either week or month must be non-zero' };
+  }
+
+  return {
+    ok: true,
+    values: {
+      yearInt: yearParsed.value,
+      weekInt: weekParsed.value,
+      monthInt: monthParsed.value,
+    },
+  };
+}
+
 const isTrue = (value) => value === true || value === 'true';
 
 function TrafficController(context, log, env) {
@@ -89,9 +130,13 @@ function TrafficController(context, log, env) {
     const {
       year, week, month, noCache, trafficType,
     } = context.data;
-    if (!year || (!week && !month)) {
-      return badRequest('Year and (week or month) are required parameters');
+
+    const temporal = validateTemporalParams({ year, week, month });
+    if (!temporal.ok) {
+      return badRequest(temporal.error);
     }
+
+    const { yearInt, weekInt, monthInt } = temporal.values;
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
 
@@ -109,11 +154,6 @@ function TrafficController(context, log, env) {
     if (trafficType == null && !dimensions.includes('trf_type')) {
       trfTypes = ['paid'];
     }
-
-    // build query
-    const weekInt = parseInt(week, 10) || 0;
-    const monthInt = parseInt(month, 10) || 0;
-    const yearInt = parseInt(year, 10) || new Date().getFullYear();
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
       week: weekInt,
       month: monthInt,
