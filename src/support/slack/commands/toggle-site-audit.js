@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 import {
-  isValidUrl, isNonEmptyArray, hasText, tracingFetch as fetch,
+  hasText,
+  isNonEmptyArray,
+  isValidUrl,
+  tracingFetch as fetch,
 } from '@adobe/spacecat-shared-utils';
 import { Readable } from 'stream';
 import { parse } from 'csv';
@@ -53,14 +56,15 @@ const promptPreflightConfig = async (slackContext, site, auditType) => {
     }
   }
 
-  await say({
+  return say({
     text: `:warning: Preflight audit requires additional configuration for \`${site.getBaseURL()}\``,
     blocks: [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `:warning: *Preflight audit requires additional configuration for:*\n\`${site.getBaseURL()}\`\n\n*Missing:*\n${missingItems.map((item) => `• ${item}`).join('\n')}`,
+          text: `:warning: *Preflight audit requires additional configuration for:*\n\`${site.getBaseURL()}\`\n\n*Missing:*\n${missingItems.map((item) => `• ${item}`)
+            .join('\n')}`,
         },
       },
       {

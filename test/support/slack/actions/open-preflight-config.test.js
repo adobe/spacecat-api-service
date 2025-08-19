@@ -59,6 +59,9 @@ describe('open-preflight-config', () => {
       views: {
         open: sandbox.stub().resolves(),
       },
+      chat: {
+        update: sandbox.stub().resolves(),
+      },
     };
 
     body = {
@@ -71,6 +74,14 @@ describe('open-preflight-config', () => {
       trigger_id: 'trigger123',
       channel: {
         id: 'C12345',
+      },
+      message: {
+        ts: '1234567890.123456',
+        thread_ts: '1234567890.000000',
+      },
+      user: {
+        id: 'U123456',
+        name: 'TestUser',
       },
     };
   });
@@ -92,6 +103,20 @@ describe('open-preflight-config', () => {
 
       expect(ackMock).to.have.been.calledOnce;
       expect(siteMock.findById).to.have.been.calledWith('site123');
+
+      expect(clientMock.chat.update).to.have.been.calledWith({
+        channel: 'C12345',
+        ts: '1234567890.123456',
+        text: ':gear: Preflight configuration started by TestUser',
+        blocks: [{
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: ':gear: *Preflight configuration started by TestUser*\n`https://example.com`\n\nConfiguring preflight audit...',
+          },
+        }],
+      });
+
       expect(clientMock.views.open).to.have.been.calledOnce;
 
       const openCall = clientMock.views.open.firstCall.args[0];
@@ -102,6 +127,8 @@ describe('open-preflight-config', () => {
       expect(metadata.siteId).to.equal('site123');
       expect(metadata.auditType).to.equal('preflight');
       expect(metadata.channelId).to.equal('C12345');
+      expect(metadata.threadTs).to.equal('1234567890.000000');
+      expect(metadata.messageTs).to.equal('1234567890.123456');
 
       // Check that authoring type is pre-populated
       const { blocks } = openCall.view;
@@ -215,6 +242,66 @@ describe('open-preflight-config', () => {
       });
 
       expect(context.log.error).to.have.been.calledWith('Error opening preflight config modal:', sinon.match.instanceOf(Error));
+    });
+
+    it('should handle chat.update error gracefully', async () => {
+      siteMock.findById.resolves(siteMock);
+      clientMock.chat.update.rejects(new Error('Update failed'));
+
+      const openAction = openPreflightConfig(context);
+      await openAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(context.log.error).to.have.been.calledWith('Failed to update original message:', sinon.match.instanceOf(Error));
+      expect(clientMock.views.open).to.have.been.calledOnce; // Modal should still open
+    });
+
+    it('should handle message without thread_ts', async () => {
+      siteMock.findById.resolves(siteMock);
+
+      delete body.message.thread_ts;
+
+      const openAction = openPreflightConfig(context);
+      await openAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(clientMock.chat.update).to.have.been.calledOnce;
+      expect(clientMock.views.open).to.have.been.calledOnce;
+
+      const metadata = JSON.parse(clientMock.views.open.firstCall.args[0].view.private_metadata);
+      expect(metadata.threadTs).to.equal('1234567890.123456'); // Should use message ts as thread ts
+    });
+
+    it('should handle missing user name gracefully', async () => {
+      siteMock.findById.resolves(siteMock);
+
+      delete body.user.name;
+
+      const openAction = openPreflightConfig(context);
+      await openAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(clientMock.chat.update).to.have.been.calledWith({
+        channel: 'C12345',
+        ts: '1234567890.123456',
+        text: ':gear: Preflight configuration started by User',
+        blocks: [{
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: ':gear: *Preflight configuration started by User*\n`https://example.com`\n\nConfiguring preflight audit...',
+          },
+        }],
+      });
     });
   });
 });

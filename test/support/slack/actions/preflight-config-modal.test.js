@@ -129,6 +129,7 @@ describe('preflight-config-modal', () => {
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: ':white_check_mark: Successfully configured and enabled preflight audit for `https://example.com`\n:writing_hand: *Authoring Type:* cs\n:gear: *Delivery Config:* Program 12345, Environment 67890\n:link: *Preview URL:* https://author-p12345-e67890.adobeaemcloud.com',
+        thread_ts: undefined,
       });
     });
 
@@ -165,6 +166,7 @@ describe('preflight-config-modal', () => {
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: ':white_check_mark: Successfully configured and enabled preflight audit for `https://example.com`\n:writing_hand: *Authoring Type:* documentauthoring\n:gear: *Helix Config:* main--site--owner.hlx.live\n:link: *Preview URL:* https://main--site--owner.hlx.live',
+        thread_ts: undefined,
       });
     });
 
@@ -291,6 +293,7 @@ describe('preflight-config-modal', () => {
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: ':x: Error: Site not found. Please try again.',
+        thread_ts: undefined,
       });
     });
 

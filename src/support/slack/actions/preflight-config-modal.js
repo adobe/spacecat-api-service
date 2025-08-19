@@ -56,7 +56,9 @@ export function preflightConfigModal(lambdaContext) {
         log.warn('Failed to parse private metadata:', error);
       }
 
-      const { siteId, auditType, channelId } = metadata;
+      const {
+        siteId, auditType, channelId, threadTs,
+      } = metadata;
 
       const { values } = body.view.state;
 
@@ -127,6 +129,7 @@ export function preflightConfigModal(lambdaContext) {
         await client.chat.postMessage({
           channel: channelId,
           text: ':x: Error: Site not found. Please try again.',
+          thread_ts: threadTs,
         });
         return;
       }
@@ -165,6 +168,7 @@ export function preflightConfigModal(lambdaContext) {
         text: `:white_check_mark: Successfully configured and enabled ${auditType} audit for \`${site.getBaseURL()}\`\n`
               + `:writing_hand: *Authoring Type:* ${authoringType}\n${
                 configDetails}`,
+        thread_ts: threadTs,
       });
     } catch (error) {
       log.error('Error handling preflight config modal:', error);

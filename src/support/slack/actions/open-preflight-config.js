@@ -31,6 +31,32 @@ export default function openPreflightConfig(lambdaContext) {
         return;
       }
 
+      const messageTs = body.message?.ts;
+      const threadTs = body.message?.thread_ts || messageTs;
+      const channelId = body.channel?.id;
+      const userName = body.user?.name || 'User';
+
+      if (messageTs && channelId) {
+        try {
+          await client.chat.update({
+            channel: channelId,
+            ts: messageTs,
+            text: `:gear: Preflight configuration started by ${userName}`,
+            blocks: [
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: `:gear: *Preflight configuration started by ${userName}*\n\`${site.getBaseURL()}\`\n\nConfiguring preflight audit...`,
+                },
+              },
+            ],
+          });
+        } catch (error) {
+          log.error('Failed to update original message:', error);
+        }
+      }
+
       // Get current values or defaults
       const currentAuthoringType = site.getAuthoringType() || '';
       const currentDeliveryConfig = site.getDeliveryConfig() || {};
@@ -53,7 +79,9 @@ export default function openPreflightConfig(lambdaContext) {
         private_metadata: JSON.stringify({
           siteId,
           auditType,
-          channelId: body.channel.id,
+          channelId,
+          threadTs,
+          messageTs,
         }),
         blocks: [
           {
