@@ -1,3 +1,38 @@
+## [1.155.1](https://github.com/adobe/spacecat-api-service/compare/v1.155.0...v1.155.1) (2025-08-18)
+
+
+### Bug Fixes
+
+* add auto fix audits ([#1150](https://github.com/adobe/spacecat-api-service/issues/1150)) ([b6fdb73](https://github.com/adobe/spacecat-api-service/commit/b6fdb73f2a5b2c823fb10c9e71599fc99e4e6fdf))
+
+# [1.155.0](https://github.com/adobe/spacecat-api-service/compare/v1.154.4...v1.155.0) (2025-08-18)
+
+
+### Features
+
+* Screenshots endpoint ([#1160](https://github.com/adobe/spacecat-api-service/issues/1160)) ([a637afb](https://github.com/adobe/spacecat-api-service/commit/a637afb93c490b7b78620150d69e57ea46a3443d))
+
+## [1.154.4](https://github.com/adobe/spacecat-api-service/compare/v1.154.3...v1.154.4) (2025-08-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.48.0 ([#1159](https://github.com/adobe/spacecat-api-service/issues/1159)) ([b2cb16f](https://github.com/adobe/spacecat-api-service/commit/b2cb16fcd1d5391f354c6debac47036998e8a3ee))
+
+## [1.154.3](https://github.com/adobe/spacecat-api-service/compare/v1.154.2...v1.154.3) (2025-08-16)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1158](https://github.com/adobe/spacecat-api-service/issues/1158)) ([f222079](https://github.com/adobe/spacecat-api-service/commit/f222079f3bb409fe6b24a1ed65f3e36be8827641))
+
+## [1.154.2](https://github.com/adobe/spacecat-api-service/compare/v1.154.1...v1.154.2) (2025-08-15)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1157](https://github.com/adobe/spacecat-api-service/issues/1157)) ([2a78591](https://github.com/adobe/spacecat-api-service/commit/2a78591f60e06dd7c1437a8ad3cd7e4ecbb905f8))
+
 ## [1.154.1](https://github.com/adobe/spacecat-api-service/compare/v1.154.0...v1.154.1) (2025-08-14)
 
 
