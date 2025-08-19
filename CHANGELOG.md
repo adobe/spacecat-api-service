@@ -1,3 +1,10 @@
+# [1.157.0](https://github.com/adobe/spacecat-api-service/compare/v1.156.0...v1.157.0) (2025-08-19)
+
+
+### Features
+
+* introduce slack modal for site onboarding and preflight audit ([#1149](https://github.com/adobe/spacecat-api-service/issues/1149)) ([4dd693e](https://github.com/adobe/spacecat-api-service/commit/4dd693e2b7e185bcafed9cf7878d33a6c75829d8))
+
 # [1.156.0](https://github.com/adobe/spacecat-api-service/compare/v1.155.1...v1.156.0) (2025-08-19)
 
 
