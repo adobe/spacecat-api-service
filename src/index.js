@@ -68,6 +68,7 @@ import ScrapeJobController from './controllers/scrapeJob.js';
 import LlmoController from './controllers/llmo.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
+import CdnLogsController from './controllers/cdn-logs.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -123,6 +124,7 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
+    const cdnLogsController = CdnLogsController(context, log, context.env);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
@@ -158,6 +160,7 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
+      cdnLogsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
