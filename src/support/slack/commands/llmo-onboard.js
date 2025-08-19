@@ -130,11 +130,11 @@ function LlmoOnboardCommand(context) {
         llmo: llmoConfig,
       };
 
-      // Set the config directly as a plain object
-      site.setConfig(updatedConfigData);
-
       // enable the traffic-analysis import for referral-traffic
       siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
+
+      // Set the config directly as a plain object
+      site.setConfig(updatedConfigData);
 
       // enable the llmo-referral-traffic import for referral-traffic
       const configuration = await Configuration.findLatest();
