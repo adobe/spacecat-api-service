@@ -1,3 +1,10 @@
+# [1.156.0](https://github.com/adobe/spacecat-api-service/compare/v1.155.1...v1.156.0) (2025-08-19)
+
+
+### Features
+
+* screenshots endpoint contains consent-banner dimensions ([#1164](https://github.com/adobe/spacecat-api-service/issues/1164)) ([7f64e9d](https://github.com/adobe/spacecat-api-service/commit/7f64e9deb1e0edabf7c44bd8c3c400a3f04c9080))
+
 ## [1.155.1](https://github.com/adobe/spacecat-api-service/compare/v1.155.0...v1.155.1) (2025-08-18)
 
 
