@@ -179,6 +179,23 @@ describe('OnboardCommand', () => {
       expect(dataAccessStub.Site.create).not.to.have.been.called;
     });
 
+    it('normalizes URL for initial values in onboarding button', async () => {
+      const args = ['https://us.frescopa.coffee/', '8C6043F15F43B6390A49401A@AdobeOrg', 'demo', '2'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say).to.have.been.called;
+      const callArgs = slackContext.say.getCall(0).args[0];
+      const button = callArgs.blocks[1].elements[0];
+
+      const buttonValue = JSON.parse(button.value);
+      expect(buttonValue.site).to.equal('https://us.frescopa.coffee'); // URL should be normalized (trailing slash removed)
+      expect(buttonValue.imsOrgId).to.equal('8C6043F15F43B6390A49401A@AdobeOrg');
+      expect(buttonValue.profile).to.equal('demo');
+      expect(buttonValue.workflowWaitTime).to.equal('2');
+    });
+
     it('shows onboarding button and does not process organizations directly', async () => {
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
       imsClientStub.getImsOrganizationDetails.resolves({

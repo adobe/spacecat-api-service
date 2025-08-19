@@ -224,7 +224,12 @@ function OnboardCommand(context) {
 
         // Show button to start onboarding with optional pre-populated values
         const initialValues = {};
-        if (site) initialValues.site = site;
+        if (site) {
+          const normalizedSite = extractURLFromSlackInput(site);
+          if (normalizedSite) {
+            initialValues.site = normalizedSite;
+          }
+        }
         if (imsOrgId) initialValues.imsOrgId = imsOrgId;
         if (profile) initialValues.profile = profile;
         if (workflowWaitTime) initialValues.workflowWaitTime = workflowWaitTime;
