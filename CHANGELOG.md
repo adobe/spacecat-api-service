@@ -1,3 +1,10 @@
+# [1.158.0](https://github.com/adobe/spacecat-api-service/compare/v1.157.0...v1.158.0) (2025-08-19)
+
+
+### Features
+
+* enable geo brand presence during llmo onboarding ([#1153](https://github.com/adobe/spacecat-api-service/issues/1153)) ([02e22fe](https://github.com/adobe/spacecat-api-service/commit/02e22fe1dea1cab267f88c56aed5a6270c755bd4))
+
 # [1.157.0](https://github.com/adobe/spacecat-api-service/compare/v1.156.0...v1.157.0) (2025-08-19)
 
 
