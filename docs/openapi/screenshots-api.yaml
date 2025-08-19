@@ -158,11 +158,72 @@ screenshots:
                       format: url
                       description: Pre-signed URL for mobile screenshot without consent banner
                       example: 'https://s3.amazonaws.com/bucket/screenshots/mobile-off.png?signature=...'
-                    scrape_json:
+                    screenshots:
+                      type: array
+                      description: Array of screenshot metadata objects
+                      items:
+                        type: object
+                        properties:
+                          fileName:
+                            type: string
+                            description: Name of the screenshot file
+                            example: 'screenshot-desktop-viewport-withBanner.png'
+                          contentType:
+                            type: string
+                            description: MIME type of the screenshot
+                            example: 'image/png'
+                          screenshotTime:
+                            type: integer
+                            description: Time taken to capture this screenshot in milliseconds
+                            example: 4275
+                    dimensionsDevice:
                       type: string
-                      format: url
-                      description: Pre-signed URL for accessing the raw scrape data JSON
-                      example: 'https://s3.amazonaws.com/bucket/scrape-data/job-12345.json?signature=...'
+                      description: Device type used for the scrape
+                      example: 'desktop'
+                    scrapeTime:
+                      type: integer
+                      description: Total time for the scrape process in milliseconds
+                      example: 32405
+                    dimensions:
+                      type: object
+                      description: Dimensional analysis results from the consent banner detection
+                      properties:
+                        bannerDimensions:
+                          type: object
+                          description: Detailed banner positioning and dimensions
+                          properties:
+                            x:
+                              type: integer
+                              description: X coordinate of the banner
+                            y:
+                              type: integer
+                              description: Y coordinate of the banner
+                            width:
+                              type: integer
+                              description: Width of the banner
+                            height:
+                              type: integer
+                              description: Height of the banner
+                            top:
+                              type: integer
+                              description: Top position
+                            right:
+                              type: integer
+                              description: Right position
+                            bottom:
+                              type: integer
+                              description: Bottom position
+                            left:
+                              type: integer
+                              description: Left position
+                        overlayOpacity:
+                          type: string
+                          description: Opacity value of the overlay
+                          example: '1'
+                        overlayBGColor:
+                          type: string
+                          description: Background color of the overlay
+                          example: 'rgba(0, 0, 0, 0)'
               required:
                 - jobId
                 - results
@@ -170,13 +231,39 @@ screenshots:
               success:
                 summary: Successful screenshot retrieval
                 value:
-                  jobId: 'screenshot-job-12345'
+                  jobId: '44db569b-e2a7-4182-b4e1-05bec07dee10'
                   results:
-                    desktop_cookie_banner_on: 'https://s3.amazonaws.com/bucket/screenshots/desktop-on.png?signature=abc123'
-                    desktop_cookie_banner_off: 'https://s3.amazonaws.com/bucket/screenshots/desktop-off.png?signature=def456'
-                    mobile_cookie_banner_on: 'https://s3.amazonaws.com/bucket/screenshots/mobile-on.png?signature=ghi789'
-                    mobile_cookie_banner_off: 'https://s3.amazonaws.com/bucket/screenshots/mobile-off.png?signature=jkl012'
-                    scrape_json: 'https://s3.amazonaws.com/bucket/scrape-data/job-12345.json?signature=mno345'
+                    desktop_cookie_banner_on: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/44db569b-e2a7-4182-b4e1-05bec07dee10/ch/screenshot-desktop-viewport-withBanner.png?X-Amz-Algorithm=...'
+                    desktop_cookie_banner_off: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/44db569b-e2a7-4182-b4e1-05bec07dee10/ch/screenshot-desktop-viewport-withoutBanner.png?X-Amz-Algorithm=...'
+                    mobile_cookie_banner_on: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/44db569b-e2a7-4182-b4e1-05bec07dee10/ch/screenshot-iphone-6-viewport-withBanner.png?X-Amz-Algorithm=...'
+                    mobile_cookie_banner_off: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/44db569b-e2a7-4182-b4e1-05bec07dee10/ch/screenshot-iphone-6-viewport-withoutBanner.png?X-Amz-Algorithm=...'
+                    screenshots:
+                      - fileName: 'screenshot-iphone-6-viewport-withBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 122
+                      - fileName: 'screenshot-desktop-viewport-withBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 4275
+                      - fileName: 'screenshot-iphone-6-viewport-withoutBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 6340
+                      - fileName: 'screenshot-desktop-viewport-withoutBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 3002
+                    dimensionsDevice: 'desktop'
+                    scrapeTime: 32405
+                    dimensions:
+                      bannerDimensions:
+                        x: 715
+                        y: 15
+                        width: 490
+                        height: 620
+                        top: 15
+                        right: 1205
+                        bottom: 635
+                        left: 715
+                      overlayOpacity: '1'
+                      overlayBGColor: 'rgba(0, 0, 0, 0)'
       '400':
         description: Bad request - Missing or invalid jobId
         content:
