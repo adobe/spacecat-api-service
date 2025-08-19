@@ -329,10 +329,11 @@ const fetchFile = async (file, token) => {
  *
  * @param {Object} file - The Slack file object.
  * @param {string} token - The Slack bot token for authentication.
+ * @param {number} [minColumns=2] - Minimum number of columns required per row.
  * @returns {Promise<Array<Array<string>>>} - Parsed CSV data as an array of rows.
  * @throws {Error} - Throws an error if the file cannot be parsed.
  */
-const parseCSV = async (file, token) => {
+const parseCSV = async (file, token, minColumns = 2) => {
   try {
     const csvString = await fetchFile(file, token);
     if (!hasText(csvString)) {
@@ -347,13 +348,13 @@ const parseCSV = async (file, token) => {
       csvStream
         .pipe(parse({ delimiter: ',', trim: true, skipEmptyLines: true }))
         .on('data', (row) => {
-          if (row.length >= 2) {
+          if (row.length >= minColumns) {
             parsedData.push(row);
           }
         })
         .on('end', () => {
           if (parsedData.length === 0) {
-            reject(new Error('CSV format invalid: Each row must have at least 2 columns.'));
+            reject(new Error(`CSV format invalid: Each row must have at least ${minColumns} columns.`));
           } else {
             resolve(parsedData);
           }

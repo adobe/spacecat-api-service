@@ -109,7 +109,7 @@ HandlerConfig:
             description: Pattern representing the URL path structure to group
             type: string
   patternProperties:
-    "^(404|broken-backlinks)$":
+    '^(404|broken-backlinks)$':
       type: object
       properties:
         mentions:
@@ -243,7 +243,7 @@ Organization:
               - '@user5'
               - '@user6'
       contentAiConfig:
-          index: 'example-index-name'
+        index: 'example-index-name'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 OrganizationList:
@@ -336,8 +336,8 @@ Site:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
     deliveryConfig:
-        description: The delivery configuration of the site
-        $ref: '#/DeliveryConfig'
+      description: The delivery configuration of the site
+      $ref: '#/DeliveryConfig'
     gitHubURL:
       description: The optional GitHub URL of the site
       $ref: '#/URL'
@@ -492,8 +492,8 @@ SiteUpdate:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
     deliveryConfig:
-        description: The delivery configuration of the site
-        $ref: '#/DeliveryConfig'
+      description: The delivery configuration of the site
+      $ref: '#/DeliveryConfig'
     goLiveDate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
@@ -713,30 +713,30 @@ AuditResult:
             properties:
               type:
                 type: string
-                enum: ["group", "url"]
+                enum: ['group', 'url']
                 description: "Specifies if the metric applies to a 'group' or an individual 'url'"
               name:
                 type: string
                 description: "Name of the group (only applicable when type is 'group')"
-                example: "Homepage Group"
+                example: 'Homepage Group'
               pattern:
                 type: string
                 description: "URL pattern for the group (only applicable when type is 'group')"
-                example: "https://www.aem.live/home*"
+                example: 'https://www.aem.live/home*'
               url:
                 description: "URL of the page (only applicable when type is 'url')"
                 $ref: '#/URL'
               pageviews:
                 type: integer
-                description: "Total pageviews for this group or URL"
+                description: 'Total pageviews for this group or URL'
                 example: 4620
               organic:
                 type: integer
-                description: "Total organic traffic for this group or URL"
+                description: 'Total organic traffic for this group or URL'
                 example: 2510
               metrics:
                 type: array
-                description: "Array of performance metrics by device type"
+                description: 'Array of performance metrics by device type'
                 items:
                   $ref: './schemas.yaml#/CWVMetric'
 AuditList:
@@ -748,48 +748,48 @@ CWVMetric:
   properties:
     deviceType:
       type: string
-      description: "The type of device"
-      enum: ["mobile", "desktop"]
-      example: "mobile"
+      description: 'The type of device'
+      enum: ['mobile', 'desktop']
+      example: 'mobile'
     pageviews:
       type: integer
-      description: "Total pageviews for this device type"
+      description: 'Total pageviews for this device type'
       example: 2120
     lcp:
       type: number
       format: float
-      description: "Largest Contentful Paint (LCP) metric"
+      description: 'Largest Contentful Paint (LCP) metric'
       example: 2099.7
     lcpCount:
       type: integer
-      description: "The count of LCP samples"
+      description: 'The count of LCP samples'
       example: 9
     cls:
       type: number
       format: float
-      description: "Cumulative Layout Shift (CLS) metric"
+      description: 'Cumulative Layout Shift (CLS) metric'
       example: 0.02066
     clsCount:
       type: integer
-      description: "The count of CLS samples"
+      description: 'The count of CLS samples'
       example: 7
     inp:
       type: integer
       format: float
-      description: "Interaction to Next Paint (INP) metric"
+      description: 'Interaction to Next Paint (INP) metric'
       example: 12
     inpCount:
       type: integer
-      description: "The count of INP samples"
+      description: 'The count of INP samples'
       example: 3
     ttfb:
       type: number
       format: float
-      description: "Time to First Byte (TTFB) metric"
+      description: 'Time to First Byte (TTFB) metric'
       example: 520.45
     ttfbCount:
       type: integer
-      description: "The count of TTFB samples"
+      description: 'The count of TTFB samples'
       example: 18
 ExperimentationOpportunity:
   type: object
@@ -807,7 +807,7 @@ ExperimentationOpportunity:
       type: string
       format: url
       description: A URL pointing to the screenshot of the webpage.
-      example: "https://space.cat/screenshots/some-cool-page.png"
+      example: 'https://space.cat/screenshots/some-cool-page.png'
     trackedPageKPIName:
       type: string
       description: The name of KPI tracked.
@@ -950,7 +950,7 @@ HoolihanHeaders:
       type: array
       items:
         type: string
-        example: "1705914000000"
+        example: '1705914000000'
     x-api-key:
       description: The API key of the client which published the original event
       type: array
@@ -976,7 +976,7 @@ HoolihanHeaders:
       type: array
       items:
         type: string
-        example: "application/json"
+        example: 'application/json'
 HoolihanEventValue:
   type: object
   required:
@@ -1014,8 +1014,8 @@ HoolihanEvent:
       description: The offset of the event within the partition
       type: integer
   example:
-    id: "b7fyJDj1bu5yrt82RxLX89a98a73KSqR4ptC5MRvlEoLshbgAB3emGKdjQleAMyINZcoAkM6cB7ma2aV"
-    topic: "example_fulfillment_topic"
+    id: 'b7fyJDj1bu5yrt82RxLX89a98a73KSqR4ptC5MRvlEoLshbgAB3emGKdjQleAMyINZcoAkM6cB7ma2aV'
+    topic: 'example_fulfillment_topic'
     partition: 0
     offset: 1234
     value:
@@ -1040,25 +1040,25 @@ HoolihanEvent:
         IH0KICAgIF0KfQ==
       headers:
         x-request-id:
-          - "123e4567-e89b-12d3-a456-426614174000"
+          - '123e4567-e89b-12d3-a456-426614174000'
         miso-trace-id:
-          - "12345678abcdef12:12345678abcdef12:12345678abcdef12:1"
+          - '12345678abcdef12:12345678abcdef12:12345678abcdef12:1'
         com-adobe-hoolihan-source-partition:
-          - "0"
+          - '0'
         com-adobe-hoolihan-source-offset:
-          - "1234"
+          - '1234'
         com-adobe-hoolihan-publish-time:
-          - "1705915000000"
+          - '1705915000000'
         x-api-key:
-          - "example_publisher_client_id"
+          - 'example_publisher_client_id'
         com-adobe-hoolihan-publisher:
-          - "example_publisher_client_id"
+          - 'example_publisher_client_id'
         com-adobe-hoolihan-source-topic:
-          - "example_source_topic"
+          - 'example_source_topic'
         com-adobe-hoolihan-on-behalf-of:
-          - "example_other_client_id"
+          - 'example_other_client_id'
         Content-Type:
-          - "application/json"
+          - 'application/json'
 HoolihanEvents:
   type: array
   items:
@@ -1610,15 +1610,15 @@ PageMetricList:
     oneOf:
       - $ref: './schemas.yaml#/PageOrganicKeywords'
 DocImportData:
-  title: "Doc Import"
-  description: "There are no data properties available for doc based imports."
+  title: 'Doc Import'
+  description: 'There are no data properties available for doc based imports.'
   properties: {}
 DAImportData:
-  title: "DA Import"
-  description: "There are no data properties available for DA based imports."
+  title: 'DA Import'
+  description: 'There are no data properties available for DA based imports.'
   properties: {}
 XWalkImportData:
-  title: "Xwalk Import"
+  title: 'Xwalk Import'
   properties:
     siteName:
       type: string
@@ -1995,7 +1995,7 @@ ApiKeyRequest:
         $ref: '#/Domain'
   example:
     name: 'Example API Key'
-    features: [ 'imports' ]
+    features: ['imports']
     domains:
       - 'example.com'
 ApiKeyMetadataResponse:
@@ -2242,11 +2242,11 @@ SuggestionStatus:
   description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
   type: string
   enum:
-      - 'NEW'
-      - 'APPROVED'
-      - 'SKIPPED'
-      - 'FIXED'
-      - 'ERROR'
+    - 'NEW'
+    - 'APPROVED'
+    - 'SKIPPED'
+    - 'FIXED'
+    - 'ERROR'
   example: 'NEW'
 SuggestionType:
   description: |
@@ -2634,12 +2634,12 @@ CWVGuidance:
       items:
         type: string
 Priority:
-      type: string
-      enum:
-        - 'high'
-        - 'medium'
-        - 'low'
-      example: 'high'
+  type: string
+  enum:
+    - 'high'
+    - 'medium'
+    - 'low'
+  example: 'high'
 Brand:
   type: object
   properties:
@@ -2659,11 +2659,11 @@ Brand:
       description: The date and time when the brand was last updated
       $ref: '#/DateTime'
   example:
-    id: "urn:aaid:sc:VA6C2:e64205e7-13ca-51e8-8b83-8d8ef1ebf911"
-    name: "Brand Foo Bar Example"
-    imsOrgId: "1234567890ABCDEF12345678@AdobeOrg"
-    createdAt: "2025-01-01T00:00:00Z"
-    updatedAt: "2025-02-01T00:00:00Z"
+    id: 'urn:aaid:sc:VA6C2:e64205e7-13ca-51e8-8b83-8d8ef1ebf911'
+    name: 'Brand Foo Bar Example'
+    imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+    createdAt: '2025-01-01T00:00:00Z'
+    updatedAt: '2025-02-01T00:00:00Z'
 BrandList:
   type: array
   items:
@@ -2705,40 +2705,18 @@ BrandGuidelines:
           items:
             $ref: '#/BrandGuideline'
       example:
-        toneOfVoice: [
-          {
-            "text": "Encourage Action"
-          },
-          {
-            "text": "Be optimistic"
-          }
-        ]
-        coreValues: [
-          {
-            "text": "Inspiring"
-          },
-          {
-            "text": "Human"
-          }
-        ]
-        guidelines: [
-          {
-            "text": "Use gender-neutral pronouns like 'they', 'them', 'theirs'"
-          },
-          {
-            "text": "Always use sentence case"
-          }
-        ]
-        restrictions: [
-          {
-            "text": "Don't use rhetorical questions"
-          }
-        ]
-        additionalGuidelines: [
-          {
-            "text": "Always use sentence case"
-          }
-        ]
+        toneOfVoice:
+          [{ 'text': 'Encourage Action' }, { 'text': 'Be optimistic' }]
+        coreValues: [{ 'text': 'Inspiring' }, { 'text': 'Human' }]
+        guidelines:
+          [
+            {
+              'text': "Use gender-neutral pronouns like 'they', 'them', 'theirs'",
+            },
+            { 'text': 'Always use sentence case' },
+          ]
+        restrictions: [{ 'text': "Don't use rhetorical questions" }]
+        additionalGuidelines: [{ 'text': 'Always use sentence case' }]
 AsyncJob:
   type: object
   properties:
@@ -2827,7 +2805,7 @@ CreateAsyncJobAcceptedResponse:
       format: date-time
     status:
       type: string
-      enum: [ IN_PROGRESS, COMPLETED, FAILED ]
+      enum: [RUNNING, COMPLETE, FAILED]
     urlCount:
       type: integer
       description: The number of URLs in the scrape job
@@ -2859,24 +2837,23 @@ ScrapedContentResponse:
       size:
         type:
           - integer
-          - "null"
+          - 'null'
         description: File size in bytes
       lastModified:
         type:
           - string
-          - "null"
+          - 'null'
         format: date-time
         description: Timestamp of the last file modification
   example:
-    - key: "about-us/scrape.json"
-      name: "scrape.json"
+    - key: 'about-us/scrape.json'
+      name: 'scrape.json'
       size: 2048
-      lastModified: "2025-04-11T00:44:31Z"
-    - key: "about-us/screenshot-desktop-fullpage.png"
-      name: "screenshot-desktop-fullpage.png"
+      lastModified: '2025-04-11T00:44:31Z'
+    - key: 'about-us/screenshot-desktop-fullpage.png'
+      name: 'screenshot-desktop-fullpage.png'
       size: 123456
-      lastModified: "2025-04-11T00:44:31Z"
-
+      lastModified: '2025-04-11T00:44:31Z'
 
 FixStatus:
   description: |
@@ -2894,7 +2871,6 @@ FixStatus:
     - 'PUBLISHED'
     - 'FAILED'
     - 'ROLLED_BACK'
-
 
 Fix:
   type: object
@@ -2923,7 +2899,6 @@ Fix:
       additionalProperties: true
     status:
       $ref: '#/FixStatus'
-
 
 FixList:
   type: array
@@ -3119,14 +3094,14 @@ PaidSiteTopPage:
       type: string
       description: Paid traffic source (e.g., paid:search:google)
   example:
-    url: "https://www.example.com/uk/"
+    url: 'https://www.example.com/uk/'
     ctr: 0.015
     avgClicksPerSession: 1.82
     pageViews: 6100
     clickedSessions: 1800
     bounceRate: 0.98
     totalNumClicks: 5100
-    source: "paid:affiliate:"
+    source: 'paid:affiliate:'
 PaidSiteTopPageList:
   type: array
   items:
@@ -3413,6 +3388,61 @@ LlmoQuestionUpdate:
       example: ['product', 'pricing', 'features']
   additionalProperties: true
 
+LlmoCustomerIntentItem:
+  type: object
+  description: A single customer intent key-value pair
+  required:
+    - key
+    - value
+  properties:
+    key:
+      description: The customer intent key identifier
+      type: string
+      example: 'target_audience'
+    value:
+      description: The customer intent value
+      type: string
+      example: 'small business owners'
+  additionalProperties: false
+
+LlmoCustomerIntent:
+  type: array
+  description: Array of customer intent key-value pairs
+  items:
+    $ref: '#/LlmoCustomerIntentItem'
+  example:
+    - key: 'target_audience'
+      value: 'small business owners'
+    - key: 'primary_goal'
+      value: 'increase conversions'
+    - key: 'user_persona'
+      value: 'marketing director'
+
+LlmoCustomerIntentInput:
+  type: array
+  description: Input format for adding new customer intent items
+  items:
+    $ref: '#/LlmoCustomerIntentItem'
+  example:
+    - key: 'target_audience'
+      value: 'small business owners'
+    - key: 'primary_goal'
+      value: 'increase conversions'
+
+LlmoCustomerIntentUpdate:
+  type: object
+  description: Update format for modifying an existing customer intent item
+  properties:
+    key:
+      description: Updated customer intent key
+      type: string
+      example: 'updated_target_audience'
+    value:
+      description: Updated customer intent value
+      type: string
+      example: 'enterprise customers'
+  additionalProperties: false
+
 LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
@@ -3431,4 +3461,7 @@ LlmoConfig:
     questions:
       description: The questions configuration containing both human and AI questions
       $ref: '#/LlmoQuestions'
+    customerIntent:
+      description: The customer intent configuration containing key-value pairs
+      $ref: '#/LlmoCustomerIntent'
   additionalProperties: false

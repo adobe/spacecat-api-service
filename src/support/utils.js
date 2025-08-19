@@ -39,6 +39,7 @@ export const isAuditForAllDeliveryTypes = (deliveryType) => deliveryType.toUpper
  * @param {string} type - The type of audit.
  * @param {Object} auditContext - The audit context object.
  * @param {string} siteId - The site ID to audit.
+ * @param {string} [auditData] - Optional audit data.
  * @returns {Promise} A promise representing the message sending operation.
  */
 export const sendAuditMessage = async (
@@ -47,7 +48,13 @@ export const sendAuditMessage = async (
   type,
   auditContext,
   siteId,
-) => sqs.sendMessage(queueUrl, { type, siteId, auditContext });
+  auditData,
+) => sqs.sendMessage(queueUrl, {
+  type,
+  siteId,
+  auditContext,
+  data: auditData,
+});
 
 // todo: prototype - untested
 /* c8 ignore start */
@@ -91,6 +98,7 @@ export const sentRunScraperMessage = async (
  * @param {string} endDate
  * @param {Object} slackContext
  * @param {string} [pageUrl] - Optional page URL for the import
+ * @param {Object} [data] - Optional data object for import-specific data
  */
 export const sendRunImportMessage = async (
   sqs,
@@ -101,6 +109,7 @@ export const sendRunImportMessage = async (
   endDate,
   slackContext,
   pageUrl = undefined,
+  data = undefined,
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   siteId,
@@ -108,6 +117,7 @@ export const sendRunImportMessage = async (
   endDate,
   slackContext,
   pageUrl,
+  ...(data && { data }),
 });
 
 export const sendAutofixMessage = async (
@@ -167,6 +177,7 @@ export const sendAuditMessages = async (
  * Triggers an audit for a site.
  * @param {Site} site - The site to audit.
  * @param {string} auditType - The type of audit.
+ * @param {undefined|string} auditData - Optional audit data.
  * @param {Object} slackContext - The Slack context object.
  * @param {Object} lambdaContext - The Lambda context object.
  * @return {Promise} - A promise representing the audit trigger operation.
@@ -174,6 +185,7 @@ export const sendAuditMessages = async (
 export const triggerAuditForSite = async (
   site,
   auditType,
+  auditData,
   slackContext,
   lambdaContext,
 ) => sendAuditMessage(
@@ -187,6 +199,7 @@ export const triggerAuditForSite = async (
     },
   },
   site.getId(),
+  auditData,
 );
 
 // todo: prototype - untested
@@ -236,6 +249,7 @@ export const triggerScraperRun = async (
  * @param {Object} slackContext
  * @param {Object} lambdaContext
  * @param {string} [pageUrl] - Optional page URL for the import
+ * @param {Object} [data] - Optional data object for import-specific data
  */
 export const triggerImportRun = async (
   config,
@@ -246,6 +260,7 @@ export const triggerImportRun = async (
   slackContext,
   lambdaContext,
   pageUrl,
+  data,
 ) => sendRunImportMessage(
   lambdaContext.sqs,
   config.getQueues().imports,
@@ -258,6 +273,7 @@ export const triggerImportRun = async (
     threadTs: slackContext.threadTs,
   },
   pageUrl,
+  data,
 );
 /* c8 ignore end */
 
