@@ -122,16 +122,8 @@ function LlmoOnboardCommand(context) {
         ...(existingLlmoConfig?.questions && { questions: existingLlmoConfig.questions }),
       };
 
-      // Update the existing config object (similar to how onboard.js and llmo.js do it)
-      // We'll set the config as raw JSON data, which is how the existing APIs do it
-      const currentConfigData = siteConfig.toJSON ? siteConfig.toJSON() : /* c8 ignore next */ {};
-      const updatedConfigData = {
-        ...currentConfigData,
-        llmo: llmoConfig,
-      };
-
-      // Set the config directly as a plain object
-      site.setConfig(updatedConfigData);
+      // setLlmoConfig method does NOT exist already
+      siteConfig.setLlmoConfig(llmoConfig);
 
       // enable the traffic-analysis import for referral-traffic
       siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
