@@ -1,3 +1,10 @@
+# [1.160.0](https://github.com/adobe/spacecat-api-service/compare/v1.159.0...v1.160.0) (2025-08-20)
+
+
+### Features
+
+* enable agentic traffic audits on onboard ([#1162](https://github.com/adobe/spacecat-api-service/issues/1162)) ([2232737](https://github.com/adobe/spacecat-api-service/commit/223273727676d511a45da1e6ef88cbf43b4af009))
+
 # [1.159.0](https://github.com/adobe/spacecat-api-service/compare/v1.158.0...v1.159.0) (2025-08-19)
 
 
