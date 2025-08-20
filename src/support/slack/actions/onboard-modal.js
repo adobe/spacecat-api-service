@@ -161,7 +161,7 @@ export function startOnboarding(lambdaContext) {
                 action_id: 'ims_org_id',
                 placeholder: {
                   type: 'plain_text',
-                  text: 'ABC123@AdobeOrg (default: AEM Sites Engineering)',
+                  text: 'ABC123@AdobeOrg (leave empty for default)',
                 },
                 ...(initialValues.imsOrgId && { initial_value: initialValues.imsOrgId }),
               },
@@ -183,10 +183,8 @@ export function startOnboarding(lambdaContext) {
                 },
                 initial_option: (() => {
                   const profileOptions = [
-                    { text: 'Default', value: 'default' },
                     { text: 'Demo', value: 'demo' },
-                    { text: 'Summit', value: 'summit' },
-                    { text: 'Summit – Lower Quality', value: 'summit-lower-quality' },
+                    { text: 'Default', value: 'default' },
                   ];
 
                   const selectedProfile = initialValues.profile || 'default';
@@ -206,13 +204,6 @@ export function startOnboarding(lambdaContext) {
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'Default',
-                    },
-                    value: 'default',
-                  },
-                  {
-                    text: {
-                      type: 'plain_text',
                       text: 'Demo',
                     },
                     value: 'demo',
@@ -220,16 +211,9 @@ export function startOnboarding(lambdaContext) {
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'Summit',
+                      text: 'Default',
                     },
-                    value: 'summit',
-                  },
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'Summit – Lower Quality',
-                    },
-                    value: 'summit-lower-quality',
+                    value: 'default',
                   },
                 ],
               },
@@ -350,7 +334,7 @@ export function startOnboarding(lambdaContext) {
               },
               label: {
                 type: 'plain_text',
-                text: 'Workflow Wait Time (seconds)',
+                text: 'Workflow Wait Time (minutes)',
               },
               optional: true,
             },
