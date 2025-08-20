@@ -187,7 +187,7 @@ export function startOnboarding(lambdaContext) {
                     { text: 'Default', value: 'default' },
                   ];
 
-                  const selectedProfile = initialValues.profile || 'default';
+                  const selectedProfile = initialValues.profile || 'demo';
                   const option = profileOptions.find(
                     (opt) => opt.value === selectedProfile,
                   ) || profileOptions[0];
