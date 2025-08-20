@@ -1,3 +1,10 @@
+## [1.161.3](https://github.com/adobe/spacecat-api-service/compare/v1.161.2...v1.161.3) (2025-08-20)
+
+
+### Bug Fixes
+
+* onboarding descriptions and default values ([#1175](https://github.com/adobe/spacecat-api-service/issues/1175)) ([e402ddb](https://github.com/adobe/spacecat-api-service/commit/e402ddb454b25e54ef6e4d21a58068bafa9f082b))
+
 ## [1.161.2](https://github.com/adobe/spacecat-api-service/compare/v1.161.1...v1.161.2) (2025-08-20)
 
 
