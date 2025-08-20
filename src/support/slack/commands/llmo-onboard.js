@@ -22,6 +22,8 @@ import BaseCommand from './base.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
+const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
+const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
 
 const PHRASES = ['onboard-llmo'];
 
@@ -132,6 +134,24 @@ function LlmoOnboardCommand(context) {
       const configuration = await Configuration.findLatest();
       configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
       configuration.enableHandlerForSite('geo-brand-presence', site);
+
+      // enable the cdn-analysis only if no other site in this organization already has it enabled
+      const organizationId = site.getOrganizationId();
+      const sitesInOrg = await Site.allByOrganizationId(organizationId);
+
+      const hasAgenticTrafficEnabled = sitesInOrg.some(
+        (orgSite) => configuration.isHandlerEnabledForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, orgSite),
+      );
+
+      if (!hasAgenticTrafficEnabled) {
+        log.info(`Enabling agentic traffic audits for organization ${organizationId} (first site in org)`);
+        configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
+      } else {
+        log.info(`Agentic traffic audits already enabled for organization ${organizationId}, skipping`);
+      }
+
+      // enable the cdn-logs-report audits for agentic traffic
+      configuration.enableHandlerForSite(AGENTIC_TRAFFIC_REPORT_AUDIT, site);
 
       try {
         await configuration.save();
