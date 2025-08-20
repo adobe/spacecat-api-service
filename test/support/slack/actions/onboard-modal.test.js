@@ -284,7 +284,7 @@ describe('onboard-modal', () => {
     });
 
     it('should set correct profile initial option based on provided value', async () => {
-      const initialValues = { profile: 'summit' };
+      const initialValues = { profile: 'default' };
       body.actions[0].value = JSON.stringify(initialValues);
 
       const startOnboardingAction = startOnboarding(context);
@@ -300,8 +300,8 @@ describe('onboard-modal', () => {
       const { blocks } = openCall.view;
       const profileBlock = blocks.find((block) => block.block_id === 'profile_input');
 
-      expect(profileBlock.element.initial_option.value).to.equal('summit');
-      expect(profileBlock.element.initial_option.text.text).to.equal('Summit');
+      expect(profileBlock.element.initial_option.value).to.equal('default');
+      expect(profileBlock.element.initial_option.text.text).to.equal('Default');
     });
 
     it('should handle unknown profile value gracefully', async () => {
@@ -322,7 +322,7 @@ describe('onboard-modal', () => {
       const profileBlock = blocks.find((block) => block.block_id === 'profile_input');
 
       // Should fall back to default profile
-      expect(profileBlock.element.initial_option.value).to.equal('default');
+      expect(profileBlock.element.initial_option.value).to.equal('demo');
     });
   });
 
