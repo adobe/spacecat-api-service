@@ -34,11 +34,21 @@ screenshots:
                 format: url
                 description: The URL of the webpage to capture screenshots from
                 example: 'https://example.com'
+              force:
+                type: boolean
+                description: Force a fresh scrape by bypassing cached results. When true, ignores any existing cached screenshots and captures new ones.
+                default: false
+                example: false
           examples:
             basic:
               summary: Basic screenshot request
               value:
                 url: 'https://example.com'
+            with_force:
+              summary: Force fresh screenshots
+              value:
+                url: 'https://example.com'
+                force: true
     responses:
       '202':
         description: Screenshot job accepted and started
