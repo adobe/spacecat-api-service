@@ -37,44 +37,48 @@ function getCacheKey(siteId, query, cacheLocation) {
 }
 
 function validateTemporalParams({ year, week, month }) {
-  if (year === undefined) {
-    return { ok: false, error: 'Year is a required parameter' };
-  }
-  // Treat null as equivalent to undefined for week/month validation
-  if ((week === undefined || week === null) && (month === undefined || month === null)) {
-    return { ok: false, error: 'Either week or month must be provided' };
-  }
+  // Helper to check if value is null or undefined
+  const isNullish = (value) => value === undefined || value === null;
 
-  const tryParse = (value, name) => {
-    if (value === undefined || value === null) {
-      return { ok: true, value: 0 };
-    }
+  // Helper to parse integer with validation
+  const parseInteger = (value, name) => {
+    if (isNullish(value)) return 0;
+
     const parsed = parseInt(value, 10);
     if (Number.isNaN(parsed)) {
-      return { ok: false, error: `${name} must be a valid number` };
+      throw new Error(`${name} must be a valid number`);
     }
-    return { ok: true, value: parsed };
+    return parsed;
   };
 
-  const yearParsed = tryParse(year, 'Year');
-  if (!yearParsed.ok) return yearParsed;
-  const weekParsed = tryParse(week, 'Week');
-  if (!weekParsed.ok) return weekParsed;
-  const monthParsed = tryParse(month, 'Month');
-  if (!monthParsed.ok) return monthParsed;
+  try {
+    // Year is required
+    if (isNullish(year)) {
+      return { ok: false, error: 'Year is a required parameter' };
+    }
 
-  if (weekParsed.value === 0 && monthParsed.value === 0) {
-    return { ok: false, error: 'Either week or month must be non-zero' };
+    // At least one of week or month must be provided
+    if (isNullish(week) && isNullish(month)) {
+      return { ok: false, error: 'Either week or month must be provided' };
+    }
+
+    // Parse all values
+    const yearInt = parseInteger(year, 'Year');
+    const weekInt = parseInteger(week, 'Week');
+    const monthInt = parseInteger(month, 'Month');
+
+    // At least one of week or month must be non-zero
+    if (weekInt === 0 && monthInt === 0) {
+      return { ok: false, error: 'Either week or month must be non-zero' };
+    }
+
+    return {
+      ok: true,
+      values: { yearInt, weekInt, monthInt },
+    };
+  } catch (error) {
+    return { ok: false, error: error.message };
   }
-
-  return {
-    ok: true,
-    values: {
-      yearInt: yearParsed.value,
-      weekInt: weekParsed.value,
-      monthInt: monthParsed.value,
-    },
-  };
 }
 
 const isTrue = (value) => value === true || value === 'true';
