@@ -334,7 +334,7 @@ export function startOnboarding(lambdaContext) {
               },
               label: {
                 type: 'plain_text',
-                text: 'Workflow Wait Time (minutes)',
+                text: 'Workflow Wait Time (seconds)',
               },
               optional: true,
             },
