@@ -190,13 +190,13 @@ describe('Paid TrafficController', async () => {
       expect(mockAthenaQuery).not.to.have.been.called;
     });
 
-    it('includes data threshold in query when PAID_PAGE_VIEWS_THRESHOLDS is set', async () => {
+    it('includes data threshold in query when PAID_DATA_THRESHOLD is set', async () => {
       const threshold = 4321;
       mockAthenaQuery.resolves([]);
       const controller = TrafficController(
         mockContext,
         mockLog,
-        { ...mockEnv, PAID_PAGE_VIEWS_THRESHOLDS: threshold },
+        { ...mockEnv, PAID_DATA_THRESHOLD: threshold },
       );
       const res = await controller.getPaidTrafficByTypeChannel();
       expect(res.status).to.equal(200);
