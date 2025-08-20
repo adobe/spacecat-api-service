@@ -1,3 +1,10 @@
+# [1.161.0](https://github.com/adobe/spacecat-api-service/compare/v1.160.1...v1.161.0) (2025-08-20)
+
+
+### Features
+
+* traffic-analysis-with-month ([#1169](https://github.com/adobe/spacecat-api-service/issues/1169)) ([29d8a91](https://github.com/adobe/spacecat-api-service/commit/29d8a91433826ea791552c3d0250639ef12e2d65))
+
 ## [1.160.1](https://github.com/adobe/spacecat-api-service/compare/v1.160.0...v1.160.1) (2025-08-20)
 
 
