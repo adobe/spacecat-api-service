@@ -56,7 +56,7 @@ function LlmoController() {
     const aiQuestions = config.getLlmoAIQuestions() || [];
 
     if (!humanQuestions.some((question) => question.key === questionKey)
-        && !aiQuestions.some((question) => question.key === questionKey)) {
+      && !aiQuestions.some((question) => question.key === questionKey)) {
       throw new Error('Invalid question key, please provide a valid question key');
     }
   };
@@ -305,6 +305,32 @@ function LlmoController() {
     return ok(config.getLlmoConfig().customerIntent || []);
   };
 
+  // Handles requests to the LLMO CDN logs filter endpoint, updates CDN logs filter configuration
+  const patchLlmoCdnLogsFilter = async (context) => {
+    const { log } = context;
+    const { data } = context;
+    const { siteId } = context.params;
+
+    try {
+      const { site, config } = await getSiteAndValidateLlmo(context);
+
+      if (!isObject(data)) {
+        return badRequest('Update data must be provided as an object');
+      }
+
+      const { cdnlogsFilter } = data;
+
+      config.updateLlmoCdnlogsFilter(cdnlogsFilter);
+
+      await saveSiteConfig(site, config, log, 'updating CDN logs filter');
+
+      return ok(config.getLlmoConfig().cdnlogsFilter || []);
+    } catch (error) {
+      log.error(`Error updating CDN logs filter for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     getLlmoConfig,
@@ -316,6 +342,7 @@ function LlmoController() {
     addLlmoCustomerIntent,
     removeLlmoCustomerIntent,
     patchLlmoCustomerIntent,
+    patchLlmoCdnLogsFilter,
   };
 }
 
