@@ -469,12 +469,11 @@ describe('LlmoController', () => {
       // Add sheetType to the context params
       mockContext.data.sheetType = 'analytics';
 
-      try {
-        await controller.getLlmoSheetData(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('External API returned 404: Not Found');
-      }
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('External API returned 404: Not Found');
     });
 
     it('should handle network errors with sheetType parameter', async () => {
@@ -484,12 +483,11 @@ describe('LlmoController', () => {
       // Add sheetType to the context params
       mockContext.data.sheetType = 'analytics';
 
-      try {
-        await controller.getLlmoSheetData(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Network error');
-      }
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Network error');
     });
 
     it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
@@ -525,35 +523,32 @@ describe('LlmoController', () => {
       };
       tracingFetchStub.resolves(mockResponse);
 
-      try {
-        await controller.getLlmoSheetData(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('External API returned 404: Not Found');
-      }
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('External API returned 404: Not Found');
     });
 
     it('should handle network errors', async () => {
       const networkError = new Error('Network error');
       tracingFetchStub.rejects(networkError);
 
-      try {
-        await controller.getLlmoSheetData(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Network error');
-      }
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Network error');
     });
 
     it('should throw error when LLMO is not enabled', async () => {
       mockConfig.getLlmoConfig.returns(null);
 
-      try {
-        await controller.getLlmoSheetData(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
-      }
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
     });
   });
 
@@ -569,12 +564,11 @@ describe('LlmoController', () => {
     it('should throw error when LLMO is not enabled', async () => {
       mockConfig.getLlmoConfig.returns(null);
 
-      try {
-        await controller.getLlmoConfig(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('LLM Optimizer is not enabled for this site');
-      }
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
     });
   });
 
