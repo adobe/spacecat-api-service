@@ -227,9 +227,9 @@ weekNumber:
     maximum: 53
 month:
   name: month
-  description: The month number (1-12)
+  description: The month number (1-12). Provide either weekNumber or month.
   in: query
-  required: true
+  required: false
   schema:
     type: integer
     minimum: 1

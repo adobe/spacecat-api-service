@@ -155,7 +155,7 @@ describe('AddSiteCommand', () => {
       expect(dataAccessStub.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
       });
-      expect(sqsStub.sendMessage.called).to.be.true;
+      expect(sqsStub.sendMessage).called;
     });
 
     it('does not trigger audit after adding site when audits are disabled', async () => {

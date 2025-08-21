@@ -63,6 +63,7 @@ import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
 import DemoController from './controllers/demo.js';
+import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import LlmoController from './controllers/llmo.js';
@@ -119,6 +120,7 @@ async function run(request, context) {
     const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
+    const consentBannerController = ConsentBannerController(context);
     const scrapeController = ScrapeController(context);
     const scrapeJobController = ScrapeJobController(context);
     const llmoController = LlmoController(context);
@@ -151,6 +153,7 @@ async function run(request, context) {
       brandsController,
       preflightController,
       demoController,
+      consentBannerController,
       scrapeController,
       scrapeJobController,
       mcpController,

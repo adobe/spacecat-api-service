@@ -119,7 +119,7 @@ describe('AddRepoCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith('\n'
+      expect(slackContext.say).calledWith('\n'
         + '      :white_check_mark: *GitHub repo added for <undefined|undefined>*\n'
         + '      \n'
         + '\n'
@@ -131,7 +131,7 @@ describe('AddRepoCommand', () => {
         + '    \n'
         + '      \n'
         + '      First PSI check with new repo is triggered! :adobe-run:\n'
-        + '      ')).to.be.true;
+        + '      ');
     });
 
     it('handles missing site URL', async () => {
@@ -190,7 +190,7 @@ describe('AddRepoCommand', () => {
       await command.handleExecution(args, slackContext);
 
       // Assertions to confirm repo info was fetched and handled correctly
-      expect(slackContext.say.calledWithMatch(/GitHub repo added/)).to.be.true;
+      expect(slackContext.say).calledWithMatch(/GitHub repo added/);
     });
 
     it('handles non-existent repository (404 error)', async () => {

@@ -378,25 +378,34 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
-    if (requestBody.authoringType !== site.getAuthoringType()
-     && Object.values(SiteModel.AUTHORING_TYPES).includes(requestBody.authoringType)) {
-      site.setAuthoringType(requestBody.authoringType);
-      updates = true;
-    }
-
-    if (isObject(requestBody.deliveryConfig)
-      && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
-      site.setDeliveryConfig(requestBody.deliveryConfig);
-      updates = true;
-    }
-
     if (isObject(requestBody.config)) {
       site.setConfig(requestBody.config);
       updates = true;
     }
 
-    if (isObject(requestBody.hlxConfig) && !deepEqual(requestBody.hlxConfig, site.getHlxConfig())) {
-      site.setHlxConfig(requestBody.hlxConfig);
+    const nextAuthoringType = Object.values(SiteModel.AUTHORING_TYPES)
+      .includes(requestBody.authoringType)
+      ? requestBody.authoringType
+      : site.getAuthoringType();
+
+    const nextDeliveryConfig = isObject(requestBody.deliveryConfig)
+      ? requestBody.deliveryConfig
+      : site.getDeliveryConfig();
+
+    const nextHlxConfig = isObject(requestBody.hlxConfig)
+      ? requestBody.hlxConfig
+      : site.getHlxConfig();
+
+    const authoringTypeChanged = nextAuthoringType !== site.getAuthoringType();
+    const deliveryConfigChanged = !deepEqual(nextDeliveryConfig, site.getDeliveryConfig());
+    const hlxConfigChanged = !deepEqual(nextHlxConfig, site.getHlxConfig());
+
+    const authoringUpdate = authoringTypeChanged || deliveryConfigChanged || hlxConfigChanged;
+
+    if (authoringUpdate) {
+      site.setAuthoringType(nextAuthoringType);
+      site.setDeliveryConfig(nextDeliveryConfig);
+      site.setHlxConfig(nextHlxConfig);
       updates = true;
     }
 
