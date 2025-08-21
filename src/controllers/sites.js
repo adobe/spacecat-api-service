@@ -23,6 +23,7 @@ import {
   hasText,
   isBoolean,
   isObject,
+  isArray,
   getStoredMetrics,
   isValidUUID,
   deepEqual,
@@ -50,6 +51,42 @@ const AHREFS = 'ahrefs';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
+
+/**
+ * Validates that pageTypes array contains valid regex patterns
+ * @param {Array} pageTypes - Array of page type objects with name and pattern
+ * @returns {object} Validation result with isValid boolean and error message
+ */
+const validatePageTypes = (pageTypes) => {
+  const validationResults = pageTypes.map((pageType, index) => {
+    if (!isObject(pageType)) {
+      return { isValid: false, error: `pageTypes[${index}] must be an object` };
+    }
+
+    if (!hasText(pageType.name)) {
+      return { isValid: false, error: `pageTypes[${index}] must have a name` };
+    }
+
+    if (!hasText(pageType.pattern)) {
+      return { isValid: false, error: `pageTypes[${index}] must have a pattern` };
+    }
+
+    try {
+      // eslint-disable-next-line no-new
+      new RegExp(pageType.pattern);
+      return { isValid: true };
+    } catch (error) {
+      return {
+        isValid: false,
+        error: `pageTypes[${index}] has invalid regex pattern: ${error.message}`,
+      };
+    }
+  });
+
+  const firstError = validationResults.find((result) => !result.isValid);
+
+  return firstError || { isValid: true };
+};
 
 function SitesController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
@@ -341,25 +378,45 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
-    if (requestBody.authoringType !== site.getAuthoringType()
-     && Object.values(SiteModel.AUTHORING_TYPES).includes(requestBody.authoringType)) {
-      site.setAuthoringType(requestBody.authoringType);
-      updates = true;
-    }
-
-    if (isObject(requestBody.deliveryConfig)
-      && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
-      site.setDeliveryConfig(requestBody.deliveryConfig);
-      updates = true;
-    }
-
     if (isObject(requestBody.config)) {
       site.setConfig(requestBody.config);
       updates = true;
     }
 
-    if (isObject(requestBody.hlxConfig) && !deepEqual(requestBody.hlxConfig, site.getHlxConfig())) {
-      site.setHlxConfig(requestBody.hlxConfig);
+    const nextAuthoringType = Object.values(SiteModel.AUTHORING_TYPES)
+      .includes(requestBody.authoringType)
+      ? requestBody.authoringType
+      : site.getAuthoringType();
+
+    const nextDeliveryConfig = isObject(requestBody.deliveryConfig)
+      ? requestBody.deliveryConfig
+      : site.getDeliveryConfig();
+
+    const nextHlxConfig = isObject(requestBody.hlxConfig)
+      ? requestBody.hlxConfig
+      : site.getHlxConfig();
+
+    const authoringTypeChanged = nextAuthoringType !== site.getAuthoringType();
+    const deliveryConfigChanged = !deepEqual(nextDeliveryConfig, site.getDeliveryConfig());
+    const hlxConfigChanged = !deepEqual(nextHlxConfig, site.getHlxConfig());
+
+    const authoringUpdate = authoringTypeChanged || deliveryConfigChanged || hlxConfigChanged;
+
+    if (authoringUpdate) {
+      site.setAuthoringType(nextAuthoringType);
+      site.setDeliveryConfig(nextDeliveryConfig);
+      site.setHlxConfig(nextHlxConfig);
+      updates = true;
+    }
+
+    if (isArray(requestBody.pageTypes) && !deepEqual(requestBody.pageTypes, site.getPageTypes())) {
+      // Validate pageTypes before setting
+      const validation = validatePageTypes(requestBody.pageTypes);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
+
+      site.setPageTypes(requestBody.pageTypes);
       updates = true;
     }
 

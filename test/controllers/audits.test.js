@@ -618,6 +618,7 @@ describe('Audits Controller', () => {
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -654,6 +655,7 @@ describe('Audits Controller', () => {
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -691,6 +693,7 @@ describe('Audits Controller', () => {
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -731,6 +734,7 @@ describe('Audits Controller', () => {
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -811,6 +815,7 @@ describe('Audits Controller', () => {
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -852,6 +857,7 @@ describe('Audits Controller', () => {
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -891,6 +897,7 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -929,6 +936,7 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -966,6 +974,7 @@ describe('Audits Controller', () => {
         getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -1029,6 +1038,7 @@ describe('Audits Controller', () => {
           getFetchConfig: () => {},
           getBrandConfig: () => ({ brandId: 'test-brand' }),
           getCdnLogsConfig: () => ({}),
+          getLlmoConfig: () => ({}),
         };
 
         site.getConfig = () => siteConfig;

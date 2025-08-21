@@ -17,28 +17,68 @@ import {
   badRequest,
   found,
 } from '@adobe/spacecat-shared-http-utils';
-import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
+import {
+  AWSAthenaClient, TrafficDataResponseDto, getTrafficAnalysisQuery,
+  TrafficDataWithCWVDto, getTrafficAnalysisQueryPlaceholdersFilled,
+} from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
-import { getStaticContent } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { TrafficDataResponseDto } from '../../dto/traffic-data-base-response.js';
-import { TrafficDataWithCWVDto } from '../../dto/traffic-data-response-with-cwv.js';
 import {
   getS3CachedResult,
   addResultJsonToCache,
   fileExists,
+  getSignedUrlWithRetries,
 } from './caching-helper.js';
-import { getDateRanges } from './calendar-week-helper.js';
-import { buildPageTypeCase } from './page-type-mapper.js';
-
-async function loadSql(variables) {
-  return getStaticContent(variables, './src/controllers/paid/channel-query.sql.tpl');
-}
 
 function getCacheKey(siteId, query, cacheLocation) {
   const outPrefix = crypto.createHash('md5').update(query).digest('hex');
   const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
   return { cacheKey, outPrefix };
+}
+
+function validateTemporalParams({ year, week, month }) {
+  // Helper to check if value is null or undefined
+  const isNullish = (value) => value === undefined || value === null;
+
+  // Helper to parse integer with validation
+  const parseInteger = (value, name) => {
+    if (isNullish(value)) return 0;
+
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+      throw new Error(`${name} must be a valid number`);
+    }
+    return parsed;
+  };
+
+  try {
+    // Year is required
+    if (isNullish(year)) {
+      return { ok: false, error: 'Year is a required parameter' };
+    }
+
+    // At least one of week or month must be provided
+    if (isNullish(week) && isNullish(month)) {
+      return { ok: false, error: 'Either week or month must be provided' };
+    }
+
+    // Parse all values
+    const yearInt = parseInteger(year, 'Year');
+    const weekInt = parseInteger(week, 'Week');
+    const monthInt = parseInteger(month, 'Month');
+
+    // At least one of week or month must be non-zero
+    if (weekInt === 0 && monthInt === 0) {
+      return { ok: false, error: 'Either week or month must be non-zero' };
+    }
+
+    return {
+      ok: true,
+      values: { yearInt, weekInt, monthInt },
+    };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
 }
 
 const isTrue = (value) => value === true || value === 'true';
@@ -60,17 +100,25 @@ function TrafficController(context, log, env) {
   async function tryGetCacheResult(siteId, query, noCache) {
     const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
     if (isTrue(noCache)) {
+      log.info(`Skipping cache check for file: ${cacheKey} because param noCache is: ${noCache}`);
       return { cachedResultUrl: null, cacheKey, outPrefix };
     }
-    if (await fileExists(s3, cacheKey, log)) {
+    const maxAttempts = 1;
+    if (await fileExists(s3, cacheKey, log, maxAttempts)) {
       log.info(`Found cached result. Fetching signed URL for Athena result from S3: ${cacheKey}`);
-      const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
+      const ignoreNotFound = true;
+      const cachedUrl = await getS3CachedResult(s3, cacheKey, log, ignoreNotFound);
       return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
     }
+    log.info(`Cached result for file: ${cacheKey} does not exist`);
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
 
   async function fetchPaidTrafficData(dimensions, mapper) {
+    /* c8 ignore next 1 */
+    const requestId = context.invocation?.requestId;
+    log.info(`Fetching paid traffic data for the request: ${requestId}`);
+
     const siteId = context.params?.siteId;
     const site = await Site.findById(siteId);
     if (!site) {
@@ -83,46 +131,53 @@ function TrafficController(context, log, env) {
     }
 
     // validate input params
-    const { year, week, noCache } = context.data;
-    if (!year || !week) {
-      return badRequest('Year and week are required parameters');
+    const {
+      year, week, month, noCache, trafficType,
+    } = context.data;
+
+    const temporal = validateTemporalParams({ year, week, month });
+    if (!temporal.ok) {
+      return badRequest(temporal.error);
     }
+
+    const { yearInt, weekInt, monthInt } = temporal.values;
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
-    const groupBy = dimensions;
-    const dimensionColumns = groupBy.join(', ');
-    const dimensionColumnsPrefixed = `${groupBy.map((col) => `a.${col}`).join(', ')}, `;
 
-    const dateRanges = getDateRanges(week, year);
-    const weekNum = week; // always use the input week
-    const temporalCondition = dateRanges
-      .map((r) => `(year=${r.year} AND month=${r.month} AND week=${weekNum})`)
-      .join(' OR ');
-
-    // Only build pageTypeCase if 'page_type' is in the dimensions
-    let pageTypeCase;
-    if (groupBy.includes('page_type')) {
-      pageTypeCase = buildPageTypeCase(siteId, 'path');
+    let pageTypes = null;
+    if (dimensions.includes('page_type')) {
+      pageTypes = await site.getPageTypes();
     }
 
-    if (!pageTypeCase) {
-      pageTypeCase = 'NULL as page_type';
+    let trfTypes = null;
+    if (trafficType && ['owned', 'earned', 'paid'].includes(trafficType)) {
+      trfTypes = [trafficType];
     }
-    const description = `fetch paid channel data | db: ${rumMetricsDatabase} } | db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${temporalCondition} | groupBy: [${groupBy.join(', ')}] | template: channel-query.sql.tpl`;
 
-    log.info(`Processing query: ${description}`);
+    // no filter supplied and api is not for traffic type default to paid
+    if (trafficType == null && !dimensions.includes('trf_type')) {
+      trfTypes = ['paid'];
+    }
+    const pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
 
-    // build query
-    const query = await loadSql({
+    const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
+      week: weekInt,
+      month: monthInt,
+      year: yearInt,
       siteId,
-      groupBy: groupBy.join(', '),
-      dimensionColumns,
-      dimensionColumnsPrefixed,
+      dimensions,
       tableName,
-      temporalCondition,
-      pageTypeCase,
+      pageTypes,
+      pageTypeMatchColumn: 'path',
+      trfTypes,
+      pageViewThreshold,
     });
 
+    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
+
+    log.info(`Processing query: ${description}`);
+    // build query
+    const query = getTrafficAnalysisQuery(quereyParams);
     log.debug(`Fetching paid data with query: ${query}`);
 
     // first try to get from cache
@@ -131,9 +186,22 @@ function TrafficController(context, log, env) {
       query,
       noCache,
     );
-    const thresholdConfig = env.CWV_THRESHOLDS || {};
+    let thresholdConfig = {};
+    if (env.CWV_THRESHOLDS) {
+      if (typeof env.CWV_THRESHOLDS === 'string') {
+        try {
+          thresholdConfig = JSON.parse(env.CWV_THRESHOLDS);
+        } catch (e) {
+          log.warn('Invalid CWV_THRESHOLDS JSON. Falling back to defaults.');
+          thresholdConfig = {};
+        }
+      } else if (typeof env.CWV_THRESHOLDS === 'object') {
+        thresholdConfig = env.CWV_THRESHOLDS;
+      }
+    }
+
     if (cachedResultUrl) {
-      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}`);
+      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${requestId}`);
       return found(cachedResultUrl);
     }
 
@@ -144,7 +212,7 @@ function TrafficController(context, log, env) {
     log.info(`Fetching paid data directly from Athena table: ${tableName}`);
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
     const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
-    log.info(`Successfully fetched results of size ${response?.length}`);
+    log.info(`Successfully fetched results of length ${response?.length}`);
 
     // add to cache
     let isCached = false;
@@ -153,7 +221,19 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    log.warn(`Failed to return cache key ${CACHE_LOCATION}. Returning response directly.`);
+    if (isCached) {
+      // even though file is saved 503 are possible in short time window,
+      // verifying file is reachable before returning
+      const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
+      if (verifiedSignedUrl != null) {
+        log.info(`Succesfully verified file existance, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
+        return found(
+          verifiedSignedUrl,
+        );
+      }
+    }
+
+    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly. Request ID: ${requestId}`);
     return ok(response, {
       'content-encoding': 'gzip',
     });
@@ -168,12 +248,15 @@ function TrafficController(context, log, env) {
     getPaidTrafficByTypeChannel: async () => fetchPaidTrafficData(['trf_type', 'trf_channel'], TrafficDataResponseDto),
     getPaidTrafficByTypeCampaign: async () => fetchPaidTrafficData(['trf_type', 'utm_campaign'], TrafficDataResponseDto),
     getPaidTrafficByType: async () => fetchPaidTrafficData(['trf_type'], TrafficDataResponseDto),
+    getPaidTrafficByUrlPageTypePlatformCampaignDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageTypePlatformCampaignDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypeCampaignDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypeDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypeCampaign: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypePlatform: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypeCampaignPlatform: async () => fetchPaidTrafficData(['path', 'page_type', 'utm_campaign', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageTypePlatformDevice: async () => fetchPaidTrafficData(['path', 'page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByPageType: async () => fetchPaidTrafficData(['page_type'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypeCampaignDevice: async () => fetchPaidTrafficData(['page_type', 'utm_campaign', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypeDevice: async () => fetchPaidTrafficData(['page_type', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypeCampaign: async () => fetchPaidTrafficData(['page_type', 'utm_campaign'], TrafficDataWithCWVDto),
