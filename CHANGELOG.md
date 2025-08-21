@@ -1,3 +1,10 @@
+## [1.163.1](https://github.com/adobe/spacecat-api-service/compare/v1.163.0...v1.163.1) (2025-08-21)
+
+
+### Bug Fixes
+
+* update ScrapeClient to newest version ([#1145](https://github.com/adobe/spacecat-api-service/issues/1145)) ([9d3b7ac](https://github.com/adobe/spacecat-api-service/commit/9d3b7ac5982ce1bb85ec4b255ba6d61b9fc6b10e))
+
 # [1.163.0](https://github.com/adobe/spacecat-api-service/compare/v1.162.0...v1.163.0) (2025-08-21)
 
 
