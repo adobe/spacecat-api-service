@@ -190,6 +190,20 @@ describe('Paid TrafficController', async () => {
       expect(mockAthenaQuery).not.to.have.been.called;
     });
 
+    it('includes data threshold in query when PAID_DATA_THRESHOLD is set', async () => {
+      const threshold = 4321;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, PAID_DATA_THRESHOLD: threshold },
+      );
+      const res = await controller.getPaidTrafficByTypeChannel();
+      expect(res.status).to.equal(200);
+      const query = mockAthenaQuery.args[0][0];
+      expect(query).to.include(String(threshold));
+    });
+
     it('does not log error if cache file is missing (known exception)', async () => {
       mockAthenaQuery.resolves(trafficTypeMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
@@ -253,20 +267,36 @@ describe('Paid TrafficController', async () => {
       expect(res.status).to.equal(403);
     });
 
-    it('returns 400 with msg if siteKey, year, month, or week is missing', async () => {
-      const requiredFields = ['year', 'week'];
-      for (const field of requiredFields) {
-        const badData = { ...mockContext.data };
-        delete badData[field];
-        const badContext = { ...mockContext, data: badData };
-        const controller = TrafficController(badContext, mockLog, mockEnv);
-        // eslint-disable-next-line no-await-in-loop
-        const rest = await controller.getPaidTrafficByTypeChannelCampaign();
-        expect(rest.status).to.equal(400);
-        // eslint-disable-next-line no-await-in-loop
-        const body = await rest.json();
-        expect(body.message).to.equal('Year and week are required parameters');
-      }
+    it('returns 400 with msg if year is missing', async () => {
+      const badData = { ...mockContext.data };
+      delete badData.year;
+      const badContext = { ...mockContext, data: badData };
+      const controller = TrafficController(badContext, mockLog, mockEnv);
+      const rest = await controller.getPaidTrafficByTypeChannelCampaign();
+      expect(rest.status).to.equal(400);
+      const body = await rest.json();
+      expect(body.message).to.equal('Year is a required parameter');
+    });
+
+    it('returns 400 with msg if both week and month are missing', async () => {
+      const badData = { ...mockContext.data };
+      delete badData.week;
+      const badContext = { ...mockContext, data: badData };
+      const controller = TrafficController(badContext, mockLog, mockEnv);
+      const rest = await controller.getPaidTrafficByTypeChannelCampaign();
+      expect(rest.status).to.equal(400);
+      const body = await rest.json();
+      expect(body.message).to.equal('Either week or month must be provided');
+    });
+
+    it('returns 400 if both week and month are zero', async () => {
+      const badData = { ...mockContext.data, week: '0', month: '0' };
+      const badContext = { ...mockContext, data: badData };
+      const controller = TrafficController(badContext, mockLog, mockEnv);
+      const rest = await controller.getPaidTrafficByTypeChannelCampaign();
+      expect(rest.status).to.equal(400);
+      const body = await rest.json();
+      expect(body.message).to.equal('Either week or month must be non-zero');
     });
 
     it('getPaidTrafficByTypeChannel returns empty array if Athena returns empty', async () => {
@@ -284,13 +314,20 @@ describe('Paid TrafficController', async () => {
     it('getPaidTrafficByCampaignUrlDevice uses custom threshold config if provided', async () => {
       // Custom thresholds: make LCP_GOOD very high so all values are 'good',
       const customGood = {
-        LCP_GOOD: 10,
-        LCP_NEEDS_IMPROVEMENT: 20,
-        INP_GOOD: 10,
-        INP_NEEDS_IMPROVEMENT: 20,
-        CLS_GOOD: 10,
-        CLS_NEEDS_IMPROVEMENT: 20,
+        // eslint-disable-next-line quote-props
+        'LCP_GOOD': 10,
+        // eslint-disable-next-line quote-props
+        'LCP_NEEDS_IMPROVEMENT': 20,
+        // eslint-disable-next-line quote-props
+        'INP_GOOD': 10,
+        // eslint-disable-next-line quote-props
+        'INP_NEEDS_IMPROVEMENT': 20,
+        // eslint-disable-next-line quote-props
+        'CLS_GOOD': 10,
+        // eslint-disable-next-line quote-props
+        'CLS_NEEDS_IMPROVEMENT': 20,
       };
+
       mockAthenaQuery.resolves([
         {
           utm_campaign: 'spring',
@@ -317,6 +354,69 @@ describe('Paid TrafficController', async () => {
       expect(putBody.lcp_score).to.equal('good');
       expect(putBody.inp_score).to.equal('good');
       expect(putBody.cls_score).to.equal('good');
+    });
+
+    it('uses custom threshold config from JSON string', async () => {
+      const jsonThresholds = {
+        LCP_GOOD: 10,
+        LCP_NEEDS_IMPROVEMENT: 20,
+        INP_GOOD: 10,
+        INP_NEEDS_IMPROVEMENT: 20,
+        CLS_GOOD: 10,
+        CLS_NEEDS_IMPROVEMENT: 20,
+      };
+      mockAthenaQuery.resolves([
+        {
+          utm_campaign: 'spring',
+          path: '/home',
+          device: 'mobile',
+          pageviews: 100,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 5,
+          p70_cls: 5,
+          p70_inp: 5,
+        },
+      ]);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, CWV_THRESHOLDS: JSON.stringify(jsonThresholds) },
+      );
+      await controller.getPaidTrafficByCampaignUrlDevice();
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString())[0];
+      expect(putBody.lcp_score).to.equal('good');
+      expect(putBody.inp_score).to.equal('good');
+      expect(putBody.cls_score).to.equal('good');
+    });
+
+    it('falls back to default thresholds when CWV_THRESHOLDS is invalid JSON', async () => {
+      mockAthenaQuery.resolves([
+        {
+          utm_campaign: 'spring',
+          path: '/home',
+          device: 'mobile',
+          pageviews: 100,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 5000,
+          p70_cls: 0.4,
+          p70_inp: 300,
+        },
+      ]);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, CWV_THRESHOLDS: '{not-json}' },
+      );
+      const res = await controller.getPaidTrafficByCampaignUrlDevice();
+      expect(res.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWith('Invalid CWV_THRESHOLDS JSON. Falling back to defaults.');
     });
 
     it('getPaidTrafficByCampaignDevice returns expected and uses correct dimensions and DTO', async () => {
@@ -571,6 +671,114 @@ describe('Paid TrafficController', async () => {
         const query = mockAthenaQuery.getCall(0).args[0];
         expect(query).to.include(test.expectedFilter, `trafficType=${test.value} should apply correct filter`);
       }
+    });
+
+    it('returns 400 error for invalid week parameter', async () => {
+      const contextWithInvalidWeek = {
+        ...mockContext,
+        data: {
+          year: '2024',
+          week: 'invalid-text', // This should cause parseInt to return NaN, triggering validation error
+        },
+      };
+
+      const controller = TrafficController(contextWithInvalidWeek, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Week must be a valid number');
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('returns 400 error for invalid year parameter', async () => {
+      const contextWithInvalidYear = {
+        ...mockContext,
+        data: {
+          year: 'not-a-number', // This should cause parseInt to return NaN, triggering validation error
+          week: '30',
+        },
+      };
+
+      const controller = TrafficController(contextWithInvalidYear, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Year must be a valid number');
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('returns 400 error for invalid month parameter', async () => {
+      const contextWithInvalidMonth = {
+        ...mockContext,
+        data: {
+          year: '2024',
+          month: 'invalid-month-text', // This should cause parseInt to return NaN, triggering validation error
+        },
+      };
+
+      const controller = TrafficController(contextWithInvalidMonth, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Month must be a valid number');
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('returns 400 error for multiple invalid parameters', async () => {
+      const contextWithInvalidParams = {
+        ...mockContext,
+        data: {
+          year: 'invalid-year-text',
+          week: 'invalid-week-text',
+        },
+      };
+
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(contextWithInvalidParams, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Year must be a valid number'); // Year validation comes first
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('accepts valid numeric strings for parameters', async () => {
+      const contextWithValidStrings = {
+        ...mockContext,
+        data: {
+          year: '2024', // Valid numeric string
+          week: '30', // Valid numeric string
+        },
+      };
+
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(contextWithValidStrings, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+    });
+
+    it('accepts null or undefined for optional week/month parameters', async () => {
+      const contextWithNullWeek = {
+        ...mockContext,
+        data: {
+          year: '2024',
+          week: null, // null should be allowed
+          month: '12', // Valid month instead
+        },
+      };
+
+      mockAthenaQuery.resolves(trafficTypeMock);
+      const controller = TrafficController(contextWithNullWeek, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByTypeChannel();
+
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
     });
   });
 });

@@ -22,6 +22,7 @@ describe('ConsentBannerController', () => {
   let consentBannerController;
   let mockScrapeClient;
   let mockS3;
+  let mockFetch;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -37,6 +38,19 @@ describe('ConsentBannerController', () => {
       GetObjectCommand: sandbox.stub(),
     };
 
+    mockFetch = sandbox.stub();
+
+    // Mock the ScrapeClient module and setup global fetch mock
+    global.fetch = mockFetch;
+
+    const ConsentBannerControllerMocked = await esmock('../../src/controllers/consentBanner.js', {
+      '@adobe/spacecat-shared-scrape-client': {
+        ScrapeClient: {
+          createFrom: sandbox.stub().returns(mockScrapeClient),
+        },
+      },
+    });
+
     mockContext = {
       log: {
         info: sandbox.stub(),
@@ -48,20 +62,13 @@ describe('ConsentBannerController', () => {
       s3: mockS3,
     };
 
-    // Mock the ScrapeClient module
-    const ConsentBannerControllerMocked = await esmock('../../src/controllers/consentBanner.js', {
-      '@adobe/spacecat-shared-scrape-client': {
-        ScrapeClient: {
-          createFrom: sandbox.stub().returns(mockScrapeClient),
-        },
-      },
-    });
-
     consentBannerController = ConsentBannerControllerMocked.default(mockContext);
   });
 
   afterEach(() => {
     sandbox.restore();
+    // Restore global fetch
+    delete global.fetch;
   });
 
   describe('parseRequestContext', () => {
@@ -268,6 +275,7 @@ describe('ConsentBannerController', () => {
       expect(mockScrapeClient.createScrapeJob).to.have.been.calledWith({
         urls: ['https://example.com'],
         processingType: 'consent-banner',
+        maxScrapeAge: undefined,
         options: {
           enableJavaScript: true,
           screenshotTypes: ['viewport'],
@@ -411,6 +419,74 @@ describe('ConsentBannerController', () => {
 
       expect(mockContext.log.error).to.have.been.calledWith(error);
     });
+
+    it('should create scrape job with force=true setting maxScrapeAge to 0', async () => {
+      const mockJob = {
+        id: 'job-123',
+        status: 'PENDING',
+        urls: ['https://example.com'],
+      };
+
+      mockScrapeClient.createScrapeJob.resolves(mockJob);
+
+      const requestContext = {
+        data: {
+          url: 'https://example.com',
+          force: true,
+        },
+      };
+
+      const response = await consentBannerController.takeScreenshots(requestContext);
+
+      expect(response.status).to.equal(202);
+      expect(mockScrapeClient.createScrapeJob).to.have.been.calledWith({
+        urls: ['https://example.com'],
+        processingType: 'consent-banner',
+        maxScrapeAge: 0,
+        options: {
+          enableJavaScript: true,
+          screenshotTypes: ['viewport'],
+          rejectRedirects: false,
+        },
+      });
+
+      const job = await response.json();
+      expect(job).to.deep.equal(mockJob);
+    });
+
+    it('should create scrape job with force=false setting maxScrapeAge to undefined', async () => {
+      const mockJob = {
+        id: 'job-123',
+        status: 'PENDING',
+        urls: ['https://example.com'],
+      };
+
+      mockScrapeClient.createScrapeJob.resolves(mockJob);
+
+      const requestContext = {
+        data: {
+          url: 'https://example.com',
+          force: false,
+        },
+      };
+
+      const response = await consentBannerController.takeScreenshots(requestContext);
+
+      expect(response.status).to.equal(202);
+      expect(mockScrapeClient.createScrapeJob).to.have.been.calledWith({
+        urls: ['https://example.com'],
+        processingType: 'consent-banner',
+        maxScrapeAge: undefined,
+        options: {
+          enableJavaScript: true,
+          screenshotTypes: ['viewport'],
+          rejectRedirects: false,
+        },
+      });
+
+      const job = await response.json();
+      expect(job).to.deep.equal(mockJob);
+    });
   });
 
   describe('getScreenshots', () => {
@@ -426,7 +502,21 @@ describe('ConsentBannerController', () => {
         path: '/test/path/scrape.json',
       };
 
+      const mockScrapeJsonData = {
+        screenshots: ['image1.png', 'image2.png'],
+        device: { width: 1920, height: 1080 },
+        scrapeTime: '2024-01-01T00:00:00Z',
+        scrapeResult: {
+          results: { some: 'data' },
+        },
+      };
+
       mockScrapeClient.getScrapeJobUrlResults.resolves([mockResult]);
+
+      // Mock fetch response for scrape.json
+      mockFetch.resolves({
+        json: sandbox.stub().resolves(mockScrapeJsonData),
+      });
 
       const presignedUrls = [
         'https://bucket.s3.amazonaws.com/desktop-on.png?signed=true',
@@ -437,35 +527,34 @@ describe('ConsentBannerController', () => {
       ];
 
       mockS3.getSignedUrl
-        .onCall(0).resolves(presignedUrls[0])
-        .onCall(1).resolves(presignedUrls[1])
+        .onCall(0).resolves(presignedUrls[4]) // scrape.json
+        .onCall(1).resolves(presignedUrls[0]) // desktop-on
         .onCall(2)
-        .resolves(presignedUrls[2])
+        .resolves(presignedUrls[1]) // desktop-off
         .onCall(3)
-        .resolves(presignedUrls[3])
+        .resolves(presignedUrls[2]) // mobile-on
         .onCall(4)
-        .resolves(presignedUrls[4]);
+        .resolves(presignedUrls[3]); // mobile-off
 
-      try {
-        const response = await consentBannerController.getScreenshots(mockRequestContext);
+      const response = await consentBannerController.getScreenshots(mockRequestContext);
 
-        // The current implementation has undefined variables, so this might throw an error
-        // In a real scenario, we'd expect this to work properly
-        expect(response.status).to.equal(200);
-        const data = await response.json();
+      expect(response.status).to.equal(200);
+      const data = await response.json();
 
-        expect(data).to.have.property('jobId', 'test-job-123');
-        expect(data).to.have.property('results');
+      expect(data).to.have.property('jobId', 'test-job-123');
+      expect(data).to.have.property('results');
+      expect(data.results.screenshots).to.deep.equal(mockScrapeJsonData.screenshots);
+      expect(data.results.dimensionsDevice).to.deep.equal(mockScrapeJsonData.device);
+      expect(data.results).to.have.property('scrapeTime', mockScrapeJsonData.scrapeTime);
 
-        // Check that getScrapeJobUrlResults was called with correct jobId
-        expect(mockScrapeClient.getScrapeJobUrlResults).to.have.been.calledWith('test-job-123');
+      // Check that getScrapeJobUrlResults was called with correct jobId
+      expect(mockScrapeClient.getScrapeJobUrlResults).to.have.been.calledWith('test-job-123');
 
-        // Check that generatePresignedUrl was called for each variant plus the scrape.json
-        expect(mockS3.getSignedUrl).to.have.callCount(5);
-      } catch (error) {
-        // If the implementation has bugs (undefined variables), we expect an error
-        expect(error.message).to.include('s3 is not defined').or.include('bucketName is not defined');
-      }
+      // Check that fetch was called to get scrape.json
+      expect(mockFetch).to.have.been.calledOnce;
+
+      // Check that generatePresignedUrl was called for each variant plus the scrape.json
+      expect(mockS3.getSignedUrl).to.have.callCount(5);
     });
 
     it('should return not found when job is still pending', async () => {
@@ -529,7 +618,22 @@ describe('ConsentBannerController', () => {
         path: '/base/path/scrape.json',
       };
 
+      const mockScrapeJsonData = {
+        screenshots: ['image1.png'],
+        device: { width: 1920, height: 1080 },
+        scrapeTime: '2024-01-01T00:00:00Z',
+        scrapeResult: {
+          results: { some: 'data' },
+        },
+      };
+
       mockScrapeClient.getScrapeJobUrlResults.resolves([mockResult]);
+
+      // Mock fetch response for scrape.json
+      mockFetch.resolves({
+        json: sandbox.stub().resolves(mockScrapeJsonData),
+      });
+
       mockS3.getSignedUrl.resolves('https://test-url.com');
 
       await consentBannerController.getScreenshots(mockRequestContext);
@@ -544,25 +648,39 @@ describe('ConsentBannerController', () => {
         path: '/test/path/scrape.json',
       };
 
+      const mockScrapeJsonData = {
+        screenshots: ['image1.png', 'image2.png'],
+        device: { width: 1920, height: 1080 },
+        scrapeTime: '2024-01-01T00:00:00Z',
+        scrapeResult: {
+          results: { some: 'data' },
+        },
+      };
+
       mockScrapeClient.getScrapeJobUrlResults.resolves([mockResult]);
 
+      // Mock fetch response for scrape.json
+      mockFetch.resolves({
+        json: sandbox.stub().resolves(mockScrapeJsonData),
+      });
+
       const mockUrls = {
-        desktop_on: 'https://bucket.s3.amazonaws.com/desktop-on.png',
-        desktop_off: 'https://bucket.s3.amazonaws.com/desktop-off.png',
-        mobile_on: 'https://bucket.s3.amazonaws.com/mobile-on.png',
-        mobile_off: 'https://bucket.s3.amazonaws.com/mobile-off.png',
+        desktop_cookie_banner_on: 'https://bucket.s3.amazonaws.com/desktop-on.png',
+        desktop_cookie_banner_off: 'https://bucket.s3.amazonaws.com/desktop-off.png',
+        mobile_cookie_banner_on: 'https://bucket.s3.amazonaws.com/mobile-on.png',
+        mobile_cookie_banner_off: 'https://bucket.s3.amazonaws.com/mobile-off.png',
         scrape: 'https://bucket.s3.amazonaws.com/scrape.json',
       };
 
       mockS3.getSignedUrl
-        .onCall(0).resolves(mockUrls.desktop_on)
-        .onCall(1).resolves(mockUrls.desktop_off)
+        .onCall(0).resolves(mockUrls.scrape) // scrape.json
+        .onCall(1).resolves(mockUrls.desktop_cookie_banner_on)
         .onCall(2)
-        .resolves(mockUrls.mobile_on)
+        .resolves(mockUrls.desktop_cookie_banner_off)
         .onCall(3)
-        .resolves(mockUrls.mobile_off)
+        .resolves(mockUrls.mobile_cookie_banner_on)
         .onCall(4)
-        .resolves(mockUrls.scrape);
+        .resolves(mockUrls.mobile_cookie_banner_off);
 
       const response = await consentBannerController.getScreenshots(mockRequestContext);
       const data = await response.json();
@@ -570,6 +688,14 @@ describe('ConsentBannerController', () => {
       expect(data).to.have.property('jobId', 'test-job-123');
       expect(data).to.have.property('results');
       expect(data.results).to.be.an('object');
+      expect(data.results.screenshots).to.deep.equal(mockScrapeJsonData.screenshots);
+      expect(data.results.dimensionsDevice).to.deep.equal(mockScrapeJsonData.device);
+      expect(data.results).to.have.property('scrapeTime', mockScrapeJsonData.scrapeTime);
+      expect(data.results.dimensions).to.deep.equal(mockScrapeJsonData.scrapeResult.results);
+      expect(data.results).to.have.property('desktop_cookie_banner_on', mockUrls.desktop_cookie_banner_on);
+      expect(data.results).to.have.property('desktop_cookie_banner_off', mockUrls.desktop_cookie_banner_off);
+      expect(data.results).to.have.property('mobile_cookie_banner_on', mockUrls.mobile_cookie_banner_on);
+      expect(data.results).to.have.property('mobile_cookie_banner_off', mockUrls.mobile_cookie_banner_off);
     });
 
     it('should handle S3 presigned URL generation errors', async () => {
@@ -578,7 +704,22 @@ describe('ConsentBannerController', () => {
         path: '/test/path/scrape.json',
       };
 
+      const mockScrapeJsonData = {
+        screenshots: ['image1.png'],
+        device: { width: 1920, height: 1080 },
+        scrapeTime: '2024-01-01T00:00:00Z',
+        scrapeResult: {
+          results: { some: 'data' },
+        },
+      };
+
       mockScrapeClient.getScrapeJobUrlResults.resolves([mockResult]);
+
+      // Mock fetch response for scrape.json
+      mockFetch.resolves({
+        json: sandbox.stub().resolves(mockScrapeJsonData),
+      });
+
       mockS3.getSignedUrl.rejects(new Error('S3 access denied'));
 
       const response = await consentBannerController.getScreenshots(mockRequestContext);

@@ -69,7 +69,7 @@ function ConsentBannerController(ctx) {
 
   async function takeScreenshots(requestContext) {
     const { data } = requestContext;
-    const { url } = data;
+    const { url, force = false } = data;
 
     try {
       if (!hasText(url) || !URL.canParse(url)) {
@@ -79,6 +79,7 @@ function ConsentBannerController(ctx) {
       const job = await scrapeClient.createScrapeJob({
         urls: [url],
         processingType: 'consent-banner',
+        maxScrapeAge: force ? 0 : undefined,
         options: {
           enableJavaScript: true,
           screenshotTypes: ['viewport'],
@@ -125,6 +126,11 @@ function ConsentBannerController(ctx) {
         return internalServerError(`Scrape job failed: ${result.reason}`);
       }
 
+      // fetch the scrape.json file
+      const scrapeJsonUrl = await generatePresignedUrl(s3, bucketName, result.path);
+      const scrapeJson = await fetch(scrapeJsonUrl);
+      const scrapeJsonData = await scrapeJson.json();
+
       // iterate over fileVariants, the output of it all should be
       // an object with the key as property and the value as the presigned url
       // the object should contain properties for each of the fileVariants
@@ -144,7 +150,11 @@ function ConsentBannerController(ctx) {
       return ok({
         jobId,
         results: {
-          ...results, scrape_json: await generatePresignedUrl(s3, bucketName, result.path),
+          ...results,
+          screenshots: scrapeJsonData.screenshots,
+          dimensionsDevice: scrapeJsonData.device,
+          scrapeTime: scrapeJsonData.scrapeTime,
+          dimensions: scrapeJsonData.scrapeResult.results,
         },
       });
     } catch (error) {

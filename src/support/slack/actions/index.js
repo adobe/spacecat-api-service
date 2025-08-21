@@ -15,6 +15,9 @@ import approveOrg from './approve-org.js';
 import approveSiteCandidate from './approve-site-candidate.js';
 import ignoreSiteCandidate from './ignore-site-candidate.js';
 import rejectOrg from './reject-org.js';
+import { onboardSiteModal, startOnboarding } from './onboard-modal.js';
+import { preflightConfigModal } from './preflight-config-modal.js';
+import openPreflightConfig from './open-preflight-config.js';
 
 const actions = {
   approveFriendsFamily,
@@ -22,6 +25,10 @@ const actions = {
   approveSiteCandidate,
   ignoreSiteCandidate,
   rejectOrg,
+  onboardSiteModal,
+  start_onboarding: startOnboarding,
+  preflight_config_modal: preflightConfigModal,
+  open_preflight_config: openPreflightConfig,
 };
 
 export default actions;
