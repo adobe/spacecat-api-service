@@ -147,6 +147,7 @@ function LlmoController(context) {
     // Add limit, offset and sheet query params to the url
     const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
     const { limit, offset, sheet } = requestContext.data;
+    log.info(`ELMO: limit: ${limit}, offset: ${offset}, sheet: ${sheet}`);
     if (limit) {
       url.searchParams.set('limit', limit);
     }
@@ -160,6 +161,7 @@ function LlmoController(context) {
 
     try {
       // Fetch data from the external endpoint using the dataFolder from config
+      log.info(`ELMO: Fetching data from Helix: ${url.toString()}`);
       const response = await fetch(url.toString(), {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
@@ -175,6 +177,12 @@ function LlmoController(context) {
 
       // Get the response data
       const data = await response.json();
+
+      // Log the size of data received from Helix
+      const jsonString = JSON.stringify(data);
+      const jsonSizeBytes = Buffer.byteLength(jsonString, 'utf8');
+      const jsonSizeMB = (jsonSizeBytes / (1024 * 1024)).toFixed(2);
+      log.info(`ELMO: Data received from Helix - JSON size: ${jsonSizeBytes} bytes (${jsonSizeMB} MB)`);
 
       // Create S3 key for this specific request
       const s3Key = sheetType
@@ -192,7 +200,12 @@ function LlmoController(context) {
         : s3Key;
 
       // Compress and upload data to S3
-      const compressedData = await gzipAsync(JSON.stringify(data));
+      const compressedData = await gzipAsync(jsonString);
+      const compressedSizeBytes = compressedData.length;
+      const compressedSizeMB = (compressedSizeBytes / (1024 * 1024)).toFixed(2);
+      const compressionRatio = ((1 - compressedSizeBytes / jsonSizeBytes) * 100).toFixed(1);
+      log.info(`ELMO: Compressed data size: ${compressedSizeBytes} bytes (${compressedSizeMB} MB), compression ratio: ${compressionRatio}%`);
+
       const putCommand = new PutObjectCommand({
         Bucket: ELMO_S3_BUCKET,
         Key: finalS3Key,
