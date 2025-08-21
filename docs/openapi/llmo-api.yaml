@@ -342,4 +342,39 @@ llmo-customer-intent-item:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ] 
+      - api_key: [ ]
+
+llmo-cdn-logs-filter:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - llmo
+    summary: Update LLMO CDN logs filter configuration
+    description: |
+      Updates the CDN logs filter configuration for a specific site.
+    operationId: patchLlmoCdnLogsFilter
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cdnlogsFilter:
+                $ref: './schemas.yaml#/LlmoCdnLogsFilter'
+    responses:
+      '200':
+        description: LLMO CDN logs filter updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCdnLogsFilter'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

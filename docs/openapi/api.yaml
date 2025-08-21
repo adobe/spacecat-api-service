@@ -233,6 +233,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-customer-intent'
   /sites/{siteId}/llmo/customer-intent/{intentKey}:
     $ref: './llmo-api.yaml#/llmo-customer-intent-item'
+  /sites/{siteId}/llmo/cdn-logs-filter:
+    $ref: './llmo-api.yaml#/llmo-cdn-logs-filter'
 
 components:
   securitySchemes:

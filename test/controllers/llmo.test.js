@@ -46,6 +46,10 @@ describe('LlmoController', () => {
         { key: 'target_audience', value: 'small business owners' },
         { key: 'primary_goal', value: 'increase conversions' },
       ],
+      cdnlogsFilter: [
+        { key: 'host', value: ['www.example.com', 'abc.com'], type: 'exclude' },
+        { key: 'host', value: ['www.example.com', 'abc.com'], type: 'include' },
+      ],
     };
 
     // Create mock config
@@ -62,6 +66,7 @@ describe('LlmoController', () => {
       addLlmoCustomerIntent: sinon.stub(),
       removeLlmoCustomerIntent: sinon.stub(),
       updateLlmoCustomerIntent: sinon.stub(),
+      updateLlmoCdnlogsFilter: sinon.stub(),
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
       getLlmoDataFolder: sinon.stub().returns('test-folder'),
@@ -1151,6 +1156,106 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal([]);
       expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith('target_audience', updateData);
+    });
+  });
+
+  describe('patchLlmoCdnLogsFilter', () => {
+    beforeEach(() => {
+      mockContext.data = {
+        cdnlogsFilter: [
+          { key: 'user-agent', value: ['bot', 'crawler'], type: 'exclude' },
+          { key: 'content-type', value: ['text/html'], type: 'include' },
+        ],
+      };
+    });
+
+    it('should update CDN logs filter successfully', async () => {
+      const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.cdnlogsFilter);
+      expect(mockConfig.updateLlmoCdnlogsFilter).to.have.been
+        .calledWith(mockContext.data.cdnlogsFilter);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should return bad request when no data provided', async () => {
+      mockContext.data = null;
+
+      const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Update data must be provided as an object');
+    });
+
+    it('should return bad request when data is not an object', async () => {
+      mockContext.data = 'invalid data';
+
+      const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Update data must be provided as an object');
+    });
+
+    it('should handle cdnlogsFilter being undefined', async () => {
+      mockContext.data = { otherProperty: 'value' };
+
+      const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.cdnlogsFilter);
+      expect(mockConfig.updateLlmoCdnlogsFilter).to.have.been.calledWith(undefined);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+    });
+
+    it('should handle save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+
+      const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.cdnlogsFilter);
+      expect(mockConfig.updateLlmoCdnlogsFilter).to.have.been
+        .calledWith(mockContext.data.cdnlogsFilter);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error updating CDN logs filter for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should handle null cdnlogsFilter in response', async () => {
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+        cdnlogsFilter: null,
+      });
+
+      const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal([]);
+      expect(mockConfig.updateLlmoCdnlogsFilter).to.have.been
+        .calledWith(mockContext.data.cdnlogsFilter);
+    });
+
+    it('should return bad request when LLMO is not enabled', async () => {
+      mockConfig.getLlmoConfig.returns(null);
+
+      const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
     });
   });
 });
