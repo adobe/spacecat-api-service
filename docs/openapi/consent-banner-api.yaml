@@ -1,7 +1,7 @@
-screenshots:
+consent-banner:
   post:
     tags:
-      - screenshots
+      - consent-banner
     security:
       - api_key: []
     summary: Take screenshots for consent banner analysis
@@ -18,8 +18,8 @@ screenshots:
       - Mobile with consent banner visible
       - Mobile with consent banner dismissed/hidden
 
-      The returned jobId can be used with the GET /screenshots endpoint to retrieve the results.
-    operationId: takeScreenshots
+      The returned jobId can be used with the GET /consent-banner endpoint to retrieve the results.
+    operationId: takeConsentBannerScreenshots
     requestBody:
       required: true
       content:
@@ -106,7 +106,7 @@ screenshots:
         $ref: './responses.yaml#/500'
   get:
     tags:
-      - screenshots
+      - consent-banner
     security:
       - api_key: []
     summary: Get consent banner screenshots
@@ -123,7 +123,7 @@ screenshots:
       - `mobile_cookie_banner_off`: Mobile screenshot with consent banner hidden
 
       Additionally provides access to the raw scrape JSON data for further analysis.
-    operationId: getScreenshots
+    operationId: getConsentBannerScreenshots
     parameters:
       - name: jobId
         in: query

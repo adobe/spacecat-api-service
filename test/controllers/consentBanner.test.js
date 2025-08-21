@@ -652,8 +652,13 @@ describe('ConsentBannerController', () => {
         screenshots: ['image1.png', 'image2.png'],
         device: { width: 1920, height: 1080 },
         scrapeTime: '2024-01-01T00:00:00Z',
-        scrapeResult: {
-          results: { some: 'data' },
+        scrapeResults: {
+          desktop: {
+            some: 'data', bannerElement: {}, overlayElement: {}, wrapperElement: {},
+          },
+          mobile: {
+            other: 'data', bannerElement: {}, overlayElement: {}, wrapperElement: {},
+          },
         },
       };
 
