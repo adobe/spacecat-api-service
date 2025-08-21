@@ -1,3 +1,10 @@
+# [1.162.0](https://github.com/adobe/spacecat-api-service/compare/v1.161.4...v1.162.0) (2025-08-21)
+
+
+### Features
+
+* add patch endpoint for llmo cdn filters ([#1173](https://github.com/adobe/spacecat-api-service/issues/1173)) ([952a5e4](https://github.com/adobe/spacecat-api-service/commit/952a5e4cc977424413e7e0a7aae73f7647963382))
+
 ## [1.161.4](https://github.com/adobe/spacecat-api-service/compare/v1.161.3...v1.161.4) (2025-08-20)
 
 
