@@ -1,3 +1,10 @@
+# [1.163.0](https://github.com/adobe/spacecat-api-service/compare/v1.162.0...v1.163.0) (2025-08-21)
+
+
+### Features
+
+* consent-banner endpoint changed result structure ([#1178](https://github.com/adobe/spacecat-api-service/issues/1178)) ([77a5287](https://github.com/adobe/spacecat-api-service/commit/77a5287cf997036b613c218c5a8bb00c203be3dc))
+
 # [1.162.0](https://github.com/adobe/spacecat-api-service/compare/v1.161.4...v1.162.0) (2025-08-21)
 
 
