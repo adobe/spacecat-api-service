@@ -89,9 +89,10 @@ export const ReportDto = {
    * initiatedBy: string
    * }}
    */
-  toQueueMessage: (report, jobId, initiatedBy) => ({
+  toQueueMessage: (report, jobId, name, initiatedBy) => ({
     reportId: jobId,
     siteId: report.getSiteId(),
+    name,
     reportType: report.getReportType(),
     reportPeriod: report.getReportPeriod(),
     storagePath: report.getStoragePath(),

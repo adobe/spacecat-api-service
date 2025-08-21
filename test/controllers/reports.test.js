@@ -40,6 +40,7 @@ describe('ReportsController', () => {
     },
     data: {
       reportType: 'performance',
+      name: 'Test Report',
       reportPeriod: {
         startDate: '2025-01-01',
         endDate: '2025-01-31',
@@ -293,6 +294,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -339,6 +341,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -387,6 +390,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -448,6 +452,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -503,6 +508,31 @@ describe('ReportsController', () => {
       expect(responseBody.reportType).to.equal('performance');
     });
 
+    it('should return bad request for missing report name', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report name is required');
+    });
+
     it('should return bad request for missing report type', async () => {
       const context = {
         params: {
@@ -510,6 +540,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: '',
+          name: 'Test Report',
           test: 'data',
         },
       };
@@ -528,6 +559,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           comparisonPeriod: {
             startDate: '2024-12-01',
             endDate: '2024-12-31',
@@ -549,6 +581,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             endDate: '2025-01-31',
           },
@@ -573,6 +606,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
           },
@@ -597,6 +631,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -618,6 +653,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -642,6 +678,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -666,6 +703,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025/01/01',
             endDate: '2025-01-31',
@@ -691,6 +729,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '01/31/2025',
@@ -716,6 +755,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -741,6 +781,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -766,6 +807,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-13-01',
             endDate: '2025-01-31',
@@ -791,6 +833,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-13-01',
@@ -816,6 +859,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -841,6 +885,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -866,6 +911,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-31',
             endDate: '2025-01-01',
@@ -891,6 +937,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -916,6 +963,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-01',
@@ -968,6 +1016,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -995,6 +1044,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -1020,6 +1070,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -1834,6 +1885,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -1880,6 +1932,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -1926,6 +1979,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -1972,6 +2026,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -2018,6 +2073,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -2059,6 +2115,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -2105,6 +2162,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: {
             startDate: '2025-01-01',
             endDate: '2025-01-31',
@@ -2149,6 +2207,7 @@ describe('ReportsController', () => {
         },
         data: {
           reportType: 'performance',
+          name: 'Test Report',
           reportPeriod: null, // Will trigger validation error
           comparisonPeriod: null,
         },

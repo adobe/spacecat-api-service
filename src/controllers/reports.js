@@ -201,7 +201,11 @@ function ReportsController(ctx, log, env) {
       return badRequest('Request data is required');
     }
 
-    const { reportType } = data;
+    const { reportType, name } = data;
+
+    if (!hasText(name)) {
+      return badRequest('Report name is required');
+    }
 
     // Validate report type
     if (!hasText(reportType)) {
@@ -287,7 +291,7 @@ function ReportsController(ctx, log, env) {
       const initiatedBy = context.attributes?.user?.email || 'unknown';
 
       // Create the message to send to the report-jobs queue using the DTO
-      const reportMessage = ReportDto.toQueueMessage(report, jobId, initiatedBy);
+      const reportMessage = ReportDto.toQueueMessage(report, jobId, name, initiatedBy);
 
       // Send message to the report-jobs queue
       await sendReportTriggerMessage(sqs, reportsQueueUrl, reportMessage, reportType);
@@ -343,7 +347,7 @@ function ReportsController(ctx, log, env) {
       // Convert reports to JSON using the DTO, with presigned URLs for successful reports
       const reportsJson = await Promise.all(reports.map(async (report) => {
         // Only generate presigned URLs for successful reports
-        if (report.getStatus() === ReportModel.STATUSES.SUCCESS) {
+        if (report.getStatus() === 'success') {
           try {
             const rawReportKey = `${report.getRawStoragePath()}report.json`;
             const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
