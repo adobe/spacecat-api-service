@@ -154,7 +154,7 @@ function ConsentBannerController(ctx) {
           screenshots: scrapeJsonData.screenshots,
           dimensionsDevice: scrapeJsonData.device,
           scrapeTime: scrapeJsonData.scrapeTime,
-          dimensions: scrapeJsonData.scrapeResult.results,
+          dimensions: scrapeJsonData.scrapeResults,
         },
       });
     } catch (error) {

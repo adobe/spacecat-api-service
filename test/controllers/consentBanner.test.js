@@ -506,9 +506,9 @@ describe('ConsentBannerController', () => {
         screenshots: ['image1.png', 'image2.png'],
         device: { width: 1920, height: 1080 },
         scrapeTime: '2024-01-01T00:00:00Z',
-        scrapeResult: {
-          results: { some: 'data' },
-        },
+        scrapeResults: [
+          { some: 'data' },
+        ],
       };
 
       mockScrapeClient.getScrapeJobUrlResults.resolves([mockResult]);
@@ -691,7 +691,7 @@ describe('ConsentBannerController', () => {
       expect(data.results.screenshots).to.deep.equal(mockScrapeJsonData.screenshots);
       expect(data.results.dimensionsDevice).to.deep.equal(mockScrapeJsonData.device);
       expect(data.results).to.have.property('scrapeTime', mockScrapeJsonData.scrapeTime);
-      expect(data.results.dimensions).to.deep.equal(mockScrapeJsonData.scrapeResult.results);
+      expect(data.results.dimensions).to.deep.equal(mockScrapeJsonData.scrapeResults);
       expect(data.results).to.have.property('desktop_cookie_banner_on', mockUrls.desktop_cookie_banner_on);
       expect(data.results).to.have.property('desktop_cookie_banner_off', mockUrls.desktop_cookie_banner_off);
       expect(data.results).to.have.property('mobile_cookie_banner_on', mockUrls.mobile_cookie_banner_on);
