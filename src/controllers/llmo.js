@@ -18,15 +18,24 @@ import {
   isObject,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { gzip } from 'zlib';
+import { promisify } from 'util';
 import crypto from 'crypto';
 
-const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
+const gzipAsync = promisify(gzip);
 
-function LlmoController() {
+const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
+const PRE_SIGNED_URL_TTL_SECONDS = 6 * 60 * 60; // 6 hours
+const ELMO_S3_BUCKET = 'elmo-data-storage';
+
+function LlmoController(context) {
+  const { s3 } = context || {};
+
   // Helper function to get site and validate LLMO config
-  const getSiteAndValidateLlmo = async (context) => {
-    const { siteId } = context.params;
-    const { dataAccess } = context;
+  const getSiteAndValidateLlmo = async (requestContext) => {
+    const { siteId } = requestContext.params;
+    const { dataAccess } = requestContext;
     const { Site } = dataAccess;
 
     const site = await Site.findById(siteId);
@@ -71,17 +80,17 @@ function LlmoController() {
   };
 
   // Handles requests to the LLMO sheet data endpoint
-  const getLlmoSheetData = async (context) => {
-    const { log } = context;
-    const { siteId, dataSource, sheetType } = context.params;
-    const { env } = context;
+  const getLlmoSheetData = async (requestContext) => {
+    const { log } = requestContext;
+    const { siteId, dataSource, sheetType } = requestContext.params;
+    const { env } = requestContext;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const { llmoConfig } = await getSiteAndValidateLlmo(requestContext);
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
-      const { limit, offset, sheet } = context.data;
+      const { limit, offset, sheet } = requestContext.data;
       if (limit) {
         url.searchParams.set('limit', limit);
       }
@@ -121,12 +130,115 @@ function LlmoController() {
     }
   };
 
-  // Handles requests to the LLMO config endpoint
-  const getLlmoConfig = async (context) => {
-    const { log } = context;
-    const { siteId } = context.params;
+  // Handles requests to the LLMO sheet data download endpoint
+  // Fetches data from Sharepoint, uploads to S3, and returns a pre-signed URL redirect
+  const getLlmoSheetDataDownload = async (requestContext) => {
+    const { log } = requestContext;
+    const { siteId, dataSource, sheetType } = requestContext.params;
+    const { env } = requestContext;
+
+    if (!s3) {
+      throw new Error('S3 client not available');
+    }
+
+    const { llmoConfig } = await getSiteAndValidateLlmo(requestContext);
+    const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+
+    // Add limit, offset and sheet query params to the url
+    const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+    const { limit, offset, sheet } = requestContext.data;
+    if (limit) {
+      url.searchParams.set('limit', limit);
+    }
+    if (offset) {
+      url.searchParams.set('offset', offset);
+    }
+    // allow fetching a specific sheet from the sheet data source
+    if (sheet) {
+      url.searchParams.set('sheet', sheet);
+    }
+
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      // Fetch data from the external endpoint using the dataFolder from config
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+          'User-Agent': SPACECAT_USER_AGENT,
+          'Accept-Encoding': 'gzip',
+        },
+      });
+
+      if (!response.ok) {
+        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the response data
+      const data = await response.json();
+
+      // Create S3 key for this specific request
+      const s3Key = sheetType
+        ? `llmo-cache/${siteId}/${sheetType}/${dataSource}.json`
+        : `llmo-cache/${siteId}/${dataSource}.json`;
+
+      // Add query params to the key to ensure uniqueness
+      const queryParams = [];
+      if (limit) queryParams.push(`limit=${limit}`);
+      if (offset) queryParams.push(`offset=${offset}`);
+      if (sheet) queryParams.push(`sheet=${sheet}`);
+
+      const finalS3Key = queryParams.length > 0
+        ? `${s3Key}?${queryParams.join('&')}`
+        : s3Key;
+
+      // Compress and upload data to S3
+      const compressedData = await gzipAsync(JSON.stringify(data));
+      const putCommand = new PutObjectCommand({
+        Bucket: ELMO_S3_BUCKET,
+        Key: finalS3Key,
+        Body: compressedData,
+        ContentType: 'application/json',
+        ContentEncoding: 'gzip',
+      });
+
+      await s3.s3Client.send(putCommand);
+      log.info(`Successfully uploaded data to S3: ${finalS3Key}`);
+
+      // Generate pre-signed URL
+      const { GetObjectCommand, getSignedUrl } = s3;
+      const getCommand = new GetObjectCommand({
+        Bucket: ELMO_S3_BUCKET,
+        Key: finalS3Key,
+      });
+
+      const presignedUrl = await getSignedUrl(
+        s3.s3Client,
+        getCommand,
+        { expiresIn: PRE_SIGNED_URL_TTL_SECONDS },
+      );
+
+      log.info(`Successfully generated pre-signed URL for siteId: ${siteId}, sheetURL: ${sheetURL}`);
+
+      // Return redirect to the pre-signed URL
+      return {
+        statusCode: 302,
+        headers: {
+          Location: presignedUrl,
+          'Cache-Control': 'no-cache',
+        },
+      };
+    } catch (error) {
+      log.error(`Error processing download request for siteId: ${siteId}, sheetURL: ${sheetURL}`, error);
+      throw error;
+    }
+  };
+
+  // Handles requests to the LLMO config endpoint
+  const getLlmoConfig = async (requestContext) => {
+    const { log } = requestContext;
+    const { siteId } = requestContext.params;
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(requestContext);
       return ok(llmoConfig);
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
@@ -135,19 +247,19 @@ function LlmoController() {
   };
 
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
-  const getLlmoQuestions = async (context) => {
-    const { llmoConfig } = await getSiteAndValidateLlmo(context);
+  const getLlmoQuestions = async (requestContext) => {
+    const { llmoConfig } = await getSiteAndValidateLlmo(requestContext);
     return ok(llmoConfig.questions || {});
   };
 
   // Handles requests to the LLMO questions endpoint, adds a new question
   // the body format is { Human: [question1, question2], AI: [question3, question4] }
-  const addLlmoQuestion = async (context) => {
-    const { log } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+  const addLlmoQuestion = async (requestContext) => {
+    const { log } = requestContext;
+    const { site, config } = await getSiteAndValidateLlmo(requestContext);
 
     // add the question to the llmoConfig
-    const newQuestions = context.data;
+    const newQuestions = requestContext.data;
     if (!newQuestions) {
       return badRequest('No questions provided in the request body');
     }
@@ -182,10 +294,10 @@ function LlmoController() {
   };
 
   // Handles requests to the LLMO questions endpoint, removes a question
-  const removeLlmoQuestion = async (context) => {
-    const { log } = context;
-    const { questionKey } = context.params;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+  const removeLlmoQuestion = async (requestContext) => {
+    const { log } = requestContext;
+    const { questionKey } = requestContext.params;
+    const { site, config } = await getSiteAndValidateLlmo(requestContext);
 
     validateQuestionKey(config, questionKey);
 
@@ -199,11 +311,11 @@ function LlmoController() {
   };
 
   // Handles requests to the LLMO questions endpoint, updates a question
-  const patchLlmoQuestion = async (context) => {
-    const { log } = context;
-    const { questionKey } = context.params;
-    const { data } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+  const patchLlmoQuestion = async (requestContext) => {
+    const { log } = requestContext;
+    const { questionKey } = requestContext.params;
+    const { data } = requestContext;
+    const { site, config } = await getSiteAndValidateLlmo(requestContext);
 
     validateQuestionKey(config, questionKey);
 
@@ -217,17 +329,17 @@ function LlmoController() {
   };
 
   // Handles requests to the LLMO customer intent endpoint, returns customer intent array
-  const getLlmoCustomerIntent = async (context) => {
-    const { llmoConfig } = await getSiteAndValidateLlmo(context);
+  const getLlmoCustomerIntent = async (requestContext) => {
+    const { llmoConfig } = await getSiteAndValidateLlmo(requestContext);
     return ok(llmoConfig.customerIntent || []);
   };
 
   // Handles requests to the LLMO customer intent endpoint, adds new customer intent items
-  const addLlmoCustomerIntent = async (context) => {
-    const { log } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+  const addLlmoCustomerIntent = async (requestContext) => {
+    const { log } = requestContext;
+    const { site, config } = await getSiteAndValidateLlmo(requestContext);
 
-    const newCustomerIntent = context.data;
+    const newCustomerIntent = requestContext.data;
     if (!Array.isArray(newCustomerIntent)) {
       return badRequest('Customer intent must be provided as an array');
     }
@@ -262,10 +374,10 @@ function LlmoController() {
   };
 
   // Handles requests to the LLMO customer intent endpoint, removes a customer intent item
-  const removeLlmoCustomerIntent = async (context) => {
-    const { log } = context;
-    const { intentKey } = context.params;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+  const removeLlmoCustomerIntent = async (requestContext) => {
+    const { log } = requestContext;
+    const { intentKey } = requestContext.params;
+    const { site, config } = await getSiteAndValidateLlmo(requestContext);
 
     validateCustomerIntentKey(config, intentKey);
 
@@ -279,11 +391,11 @@ function LlmoController() {
   };
 
   // Handles requests to the LLMO customer intent endpoint, updates a customer intent item
-  const patchLlmoCustomerIntent = async (context) => {
-    const { log } = context;
-    const { intentKey } = context.params;
-    const { data } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+  const patchLlmoCustomerIntent = async (requestContext) => {
+    const { log } = requestContext;
+    const { intentKey } = requestContext.params;
+    const { data } = requestContext;
+    const { site, config } = await getSiteAndValidateLlmo(requestContext);
 
     validateCustomerIntentKey(config, intentKey);
 
@@ -307,6 +419,7 @@ function LlmoController() {
 
   return {
     getLlmoSheetData,
+    getLlmoSheetDataDownload,
     getLlmoConfig,
     getLlmoQuestions,
     addLlmoQuestion,
