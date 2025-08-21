@@ -19,6 +19,7 @@ import {
   isValidUrl,
   isObject,
   resolveCanonicalUrl, isValidIMSOrgId,
+  detectAEMVersion,
 } from '@adobe/spacecat-shared-utils';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
@@ -374,20 +375,17 @@ export async function isAEMSite(url) {
 /**
  * Finds the delivery type of the site, url of which is provided.
  * @param {string} url - url of the site to find the delivery type for.
- * @returns {Promise<"aem_edge" | "aem_cs" | "others">} A Promise that resolves to the delivery type
+ * @returns {Promise<"aem_edge" | "aem_cs" | "aem_ams" | "aem_headless" | "other">}
+ * A Promise that resolves to the delivery type of the site
  */
 export async function findDeliveryType(url) {
-  const { isHelix } = await isHelixSite(url);
-  if (isHelix) {
-    return SiteModel.DELIVERY_TYPES.AEM_EDGE;
+  let resp;
+  try {
+    resp = await fetch(url);
+  } catch (e) {
+    return SiteModel.DELIVERY_TYPES.OTHER;
   }
-
-  const { isAEM } = await isAEMSite(url);
-  if (isAEM) {
-    return SiteModel.DELIVERY_TYPES.AEM_CS;
-  }
-
-  return SiteModel.DELIVERY_TYPES.OTHER;
+  return detectAEMVersion(await resp.text());
 }
 
 /**

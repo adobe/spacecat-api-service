@@ -21,7 +21,7 @@ import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
 
 use(sinonChai);
 
-const validHelixDom = '<!doctype html><html lang="en"><head></head><body><header></header><main><div></div></main></body></html>';
+const validHelixDom = '<!doctype html><html lang="en"><head><script src="/scripts/aem.js"></script></head><body><header></header><main><div class="block hero" data-block-status="loaded"></div></main></body></html>';
 
 describe('AddSiteCommand', () => {
   let context;
@@ -252,7 +252,7 @@ describe('AddSiteCommand', () => {
       nock(baseURL)
         .get('/')
         .times(2)
-        .reply(200, '<html><head><link rel="shortcut icon" href="/content/dam/some-company/favicon.ico"></script></head></html>');
+        .reply(200, '<html><head><link rel="stylesheet" href="/etc.clientlibs/picdev/clientlibs/clientlib-base.lc-dfb8e36247b60d34b43665aa46f30417-lc.min.css"><link rel="shortcut icon" href="/content/dam/some-company/favicon.ico"></head><body><div id="container-f2b429b0c5" class="cmp-container"><div class="cmp-text" data-cmp-data-layer="{&quot;text-123&quot;:{&quot;@type&quot;:&quot;some-company/components/text&quot;}}">Content</div></div></body></html>');
       nock(baseURL)
         .get('/index.plain.html')
         .reply(404);
