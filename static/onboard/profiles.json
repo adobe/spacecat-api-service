@@ -79,7 +79,10 @@
 			"alt-text": {},
 			"broken-backlinks-auto-suggest": {},
 			"meta-tags-auto-suggest": {},
-			"broken-internal-links-auto-suggest": {}
+			"broken-internal-links-auto-suggest": {},
+			"broken-backlinks-auto-fix": {},
+			"meta-tags-auto-fix": {},
+			"broken-internal-links-auto-fix": {}
 		},
 		"imports": {
 			"organic-traffic" : {},

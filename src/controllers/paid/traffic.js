@@ -27,12 +27,58 @@ import {
   getS3CachedResult,
   addResultJsonToCache,
   fileExists,
+  getSignedUrlWithRetries,
 } from './caching-helper.js';
 
 function getCacheKey(siteId, query, cacheLocation) {
   const outPrefix = crypto.createHash('md5').update(query).digest('hex');
   const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
   return { cacheKey, outPrefix };
+}
+
+function validateTemporalParams({ year, week, month }) {
+  // Helper to check if value is null or undefined
+  const isNullish = (value) => value === undefined || value === null;
+
+  // Helper to parse integer with validation
+  const parseInteger = (value, name) => {
+    if (isNullish(value)) return 0;
+
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+      throw new Error(`${name} must be a valid number`);
+    }
+    return parsed;
+  };
+
+  try {
+    // Year is required
+    if (isNullish(year)) {
+      return { ok: false, error: 'Year is a required parameter' };
+    }
+
+    // At least one of week or month must be provided
+    if (isNullish(week) && isNullish(month)) {
+      return { ok: false, error: 'Either week or month must be provided' };
+    }
+
+    // Parse all values
+    const yearInt = parseInteger(year, 'Year');
+    const weekInt = parseInteger(week, 'Week');
+    const monthInt = parseInteger(month, 'Month');
+
+    // At least one of week or month must be non-zero
+    if (weekInt === 0 && monthInt === 0) {
+      return { ok: false, error: 'Either week or month must be non-zero' };
+    }
+
+    return {
+      ok: true,
+      values: { yearInt, weekInt, monthInt },
+    };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
 }
 
 const isTrue = (value) => value === true || value === 'true';
@@ -57,9 +103,11 @@ function TrafficController(context, log, env) {
       log.info(`Skipping cache check for file: ${cacheKey} because param noCache is: ${noCache}`);
       return { cachedResultUrl: null, cacheKey, outPrefix };
     }
-    if (await fileExists(s3, cacheKey, log)) {
+    const maxAttempts = 1;
+    if (await fileExists(s3, cacheKey, log, maxAttempts)) {
       log.info(`Found cached result. Fetching signed URL for Athena result from S3: ${cacheKey}`);
-      const cachedUrl = await getS3CachedResult(s3, cacheKey, log);
+      const ignoreNotFound = true;
+      const cachedUrl = await getS3CachedResult(s3, cacheKey, log, ignoreNotFound);
       return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
     }
     log.info(`Cached result for file: ${cacheKey} does not exist`);
@@ -67,6 +115,10 @@ function TrafficController(context, log, env) {
   }
 
   async function fetchPaidTrafficData(dimensions, mapper) {
+    /* c8 ignore next 1 */
+    const requestId = context.invocation?.requestId;
+    log.info(`Fetching paid traffic data for the request: ${requestId}`);
+
     const siteId = context.params?.siteId;
     const site = await Site.findById(siteId);
     if (!site) {
@@ -80,11 +132,15 @@ function TrafficController(context, log, env) {
 
     // validate input params
     const {
-      year, week, noCache, trafficType,
+      year, week, month, noCache, trafficType,
     } = context.data;
-    if (!year || !week) {
-      return badRequest('Year and week are required parameters');
+
+    const temporal = validateTemporalParams({ year, week, month });
+    if (!temporal.ok) {
+      return badRequest(temporal.error);
     }
+
+    const { yearInt, weekInt, monthInt } = temporal.values;
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
 
@@ -102,25 +158,26 @@ function TrafficController(context, log, env) {
     if (trafficType == null && !dimensions.includes('trf_type')) {
       trfTypes = ['paid'];
     }
+    const pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
 
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
-      week,
-      year,
+      week: weekInt,
+      month: monthInt,
+      year: yearInt,
       siteId,
       dimensions,
       tableName,
       pageTypes,
       pageTypeMatchColumn: 'path',
       trfTypes,
+      pageViewThreshold,
     });
 
-    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
+    const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
     log.info(`Processing query: ${description}`);
-
     // build query
     const query = getTrafficAnalysisQuery(quereyParams);
-
     log.debug(`Fetching paid data with query: ${query}`);
 
     // first try to get from cache
@@ -129,9 +186,22 @@ function TrafficController(context, log, env) {
       query,
       noCache,
     );
-    const thresholdConfig = env.CWV_THRESHOLDS || {};
+    let thresholdConfig = {};
+    if (env.CWV_THRESHOLDS) {
+      if (typeof env.CWV_THRESHOLDS === 'string') {
+        try {
+          thresholdConfig = JSON.parse(env.CWV_THRESHOLDS);
+        } catch (e) {
+          log.warn('Invalid CWV_THRESHOLDS JSON. Falling back to defaults.');
+          thresholdConfig = {};
+        }
+      } else if (typeof env.CWV_THRESHOLDS === 'object') {
+        thresholdConfig = env.CWV_THRESHOLDS;
+      }
+    }
+
     if (cachedResultUrl) {
-      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}`);
+      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${requestId}`);
       return found(cachedResultUrl);
     }
 
@@ -151,7 +221,19 @@ function TrafficController(context, log, env) {
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
-    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly.`);
+    if (isCached) {
+      // even though file is saved 503 are possible in short time window,
+      // verifying file is reachable before returning
+      const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
+      if (verifiedSignedUrl != null) {
+        log.info(`Succesfully verified file existance, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
+        return found(
+          verifiedSignedUrl,
+        );
+      }
+    }
+
+    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly. Request ID: ${requestId}`);
     return ok(response, {
       'content-encoding': 'gzip',
     });

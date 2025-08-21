@@ -77,6 +77,9 @@ export function initSlackBot(lambdaContext, App) {
   Object.entries(actions)
     .forEach(([action, fn]) => app.action(action, fn(lambdaContext)));
 
+  app.view('onboard_site_modal', actions.onboardSiteModal(lambdaContext));
+  app.view('preflight_config_modal', actions.preflight_config_modal(lambdaContext));
+
   return app;
 }
 

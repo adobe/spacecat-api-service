@@ -4,23 +4,43 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Debug Mocha Tests",
+            "name": "Debug Current Mocha Test File",
             "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
             "args": [
+                "-u",
+                "bdd",
                 "--timeout",
                 "999999",
                 "--colors",
                 "${file}"
             ],
+            "internalConsoleOptions": "openOnSessionStart",
             "console": "integratedTerminal",
-            "internalConsoleOptions": "neverOpen",
-            "skipFiles": [
-                "<node_internals>/**"
+            "runtimeExecutable": "${env:HOME}/.nvm/versions/node/v22.15.0/bin/node"
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Debug All Mocha Tests",
+            "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
+            "args": [
+                "-i",
+                "-g",
+                "Post-Deploy",
+                "--spec=test/**/*.test.js"
             ],
-            "runtimeExecutable": "${workspaceFolder}/.vscode/debug-node.sh",
-            "env": {
-                "PATH": "${env:PATH}"
-            }
+            "internalConsoleOptions": "openOnSessionStart",
+            "console": "integratedTerminal",
+            "runtimeExecutable": "${env:HOME}/.nvm/versions/node/v22.15.0/bin/node"
+        },
+        {
+            "type": "node",
+            "request": "attach",
+            "name": "Attach to Node.js Process",
+            "port": 9229,
+            "restart": true,
+            "localRoot": "${workspaceFolder}",
+            "remoteRoot": "${workspaceFolder}"
         }
     ]
-} 
+}

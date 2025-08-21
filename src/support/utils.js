@@ -10,9 +10,17 @@
  * governing permissions and limitations under the License.
  */
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
-import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import {
+  hasText,
+  tracingFetch as fetch,
+  isValidUrl,
+  isObject,
+  resolveCanonicalUrl, isValidIMSOrgId,
+} from '@adobe/spacecat-shared-utils';
+import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -39,6 +47,7 @@ export const isAuditForAllDeliveryTypes = (deliveryType) => deliveryType.toUpper
  * @param {string} type - The type of audit.
  * @param {Object} auditContext - The audit context object.
  * @param {string} siteId - The site ID to audit.
+ * @param {string} [auditData] - Optional audit data.
  * @returns {Promise} A promise representing the message sending operation.
  */
 export const sendAuditMessage = async (
@@ -47,7 +56,13 @@ export const sendAuditMessage = async (
   type,
   auditContext,
   siteId,
-) => sqs.sendMessage(queueUrl, { type, siteId, auditContext });
+  auditData,
+) => sqs.sendMessage(queueUrl, {
+  type,
+  siteId,
+  auditContext,
+  data: auditData,
+});
 
 // todo: prototype - untested
 /* c8 ignore start */
@@ -91,6 +106,7 @@ export const sentRunScraperMessage = async (
  * @param {string} endDate
  * @param {Object} slackContext
  * @param {string} [pageUrl] - Optional page URL for the import
+ * @param {Object} [data] - Optional data object for import-specific data
  */
 export const sendRunImportMessage = async (
   sqs,
@@ -101,6 +117,7 @@ export const sendRunImportMessage = async (
   endDate,
   slackContext,
   pageUrl = undefined,
+  data = undefined,
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   siteId,
@@ -108,6 +125,7 @@ export const sendRunImportMessage = async (
   endDate,
   slackContext,
   pageUrl,
+  ...(data && { data }),
 });
 
 export const sendAutofixMessage = async (
@@ -165,6 +183,7 @@ export const sendAuditMessages = async (
  * Triggers an audit for a site.
  * @param {Site} site - The site to audit.
  * @param {string} auditType - The type of audit.
+ * @param {undefined|string} auditData - Optional audit data.
  * @param {Object} slackContext - The Slack context object.
  * @param {Object} lambdaContext - The Lambda context object.
  * @return {Promise} - A promise representing the audit trigger operation.
@@ -172,6 +191,7 @@ export const sendAuditMessages = async (
 export const triggerAuditForSite = async (
   site,
   auditType,
+  auditData,
   slackContext,
   lambdaContext,
 ) => sendAuditMessage(
@@ -185,6 +205,7 @@ export const triggerAuditForSite = async (
     },
   },
   site.getId(),
+  auditData,
 );
 
 // todo: prototype - untested
@@ -234,6 +255,7 @@ export const triggerScraperRun = async (
  * @param {Object} slackContext
  * @param {Object} lambdaContext
  * @param {string} [pageUrl] - Optional page URL for the import
+ * @param {Object} [data] - Optional data object for import-specific data
  */
 export const triggerImportRun = async (
   config,
@@ -244,6 +266,7 @@ export const triggerImportRun = async (
   slackContext,
   lambdaContext,
   pageUrl,
+  data,
 ) => sendRunImportMessage(
   lambdaContext.sqs,
   config.getQueues().imports,
@@ -256,6 +279,7 @@ export const triggerImportRun = async (
     threadTs: slackContext.threadTs,
   },
   pageUrl,
+  data,
 );
 /* c8 ignore end */
 
@@ -438,3 +462,424 @@ export function buildS3Prefix(type, siteId, path = '') {
   const normalized = path ? `${path.replace(/^\/+/g, '').replace(/\/+$/g, '')}/` : '';
   return `${type}/${siteId}/${normalized}`;
 }
+
+/**
+ * Checks if an import type is already enabled for a site.
+ *
+ * @param {string} importType - The import type to check.
+ * @param {Array} imports - Array of import configurations.
+ * @returns {boolean} - True if import is enabled, false otherwise.
+ */
+const isImportEnabled = (importType, imports) => {
+  const foundImport = imports?.find((importConfig) => importConfig.type === importType);
+  // If import is found, check if it's enabled, otherwise assume it's not enabled (false)
+  return foundImport ? foundImport.enabled : false;
+};
+
+/**
+ * Creates or retrieves a site and its associated organization.
+ *
+ * @param {string} baseURL - The site base URL.
+ * @param {string} imsOrgID - The IMS Organization ID.
+ * @param {string} authoringType - The authoring type of the site.
+ * @param {string} customDeliveryType - The delivery type of the site.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} reportLine - The report line object to update.
+ * @param {Object} context - The Lambda context containing dataAccess, log, etc.
+ * @param {Object} deliveryConfig - Optional delivery config to set on the site.
+ * @returns {Promise<Object>} - Object containing the site and organizationId.
+ */
+const createSiteAndOrganization = async (
+  baseURL,
+  imsOrgID,
+  authoringType,
+  customDeliveryType,
+  slackContext,
+  reportLine,
+  context,
+  deliveryConfig,
+) => {
+  const { imsClient, dataAccess, log } = context;
+  const { Site, Organization } = dataAccess;
+  const { say } = slackContext;
+  // Create a local copy to avoid modifying the parameter directly
+  const localReportLine = { ...reportLine };
+
+  let site = await Site.findByBaseURL(baseURL);
+  let organizationId;
+
+  // Check if site already exists
+  if (site) {
+    const siteOrgId = site.getOrganizationId();
+    const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
+    await say(message);
+    log.info(message);
+  } else {
+    // New site - handle organization logic
+    log.info(`Site ${baseURL} doesn't exist. Processing organization...`);
+
+    // Check if the organization with IMS Org ID already exists; create if it doesn't
+    let organization = await Organization.findByImsOrgId(imsOrgID);
+    if (!organization) {
+      const imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
+      if (!imsOrgDetails) {
+        localReportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
+        localReportLine.status = 'Failed';
+        throw new Error(localReportLine.errors);
+      }
+      log.info(`IMS Org Details: ${imsOrgDetails}`);
+      organization = await Organization.create({
+        name: imsOrgDetails.orgName,
+        imsOrgId: imsOrgID,
+      });
+
+      const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
+      await say(message);
+      log.info(message);
+    }
+
+    organizationId = organization.getId(); // Set organizationId for new site
+    log.info(`Organization ${organizationId} was successfully retrieved or created`);
+    localReportLine.spacecatOrgId = organizationId;
+
+    // Create new site
+    log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
+    const deliveryType = customDeliveryType || await findDeliveryType(baseURL);
+    log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
+    localReportLine.deliveryType = deliveryType;
+    const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
+
+    try {
+      site = await Site.create({
+        baseURL, deliveryType, isLive, organizationId, authoringType,
+      });
+
+      if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
+        site.setDeliveryConfig(deliveryConfig);
+        // Also set authoring type if provided (needed when setting delivery config)
+        if (authoringType) {
+          site.setAuthoringType(authoringType);
+        }
+        await site.save();
+        log.info(`Applied delivery configuration for site ${site.getId()}:`, { deliveryConfig, authoringType });
+      }
+    } catch (error) {
+      log.error(`Error creating site: ${error.message}`);
+      localReportLine.errors = error.message;
+      localReportLine.status = 'Failed';
+      await say(`:x: *Errors:* ${error.message}`);
+
+      throw error;
+    }
+  }
+
+  Object.assign(reportLine, localReportLine);
+  return { site, organizationId };
+};
+
+/**
+ * Shared onboarding function used by both modal and command implementations.
+ *
+ * @param {string} baseURLInput - The site URL input
+ * @param {string} imsOrganizationID - The IMS Organization ID
+ * @param {Object} configuration - The configuration object
+ * @param {Object} profile - The loaded profile configuration object
+ * @param {number} workflowWaitTime - Workflow wait time in seconds
+ * @param {Object} slackContext - Slack context object with say function
+ * @param {Object} context - Lambda context containing dataAccess, log, etc.
+ * @param {Object} additionalParams - Additional parameters
+ * @param {Object} options - Additional options
+ * @param {Function} options.urlProcessor - Function to process the URL
+ *                                          (e.g., extractURLFromSlackInput)
+ * @param {string} options.profileName - The profile name for logging and reporting
+ * @returns {Promise<Object>} Report line object
+ */
+export const onboardSingleSite = async (
+  baseURLInput,
+  imsOrganizationID,
+  configuration,
+  profile,
+  workflowWaitTime,
+  slackContext,
+  context,
+  additionalParams = {},
+  options = {},
+) => {
+  const { say } = slackContext;
+  const {
+    dataAccess, log, env,
+  } = context;
+  const { Configuration } = dataAccess;
+  const sfnClient = new SFNClient();
+
+  // Process URL - allow customization for different input formats
+  const baseURL = options.urlProcessor ? options.urlProcessor(baseURLInput) : baseURLInput.trim();
+  const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
+
+  // Extract profile name for logging and reporting (assume it's passed in options)
+  const profileName = options.profileName || 'unknown';
+
+  log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
+  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
+  await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
+
+  const reportLine = {
+    site: baseURL,
+    imsOrgId: imsOrgID,
+    spacecatOrgId: '',
+    siteId: '',
+    profile: profileName,
+    deliveryType: additionalParams.deliveryType || '',
+    authoringType: additionalParams.authoringType || '',
+    imports: '',
+    audits: '',
+    errors: '',
+    status: 'Success',
+    existingSite: 'No',
+  };
+
+  try {
+    if (!isValidUrl(baseURL)) {
+      reportLine.errors = 'Invalid site base URL';
+      reportLine.status = 'Failed';
+      return reportLine;
+    }
+
+    if (!isValidIMSOrgId(imsOrgID)) {
+      reportLine.errors = 'Invalid IMS Org ID';
+      reportLine.status = 'Failed';
+      return reportLine;
+    }
+
+    // Create or retrieve site and organization
+    const { site, organizationId } = await createSiteAndOrganization(
+      baseURL,
+      imsOrgID,
+      additionalParams.authoringType,
+      additionalParams.deliveryType,
+      slackContext,
+      reportLine,
+      context,
+      additionalParams.deliveryConfig,
+    );
+
+    const siteID = site.getId();
+    log.info(`Site ${baseURL} was successfully retrieved or created. Site ID: ${siteID}`);
+    reportLine.siteId = siteID;
+
+    log.info(`Profile ${profileName} was successfully loaded`);
+
+    if (!isObject(profile)) {
+      const error = `Profile "${profileName}" not found or invalid.`;
+      log.error(error);
+      reportLine.errors = error;
+      reportLine.status = 'Failed';
+      return reportLine;
+    }
+
+    if (!isObject(profile?.audits)) {
+      const error = `Profile "${profileName}" does not have a valid audits section.`;
+      log.error(error);
+      reportLine.errors = error;
+      reportLine.status = 'Failed';
+      return reportLine;
+    }
+
+    if (!isObject(profile?.imports)) {
+      const error = `Profile "${profileName}" does not have a valid imports section.`;
+      log.error(error);
+      reportLine.errors = error;
+      reportLine.status = 'Failed';
+      return reportLine;
+    }
+
+    const importTypes = Object.keys(profile.imports);
+    reportLine.imports = importTypes.join(', ');
+    const siteConfig = site.getConfig();
+
+    // Enabled imports only if there are not already enabled
+    const imports = siteConfig.getImports();
+    const importsEnabled = [];
+    for (const importType of importTypes) {
+      const isEnabled = isImportEnabled(importType, imports);
+      if (!isEnabled) {
+        log.info(`Enabling import: ${importType}`);
+        siteConfig.enableImport(importType);
+        importsEnabled.push(importType);
+      } else {
+        log.info(`Import '${importType}' is already enabled, skipping`);
+      }
+    }
+
+    if (importsEnabled.length > 0) {
+      log.info(`Enabled the following imports for ${siteID}: ${importsEnabled.join(', ')}`);
+    } else {
+      log.info(`All imports are already enabled for ${siteID}`);
+    }
+
+    log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
+
+    // Resolve canonical URL for the site from the base URL
+    const resolvedUrl = await resolveCanonicalUrl(baseURL);
+    const { pathname: baseUrlPathName } = new URL(baseURL);
+    const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
+
+    log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
+
+    // Update the fetch configuration only if the pathname is different from the resolved URL
+    if (baseUrlPathName !== resolvedUrlPathName) {
+      siteConfig.updateFetchConfig({
+        overrideBaseURL: resolvedUrlOrigin,
+      });
+    }
+
+    site.setConfig(Config.toDynamoItem(siteConfig));
+    try {
+      await site.save();
+    } catch (error) {
+      log.error(error);
+      reportLine.errors = error.message;
+      reportLine.status = 'Failed';
+      return reportLine;
+    }
+
+    log.info(`Site config successfully saved for site ${siteID}`);
+
+    for (const importType of importTypes) {
+      /* eslint-disable no-await-in-loop */
+      await triggerImportRun(
+        configuration,
+        importType,
+        siteID,
+        profile.imports[importType].startDate,
+        profile.imports[importType].endDate,
+        slackContext,
+        context,
+      );
+    }
+
+    log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
+
+    const auditTypes = Object.keys(profile.audits);
+
+    // Get current configuration for audit operations
+    const auditConfiguration = await Configuration.findLatest();
+
+    // Check which audits are not already enabled
+    const auditsEnabled = [];
+    for (const auditType of auditTypes) {
+      /* eslint-disable no-await-in-loop */
+      const isEnabled = auditConfiguration.isHandlerEnabledForSite(auditType, site);
+      if (!isEnabled) {
+        auditConfiguration.enableHandlerForSite(auditType, site);
+        auditsEnabled.push(auditType);
+      }
+    }
+
+    if (auditsEnabled.length > 0) {
+      log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+    } else {
+      log.info(`All audits are already enabled for site ${siteID}`);
+    }
+
+    reportLine.audits = auditTypes.join(', ');
+    log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
+
+    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
+
+    // trigger audit runs
+    log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
+    await say(`:gear: Starting audits: ${auditTypes}`);
+    for (const auditType of auditTypes) {
+      /* eslint-disable no-await-in-loop */
+      if (!auditConfiguration.isHandlerEnabledForSite(auditType, site)) {
+        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
+      } else {
+        await triggerAuditForSite(
+          site,
+          auditType,
+          undefined,
+          slackContext,
+          context,
+        );
+      }
+    }
+
+    // Opportunity status job
+    const opportunityStatusJob = {
+      type: 'opportunity-status-processor',
+      siteId: siteID,
+      siteUrl: baseURL,
+      imsOrgId: imsOrgID,
+      organizationId,
+      taskContext: {
+        auditTypes,
+        slackContext: {
+          channelId: slackContext.channelId,
+          threadTs: slackContext.threadTs,
+        },
+      },
+    };
+
+    // Disable imports and audits job - only disable what was enabled during onboarding
+    const disableImportAndAuditJob = {
+      type: 'disable-import-audit-processor',
+      siteId: siteID,
+      siteUrl: baseURL,
+      imsOrgId: imsOrgID,
+      organizationId,
+      taskContext: {
+        importTypes: importsEnabled || [],
+        auditTypes: auditsEnabled || [],
+        slackContext: {
+          channelId: slackContext.channelId,
+          threadTs: slackContext.threadTs,
+        },
+      },
+    };
+
+    // Demo URL job
+    const demoURLJob = {
+      type: 'demo-url-processor',
+      siteId: siteID,
+      siteUrl: baseURL,
+      imsOrgId: imsOrgID,
+      organizationId,
+      taskContext: {
+        experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
+        slackContext: {
+          channelId: slackContext.channelId,
+          threadTs: slackContext.threadTs,
+        },
+      },
+    };
+
+    log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
+    log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
+    log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
+
+    // Prepare and start step function workflow with the necessary parameters
+    const workflowInput = {
+      opportunityStatusJob,
+      disableImportAndAuditJob,
+      demoURLJob,
+      workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
+    };
+
+    const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+
+    const startCommand = new StartExecutionCommand({
+      stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,
+      input: JSON.stringify(workflowInput),
+      name: workflowName,
+    });
+    await sfnClient.send(startCommand);
+  } catch (error) {
+    log.error(error);
+    reportLine.errors = error.message;
+    reportLine.status = 'Failed';
+    throw error;
+  }
+
+  return reportLine;
+};

@@ -17,7 +17,6 @@ import {
   badRequest,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { sendAuditMessage } from './utils.js';
 
 // Static list for now; will be replaced with dynamic configuration later.
 export const ALL_AUDITS = [
@@ -98,13 +97,11 @@ export async function enforceRateLimit(site, auditTypes, rateLimitHours, log) {
  * Enqueue an individual audit for the given site.
  */
 async function triggerAuditForSiteAPI(site, auditType, ctx) {
-  return sendAuditMessage(
-    ctx.sqs,
-    ctx.env.AUDIT_JOBS_QUEUE_URL,
-    auditType,
-    {}, // Empty audit context – no Slack context needed
-    site.getId(),
-  );
+  return ctx.sqs.sendMessage(ctx.env.AUDIT_JOBS_QUEUE_URL, {
+    type: auditType,
+    siteId: site.getId(),
+    auditContext: {}, // Empty audit context – no Slack context needed
+  });
 }
 
 /**

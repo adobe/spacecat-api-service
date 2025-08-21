@@ -63,6 +63,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} brandsController - The brands controller.
  * @param {Object} preflightController - The preflight controller.
  * @param {Object} demoController - The demo controller.
+ * @param {Object} consentBannerController - The consent banner controller.
  * @param {Object} scrapeController - The scrape controller.
  * @param {Object} scrapeJobController - The scrape job controller.
  * @param {Object} mcpController - The MCP controller.
@@ -91,6 +92,7 @@ export default function getRouteHandlers(
   brandsController,
   preflightController,
   demoController,
+  consentBannerController,
   scrapeController,
   scrapeJobController,
   mcpController,
@@ -205,8 +207,8 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/:jobId/progress': importController.getImportJobProgress,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
-    'GET /screenshots': demoController.getScreenshots,
-    'POST /screenshots': demoController.takeScreenshots,
+    'POST /consent-banner': consentBannerController.takeScreenshots,
+    'GET /consent-banner/:jobId': consentBannerController.getScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
     'GET /mcp': mcpController.handleSseRequest,
@@ -238,6 +240,11 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
     'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
+    'GET /sites/:siteId/llmo/customer-intent': llmoController.getLlmoCustomerIntent,
+    'POST /sites/:siteId/llmo/customer-intent': llmoController.addLlmoCustomerIntent,
+    'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
+    'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
+    'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,

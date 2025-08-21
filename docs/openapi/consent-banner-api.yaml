@@ -1,0 +1,367 @@
+consent-banner:
+  post:
+    tags:
+      - consent-banner
+    security:
+      - api_key: []
+    summary: Take screenshots for consent banner analysis
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+
+      Creates a new scrape job specifically for taking consent banner screenshots.
+      This endpoint captures webpage screenshots in different states (with/without consent banners)
+      across different devices (desktop and mobile).
+
+      The job generates four distinct screenshot variants:
+      - Desktop with consent banner visible
+      - Desktop with consent banner dismissed/hidden
+      - Mobile with consent banner visible
+      - Mobile with consent banner dismissed/hidden
+
+      The returned jobId can be used with the GET /consent-banner endpoint to retrieve the results.
+    operationId: takeConsentBannerScreenshots
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - url
+            properties:
+              url:
+                type: string
+                format: url
+                description: The URL of the webpage to capture screenshots from
+                example: 'https://example.com'
+              force:
+                type: boolean
+                description: Force a fresh scrape by bypassing cached results. When true, ignores any existing cached screenshots and captures new ones.
+                default: false
+                example: false
+          examples:
+            basic:
+              summary: Basic screenshot request
+              value:
+                url: 'https://example.com'
+            with_force:
+              summary: Force fresh screenshots
+              value:
+                url: 'https://example.com'
+                force: true
+    responses:
+      '202':
+        description: Screenshot job accepted and started
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  description: The ID of the screenshot job
+                status:
+                  type: string
+                  description: The status of the screenshot job
+                  enum:
+                    - 'COMPLETE'
+                    - 'FAILED'
+                    - 'PENDING'
+                message:
+                  type: string
+                  description: A message describing the job status
+              required:
+                - jobId
+                - status
+            examples:
+              success:
+                summary: Job accepted
+                value:
+                  jobId: 'screenshot-job-12345'
+                  status: 'PENDING'
+                  message: 'Screenshot job has been queued for processing'
+      '400':
+        description: Bad request - Invalid or missing URL
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'No valid URL provided: invalid-url'
+      '401':
+        $ref: './responses.yaml#/401'
+      '503':
+        description: Service temporarily unavailable
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Service Unavailable'
+      '500':
+        $ref: './responses.yaml#/500'
+  get:
+    tags:
+      - consent-banner
+    security:
+      - api_key: []
+    summary: Get consent banner screenshots
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+
+      Retrieves the results of a consent banner screenshot job. Returns pre-signed URLs
+      for accessing the generated screenshot images and associated scrape data.
+
+      The response includes four screenshot variants:
+      - `desktop_cookie_banner_on`: Desktop screenshot with consent banner visible
+      - `desktop_cookie_banner_off`: Desktop screenshot with consent banner hidden
+      - `mobile_cookie_banner_on`: Mobile screenshot with consent banner visible
+      - `mobile_cookie_banner_off`: Mobile screenshot with consent banner hidden
+
+      Additionally provides access to the raw scrape JSON data for further analysis.
+    operationId: getConsentBannerScreenshots
+    parameters:
+      - name: jobId
+        in: query
+        required: true
+        description: The ID of the screenshot job to retrieve results for
+        schema:
+          type: string
+        example: 'screenshot-job-12345'
+    responses:
+      '200':
+        description: Screenshot results retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  description: The ID of the completed screenshot job
+                  example: 'screenshot-job-12345'
+                results:
+                  type: object
+                  description: Collection of screenshot URLs and scrape data
+                  properties:
+                    desktop_cookie_banner_on:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for desktop screenshot with consent banner
+                      example: 'https://s3.amazonaws.com/bucket/screenshots/desktop-on.png?signature=...'
+                    desktop_cookie_banner_off:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for desktop screenshot without consent banner
+                      example: 'https://s3.amazonaws.com/bucket/screenshots/desktop-off.png?signature=...'
+                    mobile_cookie_banner_on:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for mobile screenshot with consent banner
+                      example: 'https://s3.amazonaws.com/bucket/screenshots/mobile-on.png?signature=...'
+                    mobile_cookie_banner_off:
+                      type: string
+                      format: url
+                      description: Pre-signed URL for mobile screenshot without consent banner
+                      example: 'https://s3.amazonaws.com/bucket/screenshots/mobile-off.png?signature=...'
+                    screenshots:
+                      type: array
+                      description: Array of screenshot metadata objects
+                      items:
+                        type: object
+                        properties:
+                          fileName:
+                            type: string
+                            description: Name of the screenshot file
+                            example: 'screenshot-desktop-viewport-withBanner.png'
+                          contentType:
+                            type: string
+                            description: MIME type of the screenshot
+                            example: 'image/png'
+                          screenshotTime:
+                            type: integer
+                            description: Time taken to capture this screenshot in milliseconds
+                            example: 4275
+                    dimensionsDevice:
+                      type: string
+                      description: Device type used for the scrape
+                      example: 'desktop'
+                    scrapeTime:
+                      type: integer
+                      description: Total time for the scrape process in milliseconds
+                      example: 32405
+                    dimensions:
+                      type: object
+                      description: Dimensional analysis results from the consent banner detection, organized by device type
+                      additionalProperties:
+                        type: object
+                        description: Device-specific dimensional analysis results
+                        title: '[device]'
+                        properties:
+                          bannerSelector:
+                            type: string
+                            description: CSS selector used to identify the consent banner
+                            example: '.truste-consent-content'
+                          overlaySelector:
+                            type: string
+                            description: CSS selector used to identify the overlay element
+                            example: 'div#truste-consent-track'
+                          wrapperSelector:
+                            type: string
+                            description: CSS selector used to identify the wrapper element
+                            example: 'div#truste-consent-track'
+                          bannerDimensions:
+                            type: object
+                            description: Detailed banner positioning and dimensions
+                            properties:
+                              x:
+                                type: number
+                                description: X coordinate of the banner
+                                example: 715
+                              y:
+                                type: number
+                                description: Y coordinate of the banner
+                                example: 15
+                              width:
+                                type: number
+                                description: Width of the banner
+                                example: 490
+                              height:
+                                type: number
+                                description: Height of the banner
+                                example: 620
+                              top:
+                                type: number
+                                description: Top position
+                                example: 15
+                              right:
+                                type: number
+                                description: Right position
+                                example: 1205
+                              bottom:
+                                type: number
+                                description: Bottom position
+                                example: 635
+                              left:
+                                type: number
+                                description: Left position
+                                example: 715
+                          overlayOpacity:
+                            type: string
+                            description: Opacity value of the overlay
+                            example: '1'
+                          overlayBGColor:
+                            type: string
+                            description: Background color of the overlay
+                            example: 'rgba(0, 0, 0, 0)'
+              required:
+                - jobId
+                - results
+            examples:
+              success:
+                summary: Successful screenshot retrieval
+                value:
+                  jobId: 'b97e531e-119a-4312-996a-da2a6e57d72a'
+                  results:
+                    desktop_cookie_banner_on: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/b97e531e-119a-4312-996a-da2a6e57d72a/ch/screenshot-desktop-viewport-withBanner.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=...'
+                    desktop_cookie_banner_off: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/b97e531e-119a-4312-996a-da2a6e57d72a/ch/screenshot-desktop-viewport-withoutBanner.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=...'
+                    mobile_cookie_banner_on: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/b97e531e-119a-4312-996a-da2a6e57d72a/ch/screenshot-iphone-6-viewport-withBanner.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=...'
+                    mobile_cookie_banner_off: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/b97e531e-119a-4312-996a-da2a6e57d72a/ch/screenshot-iphone-6-viewport-withoutBanner.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=...'
+                    screenshots:
+                      - fileName: 'screenshot-iphone-6-viewport-withBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 583
+                      - fileName: 'screenshot-iphone-6-viewport-withoutBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 307
+                      - fileName: 'screenshot-desktop-viewport-withBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 2261
+                      - fileName: 'screenshot-desktop-viewport-withoutBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 8717
+                    dimensionsDevice: 'desktop'
+                    scrapeTime: 21835
+                    dimensions:
+                      'iPhone 6':
+                        bannerSelector: '.truste-consent-content'
+                        overlaySelector: 'div#truste-consent-track'
+                        wrapperSelector: 'div#truste-consent-track'
+                        bannerDimensions:
+                          x: 22.5
+                          y: 15
+                          width: 330
+                          height: 586.9375
+                          top: 15
+                          right: 352.5
+                          bottom: 601.9375
+                          left: 22.5
+                        overlayOpacity: '1'
+                        overlayBGColor: 'rgba(0, 0, 0, 0)'
+                      desktop:
+                        bannerSelector: '.truste-consent-content'
+                        overlaySelector: 'div#truste-consent-track'
+                        wrapperSelector: 'div#truste-consent-track'
+                        bannerDimensions:
+                          x: 715
+                          y: 15
+                          width: 490
+                          height: 620
+                          top: 15
+                          right: 1205
+                          bottom: 635
+                          left: 715
+                        overlayOpacity: '1'
+                        overlayBGColor: 'rgba(0, 0, 0, 0)'
+      '400':
+        description: Bad request - Missing or invalid jobId
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Job ID is required'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Screenshot job not found or still processing
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+            examples:
+              still_processing:
+                summary: Job still processing
+                value:
+                  error: 'Scrape job is still running. Try again in a few secs.'
+              not_found:
+                summary: Job not found
+                value:
+                  error: 'Screenshot job not found'
+      '500':
+        description: Internal server error or job failed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+            examples:
+              job_failed:
+                summary: Job execution failed
+                value:
+                  error: 'Scrape job failed: timeout'
+              server_error:
+                summary: Server error
+                value:
+                  error: 'Internal server error'
