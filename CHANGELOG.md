@@ -1,3 +1,10 @@
+# [1.164.0](https://github.com/adobe/spacecat-api-service/compare/v1.163.1...v1.164.0) (2025-08-21)
+
+
+### Features
+
+* support 200 prompts per domain ([#1179](https://github.com/adobe/spacecat-api-service/issues/1179)) ([c92fd02](https://github.com/adobe/spacecat-api-service/commit/c92fd022b8e58d28408c7ac501792cb2de5e372a))
+
 ## [1.163.1](https://github.com/adobe/spacecat-api-service/compare/v1.163.0...v1.163.1) (2025-08-21)
 
 
