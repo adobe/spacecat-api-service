@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
+import { ok, badRequest, found } from '@adobe/spacecat-shared-http-utils';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
@@ -220,13 +220,7 @@ function LlmoController(context) {
       log.info(`Successfully generated pre-signed URL for siteId: ${siteId}, sheetURL: ${sheetURL}`);
 
       // Return redirect to the pre-signed URL
-      return {
-        statusCode: 302,
-        headers: {
-          Location: presignedUrl,
-          'Cache-Control': 'no-cache',
-        },
-      };
+      return found(presignedUrl);
     } catch (error) {
       log.error(`Error processing download request for siteId: ${siteId}, sheetURL: ${sheetURL}`, error);
       throw error;
