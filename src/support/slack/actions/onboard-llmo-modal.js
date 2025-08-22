@@ -11,6 +11,7 @@
  */
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { getLastNumberOfWeeks } from '@adobe/spacecat-shared-utils';
 import { postErrorMessage } from '../../../utils/slack/base.js';
 
@@ -163,11 +164,68 @@ async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
   }
 }
 
+async function publishToAdminHlx(filename, outputLocation, log) {
+  try {
+    const org = 'adobe';
+    const site = 'project-elmo-ui-data';
+    const ref = 'main';
+    const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
+    const path = `${outputLocation}/${jsonFilename}`;
+    const headers = { Cookie: `auth_token=${process.env.ADMIN_HLX_API_KEY}` };
+
+    const baseUrl = 'https://admin.hlx.page';
+    const endpoints = [
+      { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
+      { name: 'live', url: `${baseUrl}/live/${org}/${site}/${ref}/${path}` },
+    ];
+
+    for (const [index, endpoint] of endpoints.entries()) {
+      log.info(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
+
+      // eslint-disable-next-line no-await-in-loop
+      const response = await fetch(endpoint.url, { method: 'POST', headers });
+
+      if (!response.ok) {
+        throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
+      }
+
+      log.info(`Excel report successfully published to ${endpoint.name}`);
+
+      if (index === 0) {
+        log.info('Waiting 2 seconds before publishing to live...');
+        // eslint-disable-next-line no-await-in-loop,max-statements-per-line
+        await new Promise((resolve) => { setTimeout(resolve, 2000); });
+      }
+    }
+  } catch (publishError) {
+    log.error(`Failed to publish via admin.hlx.page: ${publishError.message}`);
+  }
+}
+
+async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
+  const { log } = lambdaCtx;
+
+  const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/Shared%20Documents/sites/elmo-ui-data';
+
+  const sharepointClient = await createFrom({
+    clientId: process.env.SHAREPOINT_CLIENT_ID,
+    clientSecret: process.env.SHAREPOINT_CLIENT_SECRET,
+    authority: process.env.SHAREPOINT_AUTHORITY,
+    domainId: process.env.SHAREPOINT_DOMAIN_ID,
+  }, { url: SHAREPOINT_URL, type: 'onedrive' });
+
+  log.info(`Copying query-index to ${dataFolder}`);
+  const doc = await sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
+  await doc.copy(`/sites/elmo-ui-data/${dataFolder}/query-index.xlsx`);
+
+  await publishToAdminHlx('query-index', dataFolder, log);
+}
+
 async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
   const { baseURL, brandName, imsOrgId } = input;
-  const dataFolder = `${brandName}-content`;
+  const dataFolder = `${brandName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-content`;
 
   const { Site, Configuration } = dataAccess;
 
@@ -178,6 +236,9 @@ async function onboardSite(input, lambdaCtx, slackCtx) {
       await say(`:x: Site '${baseURL}' not found. Please add the site first using the regular onboard command.`);
       return;
     }
+
+    // upload and publish the query index file
+    await copyFilesToSharepoint(dataFolder, lambdaCtx);
 
     const siteId = site.getId();
     log.info(`Found site ${baseURL} with ID: ${siteId}`);
