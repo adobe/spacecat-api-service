@@ -150,6 +150,9 @@ function LlmoController(context) {
     log.info(`ELMO: limit: ${limit}, offset: ${offset}, sheet: ${sheet}`);
     if (limit) {
       url.searchParams.set('limit', limit);
+    } else {
+      // Set limit to '*' to explicitly request all data when no limit is provided
+      url.searchParams.set('limit', '*');
     }
     if (offset) {
       url.searchParams.set('offset', offset);
