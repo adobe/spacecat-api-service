@@ -13,6 +13,7 @@
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { getLastNumberOfWeeks } from '@adobe/spacecat-shared-utils';
+import { Octokit } from '@octokit/rest';
 import { postErrorMessage } from '../../../utils/slack/base.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
@@ -221,11 +222,53 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
   await publishToAdminHlx('query-index', dataFolder, log);
 }
 
+// update https://github.com/adobe/project-elmo-ui-data/blob/main/helix-query.yaml
+async function updateIndexConfig(dataFolder, lambdaCtx) {
+  const { log } = lambdaCtx;
+
+  log.info('Starting Git modification of helix query config');
+
+  const octokit = new Octokit({
+    auth: process.env.GITHUB_TOKEN,
+  });
+
+  const owner = 'adobe';
+  const repo = 'project-elmo-ui-data';
+  const ref = 'main';
+  const path = 'helix-query.yaml';
+
+  const { data: file } = await octokit.repos.getContent({
+    owner, repo, ref, path,
+  });
+  const content = Buffer.from(file.content, 'base64').toString('utf-8');
+
+  // add new config to end of file
+  const modifiedContent = `${content}
+
+  ${dataFolder}:
+    <<: *default
+    include:
+      - '/${dataFolder}/**'
+    target: /${dataFolder}/query-index.xlsx`;
+
+  await octokit.repos.createOrUpdateFileContents({
+    owner,
+    repo,
+    ref,
+    path,
+    message: `Automation: Onboard ${dataFolder}`,
+    content: Buffer.from(modifiedContent).toString('base64'),
+    sha: file.sha,
+  });
+
+  log.info('Done with Git modification of helix query config');
+}
+
 async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
   const { baseURL, brandName, imsOrgId } = input;
-  const dataFolder = `${brandName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-content`;
+  const dataFolder = brandName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
 
   const { Site, Configuration } = dataAccess;
 
@@ -239,6 +282,9 @@ async function onboardSite(input, lambdaCtx, slackCtx) {
 
     // upload and publish the query index file
     await copyFilesToSharepoint(dataFolder, lambdaCtx);
+
+    // update indexing config in helix
+    await updateIndexConfig(dataFolder, lambdaCtx);
 
     const siteId = site.getId();
     log.info(`Found site ${baseURL} with ID: ${siteId}`);
