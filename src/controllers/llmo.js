@@ -235,8 +235,10 @@ function LlmoController(context) {
 
       log.info(`Successfully generated pre-signed URL for siteId: ${siteId}, sheetURL: ${sheetURL}`);
 
-      // Return redirect to the pre-signed URL
-      return found(presignedUrl);
+      // Return redirect to the pre-signed URL with CORS header
+      return found(presignedUrl, {
+        'access-control-allow-origin': '*',
+      });
     } catch (error) {
       log.error(`Error processing download request for siteId: ${siteId}, sheetURL: ${sheetURL}`, error);
       throw error;
