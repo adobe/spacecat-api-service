@@ -10,118 +10,98 @@
  * governing permissions and limitations under the License.
  */
 
+import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
+import { badRequest } from '@adobe/spacecat-shared-http-utils';
 import {
-  hasText,
-  isNonEmptyObject,
-  isValidUUID,
-} from '@adobe/spacecat-shared-utils';
-import {
-  badRequest,
-  forbidden,
-  notFound,
-  createResponse,
-} from '@adobe/spacecat-shared-http-utils';
-import { triggerAudits, normalizeAuditTypes, enforceRateLimit } from '../support/sandbox-audit-service.js';
+  triggerAudits,
+  normalizeAuditTypes,
+  enforceRateLimit,
+  validateSiteAccess,
+  buildRateLimitResponse,
+  ALL_AUDITS,
+} from '../support/sandbox-audit-service.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
- * Sandbox Audit Controller for triggering audits on sandbox sites without Slack context.
- * @param {Object} context - The context object.
- * @returns {Object} Controller with audit triggering methods.
+ * Validates the controller context to ensure all required dependencies are present.
+ * Throws descriptive errors for missing dependencies.
+ *
+ * @param {Object} context - Controller context to validate
+ * @throws {Error} When required context properties are missing
  */
-function SandboxAuditController(ctx) {
-  if (!isNonEmptyObject(ctx)) {
+function validateControllerContext(context) {
+  if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
   }
 
-  const { dataAccess, log } = ctx;
-
-  if (!isNonEmptyObject(dataAccess)) {
+  if (!isNonEmptyObject(context.dataAccess)) {
     throw new Error('Data access required');
   }
+}
 
+/**
+ * Sandbox Audit Controller for triggering audits on sandbox sites
+ *
+ * @param {Object} context - The application context containing dataAccess, env, log, etc.
+ * @returns {Object} Controller with audit triggering methods.
+ */
+function SandboxAuditController(ctx) {
+  validateControllerContext(ctx);
+
+  const { dataAccess, log } = ctx;
   const { Configuration, Site } = dataAccess;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
-  /**
-   * Validates baseURL and authorization, returns either Response or the site.
-   * @param {string} baseURL
-   * @returns {Promise<{site: object}|import('@adobe/spacecat-shared-http-utils').Response>}
-   */
-  const validateRequest = async (siteId) => {
-    if (!hasText(siteId)) {
-      return badRequest('siteId path parameter is required');
-    }
+  function extractRequestParameters(requestContext) {
+    // Check both locations: data (real requests) and query (tests)
+    const auditTypeRaw = requestContext.data?.auditType || requestContext.query?.auditType;
+    const { siteId } = requestContext.params || {};
+    const auditTypes = normalizeAuditTypes(auditTypeRaw);
 
-    if (!isValidUUID(siteId)) {
-      return badRequest('Invalid siteId provided');
-    }
+    return { siteId, auditTypes };
+  }
 
-    const site = await Site.findById(siteId);
-    if (!isNonEmptyObject(site)) {
-      return notFound(`Site not found for siteId: ${siteId}`);
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('User does not have access to this site');
-    }
-
-    if (!site.getIsSandbox()) {
-      return badRequest(`Sandbox audit endpoint only supports sandbox sites. Site ${siteId} is not a sandbox.`);
-    }
-
-    return { site };
-  };
-
-  // Default gap (hrs) between audit runs when env var is not set
-  const DEFAULT_RATE_LIMIT_HOURS = 4;
+  function getRateLimitHours() {
+    const DEFAULT_RATE_LIMIT_HOURS = 4;
+    return Number.parseFloat(ctx.env?.SANDBOX_AUDIT_RATE_LIMIT_HOURS) || DEFAULT_RATE_LIMIT_HOURS;
+  }
 
   /**
-   * Triggers audit(s) for a sandbox site by siteId.
-   * POST /sites/:siteId/sandbox/audit?auditType=meta-tags
-   * POST /sites/:siteId/sandbox/audit?auditType=meta-tags,alt-text
-   * OR
-   * POST /sites/:siteId/sandbox/audit (runs all audits)
+   * Triggers audit(s) for a sandbox site.
+   * Supports single audit, multiple audits, or all configured audits.
    */
   const triggerAudit = async (context) => {
     try {
-      // Extract auditType from query parameters, not from body data
-      const { auditType: auditTypeRaw } = context.query || {};
-      const { siteId } = context.params || {};
-      const auditTypes = normalizeAuditTypes(auditTypeRaw);
-      const validation = await validateRequest(siteId);
-      if (validation.site === undefined) {
-        return validation;
+      const { siteId, auditTypes } = extractRequestParameters(context);
+
+      const siteValidation = await validateSiteAccess(siteId, Site, accessControlUtil);
+      if (siteValidation.error) {
+        return siteValidation.error;
       }
-      const { site } = validation;
-      const rateLimitHours = Number.parseFloat(ctx.env?.SANDBOX_AUDIT_RATE_LIMIT_HOURS)
-        || DEFAULT_RATE_LIMIT_HOURS;
+      const { site } = siteValidation;
+
+      // Validate audit types are supported before rate limiting
+      if (auditTypes && auditTypes.length > 0) {
+        const invalid = auditTypes.filter((type) => !ALL_AUDITS.includes(type));
+        if (invalid.length > 0) {
+          return badRequest(
+            `Invalid audit types: ${invalid.join(', ')}. Supported types: ${ALL_AUDITS.join(', ')}`,
+          );
+        }
+      }
+
+      const rateLimitHours = getRateLimitHours();
       const { allowed, skipped } = await enforceRateLimit(site, auditTypes, rateLimitHours, log);
 
       if (!allowed.length) {
-        // Compute soonest time an audit can run again
-        const minMins = Math.min(...skipped.map((s) => s.minutesRemaining));
-        const hrs = Math.floor(minMins / 60);
-        const mins = minMins % 60;
-        const timeStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} minutes`;
-
-        const msg = `Rate limit exceeded: audits ${skipped
-          .map((s) => s.auditType)
-          .join(', ')} were run less than ${rateLimitHours}h ago.`;
-
-        return createResponse({
-          message: msg,
-          nextAllowedIn: timeStr,
-          minutesRemaining: minMins,
-          auditsSkipped: skipped.map((s) => s.auditType),
-          skippedDetail: skipped,
-        }, 429, { 'x-error': msg });
+        return buildRateLimitResponse(skipped, rateLimitHours);
       }
 
       const configuration = await Configuration.findLatest();
-      const baseURL = site.getBaseURL();
-      log.info(`SandboxAudit: Triggering audit(s) for siteId ${siteId}`);
-      return triggerAudits(site, configuration, allowed, ctx, baseURL, skipped);
+
+      log.info(`SandboxAudit: Triggering audit(s) for siteId ${siteId}, types: ${allowed.join(', ')}`);
+
+      return triggerAudits(site, configuration, allowed, ctx, skipped);
     } catch (error) {
       log.error(`Error triggering audit: ${error.message}`, error);
       throw error;

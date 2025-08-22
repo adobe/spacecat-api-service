@@ -14,7 +14,7 @@
 
 import { expect } from 'chai';
 import sinon from 'sinon';
-import { normalizeAuditTypes, enforceRateLimit } from '../../src/support/sandbox-audit-service.js';
+import { normalizeAuditTypes, enforceRateLimit, triggerAudits } from '../../src/support/sandbox-audit-service.js';
 
 // Helper to create a mock Site with controllable audit history
 function createMockSite(lastAuditDateIso) {
@@ -85,8 +85,7 @@ describe('sandbox-audit-service helpers', () => {
         isHandlerEnabledForSite: () => true,
       };
 
-      const { triggerAudits } = await import('../../src/support/sandbox-audit-service.js');
-      const res = await triggerAudits(site, configuration, 'meta-tags', ctx, site.getBaseURL());
+      const res = await triggerAudits(site, configuration, 'meta-tags', ctx);
       expect(res.status).to.equal(200);
     });
 
@@ -108,8 +107,7 @@ describe('sandbox-audit-service helpers', () => {
 
       const skipped = [{ auditType: 'alt-text', nextAllowedAt: new Date().toISOString(), minutesRemaining: 10 }];
 
-      const { triggerAudits } = await import('../../src/support/sandbox-audit-service.js');
-      const res = await triggerAudits(site, configuration, 'meta-tags', ctx, site.getBaseURL(), skipped);
+      const res = await triggerAudits(site, configuration, 'meta-tags', ctx, skipped);
       const body = await res.json();
 
       expect(body.results.some((r) => r.auditType === 'alt-text' && r.status === 'skipped')).to.be.true;
@@ -131,9 +129,32 @@ describe('sandbox-audit-service helpers', () => {
         isHandlerEnabledForSite: () => false, // all audits disabled
       };
 
-      const { triggerAudits } = await import('../../src/support/sandbox-audit-service.js');
-      const res = await triggerAudits(site, configuration, null, ctx, site.getBaseURL());
+      const res = await triggerAudits(site, configuration, null, ctx);
       expect(res.status).to.equal(400);
+    });
+
+    it('returns badRequest when invalid audit types provided', async () => {
+      const ctx = {
+        env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.url/queue' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        log: { info: () => {}, error: () => {} },
+      };
+
+      const site = {
+        getId: () => 'site-123',
+        getBaseURL: () => 'https://sandbox.example.com',
+      };
+
+      const configuration = {
+        isHandlerEnabledForSite: () => true,
+      };
+
+      const res = await triggerAudits(site, configuration, ['invalid-audit', 'cwv'], ctx);
+      expect(res.status).to.equal(400);
+
+      const body = await res.json();
+      expect(body.message).to.include('Invalid audit types: invalid-audit, cwv');
+      expect(body.message).to.include('Supported types: meta-tags, alt-text');
     });
   });
 });

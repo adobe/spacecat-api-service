@@ -108,10 +108,12 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(result).to.have.property('message', 'Successfully triggered meta-tags audit for https://sandbox.example.com');
+      expect(result).to.have.property('message', 'Triggered 1 of 1 audits for https://sandbox.example.com');
       expect(result).to.have.property('siteId', SITE_IDS[0]);
-      expect(result).to.have.property('auditType', 'meta-tags');
       expect(result).to.have.property('baseURL', 'https://sandbox.example.com');
+      expect(result).to.have.property('auditsTriggered').that.deep.equals(['meta-tags']);
+      expect(result).to.have.property('auditsSkipped').that.is.an('array').and.is.empty;
+      expect(result).to.have.property('results').that.is.an('array').with.lengthOf(1);
 
       expect(mockSqs.sendMessage).to.have.been.calledOnceWith(
         'https://sqs.us-east-1.amazonaws.com/123456789/audit-jobs',
@@ -446,7 +448,7 @@ describe('Sandbox Audit Controller', () => {
       const responseSqs = await sandboxAuditController.triggerAudit(request);
       const bodySqs = await responseSqs.json();
       expect(responseSqs.status).to.equal(200);
-      expect(bodySqs).to.have.property('message').that.includes('Successfully triggered');
+      expect(bodySqs).to.have.property('message').that.includes('Triggered');
     });
 
     it('handles empty request data', async () => {
@@ -490,7 +492,7 @@ describe('Sandbox Audit Controller', () => {
         const result = await response.json();
 
         expect(response.status).to.equal(200);
-        expect(result).to.have.property('auditType', auditType);
+        expect(result).to.have.property('auditsTriggered').that.includes(auditType);
       });
 
       await Promise.all(auditPromises);
