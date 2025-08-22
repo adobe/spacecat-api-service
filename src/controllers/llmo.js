@@ -152,7 +152,7 @@ function LlmoController(context) {
       url.searchParams.set('limit', limit);
     } else {
       // Set limit to '*' to explicitly request all data when no limit is provided
-      url.searchParams.set('limit', '*');
+      url.searchParams.set('limit', '500000');
     }
     if (offset) {
       url.searchParams.set('offset', offset);
