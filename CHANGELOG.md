@@ -1,3 +1,10 @@
+## [1.164.1](https://github.com/adobe/spacecat-api-service/compare/v1.164.0...v1.164.1) (2025-08-23)
+
+
+### Bug Fixes
+
+* save config after audits enabled fix ([#1184](https://github.com/adobe/spacecat-api-service/issues/1184)) ([4f88775](https://github.com/adobe/spacecat-api-service/commit/4f887750d6c17f7c89350a1f2faf476cd5467a97))
+
 # [1.164.0](https://github.com/adobe/spacecat-api-service/compare/v1.163.1...v1.164.0) (2025-08-21)
 
 
