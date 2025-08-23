@@ -3443,6 +3443,35 @@ LlmoCustomerIntentUpdate:
       example: 'enterprise customers'
   additionalProperties: false
 
+LlmoCdnLogsFilter:
+  type: array
+  description: Array of CDN logs filter items
+  items:
+    type: object
+    required:
+      - key
+      - value
+    properties:
+      key:
+        type: string
+        example: 'host'
+      value:
+        type: array
+        items:
+          type: string
+        example: ['example.com', 'abc.com']
+      type:
+        type: string
+        enum: ['include', 'exclude']
+        example: 'include'
+  example:
+    - key: 'host'
+      value: ['example.com', 'abc.com']
+      type: 'include'
+    - key: 'status'
+      value: ['404', '500']
+      type: 'exclude'
+
 LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
@@ -3464,4 +3493,7 @@ LlmoConfig:
     customerIntent:
       description: The customer intent configuration containing key-value pairs
       $ref: '#/LlmoCustomerIntent'
+    cdnlogsFilter:
+      description: The CDN logs filter configuration for filtering log entries
+      $ref: '#/LlmoCdnLogsFilter'
   additionalProperties: false

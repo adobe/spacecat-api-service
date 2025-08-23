@@ -230,34 +230,6 @@ describe('ScrapeJobController tests', () => {
       expect(response.headers.get('x-error')).to.equal('Error: Failed to create a new scrape job: Invalid request: customHeaders must be an object');
     });
 
-    it('should reject when no scrape queues are defined', async () => {
-      delete scrapeJobConfiguration.queues;
-      baseContext.env.SCRAPE_JOB_CONFIGURATION = JSON.stringify(scrapeJobConfiguration);
-
-      const scrapeJobControllerNoQueues = ScrapeJobController(baseContext);
-      const response = await scrapeJobControllerNoQueues.createScrapeJob(baseContext);
-      expect(response.status).to.equal(503);
-      expect(response.headers.get('x-error')).to.equal('Failed to create a new scrape job: Service Unavailable: No scrape queue available');
-    });
-
-    it('correctly returns queue with least messages', async () => {
-      scrapeJobConfiguration.queues = ['spacecat-scrape-queue-1', 'spacecat-scrape-queue-2'];
-      baseContext.env.SCRAPE_JOB_CONFIGURATION = JSON.stringify(scrapeJobConfiguration);
-      baseContext.log.info = sandbox.stub();
-      const testScrapeJobController = ScrapeJobController(baseContext);
-      const response = await testScrapeJobController.createScrapeJob(baseContext);
-      expect(response.status).to.equal(202);
-      expect(baseContext.log.info.getCalls()[1].args[0]).to.equal('Queue with least messages: spacecat-scrape-queue-2');
-
-      scrapeJobConfiguration.queues = ['spacecat-scrape-queue-1', 'spacecat-scrape-queue-3'];
-      baseContext.log.info = sandbox.stub();
-      baseContext.env.SCRAPE_JOB_CONFIGURATION = JSON.stringify(scrapeJobConfiguration);
-      const testScrapeJobController2 = ScrapeJobController(baseContext);
-      const response2 = await testScrapeJobController2.createScrapeJob(baseContext);
-      expect(response2.status).to.equal(202);
-      expect(baseContext.log.info.getCalls()[1].args[0]).to.equal('Queue with least messages: spacecat-scrape-queue-1');
-    });
-
     it('should reject when invalid URLs are passed in', async () => {
       baseContext.data.urls = ['https://example.com/page1', 'not-a-valid-url'];
       const response = await scrapeJobController.createScrapeJob(baseContext);

@@ -1,3 +1,31 @@
+# [1.164.0](https://github.com/adobe/spacecat-api-service/compare/v1.163.1...v1.164.0) (2025-08-21)
+
+
+### Features
+
+* support 200 prompts per domain ([#1179](https://github.com/adobe/spacecat-api-service/issues/1179)) ([c92fd02](https://github.com/adobe/spacecat-api-service/commit/c92fd022b8e58d28408c7ac501792cb2de5e372a))
+
+## [1.163.1](https://github.com/adobe/spacecat-api-service/compare/v1.163.0...v1.163.1) (2025-08-21)
+
+
+### Bug Fixes
+
+* update ScrapeClient to newest version ([#1145](https://github.com/adobe/spacecat-api-service/issues/1145)) ([9d3b7ac](https://github.com/adobe/spacecat-api-service/commit/9d3b7ac5982ce1bb85ec4b255ba6d61b9fc6b10e))
+
+# [1.163.0](https://github.com/adobe/spacecat-api-service/compare/v1.162.0...v1.163.0) (2025-08-21)
+
+
+### Features
+
+* consent-banner endpoint changed result structure ([#1178](https://github.com/adobe/spacecat-api-service/issues/1178)) ([77a5287](https://github.com/adobe/spacecat-api-service/commit/77a5287cf997036b613c218c5a8bb00c203be3dc))
+
+# [1.162.0](https://github.com/adobe/spacecat-api-service/compare/v1.161.4...v1.162.0) (2025-08-21)
+
+
+### Features
+
+* add patch endpoint for llmo cdn filters ([#1173](https://github.com/adobe/spacecat-api-service/issues/1173)) ([952a5e4](https://github.com/adobe/spacecat-api-service/commit/952a5e4cc977424413e7e0a7aae73f7647963382))
+
 ## [1.161.4](https://github.com/adobe/spacecat-api-service/compare/v1.161.3...v1.161.4) (2025-08-20)
 
 
