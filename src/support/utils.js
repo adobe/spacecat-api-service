@@ -778,6 +778,14 @@ export const onboardSingleSite = async (
 
     if (auditsEnabled.length > 0) {
       log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+
+      try {
+        await auditConfiguration.save();
+        log.info(`Configuration saved successfully after enabling audits for site ${siteID}`);
+      } catch (error) {
+        log.error(`Failed to save configuration after enabling audits for site ${siteID}:`, error);
+        throw error;
+      }
     } else {
       log.info(`All audits are already enabled for site ${siteID}`);
     }
