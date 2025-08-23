@@ -205,8 +205,8 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/:jobId/progress': importController.getImportJobProgress,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
-    'POST /screenshots': consentBannerController.takeScreenshots,
-    'GET /screenshots/:jobId': consentBannerController.getScreenshots,
+    'POST /consent-banner': consentBannerController.takeScreenshots,
+    'GET /consent-banner/:jobId': consentBannerController.getScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
     'GET /mcp': mcpController.handleSseRequest,
@@ -242,6 +242,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/customer-intent': llmoController.addLlmoCustomerIntent,
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
+    'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
   };
 
   // Initialization of static and dynamic routes

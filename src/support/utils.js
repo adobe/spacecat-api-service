@@ -760,22 +760,27 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
-    // Get current configuration for audit operations
-    const auditConfiguration = await Configuration.findLatest();
+    const latestConfiguration = await Configuration.findLatest();
 
     // Check which audits are not already enabled
     const auditsEnabled = [];
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      const isEnabled = auditConfiguration.isHandlerEnabledForSite(auditType, site);
+      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
       if (!isEnabled) {
-        auditConfiguration.enableHandlerForSite(auditType, site);
+        latestConfiguration.enableHandlerForSite(auditType, site);
         auditsEnabled.push(auditType);
       }
     }
 
     if (auditsEnabled.length > 0) {
-      log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+      try {
+        await latestConfiguration.save();
+        log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+      } catch (error) {
+        log.error(`Failed to save configuration for site ${siteID}:`, error);
+        throw error;
+      }
     } else {
       log.info(`All audits are already enabled for site ${siteID}`);
     }
@@ -790,7 +795,7 @@ export const onboardSingleSite = async (
     await say(`:gear: Starting audits: ${auditTypes}`);
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      if (!auditConfiguration.isHandlerEnabledForSite(auditType, site)) {
+      if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
         await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
       } else {
         await triggerAuditForSite(

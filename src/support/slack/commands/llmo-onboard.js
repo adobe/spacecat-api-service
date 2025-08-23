@@ -125,7 +125,7 @@ function LlmoOnboardCommand(context) {
       siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
 
       // enable the llmo-prompts-ahrefs import
-      siteConfig.enableImport('llmo-prompts-ahrefs', { limit: 25 });
+      siteConfig.enableImport('llmo-prompts-ahrefs', { limit: 50 });
 
       // update the site config object
       site.setConfig(Config.toDynamoItem(siteConfig));
