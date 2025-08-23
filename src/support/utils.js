@@ -787,17 +787,15 @@ export const onboardSingleSite = async (
       log.info(`All audits are already enabled for site ${siteID}`);
     }
 
-    reportLine.audits = auditTypes.join(', ');
-    log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
-
-    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
+    // Refresh configuration to ensure we have the latest state for audit triggering
+    const currentConfiguration = await Configuration.findLatest();
 
     // trigger audit runs
     log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
     await say(`:gear: Starting audits: ${auditTypes}`);
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
+      if (!currentConfiguration.isHandlerEnabledForSite(auditType, site)) {
         await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
       } else {
         await triggerAuditForSite(
@@ -809,6 +807,11 @@ export const onboardSingleSite = async (
         );
       }
     }
+
+    reportLine.audits = auditTypes.join(', ');
+    log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
+
+    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
 
     // Opportunity status job
     const opportunityStatusJob = {
