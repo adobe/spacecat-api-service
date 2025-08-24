@@ -1,19 +1,7 @@
 sandbox-audit:
   parameters:
     - $ref: './parameters.yaml#/siteId'
-    - name: auditType
-      in: query
-      required: false
-      description: |
-        Comma-separated list of audit types to run. If not provided, all enabled audits will be triggered.
-        Example: meta-tags,alt-text
-      schema:
-        type: string
-        description: Comma-separated list of audit types
-        example: "meta-tags,alt-text"
-        enum:
-          - 'meta-tags'
-          - 'alt-text'
+    - $ref: './parameters.yaml#/sandboxAuditType'
   post:
     tags:
       - sandbox
