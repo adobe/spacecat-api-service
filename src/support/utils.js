@@ -779,8 +779,9 @@ export const onboardSingleSite = async (
     if (auditsEnabled.length > 0) {
       try {
         await latestConfiguration.save();
-        log.info('saved config ', latestConfiguration.toJSON());
-        log.info('saved config version: ', latestConfiguration.getVersion());
+        log.info('updated config ', latestConfiguration.toJSON());
+        log.info('updated config version: ', latestConfiguration.getVersion());
+        log.info('cwv status in updated config: ', latestConfiguration.isHandlerEnabledForSite('cwv', site));
         log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
@@ -789,11 +790,6 @@ export const onboardSingleSite = async (
     } else {
       log.info(`All audits are already enabled for site ${siteID}`);
     }
-
-    // Use the SAME configuration object for audit triggering (don't fetch again)
-    log.info('updated config ', latestConfiguration.toJSON());
-    log.info('updated config version: ', latestConfiguration.getVersion());
-    log.info('cwv status in updated config: ', latestConfiguration.isHandlerEnabledForSite('cwv', site));
 
     // trigger audit runs
     log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
