@@ -789,18 +789,17 @@ export const onboardSingleSite = async (
       log.info(`All audits are already enabled for site ${siteID}`);
     }
 
-    // Refresh configuration to ensure we have the latest state for audit triggering
-    const currentConfiguration = await Configuration.findLatest();
-    log.info('updated config ', currentConfiguration.toJSON());
-    log.info('updated config version: ', currentConfiguration.getVersion());
-    log.info('cwv status in updated config: ', currentConfiguration.isHandlerEnabledForSite('cwv', site));
+    // Use the SAME configuration object for audit triggering (don't fetch again)
+    log.info('updated config ', latestConfiguration.toJSON());
+    log.info('updated config version: ', latestConfiguration.getVersion());
+    log.info('cwv status in updated config: ', latestConfiguration.isHandlerEnabledForSite('cwv', site));
 
     // trigger audit runs
     log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
     await say(`:gear: Starting audits: ${auditTypes}`);
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      if (!currentConfiguration.isHandlerEnabledForSite(auditType, site)) {
+      if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
         await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
       } else {
         await triggerAuditForSite(
