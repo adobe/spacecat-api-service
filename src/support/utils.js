@@ -779,8 +779,6 @@ export const onboardSingleSite = async (
     if (auditsEnabled.length > 0) {
       try {
         await latestConfiguration.save();
-        log.info('updated config ', latestConfiguration.toJSON());
-        log.info('updated config version: ', latestConfiguration.getVersion());
         log.info('cwv status in updated config: ', latestConfiguration.isHandlerEnabledForSite('cwv', site));
         log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
       } catch (error) {
@@ -790,6 +788,9 @@ export const onboardSingleSite = async (
     } else {
       log.info(`All audits are already enabled for site ${siteID}`);
     }
+
+    reportLine.audits = auditTypes.join(', ');
+    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
 
     // trigger audit runs
     log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
@@ -808,11 +809,6 @@ export const onboardSingleSite = async (
         );
       }
     }
-
-    reportLine.audits = auditTypes.join(', ');
-    log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
-
-    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
 
     // Opportunity status job
     const opportunityStatusJob = {
