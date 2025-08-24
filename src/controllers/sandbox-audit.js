@@ -11,59 +11,35 @@
  */
 
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
-import { badRequest } from '@adobe/spacecat-shared-http-utils';
+import { createResponse } from '@adobe/spacecat-shared-http-utils';
 import {
   triggerAudits,
-  normalizeAuditTypes,
+  normalizeAndValidateAuditTypes,
   enforceRateLimit,
   validateSiteAccess,
-  buildRateLimitResponse,
-  ALL_AUDITS,
 } from '../support/sandbox-audit-service.js';
 import AccessControlUtil from '../support/access-control-util.js';
-
-/**
- * Validates the controller context to ensure all required dependencies are present.
- * Throws descriptive errors for missing dependencies.
- *
- * @param {Object} context - Controller context to validate
- * @throws {Error} When required context properties are missing
- */
-function validateControllerContext(context) {
-  if (!isNonEmptyObject(context)) {
-    throw new Error('Context required');
-  }
-
-  if (!isNonEmptyObject(context.dataAccess)) {
-    throw new Error('Data access required');
-  }
-}
 
 /**
  * Sandbox Audit Controller for triggering audits on sandbox sites
  *
  * @param {Object} context - The application context containing dataAccess, env, log, etc.
  * @returns {Object} Controller with audit triggering methods.
+ * @throws {Error} When data access configuration is missing or invalid
  */
 function SandboxAuditController(ctx) {
-  validateControllerContext(ctx);
+  if (!isNonEmptyObject(ctx?.dataAccess)) {
+    throw new Error('Valid data access configuration required');
+  }
 
   const { dataAccess, log } = ctx;
   const { Configuration, Site } = dataAccess;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   function extractRequestParameters(requestContext) {
-    // Check both locations: data (real requests) and query (tests)
-    const auditTypeRaw = requestContext.data?.auditType || requestContext.query?.auditType;
+    const auditTypeRaw = requestContext.data?.auditType;
     const { siteId } = requestContext.params || {};
-    const auditTypes = normalizeAuditTypes(auditTypeRaw);
-
-    return { siteId, auditTypes };
-  }
-
-  function getRateLimitHours() {
-    const DEFAULT_RATE_LIMIT_HOURS = 4;
-    return Number.parseFloat(ctx.env?.SANDBOX_AUDIT_RATE_LIMIT_HOURS) || DEFAULT_RATE_LIMIT_HOURS;
+    return { siteId, auditTypeRaw };
   }
 
   /**
@@ -72,39 +48,39 @@ function SandboxAuditController(ctx) {
    */
   const triggerAudit = async (context) => {
     try {
-      const { siteId, auditTypes } = extractRequestParameters(context);
+      const { siteId, auditTypeRaw } = extractRequestParameters(context);
 
+      // Validate site access
       const siteValidation = await validateSiteAccess(siteId, Site, accessControlUtil);
       if (siteValidation.error) {
         return siteValidation.error;
       }
       const { site } = siteValidation;
 
-      // Validate audit types are supported before rate limiting
-      if (auditTypes && auditTypes.length > 0) {
-        const invalid = auditTypes.filter((type) => !ALL_AUDITS.includes(type));
-        if (invalid.length > 0) {
-          return badRequest(
-            `Invalid audit types: ${invalid.join(', ')}. Supported types: ${ALL_AUDITS.join(', ')}`,
-          );
-        }
+      // Normalize and validate audit types
+      const { auditTypes, error } = normalizeAndValidateAuditTypes(auditTypeRaw);
+      if (error) {
+        return error;
       }
 
-      const rateLimitHours = getRateLimitHours();
-      const { allowed, skipped } = await enforceRateLimit(site, auditTypes, rateLimitHours, log);
-
-      if (!allowed.length) {
-        return buildRateLimitResponse(skipped, rateLimitHours);
+      // Check rate limits
+      const rateLimitResult = await enforceRateLimit(site, auditTypes, ctx, log);
+      const { response, allowed = [], skipped = [] } = rateLimitResult;
+      if (response) {
+        return response;
       }
 
       const configuration = await Configuration.findLatest();
-
       log.info(`SandboxAudit: Triggering audit(s) for siteId ${siteId}, types: ${allowed.join(', ')}`);
 
       return triggerAudits(site, configuration, allowed, ctx, skipped);
     } catch (error) {
       log.error(`Error triggering audit: ${error.message}`, error);
-      throw error;
+      return createResponse(
+        { message: 'Failed to trigger sandbox audit' },
+        error.status || 500,
+        { 'x-error': error.message },
+      );
     }
   };
 

@@ -54,11 +54,13 @@ describe('Sandbox Audit Controller', () => {
   let context;
 
   beforeEach(() => {
+    // Reset all stubs
+    sandbox.reset();
     // Stub AccessControlUtil.fromContext to bypass auth
     sandbox.stub(AccessControlUtil, 'fromContext').returns({ hasAccess: () => true });
 
     mockSqs = {
-      sendMessage: sandbox.stub().resolves(),
+      sendMessage: sandbox.stub().resolves({ MessageId: 'test-message-id' }),
     };
 
     mockDataAccess = {
@@ -78,6 +80,7 @@ describe('Sandbox Audit Controller', () => {
       log: loggerStub,
       env: {
         AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789/audit-jobs',
+        SANDBOX_AUDIT_RATE_LIMIT_HOURS: '1', // Default rate limit
       },
       dataAccess: mockDataAccess,
       sqs: mockSqs,
@@ -99,7 +102,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
@@ -111,8 +114,8 @@ describe('Sandbox Audit Controller', () => {
       expect(result).to.have.property('message', 'Triggered 1 of 1 audits for https://sandbox.example.com');
       expect(result).to.have.property('siteId', SITE_IDS[0]);
       expect(result).to.have.property('baseURL', 'https://sandbox.example.com');
-      expect(result).to.have.property('auditsTriggered').that.deep.equals(['meta-tags']);
-      expect(result).to.have.property('auditsSkipped').that.is.an('array').and.is.empty;
+      const triggeredAudits = result.results.filter((r) => r.status === 'triggered').map((r) => r.auditType);
+      expect(triggeredAudits).to.deep.equal(['meta-tags']);
       expect(result).to.have.property('results').that.is.an('array').with.lengthOf(1);
 
       expect(mockSqs.sendMessage).to.have.been.calledOnceWith(
@@ -132,7 +135,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {},
+        data: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -142,15 +145,15 @@ describe('Sandbox Audit Controller', () => {
       expect(result.message).to.match(/Triggered 2 (?:of 2 )?audits/);
       expect(result).to.have.property('siteId', SITE_IDS[0]);
       expect(result).to.have.property('baseURL', 'https://sandbox.example.com');
-      expect(result).to.have.property('auditsTriggered');
-      expect(result.auditsTriggered).to.deep.equal(['meta-tags', 'alt-text']);
+      const triggeredAudits = result.results.filter((r) => r.status === 'triggered').map((r) => r.auditType);
+      expect(triggeredAudits).to.have.members(['meta-tags', 'alt-text']);
 
       expect(mockSqs.sendMessage).to.have.been.calledTwice;
     });
 
     it('returns 400 when siteId is missing', async () => {
       const request = {
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
@@ -168,7 +171,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: 'not-a-valid-uuid',
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
@@ -190,7 +193,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: nonexistentSiteId,
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
@@ -225,12 +228,12 @@ describe('Sandbox Audit Controller', () => {
 
     it('returns 400 when audit triggered too recently (rate limit)', async () => {
       const recentDate = new Date();
-      // 1 minute ago
-      const oneMinuteAgo = new Date(recentDate.getTime() - 60 * 1000);
+      // 30 minutes ago (should be blocked with 1 hour rate limit)
+      const thirtyMinsAgo = new Date(recentDate.getTime() - 30 * 60 * 1000);
 
       // Attach stub for latest audit
       const recentAuditMock = {
-        getAuditedAt: () => oneMinuteAgo.toISOString(),
+        getAuditedAt: () => thirtyMinsAgo.toISOString(),
       };
 
       const siteWithHistory = {
@@ -240,14 +243,11 @@ describe('Sandbox Audit Controller', () => {
 
       mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(siteWithHistory);
 
-      // Reduce rate limit for test brevity to 0.5 hours
-      context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '0.5';
-
       const request = {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
@@ -257,8 +257,8 @@ describe('Sandbox Audit Controller', () => {
 
       expect(response.status).to.equal(429);
       expect(result).to.have.property('message').that.includes('Rate limit exceeded');
-      expect(result).to.have.property('nextAllowedIn');
-      expect(result).to.have.property('minutesRemaining');
+      expect(result.results[0]).to.have.property('nextAllowedAt');
+      expect(result.results[0]).to.have.property('minutesRemaining');
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
@@ -276,13 +276,12 @@ describe('Sandbox Audit Controller', () => {
       };
 
       mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(siteWithHistory);
-      context.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS = '0.5';
 
       const request = {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
@@ -291,7 +290,7 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(429);
-      expect(result.nextAllowedIn).to.match(/\d+ minutes/);
+      expect(result.results[0].minutesRemaining).to.be.a('number');
     });
 
     it('returns 400 with hours+minutes format when next audit over an hour', async () => {
@@ -314,7 +313,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
@@ -323,7 +322,7 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(429);
-      expect(result.nextAllowedIn).to.match(/\dh \d+m/);
+      expect(result.results[0].minutesRemaining).to.be.a('number').and.be.above(60);
     });
 
     it('returns 400 when audit type is invalid', async () => {
@@ -333,7 +332,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'invalid-audit-type',
         },
       };
@@ -342,7 +341,7 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(result).to.have.property('message').that.matches(/Supported types: meta-tags, alt-text/);
+      expect(result.message).to.include('Invalid audit types: invalid-audit-type. Supported types: meta-tags, alt-text');
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
@@ -356,7 +355,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
@@ -379,7 +378,7 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {},
+        data: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -402,34 +401,23 @@ describe('Sandbox Audit Controller', () => {
 
       mockDataAccess.Configuration.findLatest.resolves(configMock);
 
-      // Make one audit fail
-      mockSqs.sendMessage.onFirstCall().resolves();
-      mockSqs.sendMessage.onSecondCall().rejects(new Error('SQS error'));
-
       const request = {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {},
+        data: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
       const result = await response.json();
 
-      expect([200, 400]).to.include(response.status);
-      if (result.auditsSkipped) {
-        expect(result.auditsSkipped).to.deep.equal(['meta-tags']);
-      }
-
-      if (result.auditsTriggered) {
-        expect(result.auditsTriggered).to.deep.equal(['meta-tags']);
-        // One triggered plus one skipped
-        expect(result.results).to.have.length(2);
-        const triggered = result.results.find((r) => r.status === 'triggered');
-        const skipped = result.results.find((r) => r.status === 'skipped');
-        expect(triggered).to.deep.include({ auditType: 'alt-text', status: 'triggered' });
-        expect(skipped).to.include({ auditType: 'meta-tags', status: 'skipped' });
-      }
+      expect(response.status).to.equal(200);
+      const triggeredAudits = result.results.filter((r) => r.status === 'triggered').map((r) => r.auditType);
+      expect(triggeredAudits).to.deep.equal(['meta-tags']);
+      // Should have one result (only enabled audit)
+      expect(result.results).to.have.length(1);
+      const triggered = result.results.find((r) => r.status === 'triggered');
+      expect(triggered).to.deep.include({ auditType: 'meta-tags', status: 'triggered' });
     });
 
     it('handles SQS errors gracefully', async () => {
@@ -440,20 +428,20 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
 
-      const responseSqs = await sandboxAuditController.triggerAudit(request);
-      const bodySqs = await responseSqs.json();
-      expect(responseSqs.status).to.equal(200);
-      expect(bodySqs).to.have.property('message').that.includes('Triggered');
+      const response = await sandboxAuditController.triggerAudit(request);
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.have.property('message').that.includes('Triggered');
     });
 
     it('handles empty request data', async () => {
       const request = {
-        query: {},
+        data: {},
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
@@ -478,26 +466,27 @@ describe('Sandbox Audit Controller', () => {
 
       const supportedAudits = ['meta-tags', 'alt-text'];
 
-      const auditPromises = supportedAudits.map(async (auditType) => {
+      const responses = await Promise.all(supportedAudits.map(async (auditType) => {
+        mockSqs.sendMessage.resetHistory();
         const request = {
           params: {
             siteId: SITE_IDS[0],
           },
-          query: {
+          data: {
             auditType,
           },
         };
+        return sandboxAuditController.triggerAudit(request);
+      }));
 
-        const response = await sandboxAuditController.triggerAudit(request);
-        const result = await response.json();
-
-        expect(response.status).to.equal(200);
-        expect(result).to.have.property('auditsTriggered').that.includes(auditType);
+      const results = await Promise.all(responses.map((response) => response.json()));
+      results.forEach((result, i) => {
+        const auditType = supportedAudits[i];
+        expect(responses[i].status).to.equal(200);
+        const triggeredAudits = result.results.filter((r) => r.status === 'triggered').map((r) => r.auditType);
+        expect(triggeredAudits).to.include(auditType);
       });
-
-      await Promise.all(auditPromises);
-
-      expect(mockSqs.sendMessage).to.have.been.calledTwice;
+      expect(mockSqs.sendMessage.callCount).to.equal(supportedAudits.length);
     });
 
     it('logs errors appropriately', async () => {
@@ -508,18 +497,14 @@ describe('Sandbox Audit Controller', () => {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'meta-tags',
         },
       };
 
-      try {
-        await sandboxAuditController.triggerAudit(request);
-      } catch (error) {
-        // Expected to throw
-      }
-
-      expect(loggerStub.error).to.have.been.called;
+      await sandboxAuditController.triggerAudit(request);
+      // Should log error but not throw
+      expect(loggerStub.error).to.have.been.calledWith(sinon.match('Error running audit'));
     });
 
     it('logs error when one audit fails', async () => {
@@ -531,21 +516,21 @@ describe('Sandbox Audit Controller', () => {
       mockDataAccess.Configuration.findLatest.resolves(configMock);
 
       // meta-tags succeeds, alt-text fails
-      mockSqs.sendMessage.onFirstCall().resolves();
+      mockSqs.sendMessage.onFirstCall().resolves({ MessageId: 'success' });
       mockSqs.sendMessage.onSecondCall().rejects(new Error('SQS boom'));
 
       const request = {
         params: {
           siteId: SITE_IDS[0],
         },
-        query: {
+        data: {
           auditType: 'meta-tags,alt-text',
         },
       };
 
       const response = await sandboxAuditController.triggerAudit(request);
       expect(response.status).to.equal(200);
-      expect(loggerStub.error).to.have.been.calledWithMatch(sinon.match(/Error running audit/));
+      expect(loggerStub.error).to.have.been.calledWith(sinon.match(/Error running audit.*alt-text/));
     });
   });
 
@@ -565,12 +550,12 @@ describe('Sandbox Audit Controller', () => {
 
   describe('additional coverage', () => {
     it('throws when context is missing', () => {
-      expect(() => SandboxAuditController()).to.throw('Context required');
+      expect(() => SandboxAuditController()).to.throw('Valid data access configuration required');
     });
 
     it('throws when context is missing dataAccess', () => {
       const badContext = { log: loggerStub };
-      expect(() => SandboxAuditController(badContext)).to.throw('Data access required');
+      expect(() => SandboxAuditController(badContext)).to.throw('Valid data access configuration required');
     });
 
     it('returns 403 when user lacks access', async () => {
@@ -585,7 +570,7 @@ describe('Sandbox Audit Controller', () => {
 
       const response = await denyController.triggerAudit({
         params: { siteId: SITE_IDS[0] },
-        query: {},
+        data: { auditType: 'meta-tags' },
       });
       const body = await response.json();
 
@@ -603,19 +588,19 @@ describe('Sandbox Audit Controller', () => {
       mockDataAccess.Configuration.findLatest.resolves(configMock);
 
       // meta-tags succeeds, alt-text fails
-      mockSqs.sendMessage.onFirstCall().resolves();
+      mockSqs.sendMessage.onFirstCall().resolves({ MessageId: 'success' });
       mockSqs.sendMessage.onSecondCall().rejects(new Error('SQS alt-text failure'));
 
       const req = {
         params: { siteId: SITE_IDS[0] },
-        query: {},
+        data: {},
       };
       const res = await sandboxAuditController.triggerAudit(req);
       const body = await res.json();
 
       expect(res.status).to.equal(200);
       expect(body.message).to.match(/Triggered 1 (?:of 2 )?audits/);
-      expect(loggerStub.error).to.have.been.calledWithMatch(sinon.match(/alt-text/));
+      expect(loggerStub.error).to.have.been.calledWith(sinon.match(/alt-text/));
     });
 
     it('controller catch block logs and rethrows on unexpected error', async () => {
@@ -625,10 +610,58 @@ describe('Sandbox Audit Controller', () => {
 
       const req = {
         params: { siteId: SITE_IDS[0] },
-        query: {},
+        data: { auditType: 'meta-tags' },
       };
-      await expect(sandboxAuditController.triggerAudit(req)).to.be.rejectedWith('Config fail');
-      expect(loggerStub.error).to.have.been.calledWithMatch(sinon.match('Error triggering audit'));
+      const response = await sandboxAuditController.triggerAudit(req);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.message).to.equal('Failed to trigger sandbox audit');
+      expect(response.headers.get('x-error')).to.equal('Config fail');
+      expect(loggerStub.error).to.have.been.calledWith(sinon.match('Error triggering audit'));
+    });
+
+    it('handles comma-separated audit types in request', async () => {
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
+
+      const request = {
+        params: { siteId: SITE_IDS[0] },
+        data: { auditType: 'meta-tags,alt-text' },
+      };
+
+      const response = await sandboxAuditController.triggerAudit(request);
+      expect(response.status).to.equal(200);
+
+      const body = await response.json();
+      expect(body.results).to.have.length(2);
+      expect(body.results.map((r) => r.auditType)).to.include.members(['meta-tags', 'alt-text']);
+    });
+
+    it('handles array of audit types in request', async () => {
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).resolves(sites[0]);
+
+      const request = {
+        params: { siteId: SITE_IDS[0] },
+        data: { auditType: ['meta-tags', 'alt-text'] },
+      };
+
+      const response = await sandboxAuditController.triggerAudit(request);
+      expect(response.status).to.equal(200);
+
+      const body = await response.json();
+      expect(body.results).to.have.length(2);
+    });
+
+    it('covers edge case when site findById throws error', async () => {
+      mockDataAccess.Site.findById.withArgs(SITE_IDS[0]).rejects(new Error('Database error'));
+
+      const request = {
+        params: { siteId: SITE_IDS[0] },
+        data: { auditType: 'meta-tags' },
+      };
+
+      const response = await sandboxAuditController.triggerAudit(request);
+      expect(response.status).to.equal(500);
+      expect(loggerStub.error).to.have.been.called;
     });
   });
 });

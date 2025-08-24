@@ -12,7 +12,6 @@
 
 import {
   hasText,
-  isNonEmptyArray,
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
@@ -24,11 +23,22 @@ import {
   createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 
-// Static list for now; will be replaced with dynamic configuration later.
+// TODO: Move ALL_AUDITS to spacecat-shared-data-access configuration object
 export const ALL_AUDITS = [
   'meta-tags',
   'alt-text',
 ];
+
+// Constants
+const MILLISECONDS_PER_MINUTE = 60000;
+const DEFAULT_RATE_LIMIT_HOURS = 4;
+
+// Audit status enum
+const AUDIT_STATUS = {
+  TRIGGERED: 'triggered',
+  SKIPPED: 'skipped',
+  FAILED: 'failed',
+};
 
 export async function validateSiteAccess(siteId, siteModel, accessControlUtil) {
   if (!hasText(siteId)) {
@@ -58,34 +68,38 @@ export async function validateSiteAccess(siteId, siteModel, accessControlUtil) {
   return { site };
 }
 
-export function buildRateLimitResponse(skipped, rateLimitHours) {
-  const minMinutes = Math.min(...skipped.map((s) => s.minutesRemaining));
-  const hours = Math.floor(minMinutes / 60);
-  const minutes = minMinutes % 60;
-  const timeString = hours > 0 ? `${hours}h ${minutes}m` : `${minutes} minutes`;
-
-  const auditTypes = skipped.map((s) => s.auditType);
-  const message = `Rate limit exceeded: audits ${auditTypes.join(', ')} were run less than ${rateLimitHours}h ago.`;
-
-  return createResponse({
-    message,
-    nextAllowedIn: timeString,
-    minutesRemaining: minMinutes,
-    auditsSkipped: auditTypes,
-    skippedDetail: skipped,
-  }, 429, { 'x-error': message });
-}
-
-export function normalizeAuditTypes(auditTypeRaw) {
+/**
+ * Normalizes and validates audit types in one pass.
+ *
+ * @param {string[]|string|null} auditTypeRaw - Raw audit type input
+ * @returns {{auditTypes: string[], error?: Response}} Normalized and validated audit types
+ */
+export function normalizeAndValidateAuditTypes(auditTypeRaw) {
+  // Handle empty input
   if (!auditTypeRaw) {
-    return null;
+    return { auditTypes: [] };
   }
 
-  if (Array.isArray(auditTypeRaw)) {
-    return auditTypeRaw;
+  // Normalize to array
+  const auditTypes = Array.isArray(auditTypeRaw)
+    ? auditTypeRaw
+    : auditTypeRaw.split(',').map((s) => s.trim()).filter(Boolean);
+
+  // Empty array is valid - means "all audits"
+  if (auditTypes.length === 0) {
+    return { auditTypes };
   }
 
-  return auditTypeRaw.split(',').map((s) => s.trim()).filter(Boolean);
+  // Validate types
+  const invalidTypes = auditTypes.filter((type) => !ALL_AUDITS.includes(type));
+  if (invalidTypes.length > 0) {
+    // FIX: Wrap the response in an error object
+    return {
+      error: badRequest(`Invalid audit types: ${invalidTypes.join(', ')}. Supported types: ${ALL_AUDITS.join(', ')}`),
+    };
+  }
+
+  return { auditTypes };
 }
 
 /**
@@ -113,7 +127,7 @@ async function checkAuditRateLimit(site, auditType, windowMs) {
 
   // Rate limit exceeded
   const nextAllowedMs = lastRunMs + windowMs;
-  const minutesRemaining = Math.ceil((nextAllowedMs - now) / 60000);
+  const minutesRemaining = Math.ceil((nextAllowedMs - now) / MILLISECONDS_PER_MINUTE);
 
   return {
     allowed: false,
@@ -126,32 +140,35 @@ async function checkAuditRateLimit(site, auditType, windowMs) {
 }
 
 /**
- * Enforce a minimum time gap between audits for the given site.
- * Determines which audits are allowed and which should be skipped due to rate limiting.
+ * Enforce rate limits and build appropriate response.
  *
  * @param {Readonly<Site>} site - Site object to check audits for
- * @param {string[]|null} auditTypes - List of audits to check; null means ALL_AUDITS
- * @param {number} rateLimitHours - Minimum gap in hours between audit runs
+ * @param {string[]} auditTypes - List of audits to check; empty array means ALL_AUDITS
+ * @param {object} ctx - Application context containing env vars
  * @param {object} log - Logger instance
- * @returns {Promise<{allowed: string[], skipped: object[]}>} Rate limit enforcement result
+ * @returns {Promise<{allowed: string[], skipped: object[], response?: Response}>} Rate limit result
  */
-export async function enforceRateLimit(site, auditTypes, rateLimitHours, log) {
-  const types = auditTypes && auditTypes.length > 0 ? auditTypes : ALL_AUDITS;
+export async function enforceRateLimit(site, auditTypes, ctx, log) {
+  const rateLimitHours = parseInt(
+    ctx.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS || DEFAULT_RATE_LIMIT_HOURS,
+    10,
+  );
+  const types = auditTypes.length > 0 ? auditTypes : ALL_AUDITS;
 
   // Rate limiting disabled - allow all
   if (!Number.isFinite(rateLimitHours) || rateLimitHours <= 0) {
-    return { allowed: types, skipped: [] };
+    log.info('Rate limiting disabled (rateLimitHours is 0 or invalid), allowing all audits');
+    return { allowed: auditTypes, skipped: [] };
   }
 
-  const windowMs = rateLimitHours * 60 * 60 * 1000;
+  const windowMs = rateLimitHours * 60 * 60 * 1000; // hours -> minutes -> seconds -> ms
   const allowed = [];
   const skipped = [];
 
-  // Check each audit type against rate limits
+  // Check each audit type
   for (const auditType of types) {
     // eslint-disable-next-line no-await-in-loop
     const rateLimitResult = await checkAuditRateLimit(site, auditType, windowMs);
-
     if (rateLimitResult.allowed) {
       allowed.push(auditType);
     } else {
@@ -159,13 +176,35 @@ export async function enforceRateLimit(site, auditTypes, rateLimitHours, log) {
     }
   }
 
-  // Log rate limit information if any audits were skipped
+  // Log if any audits were skipped
   if (skipped.length > 0) {
     log.info({
-      skipped: skipped.map((s) => s.auditType),
+      skipped: skipped.map((skippedAudit) => skippedAudit.auditType),
+      allowed: allowed.map((auditType) => auditType),
       baseURL: site.getBaseURL(),
       rateLimitHours,
-    }, 'Rate-limit: some audits skipped');
+    }, 'Some audits skipped due to rate limit, others allowed');
+  }
+
+  // If ALL audits were skipped, return 429
+  if (allowed.length === 0) {
+    const message = `Rate limit exceeded: audits ${skipped.map((skippedAudit) => skippedAudit.auditType).join(', ')} were run less than ${rateLimitHours}h ago.`;
+
+    return {
+      allowed,
+      skipped,
+      response: createResponse({
+        message,
+        siteId: site.getId(),
+        baseURL: site.getBaseURL(),
+        results: skipped.map((skippedAudit) => ({
+          auditType: skippedAudit.auditType,
+          status: AUDIT_STATUS.SKIPPED,
+          nextAllowedAt: skippedAudit.nextAllowedAt,
+          minutesRemaining: skippedAudit.minutesRemaining,
+        })),
+      }, 429, { 'x-error': message }),
+    };
   }
 
   return { allowed, skipped };
@@ -201,12 +240,12 @@ async function enqueueAuditJob(site, auditType, context) {
 async function executeAudit(site, auditType, baseURL, context) {
   try {
     await enqueueAuditJob(site, auditType, context);
-    return { auditType, status: 'triggered' };
+    return { auditType, status: AUDIT_STATUS.TRIGGERED };
   } catch (error) {
     context.log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
     return {
       auditType,
-      status: 'failed',
+      status: AUDIT_STATUS.FAILED,
       error: error.message,
     };
   }
@@ -238,70 +277,49 @@ async function executeBatch(site, auditTypes, baseURL, context) {
  * @param {object} logger - Logger instance
  * @returns {{auditTypes: string[], error?: Response}} Processing result
  */
-function determineAuditTypes(auditTypeRaw, site, baseURL, configuration, logger) {
-  let auditTypes;
-
-  if (!auditTypeRaw) {
-    // No specific types requested - use all enabled audits
-    auditTypes = ALL_AUDITS.filter((audit) => configuration.isHandlerEnabledForSite(audit, site));
-
-    logger.info(`SandboxAuditService: enabled audits for ${baseURL}: ${auditTypes.join(', ')}`);
-
-    if (!isNonEmptyArray(auditTypes)) {
-      return {
-        error: badRequest(`No audits configured for site: ${baseURL}`),
-      };
-    }
-  } else {
-    // Specific types requested - normalize the input
-    auditTypes = Array.isArray(auditTypeRaw)
-      ? auditTypeRaw
-      : auditTypeRaw.split(',').map((s) => s.trim()).filter(Boolean);
-  }
-
-  return { auditTypes };
-}
-
 /**
- * Validates that audit types are supported.
+ * Determines and validates audit types to run.
+ * Handles both cases: no specific types (use all enabled) and specific types requested.
  *
- * @param {string[]} auditTypes - Array of audit types to validate
- * @returns {{error?: Response}} Validation result
- */
-function validateAuditTypes(auditTypes) {
-  const invalid = auditTypes.filter((type) => !ALL_AUDITS.includes(type));
-
-  if (invalid.length > 0) {
-    return {
-      error: badRequest(
-        `Invalid audit types: ${invalid.join(', ')}. Supported types: ${ALL_AUDITS.join(', ')}`,
-      ),
-    };
-  }
-
-  return {};
-}
-
-/**
- * Validates that audit types are enabled for the site.
- *
- * @param {string[]} auditTypes - Array of audit types to validate
+ * @param {string[]|string|null} auditTypeRaw - Raw audit type input
  * @param {object} site - Site object
+ * @param {string} baseURL - Site base URL for logging
  * @param {object} configuration - System configuration
- * @returns {{error?: Response}} Validation result
+ * @param {object} logger - Logger instance
+ * @returns {{auditTypes: string[], error?: Response}} Processing result
  */
-function validateEnabledAudits(auditTypes, site, configuration) {
-  const disabled = auditTypes.filter((type) => !configuration.isHandlerEnabledForSite(type, site));
+function determineAuditTypes(auditTypeRaw, site, baseURL, configuration, logger) {
+  // First normalize input if specific types requested
+  const normalizedResult = auditTypeRaw
+    ? normalizeAndValidateAuditTypes(auditTypeRaw)
+    : { auditTypes: ALL_AUDITS };
 
-  if (disabled.length > 0) {
-    return {
-      error: badRequest(
-        `The following audit types are disabled for this site: ${disabled.join(', ')}`,
-      ),
-    };
+  if (normalizedResult.error) {
+    return normalizedResult;
   }
 
-  return {};
+  // Filter to enabled audit types
+  const enabled = normalizedResult.auditTypes.filter(
+    (type) => configuration.isHandlerEnabledForSite(type, site),
+  );
+  const disabled = normalizedResult.auditTypes.filter(
+    (type) => !configuration.isHandlerEnabledForSite(type, site),
+  );
+
+  // Log enabled audits when no specific types requested
+  if (!auditTypeRaw) {
+    logger.info(`SandboxAuditService: enabled audits for ${baseURL}: ${enabled.join(', ')}`);
+  }
+
+  // Handle case where no audits are enabled
+  if (enabled.length === 0) {
+    const message = auditTypeRaw
+      ? `The following audit types are disabled for this site: ${disabled.join(', ')}`
+      : `No audits configured for site: ${baseURL}`;
+    return { error: badRequest(message) };
+  }
+
+  return { auditTypes: enabled };
 }
 
 /**
@@ -325,35 +343,21 @@ export async function triggerAudits(
   const { log } = ctx;
   const baseURL = site.getBaseURL();
 
-  // Determine which audit types to run
+  // Determine and validate audit types
   const typeResult = determineAuditTypes(auditTypeRaw, site, baseURL, configuration, log);
   if (typeResult.error) {
     return typeResult.error;
   }
 
-  const { auditTypes } = typeResult;
-
-  // Validate audit types are supported
-  const supportValidation = validateAuditTypes(auditTypes);
-  if (supportValidation.error) {
-    return supportValidation.error;
-  }
-
-  // Validate audit types are enabled for this site
-  const enabledValidation = validateEnabledAudits(auditTypes, site, configuration);
-  if (enabledValidation.error) {
-    return enabledValidation.error;
-  }
-
-  // Execute audits
-  const results = await executeBatch(site, auditTypes, baseURL, ctx);
+  // Execute audits (only enabled ones)
+  const results = await executeBatch(site, typeResult.auditTypes, baseURL, ctx);
 
   // Add skipped audit details to results
   const allResults = [...results];
   skippedDetail.forEach((skipDetail) => {
     allResults.push({
       auditType: skipDetail.auditType,
-      status: 'skipped',
+      status: AUDIT_STATUS.SKIPPED,
       nextAllowedAt: skipDetail.nextAllowedAt,
       minutesRemaining: skipDetail.minutesRemaining,
     });
@@ -365,8 +369,6 @@ export async function triggerAudits(
     message: `Triggered ${triggered.length} of ${allResults.length} audits for ${baseURL}`,
     siteId: site.getId(),
     baseURL,
-    auditsTriggered: triggered.map((r) => r.auditType),
-    auditsSkipped: skippedDetail.map((s) => s.auditType),
     results: allResults,
   });
 }

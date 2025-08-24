@@ -1,185 +1,80 @@
 sandbox-audit:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: auditType
+      in: query
+      required: false
+      description: |
+        Comma-separated list of audit types to run. If not provided, all enabled audits will be triggered.
+        Example: meta-tags,alt-text
+      schema:
+        type: string
+        description: Comma-separated list of audit types
+        example: "meta-tags,alt-text"
+        enum:
+          - 'meta-tags'
+          - 'alt-text'
   post:
     tags:
       - sandbox
-    summary: Trigger audit for a sandbox site
-    operationId: triggerSandboxAudit
+      - audit
+    summary: Trigger audits for a sandbox site
     description: |
-      Triggers one or more audits for a specified sandbox site. This endpoint is designed for 
-      partners who need to trigger audits programmatically on sandbox environments only.
-      
-      **Behavior:**
-      - If `auditType` is specified: triggers that specific audit type
-      - If `auditType` is omitted: triggers all enabled audits for the site
-      
-      **Restrictions:**
-      - Only works with sandbox sites (sites with `isSandbox: true`)
-      - Audits are rate-limited (default **4&nbsp;hours**, configurable via the
-        `SANDBOX_AUDIT_RATE_LIMIT_HOURS` environment variable). If the limit is hit the
-        endpoint responds with HTTP 429 and an explanatory message.
-      - Regular production sites will be rejected with a 400 error
-      
-      **Supported Audit Types:**
-      - `meta-tags`: Validate meta tags and SEO elements  
-      - `alt-text`: Check for missing alt text in images
-    parameters:
-      - name: siteId
-        in: path
-        required: true
-        description: UUID of the sandbox site
-        schema:
-          type: string
-          format: uuid
-        example: "a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14"
-      - name: auditType
-        in: query
-        required: false
-        description: |
-          The audit type(s) to trigger. Accepts:
-          • a single value (e.g. `meta-tags`)
-          • a comma-separated list (e.g. `meta-tags,alt-text`)
-          If omitted, all enabled audits are triggered.
-        schema:
-          type: string
-          enum: 
-            - meta-tags
-            - alt-text
-        example: "meta-tags,alt-text"
+      Triggers one or more audits for a sandbox site. If no specific audit types are provided,
+      all enabled audits will be triggered. Rate limiting is applied to prevent excessive audit runs.
+    operationId: triggerSandboxAudit
+    security:
+      - ims_key: [ ]
     responses:
       '200':
-        description: Audit(s) triggered successfully
+        description: Audits triggered successfully
         content:
           application/json:
             schema:
-              oneOf:
-                - type: object
-                  description: Response for single audit
-                  properties:
-                    message:
-                      type: string
-                      example: "Successfully triggered meta-tags audit for https://sandbox.example.com"
-                    siteId:
-                      type: string
-                      format: uuid
-                      example: "a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14"
-                    auditType:
-                      type: string
-                      example: "meta-tags"
-                    baseURL:
-                      type: string
-                      format: uri
-                      example: "https://sandbox.example.com"
-                - type: object
-                  description: Response for multiple audits (when auditType is omitted)
-                  properties:
-                    message:
-                      type: string
-                      example: "Triggered 1 of 2 audits for https://sandbox.example.com"
-                    siteId:
-                      type: string
-                      format: uuid
-                      example: "a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14"
-                    baseURL:
-                      type: string
-                      format: uri
-                      example: "https://sandbox.example.com"
-                    auditsTriggered:
-                      type: array
-                      items:
-                        type: string
-                      example: ["meta-tags"]
-                    auditsSkipped:
-                      type: array
-                      items:
-                        type: string
-                      example: ["alt-text"]
-                    results:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          auditType:
-                            type: string
-                          status:
-                            type: string
-                            enum: [triggered, skipped, failed]
-                          nextAllowedAt:
-                            type: string
-                            format: date-time
-                            description: Present when status is "skipped"
-                          minutesRemaining:
-                            type: number
-                            description: Present when status is "skipped"
-                          error:
-                            type: string
-                            description: Error message if status is failed
-                      example:
-                        - auditType: meta-tags
-                          status: triggered
-                        - auditType: alt-text
-                          status: skipped
-                          nextAllowedAt: "2025-08-15T15:37:48.419Z"
-                          minutesRemaining: 1
+              $ref: './schemas.yaml#/SandboxAuditResponse'
+            examples:
+              success:
+                summary: Mixed triggered and skipped (partial rate-limit)
+                value:
+                  message: "Triggered 1 of 2 audits for https://sandbox.example.com"
+                  siteId: "123e4567-e89b-12d3-a456-426614174000"
+                  baseURL: "https://sandbox.example.com"
+                  results:
+                    - auditType: "meta-tags"
+                      status: "triggered"
+                    - auditType: "alt-text"
+                      status: "skipped"
+                      nextAllowedAt: "2025-08-15T15:37:48.419Z"
+                      minutesRemaining: 45
       '400':
-        description: Bad request – missing or invalid parameters / non-sandbox site
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [error]
-              properties:
-                error:
-                  type: string
-                  examples:
-                    - "baseURL query parameter is required"
-                    - "Invalid baseURL provided"
-                    - "Sandbox audit endpoint only supports sandbox sites. Site https://example.com is not a sandbox."
-                    - "Invalid auditType. Supported types: meta-tags, alt-text"
-                    - "No audits configured for site: https://sandbox.example.com"
-
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
       '429':
         description: Rate limit exceeded
         content:
           application/json:
             schema:
-              type: object
-              required: [message]
-              properties:
-                message:
-                  type: string
-                nextAllowedIn:
-                  type: string
-                minutesRemaining:
-                  type: number
-                auditsSkipped:
-                  type: array
-                  items:
-                    type: string
-                skippedDetail:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      auditType:
-                        type: string
-                      nextAllowedAt:
-                        type: string
-                        format: date-time
-                      minutesRemaining:
-                        type: number
-      '404':
-        description: Site not found
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  example: "Site not found for baseURL: https://sandbox.example.com"
-      '401':
-        $ref: './responses.yaml#/401'
+              $ref: './schemas.yaml#/SandboxAuditResponse'
+            examples:
+              rateLimited:
+                summary: All requested audits are currently rate limited
+                value:
+                  message: "Rate limit exceeded: audits meta-tags, alt-text were run less than 4h ago."
+                  siteId: "123e4567-e89b-12d3-a456-426614174000"
+                  baseURL: "https://sandbox.example.com"
+                  results:
+                    - auditType: "meta-tags"
+                      status: "skipped"
+                      nextAllowedAt: "2025-08-15T15:37:48.419Z"
+                      minutesRemaining: 45
+                    - auditType: "alt-text"
+                      status: "skipped"
+                      nextAllowedAt: "2025-08-15T15:37:48.419Z"
+                      minutesRemaining: 45
       '500':
         $ref: './responses.yaml#/500'
-    security:
-      - ims_key: [ ]
