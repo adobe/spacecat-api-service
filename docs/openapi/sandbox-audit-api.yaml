@@ -1,0 +1,68 @@
+sandbox-audit:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/sandboxAuditType'
+  post:
+    tags:
+      - sandbox
+      - audit
+    summary: Trigger audits for a sandbox site
+    description: |
+      Triggers one or more audits for a sandbox site. If no specific audit types are provided,
+      all enabled audits will be triggered. Rate limiting is applied to prevent excessive audit runs.
+    operationId: triggerSandboxAudit
+    security:
+      - ims_key: [ ]
+    responses:
+      '200':
+        description: Audits triggered successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SandboxAuditResponse'
+            examples:
+              success:
+                summary: Mixed triggered and skipped (partial rate-limit)
+                value:
+                  message: "Triggered 1 of 2 audits for https://sandbox.example.com"
+                  siteId: "123e4567-e89b-12d3-a456-426614174000"
+                  baseURL: "https://sandbox.example.com"
+                  results:
+                    - auditType: "meta-tags"
+                      status: "triggered"
+                    - auditType: "alt-text"
+                      status: "skipped"
+                      nextAllowedAt: "2025-08-15T15:37:48.419Z"
+                      minutesRemaining: 45
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '429':
+        description: Rate limit exceeded
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SandboxAuditResponse'
+            examples:
+              rateLimited:
+                summary: All requested audits are currently rate limited
+                value:
+                  message: "Rate limit exceeded: audits meta-tags, alt-text were run less than 4h ago."
+                  siteId: "123e4567-e89b-12d3-a456-426614174000"
+                  baseURL: "https://sandbox.example.com"
+                  results:
+                    - auditType: "meta-tags"
+                      status: "skipped"
+                      nextAllowedAt: "2025-08-15T15:37:48.419Z"
+                      minutesRemaining: 45
+                    - auditType: "alt-text"
+                      status: "skipped"
+                      nextAllowedAt: "2025-08-15T15:37:48.419Z"
+                      minutesRemaining: 45
+      '500':
+        $ref: './responses.yaml#/500'

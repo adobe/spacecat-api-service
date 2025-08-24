@@ -257,3 +257,15 @@ trafficType:
       - 'earned' 
       - 'paid'
     example: 'paid'
+sandboxAuditType:
+  name: auditType
+  description: Comma-separated list of audit types to run
+  in: query
+  required: false
+  schema:
+    type: string
+    description: Comma-separated list of audit types
+    example: "meta-tags,alt-text"
+    enum:
+      - 'meta-tags'
+      - 'alt-text'

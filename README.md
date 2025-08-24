@@ -102,6 +102,16 @@ SLACK_TOKEN_WORKSPACE_EXTERNAL_ELEVATED=Slack token for the external workspace, 
 SLACK_OPS_CHANNEL_WORKSPACE_EXTERNAL=channel ID to use for operations messages in the external workspace
 ```
 
+Sandbox audit rate-limit (optional):
+
+Minimum hours that must elapse before the same audit can run again for the same site. 
+Default is 4 hrs. Set the variable to 0 to disable the rate-limit
+entirely.
+
+```plaintext
+SANDBOX_AUDIT_RATE_LIMIT_HOURS=4
+```
+
 Import controller requires the following env variables:
 
 ```plaintext
