@@ -511,6 +511,7 @@ const createSiteAndOrganization = async (
   // Check if site already exists
   if (site) {
     const siteOrgId = site.getOrganizationId();
+    organizationId = siteOrgId; // Set organizationId for existing sites
     const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
     await say(message);
     log.info(message);
