@@ -286,3 +286,39 @@ siteEnrollmentId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+
+# New parameters for trial users API
+trialUserId:
+  name: trialUserId
+  description: The trial user ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+provider:
+  name: provider
+  description: The identity provider (IMS, Microsoft, Google, etc.)
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'IMS'
+
+externalId:
+  name: externalId
+  description: The external user ID from the identity provider
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'user123@adobe.com'
+
+# New parameters for organization identity providers API
+organizationIdentityProviderId:
+  name: organizationIdentityProviderId
+  description: The organization identity provider ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'

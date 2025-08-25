@@ -3615,3 +3615,163 @@ SiteEnrollment:
       notes: "Initial enrollment for LLMO trial"
     createdAt: "2024-01-15T10:30:00Z"
     updatedAt: "2024-01-15T10:30:00Z"
+
+TrialUser:
+  type: object
+  description: A trial user represents a user participating in a trial program
+  required:
+    - id
+    - organizationId
+    - externalId
+    - provider
+    - status
+    - createdAt
+    - updatedAt
+  properties:
+    id:
+      description: Unique identifier for the trial user
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this trial user belongs to
+      $ref: '#/Id'
+    externalId:
+      description: External user ID from the identity provider
+      type: string
+      example: 'user123@adobe.com'
+    provider:
+      description: The identity provider (IMS, Microsoft, Google, etc.)
+      type: string
+      example: 'IMS'
+    status:
+      description: Current status of the trial user
+      type: string
+      enum: [ACTIVE, INACTIVE, SUSPENDED, COMPLETED]
+    trialStartDate:
+      description: When the trial period began
+      $ref: '#/DateTime'
+    trialEndDate:
+      description: When the trial period ends
+      $ref: '#/DateTime'
+    metadata:
+      description: Additional metadata for the trial user
+      type: object
+      additionalProperties: true
+    createdAt:
+      description: When the trial user was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the trial user was last updated
+      $ref: '#/DateTime'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    externalId: "user123@adobe.com"
+    provider: "IMS"
+    status: "ACTIVE"
+    trialStartDate: "2024-01-15T10:30:00Z"
+    trialEndDate: "2024-02-15T10:30:00Z"
+    metadata:
+      notes: "Initial trial user"
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+
+TrialUserActivity:
+  type: object
+  description: A trial user activity represents an action performed by a trial user
+  required:
+    - id
+    - siteId
+    - trialUserId
+    - type
+    - productCode
+    - createdAt
+  properties:
+    id:
+      description: Unique identifier for the trial user activity
+      $ref: '#/Id'
+    siteId:
+      description: Reference to the site where the activity occurred
+      $ref: '#/Id'
+    trialUserId:
+      description: Reference to the trial user who performed the activity
+      $ref: '#/Id'
+    type:
+      description: The type of activity performed
+      type: string
+      example: 'LOGIN'
+    details:
+      description: Additional details about the activity
+      type: object
+      additionalProperties: true
+      example:
+        browser: 'Chrome'
+        ip: '192.168.1.1'
+    productCode:
+      description: The product code associated with the activity
+      type: string
+      enum: [LLMO, ASO]
+      example: 'LLMO'
+    createdAt:
+      description: When the activity was recorded
+      $ref: '#/DateTime'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    siteId: "987fcdeb-51a2-43d7-9876-543210987654"
+    trialUserId: "456e4567-e89b-12d3-a456-426614174000"
+    type: "LOGIN"
+    details:
+      browser: "Chrome"
+      ip: "192.168.1.1"
+    productCode: "LLMO"
+    createdAt: "2024-01-15T10:30:00Z"
+
+OrganizationIdentityProvider:
+  type: object
+  description: An organization identity provider represents the mapping between an organization and an identity provider
+  required:
+    - id
+    - organizationId
+    - provider
+    - externalOrgId
+    - status
+    - createdAt
+    - updatedAt
+  properties:
+    id:
+      description: Unique identifier for the organization identity provider
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this mapping belongs to
+      $ref: '#/Id'
+    provider:
+      description: The identity provider (IMS, Microsoft, Google, etc.)
+      type: string
+      example: 'IMS'
+    externalOrgId:
+      description: External organization ID from the identity provider
+      type: string
+      example: 'org123@adobe.com'
+    status:
+      description: Current status of the identity provider mapping
+      type: string
+      enum: [ACTIVE, INACTIVE, SUSPENDED]
+    metadata:
+      description: Additional metadata for the identity provider mapping
+      type: object
+      additionalProperties: true
+    createdAt:
+      description: When the identity provider mapping was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the identity provider mapping was last updated
+      $ref: '#/DateTime'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    provider: "IMS"
+    externalOrgId: "org123@adobe.com"
+    status: "ACTIVE"
+    metadata:
+      notes: "Primary IMS mapping"
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"

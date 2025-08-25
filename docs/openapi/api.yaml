@@ -55,6 +55,12 @@ tags:
     description: Entitlement management operations
   - name: site-enrollments
     description: Site enrollment management operations
+  - name: trial-users
+    description: Trial user management operations
+  - name: trial-user-activities
+    description: Trial user activity management operations
+  - name: organization-identity-providers
+    description: Organization identity provider management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -95,6 +101,16 @@ paths:
     $ref: './entitlements-api.yaml#/entitlement-by-organization'
   /organizations/{organizationId}/entitlements-by-product/{productCode}:
     $ref: './entitlements-api.yaml#/entitlements-by-product-for-organization'
+  /organizations/{organizationId}/trial-users:
+    $ref: './trial-users-api.yaml#/trial-users-by-organization'
+  /organizations/{organizationId}/trial-users/{trialUserId}:
+    $ref: './trial-users-api.yaml#/trial-user-by-organization'
+  /organizations/{organizationId}/by-provider-and-externalid/{provider}/{externalId}:
+    $ref: './trial-users-api.yaml#/trial-user-by-provider-and-external-id'
+  /organizations/{organizationId}/organization-identity-provider:
+    $ref: './organization-identity-providers-api.yaml#/organization-identity-provider-by-organization'
+  /organizations/{organizationId}/organization-identity-provider/{organizationIdentityProviderId}:
+    $ref: './organization-identity-providers-api.yaml#/organization-identity-provider-by-id'
   /organizations/by-ims-org-id/{imsOrgId}:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:

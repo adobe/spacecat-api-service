@@ -1,0 +1,116 @@
+trial-user-activities-by-site:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - trial-user-activities
+    summary: List all trial user activities for a specific site
+    description: |
+      This endpoint retrieves all trial user activities associated with a specific site.
+    operationId: getTrialUserActivitiesBySite
+    responses:
+      '200':
+        description: List of trial user activities for site retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/TrialUserActivity'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+trial-user-activity-by-site:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/trialUserId'
+  get:
+    tags:
+      - trial-user-activities
+    summary: Retrieve trial user activities by site ID and trial user ID
+    description: |
+      This endpoint retrieves trial user activities for a specific user within a site.
+    operationId: getTrialUserActivityBySite
+    responses:
+      '200':
+        description: Successful operation with trial user activities returned
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/TrialUserActivity'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+create-trial-user-activity:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/trialUserId'
+  post:
+    tags:
+      - trial-user-activities
+    summary: Create a new trial user activity
+    description: |
+      This endpoint creates a new trial user activity record.
+    operationId: createTrialUserActivity
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - type
+              - details
+              - productCode
+            properties:
+              type:
+                type: string
+                description: The type of activity
+                example: 'LOGIN'
+              details:
+                type: object
+                description: Additional details about the activity
+                additionalProperties: true
+                example:
+                  browser: 'Chrome'
+                  ip: '192.168.1.1'
+              productCode:
+                type: string
+                description: The product code associated with the activity
+                enum: [LLMO, ASO]
+                example: 'LLMO'
+    responses:
+      '201':
+        description: Trial user activity created successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/TrialUserActivity'
+      '400':
+        $ref: './responses.yaml#/400-empty-request-body-validation-failure'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
