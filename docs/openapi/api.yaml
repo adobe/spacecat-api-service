@@ -53,6 +53,8 @@ tags:
     description: LLMO (Large Language Model Optimizer) operations
   - name: entitlements
     description: Entitlement management operations
+  - name: site-enrollments
+    description: Site enrollment management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -159,6 +161,10 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
+  /sites/{siteId}/site-enrollments:
+    $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
+  /sites/{siteId}/site-enrollments/{siteEnrollmentId}:
+    $ref: './site-enrollments-api.yaml#/site-enrollment-by-site'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:

@@ -277,3 +277,12 @@ productCode:
     enum:
       - 'LLMO'
       - 'ASO'
+
+# New parameters for site enrollments API
+siteEnrollmentId:
+  name: siteEnrollmentId
+  description: The site enrollment ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
