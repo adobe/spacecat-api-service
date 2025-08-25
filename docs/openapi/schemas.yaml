@@ -3501,3 +3501,61 @@ LlmoConfig:
       description: The CDN logs filter configuration for filtering log entries
       $ref: '#/LlmoCdnLogsFilter'
   additionalProperties: false
+
+# New schemas for entitlements, trial users, and site enrollments APIs
+Entitlement:
+  type: object
+  description: An entitlement represents product access and quotas for an organization
+  required:
+    - id
+    - organizationId
+    - productCode
+    - tier
+    - status
+    - createdAt
+    - updatedAt
+  properties:
+    id:
+      description: Unique identifier for the entitlement
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this entitlement belongs to
+      $ref: '#/Id'
+    productCode:
+      description: The product code this entitlement provides access to
+      type: string
+      enum: [LLMO, ASO]
+    tier:
+      description: The tier level of the entitlement
+      type: string
+      enum: [FREE_TRIAL, PAID]
+    status:
+      description: Current status of the entitlement
+      type: string
+      enum: [ACTIVE, SUSPENDED, ENDED]
+    quotas:
+      description: Usage quotas and limits for the entitlement
+      type: object
+      properties:
+        llmo_trial_prompts:
+          type: number
+          description: Number of LLMO trial prompts available
+    createdAt:
+      description: When the entitlement was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the entitlement was last updated
+      $ref: '#/DateTime'
+    recordExpiresAt:
+      description: When the entitlement record expires (if applicable)
+      $ref: '#/DateTime'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    productCode: "LLMO"
+    tier: "FREE_TRIAL"
+    status: "ACTIVE"
+    quotas:
+      llmo_trial_prompts: 100
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"

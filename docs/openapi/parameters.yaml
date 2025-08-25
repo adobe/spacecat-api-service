@@ -257,3 +257,23 @@ trafficType:
       - 'earned' 
       - 'paid'
     example: 'paid'
+
+# New parameters for entitlements API
+entitlementId:
+  name: entitlementId
+  description: The entitlement ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+productCode:
+  name: productCode
+  description: The product code (LLMO or ASO)
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'LLMO'
+      - 'ASO'

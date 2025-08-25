@@ -51,6 +51,8 @@ tags:
     description: APIs for taking and retrieving webpage screenshots, specifically for consent banner analysis
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: entitlements
+    description: Entitlement management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -85,6 +87,12 @@ paths:
     $ref: './brands-api.yaml#/brands-for-organization'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
+  /organizations/{organizationId}/entitlements:
+    $ref: './entitlements-api.yaml#/entitlements-by-organization'
+  /organizations/{organizationId}/entitlements/{entitlementId}:
+    $ref: './entitlements-api.yaml#/entitlement-by-organization'
+  /organizations/{organizationId}/entitlements-by-product/{productCode}:
+    $ref: './entitlements-api.yaml#/entitlements-by-product-for-organization'
   /organizations/by-ims-org-id/{imsOrgId}:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
