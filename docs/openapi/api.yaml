@@ -57,8 +57,8 @@ tags:
     description: Site enrollment management operations
   - name: trial-users
     description: Trial user management operations
-  - name: trial-user-activities
-    description: Trial user activity management operations
+  - name: user-activities
+    description: User activity management operations
   - name: organization-identity-providers
     description: Organization identity provider management operations
 
@@ -181,21 +181,18 @@ paths:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/site-enrollments/{siteEnrollmentId}:
     $ref: './site-enrollments-api.yaml#/site-enrollment-by-site'
-  /sites/{siteId}/trialUserActivities:
-    $ref: './trial-user-activities-api.yaml#/trial-user-activities-by-site'
-  /sites/{siteId}/trialUserActivities/{trialUserId}:
+  /sites/{siteId}/userActivities:
     get:
-      operationId: getTrialUserActivityBySite
+      operationId: getUserActivitiesBySite
       tags:
-        - trial-user-activities
-      summary: Retrieve trial user activities by site ID and trial user ID
-      description: This endpoint retrieves trial user activities for a specific user within a site.
+        - user-activities
+      summary: List all user activities for a specific site
+      description: This endpoint retrieves all user activities associated with a specific site.
       parameters:
         - $ref: './parameters.yaml#/siteId'
-        - $ref: './parameters.yaml#/trialUserId'
       responses:
         '200':
-          description: Successful operation with trial user activities returned
+          description: List of user activities for site retrieved successfully
           content:
             application/json:
               schema:
@@ -213,14 +210,13 @@ paths:
       security:
         - ims_key: [ ]
     post:
-      operationId: createTrialUserActivity
+      operationId: createUserActivity
       tags:
-        - trial-user-activities
-      summary: Create a new trial user activity
-      description: This endpoint creates a new trial user activity record.
+        - user-activities
+      summary: Create a new user activity
+      description: This endpoint creates a new user activity record for the logged-in user.
       parameters:
         - $ref: './parameters.yaml#/siteId'
-        - $ref: './parameters.yaml#/trialUserId'
       requestBody:
         required: true
         content:
@@ -229,13 +225,13 @@ paths:
               type: object
               required:
                 - type
-                - details
                 - productCode
               properties:
                 type:
                   type: string
                   description: The type of activity
-                  example: 'LOGIN'
+                  enum: [SIGN_UP, SIGN_IN, CREATE_SITE, RUN_AUDIT, PROMPT_RUN, DOWNLOAD]
+                  example: 'SIGN_IN'
                 details:
                   type: object
                   description: Additional details about the activity
@@ -250,13 +246,42 @@ paths:
                   example: 'LLMO'
       responses:
         '201':
-          description: Trial user activity created successfully
+          description: User activity created successfully
           content:
             application/json:
               schema:
                 $ref: './schemas.yaml#/TrialUserActivity'
         '400':
           $ref: './responses.yaml#/400-empty-request-body-validation-failure'
+        '401':
+          $ref: './responses.yaml#/401'
+        '404':
+          $ref: './responses.yaml#/404-site-not-found-with-id'
+        '500':
+          $ref: './responses.yaml#/500'
+      security:
+        - ims_key: [ ]
+  /sites/{siteId}/userActivities/{trialUserId}:
+    get:
+      operationId: getUserActivityBySite
+      tags:
+        - user-activities
+      summary: Retrieve user activities by site ID and trial user ID
+      description: This endpoint retrieves user activities for a specific user within a site.
+      parameters:
+        - $ref: './parameters.yaml#/siteId'
+        - $ref: './parameters.yaml#/trialUserId'
+      responses:
+        '200':
+          description: Successful operation with user activities returned
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: './schemas.yaml#/TrialUserActivity'
+        '400':
+          $ref: './responses.yaml#/400-no-site-id'
         '401':
           $ref: './responses.yaml#/401'
         '404':
