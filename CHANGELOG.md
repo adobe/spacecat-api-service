@@ -1,3 +1,10 @@
+## [1.164.6](https://github.com/adobe/spacecat-api-service/compare/v1.164.5...v1.164.6) (2025-08-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.36.5 ([#1192](https://github.com/adobe/spacecat-api-service/issues/1192)) ([b0ee70d](https://github.com/adobe/spacecat-api-service/commit/b0ee70d65b20a7a129f59189cac0e0bc903c4121))
+
 ## [1.164.5](https://github.com/adobe/spacecat-api-service/compare/v1.164.4...v1.164.5) (2025-08-25)
 
 
