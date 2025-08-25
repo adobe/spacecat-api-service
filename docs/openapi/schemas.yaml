@@ -3596,10 +3596,23 @@ TrialUser:
     organizationId:
       description: Reference to the organization this trial user belongs to
       $ref: '#/Id'
+    emailId:
+      description: Email ID of the trial user
+      type: string
+      format: email
+      example: 'user123@adobe.com'
+    firstName:
+      description: First name of the trial user
+      type: string
+      example: 'John'
+    lastName:
+      description: Last name of the trial user
+      type: string
+      example: 'Doe'
     externalId:
       description: External user ID from the identity provider
       type: string
-      example: 'user123@adobe.com'
+      example: '1234567890'
     provider:
       description: The identity provider (IMS, Microsoft, Google, etc.)
       type: string
@@ -3614,6 +3627,11 @@ TrialUser:
     metadata:
       description: Additional metadata for the trial user
       type: object
+      properties:
+        origin:
+          description: Origin information for the trial user (e.g., "invited", "self-signup", "partner")
+          type: string
+          example: "invited"
       additionalProperties: true
     createdAt:
       description: When the trial user was created
@@ -3624,12 +3642,15 @@ TrialUser:
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
     organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
-    externalId: "user123@adobe.com"
+    emailId: "user123@adobe.com"
+    firstName: "John"
+    lastName: "Doe"
+    externalId: "1234567890"
     provider: "IMS"
     status: "ACTIVE"
     lastSeenAt: "2024-01-15T10:30:00Z"
     metadata:
-      notes: "Initial trial user"
+      origin: "invited"
     createdAt: "2024-01-15T10:30:00Z"
     updatedAt: "2024-01-15T10:30:00Z"
 
