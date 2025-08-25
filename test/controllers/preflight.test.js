@@ -600,7 +600,7 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getCSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
+          getCSPromiseTokenFromBody: async () => { throw new utils.ErrorWithStatusCode('Missing IMS token in request body', 400); },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -625,7 +625,7 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Missing Authorization header',
+        message: 'Missing IMS token in request body',
       });
     });
 
