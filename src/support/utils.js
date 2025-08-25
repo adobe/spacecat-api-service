@@ -779,7 +779,6 @@ export const onboardSingleSite = async (
     if (auditsEnabled.length > 0) {
       try {
         await latestConfiguration.save();
-        log.info('cwv status in updated config: ', latestConfiguration.isHandlerEnabledForSite('cwv', site));
         log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
