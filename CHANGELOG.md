@@ -1,3 +1,10 @@
+## [1.164.4](https://github.com/adobe/spacecat-api-service/compare/v1.164.3...v1.164.4) (2025-08-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-gpt-client to v1.5.21 ([#1189](https://github.com/adobe/spacecat-api-service/issues/1189)) ([2dd4730](https://github.com/adobe/spacecat-api-service/commit/2dd47302684c3b2a767d9efebe09be827c137752))
+
 ## [1.164.3](https://github.com/adobe/spacecat-api-service/compare/v1.164.2...v1.164.3) (2025-08-23)
 
 
