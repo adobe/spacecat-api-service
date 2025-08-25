@@ -1805,6 +1805,10 @@ ScrapeOptions:
               - 'section'
               - 'block'
               - 'scroll'
+        rejectRedirects:
+          description: Whether to reject redirects
+          type: boolean
+          default: true
   example:
     pageLoadTimeout: 200
     enableJavascript: true
