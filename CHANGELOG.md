@@ -1,3 +1,10 @@
+## [1.164.5](https://github.com/adobe/spacecat-api-service/compare/v1.164.4...v1.164.5) (2025-08-25)
+
+
+### Bug Fixes
+
+* audit enable config save issue + orgId missing ([#1186](https://github.com/adobe/spacecat-api-service/issues/1186)) ([5ba44ce](https://github.com/adobe/spacecat-api-service/commit/5ba44ceed966a6a98c560249473f68dbf6e99a4f))
+
 ## [1.164.4](https://github.com/adobe/spacecat-api-service/compare/v1.164.3...v1.164.4) (2025-08-25)
 
 
