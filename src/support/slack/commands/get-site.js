@@ -143,7 +143,7 @@ function GetSiteCommand(context) {
 
       const textSections = [{
         text: `
-*Site Status for ${site.getBaseURL()}*
+*Site Status for foobar ${site.getBaseURL()}*
 ${printSiteDetails(site, isAuditEnabled, psiStrategy, latestAudit)}
 
 _Audits of *${psiStrategy}* strategy, sorted by date descending:_

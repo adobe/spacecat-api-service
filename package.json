@@ -35,7 +35,6 @@
     "memory": 4096,
     "awsRole!important": "arn:aws:iam::${env.AWS_ACCOUNT_ID}:role/spacecat-role-lambda-generic",
     "testUrl": "/_status_check/healthcheck.json",
-    "awsAttachAuthorizer": "spacecat-token-authorizer",
     "dev": {
       "params-file": "secrets/dev-secrets.json"
     },
