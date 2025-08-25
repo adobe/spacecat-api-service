@@ -511,6 +511,7 @@ const createSiteAndOrganization = async (
   // Check if site already exists
   if (site) {
     const siteOrgId = site.getOrganizationId();
+    organizationId = siteOrgId; // Set organizationId for existing sites
     const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
     await say(message);
     log.info(message);
@@ -778,6 +779,7 @@ export const onboardSingleSite = async (
     if (auditsEnabled.length > 0) {
       try {
         await latestConfiguration.save();
+        log.info('cwv status in updated config: ', latestConfiguration.isHandlerEnabledForSite('cwv', site));
         log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
@@ -788,8 +790,6 @@ export const onboardSingleSite = async (
     }
 
     reportLine.audits = auditTypes.join(', ');
-    log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
-
     await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
 
     // trigger audit runs
@@ -859,15 +859,33 @@ export const onboardSingleSite = async (
       },
     };
 
+    // CWV Demo Suggestions job - add generic CWV suggestions to opportunities
+    const cwvDemoSuggestionsJob = {
+      type: 'cwv-demo-suggestions-processor',
+      siteId: siteID,
+      siteUrl: baseURL,
+      imsOrgId: imsOrgID,
+      organizationId,
+      taskContext: {
+        profile: profileName, // Pass the profile name for demo check
+        slackContext: {
+          channelId: slackContext.channelId,
+          threadTs: slackContext.threadTs,
+        },
+      },
+    };
+
     log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
     log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
     log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
+    log.info(`CWV Demo Suggestions job: ${JSON.stringify(cwvDemoSuggestionsJob)}`);
 
     // Prepare and start step function workflow with the necessary parameters
     const workflowInput = {
       opportunityStatusJob,
       disableImportAndAuditJob,
       demoURLJob,
+      cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 

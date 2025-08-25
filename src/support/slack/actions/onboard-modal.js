@@ -499,7 +499,8 @@ export function onboardSiteModal(lambdaContext) {
         additionalParams,
       );
 
-      await configuration.save();
+      // Note: Configuration is already saved by sharedOnboardSingleSite in utils.js
+      // No need to call configuration.save() here as it would overwrite the changes
 
       if (reportLine.errors.length > 0) {
         await client.chat.postMessage({
