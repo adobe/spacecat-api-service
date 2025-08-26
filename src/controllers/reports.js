@@ -16,6 +16,7 @@ import {
   notFound,
   ok,
   internalServerError,
+  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -288,8 +289,6 @@ function ReportsController(ctx, log, env) {
         return badRequest('A report with the same type and duration already exists for this site');
       }
 
-      // Use the validated reports queue URL from environment
-
       // Create report data for the spacecat-shared Report model
       const reportData = {
         siteId,
@@ -360,9 +359,7 @@ function ReportsController(ctx, log, env) {
       // Get all reports for the site
       const reports = await Report.allBySiteId(siteId);
 
-      // Convert reports to JSON using the DTO, with presigned URLs for successful reports
       const reportsJson = await Promise.all(reports.map(async (report) => {
-        // Only generate presigned URLs for successful reports
         if (report.getStatus() === ReportModel.STATUSES.SUCCESS) {
           try {
             const rawReportKey = `${report.getRawStoragePath()}report.json`;
@@ -445,7 +442,7 @@ function ReportsController(ctx, log, env) {
       }
 
       if (report.getStatus() !== ReportModel.STATUSES.SUCCESS) {
-        return badRequest('Report is still processing.');
+        return createResponse({ message: 'Report is still processing.' }, 409);
       }
 
       // Verify the report belongs to the specified site

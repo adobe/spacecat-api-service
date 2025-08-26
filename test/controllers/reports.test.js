@@ -1955,8 +1955,8 @@ describe('ReportsController', () => {
       expect(mockContext.s3.GetObjectCommand).to.have.been.calledTwice;
     });
 
-    it('should return bad request for report not in success status', async () => {
-      mockReport.getStatus = () => 'pending';
+    it('should return conflict for report not in success status', async () => {
+      mockReport.getStatus = () => 'processing';
 
       const context = {
         params: {
@@ -1967,7 +1967,7 @@ describe('ReportsController', () => {
 
       const result = await reportsController.getReport(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(409);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Report is still processing.');
     });
