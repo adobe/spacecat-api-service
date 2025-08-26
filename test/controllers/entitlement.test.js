@@ -183,7 +183,7 @@ describe('Entitlement Controller', () => {
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
-      mockDataAccess.Entitlement.findByOrganizationId.rejects(dbError);
+      mockDataAccess.Entitlement.allByOrganizationId.rejects(dbError);
 
       const context = {
         params: { organizationId },

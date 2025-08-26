@@ -196,7 +196,7 @@ describe('Site Enrollment Controller', () => {
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
-      mockDataAccess.SiteEnrollment.findBySiteId.rejects(dbError);
+      mockDataAccess.SiteEnrollment.allBySiteId.rejects(dbError);
 
       const context = {
         params: { siteId },
