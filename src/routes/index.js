@@ -71,6 +71,12 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} organizationIdentityProviderController - The organization identity
+ * provider controller.
+ * @param {Object} userActivityController - The user activity controller.
+ * @param {Object} siteEnrollmentController - The site enrollment controller.
+ * @param {Object} trialUserController - The trial user controller.
+ * @param {Object} entitlementController - The entitlement controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -99,6 +105,11 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  organizationIdentityProviderController,
+  userActivityController,
+  siteEnrollmentController,
+  trialUserController,
+  entitlementController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -243,6 +254,23 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
+
+    // Organization Identity Provider Routes
+    'GET /organizations/:organizationId/organization-identity-provider': organizationIdentityProviderController.getByOrganizationID,
+
+    // User Activity Routes
+    'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
+    'POST /sites/:siteId/user-activities/': userActivityController.createTrialUserActivity,
+
+    // Site Enrollment Routes
+    'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
+
+    // Trial User Routes
+    'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserInvite,
+
+    // Entitlement Routes
+    'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
   };
 
   // Initialization of static and dynamic routes

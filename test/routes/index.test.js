@@ -192,6 +192,28 @@ describe('getRouteHandlers', () => {
     patchLlmoCustomerIntent: () => null,
   };
 
+  const mockOrganizationIdentityProviderController = {
+    getByOrganizationID: () => null,
+  };
+
+  const mockUserActivityController = {
+    getBySiteID: () => null,
+    createTrialUserActivity: () => null,
+  };
+
+  const mockSiteEnrollmentController = {
+    getBySiteID: () => null,
+    getBySiteIDAndID: () => null,
+  };
+
+  const mockTrialUserController = {
+    getByOrganizationID: () => null,
+  };
+
+  const mockEntitlementController = {
+    getByOrganizationID: () => null,
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -219,6 +241,11 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockOrganizationIdentityProviderController,
+      mockUserActivityController,
+      mockSiteEnrollmentController,
+      mockTrialUserController,
+      mockEntitlementController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -273,6 +300,14 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/sites',
+      'GET /organizations/:organizationId/organization-identity-provider',
+      'GET /organizations/:organizationId/organization-identity-provider/:organizationIdentityProviderId',
+      'GET /organizations/:organizationId/entitlements',
+      'GET /organizations/:organizationId/entitlements/:entitlementId',
+      'GET /organizations/:organizationId/entitlements-by-product/:productCode',
+      'GET /organizations/:organizationId/trial-users',
+      'GET /organizations/:organizationId/trial-users/:trialUserId',
+      'GET /organizations/:organizationId/by-provider-and-externalid/:provider/:externalId',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'PATCH /organizations/:organizationId',
@@ -297,6 +332,11 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
+      'GET /sites/:siteId/site-enrollments',
+      'GET /sites/:siteId/site-enrollments/:siteEnrollmentId',
+      'GET /sites/:siteId/user-activities',
+      'GET /sites/:siteId/user-activities/:trialUserId',
+      'POST /sites/:siteId/user-activities/:trialUserId',
       'DELETE /tools/api-keys/:id',
       'GET /tools/import/jobs/:jobId',
       'PATCH /tools/import/jobs/:jobId',
@@ -348,7 +388,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/page-type-device',
       'GET /sites/:siteId/traffic/paid/page-type-campaign',
       'GET /sites/:siteId/traffic/paid/page-type-platform',
-      'GET /sites/:siteId/traffic/paid/page-type-platform-device',
+      'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device',

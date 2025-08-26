@@ -69,6 +69,11 @@ import ScrapeJobController from './controllers/scrapeJob.js';
 import LlmoController from './controllers/llmo.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
+import OrganizationIdentityProviderController from './controllers/organization-identity-provider.js';
+import UserActivityController from './controllers/user-activity.js';
+import SiteEnrollmentController from './controllers/site-enrollment.js';
+import TrialUserController from './controllers/trial-user.js';
+import EntitlementController from './controllers/entitlement.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -125,6 +130,14 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
+    const organizationIdentityProviderController = OrganizationIdentityProviderController(
+      context,
+      context.env,
+    );
+    const userActivityController = UserActivityController(context, context.env);
+    const siteEnrollmentController = SiteEnrollmentController(context, context.env);
+    const trialUserController = TrialUserController(context, context.env);
+    const entitlementController = EntitlementController(context, context.env);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
@@ -161,6 +174,11 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
+      organizationIdentityProviderController,
+      userActivityController,
+      siteEnrollmentController,
+      trialUserController,
+      entitlementController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -174,6 +192,22 @@ async function run(request, context) {
       if (params.organizationId
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.organizationIdentityProviderId
+        && !isValidUUIDV4(params.organizationIdentityProviderId)) {
+        return badRequest('Organization Identity Provider Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.userActivityId && !isValidUUIDV4(params.userActivityId)) {
+        return badRequest('User Activity Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.siteEnrollmentId && !isValidUUIDV4(params.siteEnrollmentId)) {
+        return badRequest('Site Enrollment Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.trialUserId && !isValidUUIDV4(params.trialUserId)) {
+        return badRequest('Trial User Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.entitlementId && !isValidUUIDV4(params.entitlementId)) {
+        return badRequest('Entitlement Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
 
