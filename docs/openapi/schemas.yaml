@@ -3604,7 +3604,7 @@ TrialUser:
     status:
       description: Current status of the trial user
       type: string
-      enum: [ACTIVE, INACTIVE, SUSPENDED, COMPLETED]
+      enum: [INVITED, REGISTERED, BLOCKED, DELETED]
     lastSeenAt:
       description: When the trial user was last seen/active
       $ref: '#/DateTime'
@@ -3631,7 +3631,7 @@ TrialUser:
     lastName: "Doe"
     externalUserId: "1234567890"
     provider: "IMS"
-    status: "ACTIVE"
+    status: "INVITED"
     lastSeenAt: "2024-01-15T10:30:00Z"
     metadata:
       origin: "invited"

@@ -28,38 +28,17 @@ trial-users-by-organization:
     security:
       - ims_key: [ ]
 
-all-trial-users:
-  get:
-    tags:
-      - trial-users
-    summary: List all trial users across all organizations
-    description: |
-      This endpoint retrieves all trial users regardless of their organization.
-    operationId: getAllTrialUsers
-    responses:
-      '200':
-        description: List of all trial users retrieved successfully
-        content:
-          application/json:
-            schema:
-              type: array
-              items:
-                $ref: './schemas.yaml#/TrialUser'
-      '401':
-        $ref: './responses.yaml#/401'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - ims_key: [ ]
 
-invite-trial-user:
+
+trial-user-invite:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
   post:
     tags:
       - trial-users
-    summary: Invite a new trial user
+    summary: Invite a trial user to an organization
     description: |
-      This endpoint invites a new trial user. The organization ID is not required in the path
-      as it may not be known at the time of invitation.
+      This endpoint allows inviting a new trial user to an organization by providing their email address.
     operationId: inviteTrialUser
     requestBody:
       required: true
@@ -68,100 +47,28 @@ invite-trial-user:
           schema:
             type: object
             required:
-              - email
+              - email_id
             properties:
-              email:
+              email_id:
                 type: string
                 format: email
                 description: Email address of the user to invite
+                example: "user@example.com"
     responses:
       '201':
-        description: Trial user invited successfully
+        description: Trial user invite sent successfully
         content:
           application/json:
             schema:
               $ref: './schemas.yaml#/TrialUser'
       '400':
-        description: Bad request - invalid input data
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  description: Error message
+        $ref: './responses.yaml#/400-no-organization-id'
       '401':
         $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
       '409':
-        description: Conflict - user already exists
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  description: Error message
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - ims_key: [ ]
-
-trial-user-by-organization:
-  parameters:
-    - $ref: './parameters.yaml#/organizationId'
-    - $ref: './parameters.yaml#/trialUserId'
-  get:
-    tags:
-      - trial-users
-    summary: Retrieve a single trial user by organization ID and trial user ID
-    description: |
-      This endpoint is useful for retrieving a specific trial user by organization ID and trial user ID.
-    operationId: getTrialUserByOrganization
-    responses:
-      '200':
-        description: Successful operation with a trial user object returned
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/TrialUser'
-      '400':
-        $ref: './responses.yaml#/400-no-organization-id'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404-organization-not-found-with-id'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - ims_key: [ ]
-
-trial-user-by-provider-and-external-user-id:
-  parameters:
-    - $ref: './parameters.yaml#/organizationId'
-    - $ref: './parameters.yaml#/provider'
-    - $ref: './parameters.yaml#/externalId'
-  get:
-    tags:
-      - trial-users
-    summary: Retrieve a trial user by organization ID, provider, and external ID
-    description: |
-      This endpoint is useful for fast lookup of trial users by their IDP credentials.
-    operationId: getTrialUserByProviderAndExternalId
-    responses:
-      '200':
-        description: Successful operation with a trial user object returned
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/TrialUser'
-      '400':
-        $ref: './responses.yaml#/400-no-organization-id'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404-organization-not-found-with-id'
+        description: User already exists or is already invited
       '500':
         $ref: './responses.yaml#/500'
     security:

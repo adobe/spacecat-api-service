@@ -28,31 +28,4 @@ organization-identity-provider-by-organization:
     security:
       - ims_key: [ ]
 
-organization-identity-provider-by-id:
-  parameters:
-    - $ref: './parameters.yaml#/organizationId'
-    - $ref: './parameters.yaml#/organizationIdentityProviderId'
-  get:
-    tags:
-      - organization-identity-providers
-    summary: Retrieve a single organization identity provider by organization ID and provider ID
-    description: |
-      This endpoint retrieves a specific identity provider mapping for an organization.
-    operationId: getOrganizationIdentityProviderById
-    responses:
-      '200':
-        description: Successful operation with an organization identity provider object returned
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/OrganizationIdentityProvider'
-      '400':
-        $ref: './responses.yaml#/400-no-organization-id'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404-organization-not-found-with-id'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - ims_key: [ ]
+

@@ -97,24 +97,15 @@ paths:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
     $ref: './entitlements-api.yaml#/entitlements-by-organization'
-  /organizations/{organizationId}/entitlements/{entitlementId}:
-    $ref: './entitlements-api.yaml#/entitlement-by-organization'
-  /organizations/{organizationId}/entitlements-by-product/{productCode}:
-    $ref: './entitlements-api.yaml#/entitlements-by-product-for-organization'
+
   /organizations/{organizationId}/trial-users:
     $ref: './trial-users-api.yaml#/trial-users-by-organization'
-  /organizations/{organizationId}/trial-users/{trialUserId}:
-    $ref: './trial-users-api.yaml#/trial-user-by-organization'
-  /organizations/{organizationId}/by-provider-and-externalid/{provider}/{externalId}:
-    $ref: './trial-users-api.yaml#/trial-user-by-provider-and-external-user-id'
-  /organizations/llmo/trial-users:
-    $ref: './trial-users-api.yaml#/all-trial-users'
-  /organizations/llmo/invite:
-    $ref: './trial-users-api.yaml#/invite-trial-user'
+
+  /organizations/{organizationId}/trial-user-invite:
+    $ref: './trial-users-api.yaml#/trial-user-invite'
   /organizations/{organizationId}/organization-identity-provider:
     $ref: './organization-identity-providers-api.yaml#/organization-identity-provider-by-organization'
-  /organizations/{organizationId}/organization-identity-provider/{organizationIdentityProviderId}:
-    $ref: './organization-identity-providers-api.yaml#/organization-identity-provider-by-id'
+
   /organizations/by-ims-org-id/{imsOrgId}:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
@@ -183,8 +174,7 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
-  /sites/{siteId}/site-enrollments/{siteEnrollmentId}:
-    $ref: './site-enrollments-api.yaml#/site-enrollment-by-site'
+
   /sites/{siteId}/userActivities:
     get:
       operationId: getUserActivitiesBySite
@@ -265,35 +255,7 @@ paths:
           $ref: './responses.yaml#/500'
       security:
         - ims_key: [ ]
-  /sites/{siteId}/userActivities/{trialUserId}:
-    get:
-      operationId: getUserActivityBySite
-      tags:
-        - user-activities
-      summary: Retrieve user activities by site ID and trial user ID
-      description: This endpoint retrieves user activities for a specific user within a site.
-      parameters:
-        - $ref: './parameters.yaml#/siteId'
-        - $ref: './parameters.yaml#/trialUserId'
-      responses:
-        '200':
-          description: Successful operation with user activities returned
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: './schemas.yaml#/TrialUserActivity'
-        '400':
-          $ref: './responses.yaml#/400-no-site-id'
-        '401':
-          $ref: './responses.yaml#/401'
-        '404':
-          $ref: './responses.yaml#/404-site-not-found-with-id'
-        '500':
-          $ref: './responses.yaml#/500'
-      security:
-        - ims_key: [ ]
+
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
