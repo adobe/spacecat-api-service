@@ -256,7 +256,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'GET /organizations/:organizationId/organization-identity-provider': organizationIdentityProviderController.getByOrganizationID,
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
-    'POST /sites/:siteId/user-activities/': userActivityController.createTrialUserActivity,
+    'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserInvite,

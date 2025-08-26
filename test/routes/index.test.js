@@ -330,7 +330,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'GET /sites/:siteId/site-enrollments',
       'GET /sites/:siteId/user-activities',
-      'POST /sites/:siteId/user-activities/',
+      'POST /sites/:siteId/user-activities',
       'DELETE /tools/api-keys/:id',
       'GET /tools/import/jobs/:jobId',
       'PATCH /tools/import/jobs/:jobId',
