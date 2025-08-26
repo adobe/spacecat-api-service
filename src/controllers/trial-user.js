@@ -44,7 +44,6 @@ function TrialUserController(ctx) {
   }
 
   const { TrialUser, TrialUserCollection, Organization } = dataAccess;
-  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Gets trial users by organization ID.
@@ -65,6 +64,7 @@ function TrialUserController(ctx) {
         return notFound('Organization not found');
       }
 
+      const accessControlUtil = AccessControlUtil.fromContext(context);
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('Access denied to this organization');
       }
@@ -101,6 +101,7 @@ function TrialUserController(ctx) {
         return notFound('Organization not found');
       }
 
+      const accessControlUtil = AccessControlUtil.fromContext(context);
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('Access denied to this organization');
       }

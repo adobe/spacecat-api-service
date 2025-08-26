@@ -42,7 +42,6 @@ function SiteEnrollmentController(ctx) {
   }
 
   const { SiteEnrollment } = dataAccess;
-  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Gets site enrollments by site ID.
@@ -64,6 +63,7 @@ function SiteEnrollmentController(ctx) {
         return notFound('Site not found');
       }
 
+      const accessControlUtil = AccessControlUtil.fromContext(context);
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('Access denied to this site');
       }

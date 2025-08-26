@@ -16,10 +16,10 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import esmock from 'esmock';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
-// import * as utils from '../../src/support/utils.js';
-// import TrialUserController from '../../src/controllers/trial-user.js';
+import TrialUserController from '../../src/controllers/trial-user.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -36,32 +36,67 @@ describe('Trial User Controller', () => {
   const mockTrialUsers = [
     {
       getId: () => 'trial-user-1',
-      getEmailId: () => 'user1@example.com',
+      getOrganizationId: () => organizationId,
+      getOrganizationIdentityProviderId: () => 'provider-1',
+      getExternalUserId: () => 'ext-user-1',
       getStatus: () => 'ACTIVE',
+      getProvider: () => 'GOOGLE',
+      getLastSeenAt: () => '2023-01-01T00:00:00Z',
+      getEmailId: () => 'user1@example.com',
+      getFirstName: () => 'John',
+      getLastName: () => 'Doe',
+      getMetadata: () => ({ origin: 'invited' }),
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
     },
     {
       getId: () => 'trial-user-2',
-      getEmailId: () => 'user2@example.com',
+      getOrganizationId: () => organizationId,
+      getOrganizationIdentityProviderId: () => 'provider-2',
+      getExternalUserId: () => 'ext-user-2',
       getStatus: () => 'INVITED',
+      getProvider: () => 'GOOGLE',
+      getLastSeenAt: () => '2023-01-01T00:00:00Z',
+      getEmailId: () => 'user2@example.com',
+      getFirstName: () => 'Jane',
+      getLastName: () => 'Smith',
+      getMetadata: () => ({ origin: 'invited' }),
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
     },
   ];
 
   const mockTrialUser = {
-    getId: () => 'trial-user-new',
-    getEmailId: () => 'newuser@example.com',
-    getStatus: () => 'INVITED',
+    getId: () => 'trial-user-123',
+    getOrganizationId: () => organizationId,
+    getOrganizationIdentityProviderId: () => 'provider-123',
+    getExternalUserId: () => 'ext-user-123',
+    getStatus: () => 'ACTIVE',
+    getProvider: () => 'GOOGLE',
+    getLastSeenAt: () => '2023-01-01T00:00:00Z',
+    getEmailId: () => 'test@example.com',
+    getFirstName: () => 'Test',
+    getLastName: () => 'User',
+    getMetadata: () => ({ origin: 'invited' }),
+    getCreatedAt: () => '2023-01-01T00:00:00Z',
+    getUpdatedAt: () => '2023-01-01T00:00:00Z',
   };
 
   const mockDataAccess = {
-    Organization: {
-      findById: sandbox.stub().resolves(mockOrganization),
-    },
     TrialUser: {
+      findById: sandbox.stub().resolves(mockTrialUser),
       allByOrganizationId: sandbox.stub().resolves(mockTrialUsers),
+      STATUSES: {
+        INVITED: 'INVITED',
+      },
     },
     TrialUserCollection: {
+      findByOrganizationId: sandbox.stub().resolves(mockTrialUsers),
       findByEmailId: sandbox.stub().resolves(null),
       create: sandbox.stub().resolves(mockTrialUser),
+    },
+    Organization: {
+      findById: sandbox.stub().resolves(mockOrganization),
     },
   };
 
@@ -73,40 +108,78 @@ describe('Trial User Controller', () => {
 
   beforeEach(() => {
     sandbox.restore();
+    trialUserController = TrialUserController({
+      dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+    });
+
     // Reset stubs
-    mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
+    mockDataAccess.TrialUser.findById = sandbox.stub().resolves(mockTrialUser);
     mockDataAccess.TrialUser.allByOrganizationId = sandbox.stub().resolves(mockTrialUsers);
-    mockDataAccess.TrialUserCollection.findByEmailId = sandbox.stub().resolves(null);
-    mockDataAccess.TrialUserCollection.create = sandbox.stub().resolves(mockTrialUser);
+    mockDataAccess.TrialUserCollection.findByOrganizationId = sandbox
+      .stub()
+      .resolves(mockTrialUsers);
+    mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
     mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
+
+    // Stub AccessControlUtil.fromContext
+    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
   });
 
   afterEach(() => {
     sandbox.restore();
   });
 
+  describe('TrialUserController constructor', () => {
+    it('should throw error when context is not provided', () => {
+      expect(() => TrialUserController()).to.throw('Context required');
+    });
+
+    it('should throw error when context is null', () => {
+      expect(() => TrialUserController(null)).to.throw('Context required');
+    });
+
+    it('should throw error when context is empty object', () => {
+      expect(() => TrialUserController({})).to.throw('Context required');
+    });
+
+    it('should throw error when dataAccess is not provided', () => {
+      expect(() => TrialUserController({ someOtherProp: 'value' })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is null', () => {
+      expect(() => TrialUserController({ dataAccess: null })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is empty object', () => {
+      expect(() => TrialUserController({ dataAccess: {} })).to.throw('Data access required');
+    });
+  });
+
   describe('getByOrganizationID', () => {
     it('should return trial users for valid organization ID', async () => {
       const context = {
         params: { organizationId },
-        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
-      // Mock AccessControlUtil.fromContext
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
+      const result = await trialUserController.getByOrganizationID(context);
 
-      const { default: MockedTrialUserController } = await esmock('../../src/controllers/trial-user.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedTrialUserController({ dataAccess: mockDataAccess });
-      const result = await controller.getByOrganizationID(context);
-
-      expect(result.statusCode).to.equal(200);
-      expect(result.body).to.be.an('array');
-      expect(result.body).to.have.length(2);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.be.an('array');
+      expect(body).to.have.length(2);
     });
 
     it('should return bad request for invalid UUID', async () => {
@@ -116,8 +189,9 @@ describe('Trial User Controller', () => {
 
       const result = await trialUserController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(400);
-      expect(result.body).to.equal('Organization ID required');
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization ID required');
     });
 
     it('should return not found for non-existent organization', async () => {
@@ -125,126 +199,166 @@ describe('Trial User Controller', () => {
 
       const context = {
         params: { organizationId },
-        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await trialUserController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(404);
-      expect(result.body).to.equal('Organization not found');
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found');
     });
 
     it('should return forbidden when user lacks access', async () => {
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns({
-          hasAccess: sandbox.stub().resolves(false),
-        }),
-      };
+      mockAccessControlUtil.hasAccess.resolves(false);
 
-      const { default: MockedTrialUserController } = await esmock('../../src/controllers/trial-user.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedTrialUserController({ dataAccess: mockDataAccess });
       const context = {
         params: { organizationId },
-        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await trialUserController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(403);
-      expect(result.body).to.equal('Access denied to this organization');
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Access denied to this organization');
     });
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
       mockDataAccess.TrialUser.allByOrganizationId.rejects(dbError);
 
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
-
-      const { default: MockedTrialUserController } = await esmock('../../src/controllers/trial-user.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedTrialUserController({ dataAccess: mockDataAccess });
       const context = {
         params: { organizationId },
-        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await trialUserController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(500);
-      expect(result.body).to.equal('Database connection failed');
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Database connection failed');
     });
 
     it('should return internal server error when access control check fails', async () => {
       const accessError = new Error('Access control error');
       mockAccessControlUtil.hasAccess.rejects(accessError);
 
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
-
-      const { default: MockedTrialUserController } = await esmock('../../src/controllers/trial-user.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedTrialUserController({ dataAccess: mockDataAccess });
       const context = {
         params: { organizationId },
-        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await trialUserController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(500);
-      expect(result.body).to.equal('Access control error');
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Access control error');
+    });
+
+    it('should return internal server error when Organization.findById fails', async () => {
+      const orgError = new Error('Organization lookup failed');
+      mockDataAccess.Organization.findById.rejects(orgError);
+
+      const context = {
+        params: { organizationId },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getByOrganizationID(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization lookup failed');
     });
   });
 
   describe('createTrialUserInvite', () => {
-    const validEmailId = 'newuser@example.com';
-
-    it('should create trial user invite successfully', async () => {
+    it('should create trial user invite for valid data', async () => {
       const context = {
         params: { organizationId },
-        data: { emailId: validEmailId },
-        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
-      // Mock AccessControlUtil.fromContext
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
+      // Mock the create method to return a trial user with the passed data
+      const createdTrialUser = {
+        ...mockTrialUser,
+        getEmailId: () => 'newuser@example.com',
       };
+      mockDataAccess.TrialUserCollection.create.resolves(createdTrialUser);
 
-      const { default: MockedTrialUserController } = await esmock('../../src/controllers/trial-user.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
+      const result = await trialUserController.createTrialUserInvite(context);
 
-      const controller = MockedTrialUserController({ dataAccess: mockDataAccess });
-      const result = await controller.createTrialUserInvite(context);
-
-      expect(result.statusCode).to.equal(201);
-      expect(result.body).to.be.an('object');
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body).to.have.property('id');
+      expect(body).to.have.property('emailId', 'newuser@example.com');
     });
 
-    it('should return bad request for invalid UUID', async () => {
+    it('should return bad request for invalid organization ID', async () => {
       const context = {
         params: { organizationId: 'invalid-uuid' },
-        data: { emailId: validEmailId },
+        data: { emailId: 'newuser@example.com' },
       };
 
       const result = await trialUserController.createTrialUserInvite(context);
 
-      expect(result.statusCode).to.equal(400);
-      expect(result.body).to.equal('Organization ID required');
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization ID required');
     });
 
     it('should return bad request for missing email ID', async () => {
+      const context = {
+        params: { organizationId },
+        data: {},
+      };
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Email ID is required');
+    });
+
+    it('should return bad request for empty email ID', async () => {
       const context = {
         params: { organizationId },
         data: { emailId: '' },
@@ -252,20 +366,9 @@ describe('Trial User Controller', () => {
 
       const result = await trialUserController.createTrialUserInvite(context);
 
-      expect(result.statusCode).to.equal(400);
-      expect(result.body).to.equal('Email ID is required');
-    });
-
-    it('should return bad request for null email ID', async () => {
-      const context = {
-        params: { organizationId },
-        data: { emailId: null },
-      };
-
-      const result = await trialUserController.createTrialUserInvite(context);
-
-      expect(result.statusCode).to.equal(400);
-      expect(result.body).to.equal('Email ID is required');
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Email ID is required');
     });
 
     it('should return not found for non-existent organization', async () => {
@@ -273,36 +376,43 @@ describe('Trial User Controller', () => {
 
       const context = {
         params: { organizationId },
-        data: { emailId: validEmailId },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await trialUserController.createTrialUserInvite(context);
 
-      expect(result.statusCode).to.equal(404);
-      expect(result.body).to.equal('Organization not found');
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found');
     });
 
     it('should return forbidden when user lacks access', async () => {
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns({
-          hasAccess: sandbox.stub().resolves(false),
-        }),
-      };
+      mockAccessControlUtil.hasAccess.resolves(false);
 
-      const { default: MockedTrialUserController } = await esmock('../../src/controllers/trial-user.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedTrialUserController({ dataAccess: mockDataAccess });
       const context = {
         params: { organizationId },
-        data: { emailId: validEmailId },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
-      const result = await controller.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserInvite(context);
 
-      expect(result.statusCode).to.equal(403);
-      expect(result.body).to.equal('Access denied to this organization');
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Access denied to this organization');
     });
 
     it('should return bad request when trial user already exists', async () => {
@@ -310,38 +420,92 @@ describe('Trial User Controller', () => {
 
       const context = {
         params: { organizationId },
-        data: { emailId: validEmailId },
+        data: { emailId: 'existing@example.com' },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await trialUserController.createTrialUserInvite(context);
 
-      expect(result.statusCode).to.equal(400);
-      expect(result.body).to.equal('Trial user with this email already exists');
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Trial user with this email already exists');
     });
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
       mockDataAccess.TrialUserCollection.create.rejects(dbError);
+      // Ensure findByEmailId returns null for this test
+      mockDataAccess.TrialUserCollection.findByEmailId.resolves(null);
 
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
-
-      const { default: MockedTrialUserController } = await esmock('../../src/controllers/trial-user.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedTrialUserController({ dataAccess: mockDataAccess });
       const context = {
         params: { organizationId },
-        data: { emailId: validEmailId },
-        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
       };
 
-      const result = await controller.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserInvite(context);
 
-      expect(result.statusCode).to.equal(500);
-      expect(result.body).to.equal('Database connection failed');
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Database connection failed');
+    });
+
+    it('should return internal server error when access control check fails', async () => {
+      const accessError = new Error('Access control error');
+      mockAccessControlUtil.hasAccess.rejects(accessError);
+
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Access control error');
+    });
+
+    it('should return internal server error when Organization.findById fails', async () => {
+      const orgError = new Error('Organization lookup failed');
+      mockDataAccess.Organization.findById.rejects(orgError);
+
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization lookup failed');
     });
   });
 });

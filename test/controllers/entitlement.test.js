@@ -16,10 +16,10 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import esmock from 'esmock';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
-// import * as utils from '../../src/support/utils.js';
 import EntitlementController from '../../src/controllers/entitlement.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -36,13 +36,23 @@ describe('Entitlement Controller', () => {
   const mockEntitlements = [
     {
       getId: () => 'ent1',
+      getOrganizationId: () => organizationId,
       getProductCode: () => 'LLMO',
       getTier: () => 'FREE_TRIAL',
+      getStatus: () => 'ACTIVE',
+      getQuotas: () => ({}),
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
     },
     {
       getId: () => 'ent2',
+      getOrganizationId: () => organizationId,
       getProductCode: () => 'ASO',
       getTier: () => 'PAID',
+      getStatus: () => 'ACTIVE',
+      getQuotas: () => ({}),
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
     },
   ];
 
@@ -65,16 +75,51 @@ describe('Entitlement Controller', () => {
     sandbox.restore();
     entitlementController = EntitlementController({
       dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
     });
 
     // Reset stubs
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
     mockDataAccess.Entitlement.findByOrganizationId = sandbox.stub().resolves(mockEntitlements);
     mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
+
+    // Stub AccessControlUtil.fromContext
+    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
   });
 
   afterEach(() => {
     sandbox.restore();
+  });
+
+  describe('EntitlementController constructor', () => {
+    it('should throw error when context is not provided', () => {
+      expect(() => EntitlementController()).to.throw('Context required');
+    });
+
+    it('should throw error when context is null', () => {
+      expect(() => EntitlementController(null)).to.throw('Context required');
+    });
+
+    it('should throw error when context is empty object', () => {
+      expect(() => EntitlementController({})).to.throw('Context required');
+    });
+
+    it('should throw error when dataAccess is not provided', () => {
+      expect(() => EntitlementController({ someOtherProp: 'value' })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is null', () => {
+      expect(() => EntitlementController({ dataAccess: null })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is empty object', () => {
+      expect(() => EntitlementController({ dataAccess: {} })).to.throw('Data access required');
+    });
   });
 
   describe('getByOrganizationID', () => {
@@ -84,21 +129,14 @@ describe('Entitlement Controller', () => {
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      // Mock AccessControlUtil.fromContext
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
+      const result = await entitlementController.getByOrganizationID(context);
 
-      const { default: MockedEntitlementController } = await esmock('../../src/controllers/entitlement.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
+      expect(result.status).to.equal(200);
 
-      const controller = MockedEntitlementController({ dataAccess: mockDataAccess });
-      const result = await controller.getByOrganizationID(context);
-
-      expect(result.statusCode).to.equal(200);
-      expect(result.body).to.be.an('array');
-      expect(result.body).to.have.length(2);
+      // Parse the response body
+      const body = await result.json();
+      expect(body).to.be.an('array');
+      expect(body).to.have.length(2);
     });
 
     it('should return bad request for invalid UUID', async () => {
@@ -108,8 +146,9 @@ describe('Entitlement Controller', () => {
 
       const result = await entitlementController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(400);
-      expect(result.body).to.equal('Organization ID required');
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization ID required');
     });
 
     it('should return not found for non-existent organization', async () => {
@@ -122,79 +161,72 @@ describe('Entitlement Controller', () => {
 
       const result = await entitlementController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(404);
-      expect(result.body).to.equal('Organization not found');
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found');
     });
 
     it('should return forbidden when user lacks access', async () => {
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns({
-          hasAccess: sandbox.stub().resolves(false),
-        }),
-      };
+      mockAccessControlUtil.hasAccess.resolves(false);
 
-      const { default: MockedEntitlementController } = await esmock('../../src/controllers/entitlement.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedEntitlementController({ dataAccess: mockDataAccess });
       const context = {
         params: { organizationId },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await entitlementController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(403);
-      expect(result.body).to.equal('Only users belonging to the organization can view its entitlements');
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Only users belonging to the organization can view its entitlements');
     });
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
       mockDataAccess.Entitlement.findByOrganizationId.rejects(dbError);
 
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
-
-      const { default: MockedEntitlementController } = await esmock('../../src/controllers/entitlement.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedEntitlementController({ dataAccess: mockDataAccess });
       const context = {
         params: { organizationId },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await entitlementController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(500);
-      expect(result.body).to.equal('Database connection failed');
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Database connection failed');
     });
 
     it('should return internal server error when access control check fails', async () => {
       const accessError = new Error('Access control error');
       mockAccessControlUtil.hasAccess.rejects(accessError);
 
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
-
-      const { default: MockedEntitlementController } = await esmock('../../src/controllers/entitlement.js', {
-        '../support/access-control-util.js': AccessControlUtilStub,
-      });
-
-      const controller = MockedEntitlementController({ dataAccess: mockDataAccess });
       const context = {
         params: { organizationId },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await entitlementController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(500);
-      expect(result.body).to.equal('Access control error');
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Access control error');
+    });
+
+    it('should return internal server error when Organization.findById fails', async () => {
+      const orgError = new Error('Organization lookup failed');
+      mockDataAccess.Organization.findById.rejects(orgError);
+
+      const context = {
+        params: { organizationId },
+        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+      };
+
+      const result = await entitlementController.getByOrganizationID(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization lookup failed');
     });
   });
 });

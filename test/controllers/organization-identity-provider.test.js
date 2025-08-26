@@ -16,11 +16,10 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import esmock from 'esmock';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
-// import * as utils from '../../src/support/utils.js';
-// import OrganizationIdentityProviderController from
-// '../../src/controllers/organization-identity-provider.js';
+import OrganizationIdentityProviderController from '../../src/controllers/organization-identity-provider.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -40,12 +39,24 @@ describe('Organization Identity Provider Controller', () => {
       getOrganizationId: () => organizationId,
       getType: () => 'GOOGLE',
       getStatus: () => 'ACTIVE',
+      getProviderId: () => 'google-123',
+      getExternalId: () => 'ext-123',
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getMetadata: () => ({ type: 'GOOGLE', status: 'ACTIVE' }),
+      getProvider: () => 'GOOGLE',
     },
     {
       getId: () => 'provider-2',
       getOrganizationId: () => organizationId,
       getType: () => 'MICROSOFT',
       getStatus: () => 'PENDING',
+      getProviderId: () => 'microsoft-456',
+      getExternalId: () => 'ext-456',
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getMetadata: () => ({ type: 'MICROSOFT', status: 'PENDING' }),
+      getProvider: () => 'MICROSOFT',
     },
   ];
 
@@ -66,15 +77,54 @@ describe('Organization Identity Provider Controller', () => {
 
   beforeEach(() => {
     sandbox.restore();
+    organizationIdentityProviderController = OrganizationIdentityProviderController({
+      dataAccess: mockDataAccess,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+    });
+
     // Reset stubs
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
     mockDataAccess.OrganizationIdentityProvider.allByOrganizationId = sandbox.stub()
       .resolves(mockIdentityProviders);
     mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
+
+    // Stub AccessControlUtil.fromContext
+    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
   });
 
   afterEach(() => {
     sandbox.restore();
+  });
+
+  describe('OrganizationIdentityProviderController constructor', () => {
+    it('should throw error when context is not provided', () => {
+      expect(() => OrganizationIdentityProviderController()).to.throw('Context required');
+    });
+
+    it('should throw error when context is null', () => {
+      expect(() => OrganizationIdentityProviderController(null)).to.throw('Context required');
+    });
+
+    it('should throw error when context is empty object', () => {
+      expect(() => OrganizationIdentityProviderController({})).to.throw('Context required');
+    });
+
+    it('should throw error when dataAccess is not provided', () => {
+      expect(() => OrganizationIdentityProviderController({ someOtherProp: 'value' })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is null', () => {
+      expect(() => OrganizationIdentityProviderController({ dataAccess: null })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is empty object', () => {
+      expect(() => OrganizationIdentityProviderController({ dataAccess: {} })).to.throw('Data access required');
+    });
   });
 
   describe('getByOrganizationID', () => {
@@ -84,26 +134,12 @@ describe('Organization Identity Provider Controller', () => {
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      // Mock AccessControlUtil.fromContext
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
-      const { default: MockedOrganizationIdentityProviderController } = await esmock(
-        '../../src/controllers/organization-identity-provider.js',
-        {
-          '../support/access-control-util.js': AccessControlUtilStub,
-        },
-      );
-
-      const controller = MockedOrganizationIdentityProviderController({
-        dataAccess: mockDataAccess,
-      });
-      const result = await controller.getByOrganizationID(context);
-
-      expect(result.statusCode).to.equal(200);
-      expect(result.body).to.be.an('array');
-      expect(result.body).to.have.length(2);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.be.an('array');
+      expect(body).to.have.length(2);
     });
 
     it('should return bad request for invalid UUID', async () => {
@@ -113,8 +149,9 @@ describe('Organization Identity Provider Controller', () => {
 
       const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(400);
-      expect(result.body).to.equal('Organization ID required');
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization ID required');
     });
 
     it('should return not found for non-existent organization', async () => {
@@ -127,94 +164,72 @@ describe('Organization Identity Provider Controller', () => {
 
       const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(404);
-      expect(result.body).to.equal('Organization not found');
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found');
     });
 
     it('should return forbidden when user lacks access', async () => {
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns({
-          hasAccess: sandbox.stub().resolves(false),
-        }),
-      };
+      mockAccessControlUtil.hasAccess.resolves(false);
 
-      const { default: MockedOrganizationIdentityProviderController } = await esmock(
-        '../../src/controllers/organization-identity-provider.js',
-        {
-          '../support/access-control-util.js': AccessControlUtilStub,
-        },
-      );
-
-      const controller = MockedOrganizationIdentityProviderController({
-        dataAccess: mockDataAccess,
-      });
       const context = {
         params: { organizationId },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(403);
-      expect(result.body).to.equal('Only users belonging to the organization can view its identity providers');
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Only users belonging to the organization can view its identity providers');
     });
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
       mockDataAccess.OrganizationIdentityProvider.allByOrganizationId.rejects(dbError);
 
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
-
-      const { default: MockedOrganizationIdentityProviderController } = await esmock(
-        '../../src/controllers/organization-identity-provider.js',
-        {
-          '../support/access-control-util.js': AccessControlUtilStub,
-        },
-      );
-
-      const controller = MockedOrganizationIdentityProviderController({
-        dataAccess: mockDataAccess,
-      });
       const context = {
         params: { organizationId },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(500);
-      expect(result.body).to.equal('Database connection failed');
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Database connection failed');
     });
 
     it('should return internal server error when access control check fails', async () => {
       const accessError = new Error('Access control error');
       mockAccessControlUtil.hasAccess.rejects(accessError);
 
-      const AccessControlUtilStub = {
-        fromContext: sandbox.stub().returns(mockAccessControlUtil),
-      };
-
-      const { default: MockedOrganizationIdentityProviderController } = await esmock(
-        '../../src/controllers/organization-identity-provider.js',
-        {
-          '../support/access-control-util.js': AccessControlUtilStub,
-        },
-      );
-
-      const controller = MockedOrganizationIdentityProviderController({
-        dataAccess: mockDataAccess,
-      });
       const context = {
         params: { organizationId },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await controller.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
-      expect(result.statusCode).to.equal(500);
-      expect(result.body).to.equal('Access control error');
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Access control error');
+    });
+
+    it('should return internal server error when Organization.findById fails', async () => {
+      const orgError = new Error('Organization lookup failed');
+      mockDataAccess.Organization.findById.rejects(orgError);
+
+      const context = {
+        params: { organizationId },
+        authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
+      };
+
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization lookup failed');
     });
   });
 });
