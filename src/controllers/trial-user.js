@@ -23,6 +23,7 @@ import {
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { TrialUser as TrialUserModel } from '@adobe/spacecat-shared-data-access';
 
 import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -43,7 +44,7 @@ function TrialUserController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { TrialUser, TrialUserCollection, Organization } = dataAccess;
+  const { TrialUser, Organization } = dataAccess;
 
   /**
    * Gets trial users by organization ID.
@@ -107,16 +108,16 @@ function TrialUserController(ctx) {
       }
 
       // Check if trial user already exists with this email
-      const existingTrialUser = await TrialUserCollection.findByEmailId(emailId);
+      const existingTrialUser = await TrialUser.findByEmailId(emailId);
       if (existingTrialUser) {
         return badRequest('Trial user with this email already exists');
       }
 
       // Create new trial user invite
-      const trialUser = await TrialUserCollection.create({
+      const trialUser = await TrialUser.create({
         emailId,
         organizationId,
-        status: TrialUser.STATUSES.INVITED,
+        status: TrialUserModel.STATUSES.INVITED,
         metadata: { origin: 'invited' },
       });
 

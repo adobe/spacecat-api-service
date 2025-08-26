@@ -20,6 +20,10 @@ import {
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import {
+  TrialUserActivity as TrialUserActivityModel,
+  Entitlement as EntitlementModel,
+} from '@adobe/spacecat-shared-data-access';
 
 import { UserActivityDto } from '../dto/user-activity.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -42,11 +46,9 @@ function UserActivityController(ctx) {
 
   const {
     TrialUserActivity,
-    TrialUserActivityCollection,
     Site,
-    TrialUserCollection,
+    TrialUser,
     Entitlement,
-    EntitlementCollection,
   } = dataAccess;
 
   /**
@@ -101,12 +103,12 @@ function UserActivityController(ctx) {
     // Validate required fields
     const { type, productCode } = activityData;
 
-    if (!type || !Object.values(TrialUserActivity.TYPES).includes(type)) {
-      return badRequest(`Valid activity type is required (${Object.values(TrialUserActivity.TYPES).join(', ')})`);
+    if (!type || !Object.values(TrialUserActivityModel.TYPES).includes(type)) {
+      return badRequest(`Valid activity type is required (${Object.values(TrialUserActivityModel.TYPES).join(', ')})`);
     }
 
-    if (!productCode || !Object.values(Entitlement.PRODUCT_CODES).includes(productCode)) {
-      return badRequest(`Valid product code is required (${Object.values(Entitlement.PRODUCT_CODES).join(', ')})`);
+    if (!productCode || !Object.values(EntitlementModel.PRODUCT_CODES).includes(productCode)) {
+      return badRequest(`Valid product code is required (${Object.values(EntitlementModel.PRODUCT_CODES).join(', ')})`);
     }
 
     try {
@@ -128,7 +130,7 @@ function UserActivityController(ctx) {
       }
 
       // Find the trial user by email
-      const trialUser = await TrialUserCollection.findByEmailId(authInfo.getProfile().trial_email);
+      const trialUser = await TrialUser.findByEmailId(authInfo.getProfile().trial_email);
       if (!trialUser) {
         return badRequest('Trial user not found for the authenticated user');
       }
@@ -139,7 +141,7 @@ function UserActivityController(ctx) {
       const organizationId = site.getOrganizationId();
 
       // Find entitlement using organization ID and product code
-      const entitlements = await EntitlementCollection.allByOrganizationIdAndProductCode(
+      const entitlements = await Entitlement.allByOrganizationIdAndProductCode(
         organizationId,
         productCode,
       );
@@ -149,7 +151,7 @@ function UserActivityController(ctx) {
 
       const entitlementId = entitlements[0].getId();
 
-      const userActivity = await TrialUserActivityCollection.create({
+      const userActivity = await TrialUserActivity.create({
         ...activityData,
         siteId,
         trialUserId,

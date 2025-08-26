@@ -29,6 +29,44 @@ describe('User Activity Controller', () => {
   const siteId = '123e4567-e89b-12d3-a456-426614174000';
   const organizationId = '456e7890-e89b-12d3-a456-426614174000';
 
+  describe('Constructor Validation', () => {
+    it('should throw error when context is not provided', () => {
+      expect(() => UserActivityController()).to.throw('Context required');
+    });
+
+    it('should throw error when context is null', () => {
+      expect(() => UserActivityController(null)).to.throw('Context required');
+    });
+
+    it('should throw error when context is undefined', () => {
+      expect(() => UserActivityController(undefined)).to.throw('Context required');
+    });
+
+    it('should throw error when context is not an object', () => {
+      expect(() => UserActivityController('not-an-object')).to.throw('Context required');
+    });
+
+    it('should throw error when context is an empty object', () => {
+      expect(() => UserActivityController({})).to.throw('Context required');
+    });
+
+    it('should throw error when dataAccess is missing from context', () => {
+      expect(() => UserActivityController({ someOtherProperty: 'value' })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is null', () => {
+      expect(() => UserActivityController({ dataAccess: null })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is undefined', () => {
+      expect(() => UserActivityController({ dataAccess: undefined })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is not an object', () => {
+      expect(() => UserActivityController({ dataAccess: 'not-an-object' })).to.throw('Data access required');
+    });
+  });
+
   const mockSite = {
     getId: () => siteId,
     getOrganizationId: () => organizationId,
@@ -53,8 +91,8 @@ describe('User Activity Controller', () => {
       getTrialUserId: () => 'trial-user-123',
       getSiteId: () => siteId,
       getEntitlementId: () => 'entitlement-123',
-      getType: () => 'LOGIN',
-      getDetails: () => ({ action: 'LOGIN' }),
+      getType: () => 'SIGN_IN',
+      getDetails: () => ({ action: 'SIGN_IN' }),
       getProductCode: () => 'LLMO',
       getTimestamp: () => new Date('2023-01-01T00:00:00Z'),
       getCreatedAt: () => '2023-01-01T00:00:00Z',
@@ -79,32 +117,30 @@ describe('User Activity Controller', () => {
     TrialUserActivity: {
       findBySiteId: sandbox.stub().resolves(mockUserActivities),
       allBySiteId: sandbox.stub().resolves(mockUserActivities),
-      TYPES: {
-        LOGIN: 'LOGIN',
-        LOGOUT: 'LOGOUT',
-      },
-    },
-    TrialUserActivityCollection: {
-      findBySiteId: sandbox.stub().resolves(mockUserActivities),
       create: sandbox.stub().resolves(mockUserActivities[0]),
+      TYPES: {
+        SIGN_UP: 'SIGN_UP',
+        SIGN_IN: 'SIGN_IN',
+        CREATE_SITE: 'CREATE_SITE',
+        RUN_AUDIT: 'RUN_AUDIT',
+        PROMPT_RUN: 'PROMPT_RUN',
+        DOWNLOAD: 'DOWNLOAD',
+      },
     },
     Site: {
       findById: sandbox.stub().resolves(mockSite),
     },
-    TrialUserCollection: {
+    TrialUser: {
       findById: sandbox.stub().resolves(mockTrialUser),
       findByEmailId: sandbox.stub().resolves(mockTrialUser),
     },
     Entitlement: {
       findById: sandbox.stub().resolves(mockEntitlement),
+      allByOrganizationIdAndProductCode: sandbox.stub().resolves([mockEntitlement]),
       PRODUCT_CODES: {
         LLMO: 'LLMO',
         ASO: 'ASO',
       },
-    },
-    EntitlementCollection: {
-      findById: sandbox.stub().resolves(mockEntitlement),
-      allByOrganizationIdAndProductCode: sandbox.stub().resolves([mockEntitlement]),
     },
   };
 
@@ -129,15 +165,12 @@ describe('User Activity Controller', () => {
     // Reset stubs
     mockDataAccess.TrialUserActivity.findBySiteId = sandbox.stub().resolves(mockUserActivities);
     mockDataAccess.TrialUserActivity.allBySiteId = sandbox.stub().resolves(mockUserActivities);
-    mockDataAccess.TrialUserActivityCollection.findBySiteId = sandbox
-      .stub()
-      .resolves(mockUserActivities);
+    mockDataAccess.TrialUserActivity.create = sandbox.stub().resolves(mockUserActivities[0]);
     mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
-    mockDataAccess.TrialUserCollection.findById = sandbox.stub().resolves(mockTrialUser);
-    mockDataAccess.TrialUserCollection.findByEmailId = sandbox.stub().resolves(mockTrialUser);
+    mockDataAccess.TrialUser.findById = sandbox.stub().resolves(mockTrialUser);
+    mockDataAccess.TrialUser.findByEmailId = sandbox.stub().resolves(mockTrialUser);
     mockDataAccess.Entitlement.findById = sandbox.stub().resolves(mockEntitlement);
-    mockDataAccess.EntitlementCollection.findById = sandbox.stub().resolves(mockEntitlement);
-    mockDataAccess.EntitlementCollection.allByOrganizationIdAndProductCode = sandbox
+    mockDataAccess.Entitlement.allByOrganizationIdAndProductCode = sandbox
       .stub()
       .resolves([mockEntitlement]);
     mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
@@ -322,7 +355,7 @@ describe('User Activity Controller', () => {
     it('should create trial user activity for valid data', async () => {
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -335,13 +368,13 @@ describe('User Activity Controller', () => {
       expect(result.status).to.equal(201);
       const body = await result.json();
       expect(body).to.have.property('id');
-      expect(body).to.have.property('type', 'LOGIN');
+      expect(body).to.have.property('type', 'SIGN_IN');
     });
 
     it('should return bad request for invalid site ID', async () => {
       const context = {
         params: { siteId: 'invalid-uuid' },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -374,7 +407,7 @@ describe('User Activity Controller', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('Valid activity type is required (LOGIN, LOGOUT)');
+      expect(body.message).to.equal('Valid activity type is required (SIGN_UP, SIGN_IN, CREATE_SITE, RUN_AUDIT, PROMPT_RUN, DOWNLOAD)');
     });
 
     it('should return bad request for invalid type', async () => {
@@ -387,13 +420,13 @@ describe('User Activity Controller', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('Valid activity type is required (LOGIN, LOGOUT)');
+      expect(body.message).to.equal('Valid activity type is required (SIGN_UP, SIGN_IN, CREATE_SITE, RUN_AUDIT, PROMPT_RUN, DOWNLOAD)');
     });
 
     it('should return bad request for missing product code', async () => {
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN' },
+        data: { type: 'SIGN_IN' },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -406,7 +439,7 @@ describe('User Activity Controller', () => {
     it('should return bad request for invalid product code', async () => {
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'INVALID' },
+        data: { type: 'SIGN_IN', productCode: 'INVALID' },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -421,7 +454,7 @@ describe('User Activity Controller', () => {
 
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -441,7 +474,7 @@ describe('User Activity Controller', () => {
 
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -459,7 +492,7 @@ describe('User Activity Controller', () => {
     it('should return bad request when user trial email not found', async () => {
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -475,11 +508,11 @@ describe('User Activity Controller', () => {
     });
 
     it('should return bad request when trial user not found', async () => {
-      mockDataAccess.TrialUserCollection.findByEmailId.resolves(null);
+      mockDataAccess.TrialUser.findByEmailId.resolves(null);
 
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -495,11 +528,11 @@ describe('User Activity Controller', () => {
     });
 
     it('should return bad request when entitlement not found', async () => {
-      mockDataAccess.EntitlementCollection.allByOrganizationIdAndProductCode.resolves([]);
+      mockDataAccess.Entitlement.allByOrganizationIdAndProductCode.resolves([]);
 
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -516,11 +549,11 @@ describe('User Activity Controller', () => {
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
-      mockDataAccess.TrialUserActivityCollection.create.rejects(dbError);
+      mockDataAccess.TrialUserActivity.create.rejects(dbError);
 
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -541,7 +574,7 @@ describe('User Activity Controller', () => {
 
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -562,7 +595,7 @@ describe('User Activity Controller', () => {
 
       const context = {
         params: { siteId },
-        data: { type: 'LOGIN', productCode: 'LLMO' },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
         authInfo: new AuthInfo()
           .withType('jwt')

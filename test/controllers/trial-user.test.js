@@ -28,6 +28,44 @@ describe('Trial User Controller', () => {
   const sandbox = sinon.createSandbox();
   const organizationId = '123e4567-e89b-12d3-a456-426614174000';
 
+  describe('Constructor Validation', () => {
+    it('should throw error when context is not provided', () => {
+      expect(() => TrialUserController()).to.throw('Context required');
+    });
+
+    it('should throw error when context is null', () => {
+      expect(() => TrialUserController(null)).to.throw('Context required');
+    });
+
+    it('should throw error when context is undefined', () => {
+      expect(() => TrialUserController(undefined)).to.throw('Context required');
+    });
+
+    it('should throw error when context is not an object', () => {
+      expect(() => TrialUserController('not-an-object')).to.throw('Context required');
+    });
+
+    it('should throw error when context is an empty object', () => {
+      expect(() => TrialUserController({})).to.throw('Context required');
+    });
+
+    it('should throw error when dataAccess is missing from context', () => {
+      expect(() => TrialUserController({ someOtherProperty: 'value' })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is null', () => {
+      expect(() => TrialUserController({ dataAccess: null })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is undefined', () => {
+      expect(() => TrialUserController({ dataAccess: undefined })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is not an object', () => {
+      expect(() => TrialUserController({ dataAccess: 'not-an-object' })).to.throw('Data access required');
+    });
+  });
+
   const mockOrganization = {
     getId: () => organizationId,
     getName: () => 'Test Organization',
@@ -86,14 +124,11 @@ describe('Trial User Controller', () => {
     TrialUser: {
       findById: sandbox.stub().resolves(mockTrialUser),
       allByOrganizationId: sandbox.stub().resolves(mockTrialUsers),
+      findByEmailId: sandbox.stub().resolves(null),
+      create: sandbox.stub().resolves(mockTrialUser),
       STATUSES: {
         INVITED: 'INVITED',
       },
-    },
-    TrialUserCollection: {
-      findByOrganizationId: sandbox.stub().resolves(mockTrialUsers),
-      findByEmailId: sandbox.stub().resolves(null),
-      create: sandbox.stub().resolves(mockTrialUser),
     },
     Organization: {
       findById: sandbox.stub().resolves(mockOrganization),
@@ -121,7 +156,7 @@ describe('Trial User Controller', () => {
     // Reset stubs
     mockDataAccess.TrialUser.findById = sandbox.stub().resolves(mockTrialUser);
     mockDataAccess.TrialUser.allByOrganizationId = sandbox.stub().resolves(mockTrialUsers);
-    mockDataAccess.TrialUserCollection.findByOrganizationId = sandbox
+    mockDataAccess.TrialUser.findByOrganizationId = sandbox
       .stub()
       .resolves(mockTrialUsers);
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
@@ -322,7 +357,7 @@ describe('Trial User Controller', () => {
         ...mockTrialUser,
         getEmailId: () => 'newuser@example.com',
       };
-      mockDataAccess.TrialUserCollection.create.resolves(createdTrialUser);
+      mockDataAccess.TrialUser.create.resolves(createdTrialUser);
 
       const result = await trialUserController.createTrialUserInvite(context);
 
@@ -416,7 +451,7 @@ describe('Trial User Controller', () => {
     });
 
     it('should return bad request when trial user already exists', async () => {
-      mockDataAccess.TrialUserCollection.findByEmailId.resolves(mockTrialUser);
+      mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUser);
 
       const context = {
         params: { organizationId },
@@ -439,9 +474,9 @@ describe('Trial User Controller', () => {
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
-      mockDataAccess.TrialUserCollection.create.rejects(dbError);
+      mockDataAccess.TrialUser.create.rejects(dbError);
       // Ensure findByEmailId returns null for this test
-      mockDataAccess.TrialUserCollection.findByEmailId.resolves(null);
+      mockDataAccess.TrialUser.findByEmailId.resolves(null);
 
       const context = {
         params: { organizationId },
