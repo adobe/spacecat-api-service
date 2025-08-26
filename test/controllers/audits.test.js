@@ -182,6 +182,9 @@ describe('Audits Controller', () => {
     name: 'Test Org',
     imsOrgId: 'org-id@AdobeOrg',
   });
+
+  // Ensure the mock organization has the required methods
+  sinon.stub(mockOrganization, 'getImsOrgId').returns('org-id@AdobeOrg');
   const mockSite = new Site(
     {
       entities: {
@@ -344,6 +347,7 @@ describe('Audits Controller', () => {
         ...authContextUser,
       });
 
+      // Ensure the mock site has the organization properly set up
       mockDataAccess.Site.findById.resolves(mockSite);
       mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
       const result = await controller.getAllForSite({ params: { siteId } });

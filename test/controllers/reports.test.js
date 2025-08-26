@@ -1005,41 +1005,130 @@ describe('ReportsController', () => {
     // Common validation tests
     testCommonValidations('createReport');
 
-    it('should return internal server error when queue URL is not configured', async () => {
+    it('should throw error during initialization when queue URL is not configured', () => {
       const contextWithNoQueue = {
         ...mockContext,
       };
       const envWithoutQueue = {};
 
-      const controllerWithoutQueue = ReportsController(
-        contextWithNoQueue,
-        mockLog,
-        envWithoutQueue,
-      );
+      expect(() => {
+        ReportsController(
+          contextWithNoQueue,
+          mockLog,
+          envWithoutQueue,
+        );
+      }).to.throw('Environment variables required');
+    });
 
-      const context = {
-        params: {
-          siteId: '123e4567-e89b-12d3-a456-426614174000',
-        },
-        data: {
-          reportType: 'performance',
-          name: 'Test Report',
-          reportPeriod: {
-            startDate: '2025-01-01',
-            endDate: '2025-01-31',
-          },
-          comparisonPeriod: {
-            startDate: '2024-12-01',
-            endDate: '2024-12-31',
-          },
-        },
+    it('should throw error during initialization when REPORT_JOBS_QUEUE_URL is missing', () => {
+      const contextWithNoQueue = {
+        ...mockContext,
+      };
+      const envWithoutQueue = {
+        S3_REPORT_BUCKET: 'test-reports-bucket',
+        S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
       };
 
-      const result = await controllerWithoutQueue.createReport(context);
+      expect(() => {
+        ReportsController(
+          contextWithNoQueue,
+          mockLog,
+          envWithoutQueue,
+        );
+      }).to.throw('REPORT_JOBS_QUEUE_URL environment variable is required');
+    });
 
-      expect(result.status).to.equal(500);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Reports queue is not configured');
+    it('should throw error during initialization when S3_REPORT_BUCKET is missing', () => {
+      const contextWithNoQueue = {
+        ...mockContext,
+      };
+      const envWithoutQueue = {
+        REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/reports-queue',
+        S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
+      };
+
+      expect(() => {
+        ReportsController(
+          contextWithNoQueue,
+          mockLog,
+          envWithoutQueue,
+        );
+      }).to.throw('S3_REPORT_BUCKET environment variable is required');
+    });
+
+    it('should throw error during initialization when S3_MYSTIQUE_BUCKET is missing', () => {
+      const contextWithNoQueue = {
+        ...mockContext,
+      };
+      const envWithoutQueue = {
+        REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/reports-queue',
+        S3_REPORT_BUCKET: 'test-reports-bucket',
+      };
+
+      expect(() => {
+        ReportsController(
+          contextWithNoQueue,
+          mockLog,
+          envWithoutQueue,
+        );
+      }).to.throw('S3_MYSTIQUE_BUCKET environment variable is required');
+    });
+
+    it('should throw error during initialization when REPORT_JOBS_QUEUE_URL is empty string', () => {
+      const contextWithNoQueue = {
+        ...mockContext,
+      };
+      const envWithoutQueue = {
+        REPORT_JOBS_QUEUE_URL: '',
+        S3_REPORT_BUCKET: 'test-reports-bucket',
+        S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
+      };
+
+      expect(() => {
+        ReportsController(
+          contextWithNoQueue,
+          mockLog,
+          envWithoutQueue,
+        );
+      }).to.throw('REPORT_JOBS_QUEUE_URL environment variable is required');
+    });
+
+    it('should throw error during initialization when S3_REPORT_BUCKET is empty string', () => {
+      const contextWithNoQueue = {
+        ...mockContext,
+      };
+      const envWithoutQueue = {
+        REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/reports-queue',
+        S3_REPORT_BUCKET: '',
+        S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
+      };
+
+      expect(() => {
+        ReportsController(
+          contextWithNoQueue,
+          mockLog,
+          envWithoutQueue,
+        );
+      }).to.throw('S3_REPORT_BUCKET environment variable is required');
+    });
+
+    it('should throw error during initialization when S3_MYSTIQUE_BUCKET is empty string', () => {
+      const contextWithNoQueue = {
+        ...mockContext,
+      };
+      const envWithoutQueue = {
+        REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/reports-queue',
+        S3_REPORT_BUCKET: 'test-reports-bucket',
+        S3_MYSTIQUE_BUCKET: '',
+      };
+
+      expect(() => {
+        ReportsController(
+          contextWithNoQueue,
+          mockLog,
+          envWithoutQueue,
+        );
+      }).to.throw('S3_MYSTIQUE_BUCKET environment variable is required');
     });
 
     it('should return internal server error when SQS send fails', async () => {

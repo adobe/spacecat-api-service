@@ -164,6 +164,29 @@ function ReportsController(ctx, log, env) {
     throw new Error('Data access required');
   }
 
+  // Validate required environment variables early
+  if (!isNonEmptyObject(env)) {
+    throw new Error('Environment variables required');
+  }
+
+  const {
+    REPORT_JOBS_QUEUE_URL: reportsQueueUrl,
+    S3_REPORT_BUCKET: s3ReportBucket,
+    S3_MYSTIQUE_BUCKET: s3MystiqueBucket,
+  } = env;
+
+  if (!hasText(reportsQueueUrl)) {
+    throw new Error('REPORT_JOBS_QUEUE_URL environment variable is required');
+  }
+
+  if (!hasText(s3ReportBucket)) {
+    throw new Error('S3_REPORT_BUCKET environment variable is required');
+  }
+
+  if (!hasText(s3MystiqueBucket)) {
+    throw new Error('S3_MYSTIQUE_BUCKET environment variable is required');
+  }
+
   const { Site, Report } = dataAccess;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -265,12 +288,7 @@ function ReportsController(ctx, log, env) {
         return badRequest('A report with the same type and duration already exists for this site');
       }
 
-      // Get the reports queue URL from environment
-      const { REPORT_JOBS_QUEUE_URL: reportsQueueUrl } = env;
-      if (!hasText(reportsQueueUrl)) {
-        log.error('REPORT_JOBS_QUEUE_URL environment variable is not configured');
-        return internalServerError('Reports queue is not configured');
-      }
+      // Use the validated reports queue URL from environment
 
       // Create report data for the spacecat-shared Report model
       const reportData = {
@@ -320,7 +338,6 @@ function ReportsController(ctx, log, env) {
    * @return {Promise<Response>} Response containing all reports for the site.
    */
   const getAllReportsBySiteId = async (context) => {
-    const { S3_REPORT_BUCKET: bucketName } = env;
     const { siteId } = context.params;
 
     // Validate site ID
@@ -350,10 +367,14 @@ function ReportsController(ctx, log, env) {
           try {
             const rawReportKey = `${report.getRawStoragePath()}report.json`;
             const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
-            const rawPresignedUrlResult = await generatePresignedUrl(s3, bucketName, rawReportKey);
+            const rawPresignedUrlResult = await generatePresignedUrl(
+              s3,
+              s3ReportBucket,
+              rawReportKey,
+            );
             const mystiquePresignedUrlResult = await generatePresignedUrl(
               s3,
-              bucketName,
+              s3ReportBucket,
               mystiqueReportKey,
             );
             const presignedUrlObject = {
@@ -393,7 +414,6 @@ function ReportsController(ctx, log, env) {
    * @return {Promise<Response>} Response containing the report data.
    */
   const getReport = async (context) => {
-    const { S3_REPORT_BUCKET: bucketName } = env;
     const { siteId, reportId } = context.params;
 
     // Validate site ID
@@ -435,10 +455,10 @@ function ReportsController(ctx, log, env) {
 
       const rawReportKey = `${report.getRawStoragePath()}report.json`;
       const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
-      const rawPresignedUrlResult = await generatePresignedUrl(s3, bucketName, rawReportKey);
+      const rawPresignedUrlResult = await generatePresignedUrl(s3, s3ReportBucket, rawReportKey);
       const mystiquePresignedUrlResult = await generatePresignedUrl(
         s3,
-        bucketName,
+        s3ReportBucket,
         mystiqueReportKey,
       );
       const presignedUrlObject = {
@@ -469,7 +489,6 @@ function ReportsController(ctx, log, env) {
    */
   const deleteReport = async (context) => {
     const { siteId, reportId } = context.params;
-    const { S3_REPORT_BUCKET: bucketName, S3_MYSTIQUE_BUCKET: mystiqueBucketName } = env;
 
     // Validate site ID
     if (!isValidUUID(siteId)) {
@@ -511,8 +530,8 @@ function ReportsController(ctx, log, env) {
         try {
           // Delete both S3 files
           await Promise.all([
-            deleteS3Object(s3, bucketName, rawReportKey),
-            deleteS3Object(s3, mystiqueBucketName, mystiqueReportKey),
+            deleteS3Object(s3, s3ReportBucket, rawReportKey),
+            deleteS3Object(s3, s3MystiqueBucket, mystiqueReportKey),
           ]);
           log.info(`S3 files deleted for report ${reportId}: ${rawReportKey}, ${mystiqueReportKey}`);
         } catch (s3Error) {
@@ -549,7 +568,6 @@ function ReportsController(ctx, log, env) {
   const patchReport = async (context) => {
     const { siteId, reportId } = context.params;
     const { data } = context;
-    const { S3_MYSTIQUE_BUCKET: bucketName } = env;
 
     // Validate site ID
     if (!isValidUUID(siteId)) {
@@ -603,7 +621,7 @@ function ReportsController(ctx, log, env) {
       const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
 
       try {
-        await uploadS3Object(s3, bucketName, mystiqueReportKey, data);
+        await uploadS3Object(s3, s3MystiqueBucket, mystiqueReportKey, data);
         log.info(`Enhanced report updated successfully for report ${reportId} at key: ${mystiqueReportKey}`);
       } catch (s3Error) {
         log.error(`Failed to upload enhanced report to S3 for report ${reportId}: ${s3Error.message}`);
