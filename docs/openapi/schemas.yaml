@@ -3522,10 +3522,6 @@ Entitlement:
       description: The tier level of the entitlement
       type: string
       enum: [FREE_TRIAL, PAID]
-    status:
-      description: Current status of the entitlement
-      type: string
-      enum: [ACTIVE, SUSPENDED, ENDED]
     quotas:
       description: Usage quotas and limits for the entitlement
       type: object
@@ -3545,7 +3541,6 @@ Entitlement:
     organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
     productCode: "LLMO"
     tier: "FREE_TRIAL"
-    status: "ACTIVE"
     quotas:
       llmo_trial_prompts: 100
     createdAt: "2024-01-15T10:30:00Z"
@@ -3565,25 +3560,14 @@ SiteEnrollment:
     entitlementId:
       description: Reference to the entitlement this enrollment is based on
       $ref: '#/Id'
-    status:
-      description: Current status of the site enrollment
-      type: string
-      enum: [ACTIVE, INACTIVE, SUSPENDED]
-
     createdAt:
       description: When the site enrollment was created
-      $ref: '#/DateTime'
-    updatedAt:
-      description: When the site enrollment was last updated
       $ref: '#/DateTime'
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
     siteId: "987fcdeb-51a2-43d7-9876-543210987654"
     entitlementId: "456e4567-e89b-12d3-a456-426614174000"
-    status: "ACTIVE"
-
     createdAt: "2024-01-15T10:30:00Z"
-    updatedAt: "2024-01-15T10:30:00Z"
 
 TrialUser:
   type: object
@@ -3609,7 +3593,7 @@ TrialUser:
       description: Last name of the trial user
       type: string
       example: 'Doe'
-    externalId:
+    externalUserId:
       description: External user ID from the identity provider
       type: string
       example: '1234567890'
@@ -3645,7 +3629,7 @@ TrialUser:
     emailId: "user123@adobe.com"
     firstName: "John"
     lastName: "Doe"
-    externalId: "1234567890"
+    externalUserId: "1234567890"
     provider: "IMS"
     status: "ACTIVE"
     lastSeenAt: "2024-01-15T10:30:00Z"
@@ -3667,6 +3651,9 @@ TrialUserActivity:
       $ref: '#/Id'
     trialUserId:
       description: Reference to the trial user who performed the activity
+      $ref: '#/Id'
+    entitlementId:
+      description: Reference to the entitlement associated with this activity
       $ref: '#/Id'
     type:
       description: The type of activity performed
@@ -3692,6 +3679,7 @@ TrialUserActivity:
     id: "123e4567-e89b-12d3-a456-426614174000"
     siteId: "987fcdeb-51a2-43d7-9876-543210987654"
     trialUserId: "456e4567-e89b-12d3-a456-426614174000"
+    entitlementId: "789e4567-e89b-12d3-a456-426614174000"
     type: "SIGN_IN"
     details:
       browser: "Chrome"
@@ -3718,16 +3706,28 @@ OrganizationIdentityProvider:
       description: External ID from the identity provider
       type: string
       example: 'org123@adobe.com'
+    metadata:
+      description: Additional metadata for the organization identity provider
+      type: object
+      properties:
+        domain:
+          description: Domain associated with the identity provider
+          type: string
+          example: "adobe.com"
+        ssoEnabled:
+          description: Whether SSO is enabled for this provider
+          type: boolean
+          example: true
+      additionalProperties: true
     createdAt:
       description: When the identity provider mapping was created
-      $ref: '#/DateTime'
-    updatedAt:
-      description: When the identity provider mapping was last updated
       $ref: '#/DateTime'
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
     organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
     provider: "IMS"
     externalId: "org123@adobe.com"
+    metadata:
+      domain: "adobe.com"
+      ssoEnabled: true
     createdAt: "2024-01-15T10:30:00Z"
-    updatedAt: "2024-01-15T10:30:00Z"

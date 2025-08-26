@@ -106,7 +106,7 @@ paths:
   /organizations/{organizationId}/trial-users/{trialUserId}:
     $ref: './trial-users-api.yaml#/trial-user-by-organization'
   /organizations/{organizationId}/by-provider-and-externalid/{provider}/{externalId}:
-    $ref: './trial-users-api.yaml#/trial-user-by-provider-and-external-id'
+    $ref: './trial-users-api.yaml#/trial-user-by-provider-and-external-user-id'
   /organizations/llmo/trial-users:
     $ref: './trial-users-api.yaml#/all-trial-users'
   /organizations/llmo/invite:

@@ -305,9 +305,18 @@ provider:
     type: string
     example: 'IMS'
 
+externalUserId:
+  name: externalUserId
+  description: The external user ID from the identity provider
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'user123@adobe.com'
+
 externalId:
   name: externalId
-  description: The external user ID from the identity provider
+  description: The external ID from the identity provider
   in: path
   required: true
   schema:

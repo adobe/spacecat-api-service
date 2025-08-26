@@ -137,7 +137,7 @@ trial-user-by-organization:
     security:
       - ims_key: [ ]
 
-trial-user-by-provider-and-external-id:
+trial-user-by-provider-and-external-user-id:
   parameters:
     - $ref: './parameters.yaml#/organizationId'
     - $ref: './parameters.yaml#/provider'
