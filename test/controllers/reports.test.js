@@ -292,7 +292,7 @@ describe('ReportsController', () => {
       );
     });
 
-    it('should return bad request for duplicate report with same parameters', async () => {
+    it('should return conflict for duplicate report with same parameters', async () => {
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
@@ -330,15 +330,18 @@ describe('ReportsController', () => {
           endDate: '2024-12-31',
         }),
         getStatus: () => 'success',
+        getId: () => 'existing-report-id',
       };
 
       mockDataAccess.Report.allBySiteId = sinon.stub().resolves([existingReport]);
 
       const result = await reportsController.createReport(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(409);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site. Current status: success');
+      expect(responseBody.message).to.equal('Report already exists for site 123e4567-e89b-12d3-a456-426614174000 with the same parameters');
+      expect(responseBody.status).to.equal('success');
+      expect(responseBody.reportId).to.equal('existing-report-id');
     });
 
     it('should successfully create report when existing failed report has same parameters', async () => {
@@ -439,6 +442,7 @@ describe('ReportsController', () => {
             endDate: '2024-12-31',
           }),
           getStatus: () => 'success',
+          getId: () => 'existing-report-id',
         },
       ];
 
@@ -447,9 +451,11 @@ describe('ReportsController', () => {
       const result = await reportsController.createReport(context);
 
       // Should fail because there's a successful report with same parameters
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(409);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site. Current status: success');
+      expect(responseBody.message).to.equal('Report already exists for site 123e4567-e89b-12d3-a456-426614174000 with the same parameters');
+      expect(responseBody.status).to.equal('success');
+      expect(responseBody.reportId).to.exist;
     });
 
     it('should successfully create report when existing reports have different report types', async () => {
@@ -2087,15 +2093,18 @@ describe('ReportsController', () => {
           endDate: '2024-12-31',
         }),
         getStatus: () => 'success',
+        getId: () => 'existing-report-id',
       };
 
       mockDataAccess.Report.allBySiteId = sinon.stub().resolves([existingReport]);
 
       const result = await reportsController.createReport(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(409);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site. Current status: success');
+      expect(responseBody.message).to.equal('Report already exists for site 123e4567-e89b-12d3-a456-426614174000 with the same parameters');
+      expect(responseBody.status).to.equal('success');
+      expect(responseBody.reportId).to.equal('existing-report-id');
     });
 
     it('should correctly identify different start dates', async () => {
