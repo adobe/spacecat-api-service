@@ -338,7 +338,7 @@ describe('ReportsController', () => {
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site');
+      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site. Current status: success');
     });
 
     it('should successfully create report when existing failed report has same parameters', async () => {
@@ -449,7 +449,7 @@ describe('ReportsController', () => {
       // Should fail because there's a successful report with same parameters
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site');
+      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site. Current status: success');
     });
 
     it('should successfully create report when existing reports have different report types', async () => {
@@ -557,6 +557,57 @@ describe('ReportsController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Report type is required');
+    });
+
+    it('should successfully create report when existing failed report has same parameters', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'performance',
+          name: 'Test Report',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+        attributes: {
+          authInfo: {
+            profile: {
+              email: 'test@example.com',
+            },
+          },
+        },
+      };
+
+      // Mock existing failed report with same parameters
+      const existingReport = {
+        getReportType: () => 'performance',
+        getReportPeriod: () => ({
+          startDate: '2025-01-01',
+          endDate: '2025-01-31',
+        }),
+        getComparisonPeriod: () => ({
+          startDate: '2024-12-01',
+          endDate: '2024-12-31',
+        }),
+        getStatus: () => 'failed',
+      };
+
+      mockDataAccess.Report.allBySiteId = sinon.stub().resolves([existingReport]);
+
+      const result = await reportsController.createReport(context);
+
+      // Should succeed since failed reports are not considered duplicates
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Report generation job queued successfully');
+      expect(responseBody.reportType).to.equal('performance');
     });
 
     it('should return bad request for invalid report type', async () => {
@@ -2044,7 +2095,7 @@ describe('ReportsController', () => {
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site');
+      expect(responseBody.message).to.equal('A report with the same type and duration already exists for this site. Current status: success');
     });
 
     it('should correctly identify different start dates', async () => {

@@ -293,7 +293,8 @@ function ReportsController(ctx, log, env) {
 
       if (existingReport) {
         log.info(`Report already exists for site ${siteId} with the same parameters`);
-        return badRequest('A report with the same type and duration already exists for this site');
+        const existingStatus = existingReport.getStatus();
+        return badRequest(`A report with the same type and duration already exists for this site. Current status: ${existingStatus}`);
       }
 
       // Create report data for the spacecat-shared Report model
