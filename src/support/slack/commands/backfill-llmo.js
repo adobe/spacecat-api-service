@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -18,12 +18,21 @@ import {
 
 import BaseCommand from './base.js';
 
-const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
+const SUPPORTED_STREAMS = {
+  agentic: 'cdn-logs-report',
+  referral: null, // no-op for now
+};
 
-const PHRASES = ['run agentic-traffic-backfill'];
+const PHRASES = ['backfill-llmo'];
 
-async function triggerAgenticTrafficBackfill(context, configuration, siteId, weeks = 4) {
+async function triggerBackfill(context, configuration, siteId, streamType, weeks = 4) {
   const { log, sqs } = context;
+  const auditType = SUPPORTED_STREAMS[streamType];
+
+  /* c8 ignore next 3 */
+  if (!auditType) {
+    throw new Error(`Unsupported stream type: ${streamType}`);
+  }
 
   const weekOffsets = [];
   for (let i = 1; i <= weeks; i += 1) {
@@ -32,7 +41,7 @@ async function triggerAgenticTrafficBackfill(context, configuration, siteId, wee
 
   for (const week of weekOffsets) {
     const message = {
-      type: AGENTIC_TRAFFIC_REPORT_AUDIT,
+      type: auditType,
       siteId,
       auditContext: {
         weekOffset: week,
@@ -40,24 +49,24 @@ async function triggerAgenticTrafficBackfill(context, configuration, siteId, wee
     };
     // eslint-disable-next-line no-await-in-loop
     await sqs.sendMessage(configuration.getQueues().audits, message);
-    log.info(`Successfully triggered audit ${AGENTIC_TRAFFIC_REPORT_AUDIT} with message: ${JSON.stringify(message)}`);
+    log.info(`Successfully triggered ${streamType} backfill ${auditType} with message: ${JSON.stringify(message)}`);
   }
 }
 
 /**
- * Factory function to create the RunAgenticTrafficBackfillCommand object.
+ * Creates the BackfillLlmoCommand object.
  *
  * @param {Object} context - The context object.
- * @returns {RunAgenticTrafficBackfillCommand} - The RunAgenticTrafficBackfillCommand object.
+ * @returns {BackfillLlmoCommand} - The BackfillLlmoCommand object.
  * @constructor
  */
-function RunAgenticTrafficBackfillCommand(context) {
+function BackfillLlmoCommand(context) {
   const baseCommand = BaseCommand({
-    id: 'run-agentic-traffic-backfill',
-    name: 'Run Agentic Traffic Backfill',
-    description: 'Backfills agentic traffic for the last given number of weeks (max: 4 weeks).',
+    id: 'backfill-llmo',
+    name: 'Backfill LLMO',
+    description: 'Backfills LLMO streams for the last given number of weeks (max: 4 weeks).',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {baseURL} [weeks]`,
+    usageText: `${PHRASES[0]} {baseURL} {streamType} [weeks]`,
   });
 
   const {
@@ -66,9 +75,9 @@ function RunAgenticTrafficBackfillCommand(context) {
   const { Site, Configuration } = dataAccess;
 
   /**
-   * Handles agentic traffic backfill for a single site.
+   * Handles LLMO stream backfill for a single site.
    *
-   * @param {string[]} args - The args provided to the command ([baseURL, weeks]).
+   * @param {string[]} args - The args provided to the command ([baseURL, streamType, weeks]).
    * @param {Object} slackContext - The Slack context object.
    * @param {Function} slackContext.say - The Slack say function.
    * @returns {Promise} A promise that resolves when the operation is complete.
@@ -77,13 +86,14 @@ function RunAgenticTrafficBackfillCommand(context) {
     const { say } = slackContext;
 
     try {
-      if (args.length < 1) {
-        await say(':warning: Missing required arguments. Please provide: `baseURL`.');
+      if (args.length < 2) {
+        await say(':warning: Missing required arguments. Please provide: `baseURL` and `streamType`.');
         await say(`Usage: _${baseCommand.usage().replace('Usage: _', '').replace('_', '')}_`);
+        await say(`Supported stream types: ${Object.keys(SUPPORTED_STREAMS).join(', ')}`);
         return;
       }
 
-      const [baseURLInput, weeksInput] = args;
+      const [baseURLInput, streamType, weeksInput] = args;
       const weeks = weeksInput ? parseInt(weeksInput, 10) : 4;
 
       const baseURL = extractURLFromSlackInput(baseURLInput);
@@ -93,12 +103,17 @@ function RunAgenticTrafficBackfillCommand(context) {
         return;
       }
 
+      if (!SUPPORTED_STREAMS[streamType]) {
+        await say(`:warning: Unsupported stream type: ${streamType}. Supported types: ${Object.keys(SUPPORTED_STREAMS).join(', ')}`);
+        return;
+      }
+
       if (weeksInput && (Number.isNaN(weeks) || weeks < 1 || weeks > 4)) {
         await say(':warning: Please provide a valid number of weeks (1-4).');
         return;
       }
 
-      await say(`:gear: Starting agentic traffic backfill for site ${baseURL} (${weeks} weeks)...`);
+      await say(`:gear: Starting ${streamType} backfill for site ${baseURL} (${weeks} weeks)...`);
 
       const site = await Site.findByBaseURL(baseURL);
       if (!site) {
@@ -111,19 +126,20 @@ function RunAgenticTrafficBackfillCommand(context) {
 
       const configuration = await Configuration.findLatest();
 
-      await triggerAgenticTrafficBackfill(context, configuration, siteId, weeks);
+      await triggerBackfill(context, configuration, siteId, streamType, weeks);
 
-      const message = `:white_check_mark: *Agentic traffic backfill completed successfully!*
+      const message = `:white_check_mark: *${streamType.charAt(0).toUpperCase() + streamType.slice(1)} backfill triggered successfully!*
         
 :link: *Site:* ${baseURL}
 :identification_card: *Site ID:* ${siteId}
 :calendar: *Weeks:* ${weeks}
+:ocean: *Stream:* ${streamType}
 
-The agentic traffic backfill for the last ${weeks} week${weeks === 1 ? '' : 's'} has been triggered.`;
+The ${streamType} backfill for the last ${weeks} week${weeks === 1 ? '' : 's'} has been triggered.`;
 
       await say(message);
     } catch (error) {
-      log.error('Error in agentic traffic backfill:', error);
+      log.error('Error in LLMO backfill:', error);
       await postErrorMessage(say, error);
     }
   };
@@ -132,4 +148,4 @@ The agentic traffic backfill for the last ${weeks} week${weeks === 1 ? '' : 's'}
   return { ...baseCommand, handleExecution };
 }
 
-export default RunAgenticTrafficBackfillCommand;
+export default BackfillLlmoCommand;

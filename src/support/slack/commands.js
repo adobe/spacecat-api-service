@@ -30,7 +30,7 @@ import llmoOnboard from './commands/llmo-onboard.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
 import toggleSiteImport from './commands/toggle-site-import.js';
 import runTrafficAnalysisBackfill from './commands/run-traffic-analysis-backfill.js';
-import runAgenticTrafficBackfill from './commands/run-agentic-traffic-backfill.js';
+import backfillLlmo from './commands/backfill-llmo.js';
 
 /**
  * Returns all commands.
@@ -59,5 +59,5 @@ export default (context) => [
   llmoOnboard(context),
   setSiteOrganizationCommand(context),
   toggleSiteImport(context),
-  runAgenticTrafficBackfill(context),
+  backfillLlmo(context),
 ];
