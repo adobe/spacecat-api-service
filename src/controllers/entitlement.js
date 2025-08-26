@@ -68,7 +68,8 @@ function EntitlementController(ctx) {
         return forbidden('Only users belonging to the organization can view its entitlements');
       }
 
-      const entitlements = await Entitlement.findByOrganizationId(organizationId);
+      const entitlements = await Entitlement.allByOrganizationId(organizationId);
+
       const orgEntitlements = entitlements
         .map((entitlement) => EntitlementDto.toJSON(entitlement));
       return ok(orgEntitlements);

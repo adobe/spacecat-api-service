@@ -61,7 +61,7 @@ describe('Entitlement Controller', () => {
       findById: sandbox.stub().resolves(mockOrganization),
     },
     Entitlement: {
-      findByOrganizationId: sandbox.stub().resolves(mockEntitlements),
+      allByOrganizationId: sandbox.stub().resolves(mockEntitlements),
     },
   };
 
@@ -85,7 +85,7 @@ describe('Entitlement Controller', () => {
 
     // Reset stubs
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
-    mockDataAccess.Entitlement.findByOrganizationId = sandbox.stub().resolves(mockEntitlements);
+    mockDataAccess.Entitlement.allByOrganizationId = sandbox.stub().resolves(mockEntitlements);
     mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
 
     // Stub AccessControlUtil.fromContext
