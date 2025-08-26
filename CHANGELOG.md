@@ -1,3 +1,24 @@
+# [1.165.0](https://github.com/adobe/spacecat-api-service/compare/v1.164.7...v1.165.0) (2025-08-26)
+
+
+### Features
+
+* add slack command to backfill llmo reports ([#1196](https://github.com/adobe/spacecat-api-service/issues/1196)) ([84ffdf2](https://github.com/adobe/spacecat-api-service/commit/84ffdf280d5ec8e0f18694060727a214f5ef7a84))
+
+## [1.164.7](https://github.com/adobe/spacecat-api-service/compare/v1.164.6...v1.164.7) (2025-08-26)
+
+
+### Bug Fixes
+
+* improve aem detection logic ([#1177](https://github.com/adobe/spacecat-api-service/issues/1177)) ([699bb03](https://github.com/adobe/spacecat-api-service/commit/699bb0351edd64cc351e1c29a63c4d089ba3ea28))
+
+## [1.164.6](https://github.com/adobe/spacecat-api-service/compare/v1.164.5...v1.164.6) (2025-08-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.36.5 ([#1192](https://github.com/adobe/spacecat-api-service/issues/1192)) ([b0ee70d](https://github.com/adobe/spacecat-api-service/commit/b0ee70d65b20a7a129f59189cac0e0bc903c4121))
+
 ## [1.164.5](https://github.com/adobe/spacecat-api-service/compare/v1.164.4...v1.164.5) (2025-08-25)
 
 
