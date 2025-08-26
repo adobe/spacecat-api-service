@@ -94,6 +94,14 @@ export default class AccessControlUtil {
       const trialUser = await this.TrialUser.findByEmailId(this.authInfo.getProfile().trial_email);
       if (!isNonEmptyObject(trialUser)) {
         // create a trial user
+        await this.TrialUser.create({
+          emailId: this.authInfo.getProfile().trial_email,
+          organizationId: org.getId(),
+          status: this.TrialUser.STATUS.REGISTERED,
+          provider: this.authInfo.getProfile().provider,
+          externalUserId: this.authInfo.getProfile().email,
+          lastSeenAt: new Date().toISOString(),
+        });
       }
     }
   }
