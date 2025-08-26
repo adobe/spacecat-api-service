@@ -19,15 +19,17 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
+import AccessControlUtil from '../support/access-control-util.js';
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
-function LlmoController() {
+function LlmoController(ctx) {
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
     const { dataAccess } = context;
-    const { Site } = dataAccess;
+    const { Site, Entitlment } = dataAccess;
 
     const site = await Site.findById(siteId);
     const config = site.getConfig();
@@ -36,7 +38,7 @@ function LlmoController() {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-
+    accessControlUtil.hasAccess(site, '', Entitlment.PRODUCT_CODES.LLMO);
     return { site, config, llmoConfig };
   };
 

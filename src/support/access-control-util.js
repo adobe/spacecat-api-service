@@ -39,6 +39,8 @@ export default class AccessControlUtil {
   constructor(context) {
     const { log, pathInfo, attributes } = context;
     this.authInfo = attributes?.authInfo;
+    this.Entitlment = context.dataAccess.Entitlment;
+    this.TrialUser = context.dataAccess.TrialUser;
 
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
@@ -77,7 +79,26 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
-  async hasAccess(entity, subService = '') {
+  async validateEntitlement(org, productCode) {
+    const entitlement = await org.findByOrganizationIdAndProductCode(org.getId(), productCode);
+    if (!isNonEmptyObject(entitlement)) {
+      throw new Error('Missing entitlement for organization');
+    }
+    const validEntitlement = entitlement.find((ent) => ent.productCode === productCode && ent.tier);
+    if (!isNonEmptyObject(validEntitlement)) {
+      throw new Error(`[Error] No Entitlement for ${productCode}`);
+    }
+
+    if (validEntitlement.tier === this.Entitlment.TIER.FREE_TRIAL) {
+      // this trail_email need to be set in authInfo in IMS handlers
+      const trialUser = await this.TrialUser.findByEmailId(this.authInfo.getProfile().trial_email);
+      if (!isNonEmptyObject(trialUser)) {
+        // create a trial user
+      }
+    }
+  }
+
+  async hasAccess(entity, subService = '', productCode = '') {
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
@@ -99,6 +120,9 @@ export default class AccessControlUtil {
     }
 
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+    if (productCode.length > 0) {
+      await this.validateEntitlement(entity, productCode);
+    }
     if (subService.length > 0) {
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
     }
