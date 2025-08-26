@@ -1,3 +1,10 @@
+# [1.165.0](https://github.com/adobe/spacecat-api-service/compare/v1.164.7...v1.165.0) (2025-08-26)
+
+
+### Features
+
+* add slack command to backfill llmo reports ([#1196](https://github.com/adobe/spacecat-api-service/issues/1196)) ([84ffdf2](https://github.com/adobe/spacecat-api-service/commit/84ffdf280d5ec8e0f18694060727a214f5ef7a84))
+
 ## [1.164.7](https://github.com/adobe/spacecat-api-service/compare/v1.164.6...v1.164.7) (2025-08-26)
 
 
