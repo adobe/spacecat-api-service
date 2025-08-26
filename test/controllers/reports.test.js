@@ -559,6 +559,32 @@ describe('ReportsController', () => {
       expect(responseBody.message).to.equal('Report type is required');
     });
 
+    it('should return bad request for invalid report type', async () => {
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+        },
+        data: {
+          reportType: 'invalid-type',
+          name: 'Test Report',
+          reportPeriod: {
+            startDate: '2025-01-01',
+            endDate: '2025-01-31',
+          },
+          comparisonPeriod: {
+            startDate: '2024-12-01',
+            endDate: '2024-12-31',
+          },
+        },
+      };
+
+      const result = await reportsController.createReport(context);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Invalid report type. Valid types are: optimization, performance');
+    });
+
     it('should return bad request for missing report period', async () => {
       const context = {
         params: {

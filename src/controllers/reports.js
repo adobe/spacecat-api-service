@@ -30,6 +30,7 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { ReportDto } from '../dto/report.js';
 import { sendReportTriggerMessage } from '../support/utils.js';
+import { REPORT_TYPES } from '../utils/constants.js';
 
 /**
  * Validates a period object (reportPeriod or comparisonPeriod)
@@ -233,6 +234,12 @@ function ReportsController(ctx, log, env) {
     // Validate report type
     if (!hasText(reportType)) {
       return badRequest('Report type is required');
+    }
+
+    // Validate that report type is a valid enum value
+    const validReportTypes = Object.values(REPORT_TYPES);
+    if (!validReportTypes.includes(reportType)) {
+      return badRequest(`Invalid report type. Valid types are: ${validReportTypes.join(', ')}`);
     }
 
     // Validate report period
