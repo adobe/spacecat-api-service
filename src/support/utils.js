@@ -864,7 +864,7 @@ export const onboardSingleSite = async (
       imsOrgId: imsOrgID,
       organizationId,
       taskContext: {
-        profile: profileName, // Pass the profile name for demo check
+        profile: profileName,
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
