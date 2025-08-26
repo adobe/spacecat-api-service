@@ -235,7 +235,7 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
     auth: process.env.GITHUB_TOKEN,
   });
 
-  const owner = 'adobe';
+  const owner = 'hannessolo'; // TODO change to adobe instead of fork
   const repo = 'project-elmo-ui-data';
   const ref = 'main';
   const path = 'helix-query.yaml';
@@ -246,13 +246,13 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
   // add new config to end of file
-  const modifiedContent = `${content}
-
+  const modifiedContent = `${content}${content.endsWith('\n') ? '' : '\n'}
   ${dataFolder}:
     <<: *default
     include:
       - '/${dataFolder}/**'
-    target: /${dataFolder}/query-index.xlsx`;
+    target: /${dataFolder}/query-index.xlsx
+`;
 
   await octokit.repos.createOrUpdateFileContents({
     owner,
@@ -282,6 +282,9 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       await say(`:x: Site '${baseURL}' not found. Please add the site first using the regular onboard command.`);
       return;
     }
+
+    // check that provided IMS org matches
+    await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
 
     // upload and publish the query index file
     await copyFilesToSharepoint(dataFolder, lambdaCtx);
@@ -314,7 +317,6 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     configuration.enableHandlerForSite('geo-brand-presence', site);
 
     // enable the cdn-analysis only if no other site in this organization already has it enabled
-    await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
     const sitesInOrg = await Site.allByOrganizationId(imsOrgId);
 
     const hasAgenticTrafficEnabled = sitesInOrg.some(
