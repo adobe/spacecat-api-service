@@ -347,7 +347,7 @@ function ReportsController(ctx, log, env) {
       // Convert reports to JSON using the DTO, with presigned URLs for successful reports
       const reportsJson = await Promise.all(reports.map(async (report) => {
         // Only generate presigned URLs for successful reports
-        if (report.getStatus() === 'success') {
+        if (report.getStatus() === ReportModel.STATUSES.SUCCESS) {
           try {
             const rawReportKey = `${report.getRawStoragePath()}report.json`;
             const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
