@@ -67,7 +67,7 @@ function SiteEnrollmentController(ctx) {
         return forbidden('Access denied to this site');
       }
 
-      const siteEnrollments = await SiteEnrollment.findBySiteId(siteId);
+      const siteEnrollments = await SiteEnrollment.allBySiteId(siteId);
       const enrollments = siteEnrollments.map(
         (enrollment) => SiteEnrollmentDto.toJSON(enrollment),
       );

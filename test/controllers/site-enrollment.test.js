@@ -58,7 +58,7 @@ describe('Site Enrollment Controller', () => {
       findById: sandbox.stub().resolves(mockSite),
     },
     SiteEnrollment: {
-      findBySiteId: sandbox.stub().resolves(mockSiteEnrollments),
+      allBySiteId: sandbox.stub().resolves(mockSiteEnrollments),
     },
   };
 
@@ -82,7 +82,7 @@ describe('Site Enrollment Controller', () => {
 
     // Reset stubs
     mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
-    mockDataAccess.SiteEnrollment.findBySiteId = sandbox.stub().resolves(mockSiteEnrollments);
+    mockDataAccess.SiteEnrollment.allBySiteId = sandbox.stub().resolves(mockSiteEnrollments);
     mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
 
     // Stub AccessControlUtil.fromContext
