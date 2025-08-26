@@ -11,6 +11,7 @@
  */
 
 import { getLastNumberOfWeeks, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import {
   extractURLFromSlackInput,
@@ -21,6 +22,8 @@ import BaseCommand from './base.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
+const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
+const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
 
 const PHRASES = ['onboard-llmo'];
 
@@ -113,32 +116,42 @@ function LlmoOnboardCommand(context) {
 
       // Get current site config
       const siteConfig = site.getConfig();
-      const existingLlmoConfig = siteConfig.getLlmoConfig();
 
-      // Prepare LLMO config, preserving existing questions
-      const llmoConfig = {
-        dataFolder: dataFolder.trim(),
-        brand: brandName.trim(),
-        ...(existingLlmoConfig?.questions && { questions: existingLlmoConfig.questions }),
-      };
-
-      // Update the existing config object (similar to how onboard.js and llmo.js do it)
-      // We'll set the config as raw JSON data, which is how the existing APIs do it
-      const currentConfigData = siteConfig.toJSON ? siteConfig.toJSON() : /* c8 ignore next */ {};
-      const updatedConfigData = {
-        ...currentConfigData,
-        llmo: llmoConfig,
-      };
-
-      // Set the config directly as a plain object
-      site.setConfig(updatedConfigData);
+      // Update brand and data directory
+      siteConfig.updateLlmoBrand(brandName.trim());
+      siteConfig.updateLlmoDataFolder(dataFolder.trim());
 
       // enable the traffic-analysis import for referral-traffic
       siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
 
-      // enable the llmo-referral-traffic import for referral-traffic
+      // enable the llmo-prompts-ahrefs import
+      siteConfig.enableImport('llmo-prompts-ahrefs', { limit: 50 });
+
+      // update the site config object
+      site.setConfig(Config.toDynamoItem(siteConfig));
+
+      // enable all necessary handlers
       const configuration = await Configuration.findLatest();
       configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
+      configuration.enableHandlerForSite('geo-brand-presence', site);
+
+      // enable the cdn-analysis only if no other site in this organization already has it enabled
+      const organizationId = site.getOrganizationId();
+      const sitesInOrg = await Site.allByOrganizationId(organizationId);
+
+      const hasAgenticTrafficEnabled = sitesInOrg.some(
+        (orgSite) => configuration.isHandlerEnabledForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, orgSite),
+      );
+
+      if (!hasAgenticTrafficEnabled) {
+        log.info(`Enabling agentic traffic audits for organization ${organizationId} (first site in org)`);
+        configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
+      } else {
+        log.info(`Agentic traffic audits already enabled for organization ${organizationId}, skipping`);
+      }
+
+      // enable the cdn-logs-report audits for agentic traffic
+      configuration.enableHandlerForSite(AGENTIC_TRAFFIC_REPORT_AUDIT, site);
 
       try {
         await configuration.save();

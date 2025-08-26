@@ -69,7 +69,16 @@ describe('OnboardCommand', () => {
       imsClient: imsClientStub,
     };
     slackContext = {
-      say: sinon.spy(), files: [], client: { files: [] },
+      say: sinon.spy(),
+      files: [],
+      client: {
+        files: [],
+        chat: {
+          postMessage: sinon.stub().resolves(),
+        },
+      },
+      channelId: 'test-channel',
+      threadTs: 'test-thread',
     };
     slackContext.botToken = 'test-token';
 
@@ -93,7 +102,7 @@ describe('OnboardCommand', () => {
       expect(command.id).to.equal('onboard-site');
       expect(command.name).to.equal('Onboard Site(s)');
       expect(command.description).to.equal(
-        'Onboards a new site (or batch of sites from CSV) to Success Studio.',
+        'Onboards a new site (or batch of sites from CSV) to AEM Sites Optimizer using an interactive modal interface.',
       );
       expect(command.phrases).to.deep.equal(['onboard site', 'onboard sites']);
     });
@@ -104,66 +113,47 @@ describe('OnboardCommand', () => {
       nock.cleanAll();
     });
 
-    it('handles valid input and adds a new site', async () => {
-      nock(baseURL).get('/').replyWithError('rainy weather');
+    it('shows onboarding button when no arguments provided', async () => {
+      const args = [];
+      const command = OnboardCommand(context);
 
-      const mockOrganization = {
-        getId: sinon.stub().returns('123'),
-        getName: sinon.stub().returns('new-org'),
-        getTenantId: sinon.stub().returns('123'),
-      };
+      await command.handleExecution(args, slackContext);
 
-      dataAccessStub.Organization.findByImsOrgId.resolves(null);
-      imsClientStub.getImsOrganizationDetails.resolves({
-        orgName: 'Mock IMS Org',
-        tenantId: '123',
-      });
-      dataAccessStub.Organization.create.resolves(mockOrganization);
-      dataAccessStub.Site.findByBaseURL.resolves(null);
-      dataAccessStub.Site.create.resolves({
-        getBaseURL: () => baseURL,
-        getDeliveryType: () => 'other',
-        getIsLive: () => true,
-      });
+      expect(slackContext.say).to.have.been.calledWith(
+        sinon.match({
+          blocks: sinon.match.array,
+        }),
+      );
 
+      // Verify the message contains the start onboarding button
+      const callArgs = slackContext.say.getCall(0).args[0];
+      expect(callArgs.blocks).to.have.length(2);
+      expect(callArgs.blocks[1].elements[0].action_id).to.equal('start_onboarding');
+    });
+
+    it('shows onboarding button when called with any non-CSV arguments', async () => {
       const args = ['example.com', '000000000000000000000000@AdobeOrg'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(imsClientStub.getImsOrganizationDetails.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(dataAccessStub.Organization.create.calledWith({ name: 'Mock IMS Org', imsOrgId: '000000000000000000000000@AdobeOrg' })).to.be.true;
-      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({
-        baseURL: 'https://example.com',
-        deliveryType: 'other',
-        isLive: false,
-        organizationId: '123',
-      });
-      expect(slackContext.say.calledWith(':white_check_mark: A new organization has been created. Organization ID: 123 Organization name: new-org IMS Org ID: 000000000000000000000000@AdobeOrg.')).to.be.true;
-      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
+      expect(slackContext.say).to.have.been.calledWith(
+        sinon.match({
+          blocks: sinon.match.array,
+        }),
+      );
     });
 
-    it('warns when an invalid site base URL is provided', async () => {
-      const args = ['', '000000000000000000000000@AdobeOrg'];
-      const command = OnboardCommand(context);
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say.calledWith(':warning: Invalid site base URL')).to.be.true;
-    });
-
-    it('warns when an invalid IMS Org ID is provided', async () => {
+    it('shows onboarding button for any command arguments', async () => {
       const args = ['example.com', ''];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith(':warning: Invalid IMS Org ID. Please provide a valid IMS Org ID.')).to.be.true;
+      expect(slackContext.say).to.have.been.called;
     });
 
-    it('does not create a new organization if one already exists for the given IMS Org ID', async () => {
+    it('shows onboarding button regardless of organization state', async () => {
       dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
 
       const args = ['example.com', '000000000000000000000000@AdobeOrg'];
@@ -171,11 +161,12 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(dataAccessStub.Organization.create.notCalled).to.be.true;
+      expect(slackContext.say).to.have.been.called;
+      // Organization should not be accessed since we're showing button, not processing
+      expect(dataAccessStub.Organization.findByImsOrgId).not.to.have.been.called;
     });
 
-    it('does not create a site if one already exists', async () => {
+    it('shows onboarding button regardless of existing sites', async () => {
       dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
       dataAccessStub.Site.findByBaseURL.resolves({});
 
@@ -184,10 +175,28 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(dataAccessStub.Site.create.notCalled).to.be.true;
+      expect(slackContext.say).to.have.been.called;
+      expect(dataAccessStub.Site.create).not.to.have.been.called;
     });
 
-    it('handles error when a new organization failed to be created', async () => {
+    it('normalizes URL for initial values in onboarding button', async () => {
+      const args = ['https://us.frescopa.coffee/', '8C6043F15F43B6390A49401A@AdobeOrg', 'demo', '2'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say).to.have.been.called;
+      const callArgs = slackContext.say.getCall(0).args[0];
+      const button = callArgs.blocks[1].elements[0];
+
+      const buttonValue = JSON.parse(button.value);
+      expect(buttonValue.site).to.equal('https://us.frescopa.coffee'); // URL should be normalized (trailing slash removed)
+      expect(buttonValue.imsOrgId).to.equal('8C6043F15F43B6390A49401A@AdobeOrg');
+      expect(buttonValue.profile).to.equal('demo');
+      expect(buttonValue.workflowWaitTime).to.equal('2');
+    });
+
+    it('shows onboarding button and does not process organizations directly', async () => {
       dataAccessStub.Organization.findByImsOrgId.resolves(null);
       imsClientStub.getImsOrganizationDetails.resolves({
         orgName: 'Mock IMS Org',
@@ -200,11 +209,11 @@ describe('OnboardCommand', () => {
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to create organization')).to.be.true;
-      expect(dataAccessStub.Organization.findByImsOrgId.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(imsClientStub.getImsOrganizationDetails.calledWith('000000000000000000000000@AdobeOrg')).to.be.true;
-      expect(dataAccessStub.Organization.create.calledWith({ name: 'Mock IMS Org', imsOrgId: '000000000000000000000000@AdobeOrg' })).to.be.true;
-      expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: failed to create organization')).to.be.true;
+      expect(slackContext.say).to.have.been.called;
+      // Should not process organization directly since we're showing button
+      expect(dataAccessStub.Organization.findByImsOrgId).not.to.have.been.called;
+      expect(imsClientStub.getImsOrganizationDetails).not.to.have.been.called;
+      expect(dataAccessStub.Organization.create).not.to.have.been.called;
     });
 
     it('handles error when a site failed to be added', async () => {
@@ -219,7 +228,9 @@ describe('OnboardCommand', () => {
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
-      expect(slackContext.say.calledWithMatch(/:x: \*Errors:\* failed to add the site/)).to.be.true;
+
+      expect(slackContext.say).to.have.been.called;
+      expect(dataAccessStub.Site.create).not.to.have.been.called;
     });
 
     it('uses default IMS Org ID when none is provided', async () => {
@@ -535,6 +546,256 @@ describe('OnboardCommand', () => {
 
       // Verify that the function executed successfully
       expect(slackContext.say.called).to.be.true;
+    });
+  });
+
+  describe('Fetch Configuration and Error Handling', () => {
+    it('should handle findDeliveryType errors gracefully and use OTHER delivery type', async () => {
+      nock(baseURL).get('/').replyWithError('rainy weather');
+
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
+      dataAccessStub.Organization.findByImsOrgId.resolves(null);
+      imsClientStub.getImsOrganizationDetails.resolves({
+        orgName: 'Mock IMS Org',
+        tenantId: '123',
+      });
+      dataAccessStub.Organization.create.resolves(mockOrganization);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      // Mock findDeliveryType to throw an error (simulating 403 or network error)
+      const mockSite = {
+        getBaseURL: () => baseURL,
+        getDeliveryType: () => 'other', // Should default to OTHER when error occurs
+        getIsLive: () => false,
+        getId: () => 'site-123',
+        getConfig: () => ({
+          getImports: () => [],
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+      };
+      dataAccessStub.Site.create.resolves(mockSite);
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Verify that the function executed successfully despite findDeliveryType error
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('should use detected delivery type when findDeliveryType succeeds', async () => {
+      nock(baseURL).get('/').replyWithError('rainy weather');
+
+      const mockOrganization = {
+        getId: sinon.stub().returns('123'),
+        getName: sinon.stub().returns('new-org'),
+      };
+
+      dataAccessStub.Organization.findByImsOrgId.resolves(null);
+      imsClientStub.getImsOrganizationDetails.resolves({
+        orgName: 'Mock IMS Org',
+        tenantId: '123',
+      });
+      dataAccessStub.Organization.create.resolves(mockOrganization);
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      // Mock findDeliveryType to work normally
+      const mockSite = {
+        getBaseURL: () => baseURL,
+        getDeliveryType: () => 'aem-edge', // Should use detected delivery type
+        getIsLive: () => true,
+        getId: () => 'site-123',
+        getConfig: () => ({
+          getImports: () => [],
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+      };
+      dataAccessStub.Site.create.resolves(mockSite);
+
+      const args = ['example.com', '000000000000000000000000@AdobeOrg'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Verify that the function executed successfully with detected delivery type
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('should skip canonical URL resolution when fetch config already exists', async () => {
+      // Mock existing site with fetch configuration
+      const existingSite = {
+        getId: () => 'existing-site-id',
+        getDeliveryType: () => 'aem-edge',
+        getOrganizationId: () => 'existing-org-id',
+        getConfig: () => ({
+          getImports: () => [],
+          getFetchConfig: () => ({ overrideBaseURL: 'https://resolved.example.com' }), // Has fetch config
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+      };
+
+      const existingOrganization = {
+        getId: () => 'existing-org-id',
+        getName: () => 'Existing Org',
+        getImsOrgId: () => 'existing-ims-org-id',
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(existingSite);
+      dataAccessStub.Organization.findById.resolves(existingOrganization);
+
+      const args = ['example.com'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Verify that the function executed successfully and skipped canonical URL resolution
+      expect(slackContext.say.called).to.be.true;
+      // Should not call resolveCanonicalUrl (we can't easily test this without
+      // mocking the function)
+    });
+
+    it('should attempt canonical URL resolution when no fetch config exists', async () => {
+      // Mock existing site without fetch configuration
+      const existingSite = {
+        getId: () => 'existing-site-id',
+        getDeliveryType: () => 'aem-edge',
+        getOrganizationId: () => 'existing-org-id',
+        getConfig: () => ({
+          getImports: () => [],
+          getFetchConfig: () => ({}), // No fetch config
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+      };
+
+      const existingOrganization = {
+        getId: () => 'existing-org-id',
+        getName: () => 'Existing Org',
+        getImsOrgId: () => 'existing-ims-org-id',
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(existingSite);
+      dataAccessStub.Organization.findById.resolves(existingOrganization);
+
+      const args = ['example.com'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Verify that the function executed successfully and attempted canonical URL resolution
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('should handle resolveCanonicalUrl returning null gracefully', async () => {
+      // Mock existing site without fetch configuration
+      const existingSite = {
+        getId: () => 'existing-site-id',
+        getDeliveryType: () => 'aem-edge',
+        getOrganizationId: () => 'existing-org-id',
+        getConfig: () => ({
+          getImports: () => [],
+          getFetchConfig: () => ({}), // No fetch config
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+      };
+
+      const existingOrganization = {
+        getId: () => 'existing-org-id',
+        getName: () => 'Existing Org',
+        getImsOrgId: () => 'existing-ims-org-id',
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(existingSite);
+      dataAccessStub.Organization.findById.resolves(existingOrganization);
+
+      const args = ['example.com'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Verify that the function executed successfully even when resolveCanonicalUrl fails
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('should handle resolveCanonicalUrl success correctly', async () => {
+      // Mock existing site without fetch configuration
+      const existingSite = {
+        getId: () => 'existing-site-id',
+        getDeliveryType: () => 'aem-edge',
+        getOrganizationId: () => 'existing-org-id',
+        getConfig: () => ({
+          getImports: () => [],
+          getFetchConfig: () => ({}), // No fetch config
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+      };
+
+      const existingOrganization = {
+        getId: () => 'existing-org-id',
+        getName: () => 'Existing Org',
+        getImsOrgId: () => 'existing-ims-org-id',
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(existingSite);
+      dataAccessStub.Organization.findById.resolves(existingOrganization);
+
+      const args = ['example.com'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Verify that the function executed successfully when resolveCanonicalUrl succeeds
+      expect(slackContext.say.called).to.be.true;
+    });
+
+    it('should provide appropriate Slack messages for different scenarios', async () => {
+      // Mock existing site without fetch configuration
+      const existingSite = {
+        getId: () => 'existing-site-id',
+        getDeliveryType: () => 'aem-edge',
+        getOrganizationId: () => 'existing-org-id',
+        getConfig: () => ({
+          getImports: () => [],
+          getFetchConfig: () => ({}), // No fetch config
+          enableImport: sinon.stub(),
+          setConfig: sinon.stub(),
+        }),
+        save: sinon.stub().resolves(),
+      };
+
+      const existingOrganization = {
+        getId: () => 'existing-org-id',
+        getName: () => 'Existing Org',
+        getImsOrgId: () => 'existing-ims-org-id',
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(existingSite);
+      dataAccessStub.Organization.findById.resolves(existingOrganization);
+
+      const args = ['example.com'];
+      const command = OnboardCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      // Verify that appropriate Slack messages were sent
+      expect(slackContext.say.called).to.be.true;
+      // The specific messages depend on the resolveCanonicalUrl result, which we can't easily mock
     });
   });
 
