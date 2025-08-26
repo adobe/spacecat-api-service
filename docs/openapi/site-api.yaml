@@ -243,7 +243,6 @@ site-reports:
                   description: Error message describing the server error
                   example: "Failed to get reports: [specific error message]"
     security:
-      - api_key: [ ]
       - ims_key: [ ]
       - scoped_api_key: [ ]
   post:
@@ -268,7 +267,7 @@ site-reports:
             properties:
               reportType:
                 type: string
-                enum: [performance, accessibility, seo, security, conversion, cwv, optimization]
+                enum: [optimization, performance]
                 description: The type of report to generate
                 example: 'performance'
               name:
@@ -355,7 +354,7 @@ site-reports:
               jobId: "550e8400-e29b-41d4-a716-446655440001"
               timestamp: "2024-01-15T10:30:00Z"
       '400':
-        description: Bad request - validation errors or duplicate report
+        description: Bad request - validation errors
         content:
           application/json:
             schema:
@@ -369,6 +368,7 @@ site-reports:
                     - "Request data is required"
                     - "Report name is required"
                     - "Report type is required"
+                    - "Invalid report type. Valid types are: optimization, performance"
                     - "Report period is required"
                     - "Report period start date is required"
                     - "Report period end date is required"
@@ -385,7 +385,26 @@ site-reports:
                     - "Comparison period start date is not a valid date"
                     - "Comparison period end date is not a valid date"
                     - "Comparison period start date must be less than or equal to end date"
-                    - "A report with the same type and duration already exists for this site"
+      '409':
+        description: Conflict - duplicate report exists
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the conflict
+                  example: "Report already exists for site 550e8400-e29b-41d4-a716-446655440000 with the same parameters"
+                status:
+                  type: string
+                  description: Current status of the existing report
+                  example: "success"
+                reportId:
+                  type: string
+                  format: uuid
+                  description: ID of the existing report
+                  example: "550e8400-e29b-41d4-a716-446655440001"
       '401':
         $ref: './responses.yaml#/401'
       '403':
@@ -410,7 +429,6 @@ site-reports:
                     - "Failed to create report job: SQS error"
                     - "Failed to create report job: [specific error message]"
     security:
-      - api_key: [ ]
       - ims_key: [ ]
       - scoped_api_key: [ ]
 
@@ -461,7 +479,7 @@ site-report:
                 mystiquePresignedUrl: "https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=..."
                 mystiquePresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
       '400':
-        description: Bad request - validation errors or report not ready
+        description: Bad request - validation errors
         content:
           application/json:
             schema:
@@ -473,8 +491,18 @@ site-report:
                   examples:
                     - "Valid site ID is required"
                     - "Valid report ID is required"
-                    - "Report is still processing."
                     - "Report does not belong to the specified site"
+      '409':
+        description: Conflict - report is still processing
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message
+                  example: "Report is still processing."
       '401':
         $ref: './responses.yaml#/401'
       '403':
@@ -499,7 +527,6 @@ site-report:
                   description: Error message describing the server error
                   example: "Failed to get report: [specific error message]"
     security:
-      - api_key: [ ]
       - ims_key: [ ]
       - scoped_api_key: [ ]
   patch:
@@ -539,7 +566,7 @@ site-report:
               properties:
                 message:
                   type: string
-                  example: "Enhanced report data updated successfully"
+                  example: "Enhanced report updated successfully"
                 siteId:
                   type: string
                   format: uuid
@@ -551,12 +578,12 @@ site-report:
                   format: date-time
                   description: Timestamp when the report was updated
             example:
-              message: "Enhanced report data updated successfully"
+              message: "Enhanced report updated successfully"
               siteId: "550e8400-e29b-41d4-a716-446655440000"
               reportId: "550e8400-e29b-41d4-a716-446655440001"
               updatedAt: "2024-01-15T11:45:00Z"
       '400':
-        description: Bad request - validation errors or report not ready
+        description: Bad request - validation errors
         content:
           application/json:
             schema:
@@ -598,7 +625,6 @@ site-report:
                     - "Failed to update report in S3: [specific S3 error message]"
                     - "Failed to update report: [specific error message]"
     security:
-      - api_key: [ ]
       - ims_key: [ ]
       - scoped_api_key: [ ]
   delete:
@@ -665,6 +691,5 @@ site-report:
                   description: Error message describing the server error
                   example: "Failed to delete report: [specific error message]"
     security:
-      - api_key: [ ]
       - ims_key: [ ]
       - scoped_api_key: [ ]
