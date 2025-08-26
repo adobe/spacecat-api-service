@@ -174,6 +174,7 @@ describe('ReportsController', () => {
     mockEnv = {
       REPORT_JOBS_QUEUE_URL: 'https://sqs.test.com/report-jobs-queue',
       S3_REPORT_BUCKET: 'test-bucket',
+      S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
     };
 
     mockSite = {
@@ -1372,7 +1373,7 @@ describe('ReportsController', () => {
         Key: rawReportKey,
       });
       expect(deleteCommands[1].args[0]).to.deep.include({
-        Bucket: 'test-bucket',
+        Bucket: 'test-mystique-bucket',
         Key: mystiqueReportKey,
       });
 
@@ -1561,7 +1562,7 @@ describe('ReportsController', () => {
       const mystiqueReportKey = 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/enhanced/report.json';
 
       expect(putCommand).to.deep.include({
-        Bucket: 'test-bucket',
+        Bucket: 'test-mystique-bucket',
         Key: mystiqueReportKey,
         ContentType: 'application/json',
       });

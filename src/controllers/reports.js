@@ -470,7 +470,7 @@ function ReportsController(ctx, log, env) {
    */
   const deleteReport = async (context) => {
     const { siteId, reportId } = context.params;
-    const { S3_REPORT_BUCKET: bucketName } = env;
+    const { S3_REPORT_BUCKET: bucketName, S3_MYSTIQUE_BUCKET: mystiqueBucketName } = env;
 
     // Validate site ID
     if (!isValidUUID(siteId)) {
@@ -513,7 +513,7 @@ function ReportsController(ctx, log, env) {
           // Delete both S3 files
           await Promise.all([
             deleteS3Object(s3, bucketName, rawReportKey),
-            deleteS3Object(s3, bucketName, mystiqueReportKey),
+            deleteS3Object(s3, mystiqueBucketName, mystiqueReportKey),
           ]);
           log.info(`S3 files deleted for report ${reportId}: ${rawReportKey}, ${mystiqueReportKey}`);
         } catch (s3Error) {
@@ -550,7 +550,7 @@ function ReportsController(ctx, log, env) {
   const patchReport = async (context) => {
     const { siteId, reportId } = context.params;
     const { data } = context;
-    const { S3_REPORT_BUCKET: bucketName } = env;
+    const { S3_MYSTIQUE_BUCKET: bucketName } = env;
 
     // Validate site ID
     if (!isValidUUID(siteId)) {

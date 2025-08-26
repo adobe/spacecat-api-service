@@ -3570,18 +3570,28 @@ Report:
       example: 'user@adobe.com'
     data:
       type: object
-      description: Optional data containing presigned URLs for downloading reports
+      description: Optional data containing presigned URLs for downloading reports (only present for successful reports)
       properties:
         rawPresignedUrl:
           type: string
           format: uri
           description: Presigned URL for downloading the raw report data
           example: 'https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=...'
+        rawPresignedUrlExpiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the raw report presigned URL
+          example: '2024-01-22T10:30:00Z'
         mystiquePresignedUrl:
           type: string
           format: uri
           description: Presigned URL for downloading the enhanced report with AI insights
           example: 'https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=...'
+        mystiquePresignedUrlExpiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the enhanced report presigned URL
+          example: '2024-01-22T10:30:00Z'
       additionalProperties: false
   required: [id, siteId, reportType, status, reportPeriod, createdAt, updatedAt]
   additionalProperties: false

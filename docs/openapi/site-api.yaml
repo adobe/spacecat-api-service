@@ -191,7 +191,9 @@ site-reports:
                     updatedBy: "user@example.com"
                     data:
                       rawPresignedUrl: "https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=..."
+                      rawPresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
                       mystiquePresignedUrl: "https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=..."
+                      mystiquePresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
                   - id: "550e8400-e29b-41d4-a716-446655440002"
                     siteId: "550e8400-e29b-41d4-a716-446655440000"
                     reportType: "seo"
@@ -207,7 +209,16 @@ site-reports:
                     updatedAt: "2024-02-15T10:30:00Z"
                     updatedBy: "user@example.com"
       '400':
-        $ref: './responses.yaml#/400-no-site-id'
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the validation failure
+                  example: "Valid site ID is required"
       '401':
         $ref: './responses.yaml#/401'
       '403':
@@ -216,9 +227,21 @@ site-reports:
           X-Error:
             $ref: './headers.yaml#/xError'
       '404':
-        $ref: './responses.yaml#/404-site-not-found-with-id'
+        description: Site or report not found
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
-        $ref: './responses.yaml#/500'
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  example: "Failed to get reports: [specific error message]"
     security:
       - api_key: [ ]
       - ims_key: [ ]
@@ -239,6 +262,7 @@ site-reports:
             type: object
             required:
               - reportType
+              - name
               - reportPeriod
               - comparisonPeriod
             properties:
@@ -247,6 +271,10 @@ site-reports:
                 enum: [performance, accessibility, seo, security, conversion, cwv, optimization]
                 description: The type of report to generate
                 example: 'performance'
+              name:
+                type: string
+                description: The name of the report (required)
+                example: 'Hersheyland'
               reportPeriod:
                 type: object
                 required:
@@ -255,12 +283,14 @@ site-reports:
                 properties:
                   startDate:
                     type: string
-                    format: date
-                    description: Start date for the report period
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    description: Start date for the report period in YYYY-MM-DD format
+                    example: "2024-01-01"
                   endDate:
                     type: string
-                    format: date
-                    description: End date for the report period
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    description: End date for the report period in YYYY-MM-DD format
+                    example: "2024-01-31"
               comparisonPeriod:
                 type: object
                 required:
@@ -269,14 +299,17 @@ site-reports:
                 properties:
                   startDate:
                     type: string
-                    format: date
-                    description: Start date for comparison period
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    description: Start date for comparison period in YYYY-MM-DD format
+                    example: "2023-12-01"
                   endDate:
                     type: string
-                    format: date
-                    description: End date for comparison period
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    description: End date for comparison period in YYYY-MM-DD format
+                    example: "2023-12-31"
             example:
               reportType: "performance"
+              name: "Hersheyland"
               reportPeriod:
                 startDate: "2024-01-01"
                 endDate: "2024-01-31"
@@ -314,6 +347,13 @@ site-reports:
                   type: string
                   format: date-time
                   description: Timestamp when the job was created
+            example:
+              message: "Report generation job queued successfully"
+              siteId: "550e8400-e29b-41d4-a716-446655440000"
+              reportType: "performance"
+              status: "processing"
+              jobId: "550e8400-e29b-41d4-a716-446655440001"
+              timestamp: "2024-01-15T10:30:00Z"
       '400':
         description: Bad request - validation errors or duplicate report
         content:
@@ -326,14 +366,25 @@ site-reports:
                   description: Error message describing the validation failure
                   examples:
                     - "Valid site ID is required"
+                    - "Request data is required"
+                    - "Report name is required"
                     - "Report type is required"
                     - "Report period is required"
                     - "Report period start date is required"
                     - "Report period end date is required"
+                    - "Report period start date must be in YYYY-MM-DD format"
+                    - "Report period end date must be in YYYY-MM-DD format"
+                    - "Report period start date is not a valid date"
+                    - "Report period end date is not a valid date"
+                    - "Report period start date must be less than or equal to end date"
                     - "Comparison period is required"
                     - "Comparison period start date is required"
                     - "Comparison period end date is required"
-                    - "Request data is required"
+                    - "Comparison period start date must be in YYYY-MM-DD format"
+                    - "Comparison period end date must be in YYYY-MM-DD format"
+                    - "Comparison period start date is not a valid date"
+                    - "Comparison period end date is not a valid date"
+                    - "Comparison period start date must be less than or equal to end date"
                     - "A report with the same type and duration already exists for this site"
       '401':
         $ref: './responses.yaml#/401'
@@ -357,6 +408,7 @@ site-reports:
                   examples:
                     - "Reports queue is not configured"
                     - "Failed to create report job: SQS error"
+                    - "Failed to create report job: [specific error message]"
     security:
       - api_key: [ ]
       - ims_key: [ ]
@@ -405,7 +457,9 @@ site-report:
               updatedBy: "user@example.com"
               data:
                 rawPresignedUrl: "https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=..."
+                rawPresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
                 mystiquePresignedUrl: "https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=..."
+                mystiquePresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
       '400':
         description: Bad request - validation errors or report not ready
         content:
@@ -429,17 +483,21 @@ site-report:
           X-Error:
             $ref: './headers.yaml#/xError'
       '404':
-        description: Report not found
+        description: Site or report not found
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        description: Internal server error
         content:
           application/json:
             schema:
               type: object
               properties:
-                error:
+                message:
                   type: string
-                  example: "Report not found"
-      '500':
-        $ref: './responses.yaml#/500'
+                  description: Error message describing the server error
+                  example: "Failed to get report: [specific error message]"
     security:
       - api_key: [ ]
       - ims_key: [ ]
@@ -488,6 +546,15 @@ site-report:
                 reportId:
                   type: string
                   format: uuid
+                updatedAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp when the report was updated
+            example:
+              message: "Enhanced report data updated successfully"
+              siteId: "550e8400-e29b-41d4-a716-446655440000"
+              reportId: "550e8400-e29b-41d4-a716-446655440001"
+              updatedAt: "2024-01-15T11:45:00Z"
       '400':
         description: Bad request - validation errors or report not ready
         content:
@@ -501,8 +568,10 @@ site-report:
                   examples:
                     - "Valid site ID is required"
                     - "Valid report ID is required"
-                    - "Report does not have a valid storage path"
                     - "Request data is required"
+                    - "Report does not belong to the specified site"
+                    - "Can only update reports that are in success status"
+                    - "Report does not have a valid storage path"
       '401':
         $ref: './responses.yaml#/401'
       '403':
@@ -511,17 +580,12 @@ site-report:
           X-Error:
             $ref: './headers.yaml#/xError'
       '404':
-        description: Report not found
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  example: "Report not found"
+        description: Site or report not found
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
       '500':
-        description: Internal server error - S3 operation failed
+        description: Internal server error
         content:
           application/json:
             schema:
@@ -531,7 +595,8 @@ site-report:
                   type: string
                   description: Error message describing the server error
                   examples:
-                    - "Failed to update enhanced report data: S3 error"
+                    - "Failed to update report in S3: [specific S3 error message]"
+                    - "Failed to update report: [specific error message]"
     security:
       - api_key: [ ]
       - ims_key: [ ]
@@ -563,7 +628,19 @@ site-report:
                   type: string
                   format: uuid
       '400':
-        $ref: './responses.yaml#/400'
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the validation failure
+                  examples:
+                    - "Valid site ID is required"
+                    - "Valid report ID is required"
+                    - "Report does not belong to the specified site"
       '401':
         $ref: './responses.yaml#/401'
       '403':
@@ -572,17 +649,21 @@ site-report:
           X-Error:
             $ref: './headers.yaml#/xError'
       '404':
-        description: Report not found
+        description: Site or report not found
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        description: Internal server error
         content:
           application/json:
             schema:
               type: object
               properties:
-                error:
+                message:
                   type: string
-                  example: "Report not found"
-      '500':
-        $ref: './responses.yaml#/500'
+                  description: Error message describing the server error
+                  example: "Failed to delete report: [specific error message]"
     security:
       - api_key: [ ]
       - ims_key: [ ]
