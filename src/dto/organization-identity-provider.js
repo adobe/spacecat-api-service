@@ -24,8 +24,7 @@ export const OrganizationIdentityProviderDto = {
    *   metadata: any,
    *   provider: string,
    *   externalId: string,
-   *   createdAt: string,
-   *   updatedAt: string
+   *   createdAt: string
    * }}
    */
   toJSON: (organizationIdentityProvider) => ({
@@ -35,6 +34,5 @@ export const OrganizationIdentityProviderDto = {
     provider: organizationIdentityProvider.getProvider(),
     externalId: organizationIdentityProvider.getExternalId(),
     createdAt: organizationIdentityProvider.getCreatedAt(),
-    updatedAt: organizationIdentityProvider.getUpdatedAt(),
   }),
 };

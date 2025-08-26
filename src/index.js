@@ -130,14 +130,11 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
-    const organizationIdentityProviderController = OrganizationIdentityProviderController(
-      context,
-      context.env,
-    );
-    const userActivityController = UserActivityController(context, context.env);
-    const siteEnrollmentController = SiteEnrollmentController(context, context.env);
-    const trialUserController = TrialUserController(context, context.env);
-    const entitlementController = EntitlementController(context, context.env);
+    const organizationIdentityProviderController = OrganizationIdentityProviderController(context);
+    const userActivityController = UserActivityController(context);
+    const siteEnrollmentController = SiteEnrollmentController(context);
+    const trialUserController = TrialUserController(context);
+    const entitlementController = EntitlementController(context);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
@@ -193,7 +190,6 @@ async function run(request, context) {
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
-
       context.params = params;
 
       return await handler(context);

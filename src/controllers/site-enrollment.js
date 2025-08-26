@@ -41,7 +41,7 @@ function SiteEnrollmentController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { SiteEnrollment } = dataAccess;
+  const { SiteEnrollment, Site } = dataAccess;
 
   /**
    * Gets site enrollments by site ID.
@@ -57,7 +57,6 @@ function SiteEnrollmentController(ctx) {
 
     try {
       // Check if user has access to the site
-      const { Site } = dataAccess;
       const site = await Site.findById(siteId);
       if (!site) {
         return notFound('Site not found');

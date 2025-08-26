@@ -254,22 +254,12 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
-
-    // Organization Identity Provider Routes
     'GET /organizations/:organizationId/organization-identity-provider': organizationIdentityProviderController.getByOrganizationID,
-
-    // User Activity Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
     'POST /sites/:siteId/user-activities/': userActivityController.createTrialUserActivity,
-
-    // Site Enrollment Routes
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
-
-    // Trial User Routes
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserInvite,
-
-    // Entitlement Routes
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
   };
 

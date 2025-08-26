@@ -50,7 +50,7 @@ function OrganizationIdentityProviderController(ctx) {
    * @returns {Promise<Response>} Array of organization identity providers response.
    */
   const getByOrganizationID = async (context) => {
-    const organizationId = context.params?.organizationId;
+    const { organizationId } = context.params;
 
     if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');

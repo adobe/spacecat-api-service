@@ -28,7 +28,7 @@ import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
- * TrialUser controller. Provides methods to read trial users.
+ * TrialUser controller. Provides methods to read and create trial users.
  * @param {object} ctx - Context of the request.
  * @returns {object} TrialUser controller.
  * @constructor
