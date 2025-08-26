@@ -1,3 +1,10 @@
+## [1.164.7](https://github.com/adobe/spacecat-api-service/compare/v1.164.6...v1.164.7) (2025-08-26)
+
+
+### Bug Fixes
+
+* improve aem detection logic ([#1177](https://github.com/adobe/spacecat-api-service/issues/1177)) ([699bb03](https://github.com/adobe/spacecat-api-service/commit/699bb0351edd64cc351e1c29a63c4d089ba3ea28))
+
 ## [1.164.6](https://github.com/adobe/spacecat-api-service/compare/v1.164.5...v1.164.6) (2025-08-25)
 
 
