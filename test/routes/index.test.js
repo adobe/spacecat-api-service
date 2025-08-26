@@ -203,11 +203,11 @@ describe('getRouteHandlers', () => {
 
   const mockSiteEnrollmentController = {
     getBySiteID: () => null,
-    getBySiteIDAndID: () => null,
   };
 
   const mockTrialUserController = {
     getByOrganizationID: () => null,
+    createTrialUserInvite: () => null,
   };
 
   const mockEntitlementController = {
@@ -388,7 +388,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/page-type-device',
       'GET /sites/:siteId/traffic/paid/page-type-campaign',
       'GET /sites/:siteId/traffic/paid/page-type-platform',
-      'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device',
+      'GET /sites/:siteId/traffic/paid/page-type-platform-device',
       'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device',

@@ -193,22 +193,7 @@ async function run(request, context) {
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
-      if (params.organizationIdentityProviderId
-        && !isValidUUIDV4(params.organizationIdentityProviderId)) {
-        return badRequest('Organization Identity Provider Id is invalid. Please provide a valid UUID.');
-      }
-      if (params.userActivityId && !isValidUUIDV4(params.userActivityId)) {
-        return badRequest('User Activity Id is invalid. Please provide a valid UUID.');
-      }
-      if (params.siteEnrollmentId && !isValidUUIDV4(params.siteEnrollmentId)) {
-        return badRequest('Site Enrollment Id is invalid. Please provide a valid UUID.');
-      }
-      if (params.trialUserId && !isValidUUIDV4(params.trialUserId)) {
-        return badRequest('Trial User Id is invalid. Please provide a valid UUID.');
-      }
-      if (params.entitlementId && !isValidUUIDV4(params.entitlementId)) {
-        return badRequest('Entitlement Id is invalid. Please provide a valid UUID.');
-      }
+
       context.params = params;
 
       return await handler(context);
