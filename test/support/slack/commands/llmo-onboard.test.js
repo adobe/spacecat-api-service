@@ -152,7 +152,7 @@ describe('LlmoOnboardCommand', () => {
       expect(mockConfig.enableImport).to.have.been.calledWith('traffic-analysis');
 
       // enable llmo-prompts-ahrefs import on the site confing
-      expect(mockConfig.enableImport).calledWith('llmo-prompts-ahrefs', { limit: 25 });
+      expect(mockConfig.enableImport).calledWith('llmo-prompts-ahrefs', { limit: 50 });
       // check organization sites for existing agentic traffic config
       expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith('test-org-id');
 

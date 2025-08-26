@@ -1805,6 +1805,10 @@ ScrapeOptions:
               - 'section'
               - 'block'
               - 'scroll'
+        rejectRedirects:
+          description: Whether to reject redirects
+          type: boolean
+          default: true
   example:
     pageLoadTimeout: 200
     enableJavascript: true
@@ -1819,6 +1823,11 @@ ScrapeRequest:
       description: The name of the scrape handler to use.
       type: string
       default: 'default'
+    maxScrapeAge:
+      description: The maximum age of a scrape in hours. Providing the value of 0 will result in forcing the scrape (disabling this caching feature)
+      type: integer
+      minimum: 0
+      default: 24
     options:
       description: Optional configuration params, defined as a JSON object
       $ref: '#/ScrapeOptions'
@@ -3443,6 +3452,35 @@ LlmoCustomerIntentUpdate:
       example: 'enterprise customers'
   additionalProperties: false
 
+LlmoCdnLogsFilter:
+  type: array
+  description: Array of CDN logs filter items
+  items:
+    type: object
+    required:
+      - key
+      - value
+    properties:
+      key:
+        type: string
+        example: 'host'
+      value:
+        type: array
+        items:
+          type: string
+        example: ['example.com', 'abc.com']
+      type:
+        type: string
+        enum: ['include', 'exclude']
+        example: 'include'
+  example:
+    - key: 'host'
+      value: ['example.com', 'abc.com']
+      type: 'include'
+    - key: 'status'
+      value: ['404', '500']
+      type: 'exclude'
+
 LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
@@ -3464,4 +3502,7 @@ LlmoConfig:
     customerIntent:
       description: The customer intent configuration containing key-value pairs
       $ref: '#/LlmoCustomerIntent'
+    cdnlogsFilter:
+      description: The CDN logs filter configuration for filtering log entries
+      $ref: '#/LlmoCdnLogsFilter'
   additionalProperties: false
