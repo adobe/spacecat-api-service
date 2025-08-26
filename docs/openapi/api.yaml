@@ -51,6 +51,8 @@ tags:
     description: APIs for taking and retrieving webpage screenshots, specifically for consent banner analysis
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: cdn-logs-infrastructure
+    description: APIs for CDN logs infrastructure management
 
 paths:
   /audits/latest/{auditType}:
@@ -235,6 +237,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-customer-intent-item'
   /sites/{siteId}/llmo/cdn-logs-filter:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-filter'
+  /cdn-logs-infrastructure/provision:
+    $ref: './tools-api.yaml#/cdn-logs-infrastructure-provision'
 
 components:
   securitySchemes:
