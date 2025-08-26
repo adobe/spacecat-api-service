@@ -51,8 +51,10 @@ describe('ReportsController', () => {
       },
     },
     attributes: {
-      user: {
-        email: 'test@example.com',
+      authInfo: {
+        profile: {
+          email: 'test@example.com',
+        },
       },
     },
   });
@@ -232,8 +234,10 @@ describe('ReportsController', () => {
       dataAccess: mockDataAccess,
       sqs: mockSqs,
       attributes: {
-        user: {
-          email: 'test@example.com',
+        authInfo: {
+          profile: {
+            email: 'test@example.com',
+          },
         },
       },
     };
@@ -263,8 +267,8 @@ describe('ReportsController', () => {
         reportType: 'performance',
         status: 'processing',
       });
-      expect(responseBody.jobId).to.be.a('string');
-      expect(responseBody.jobId).to.equal('test-report-id');
+      expect(responseBody.reportId).to.be.a('string');
+      expect(responseBody.reportId).to.equal('test-report-id');
 
       expect(mockSqs.sendMessage).to.have.been.calledOnceWith(
         mockEnv.REPORT_JOBS_QUEUE_URL,
@@ -306,8 +310,10 @@ describe('ReportsController', () => {
           },
         },
         attributes: {
-          user: {
-            email: 'test@example.com',
+          authInfo: {
+            profile: {
+              email: 'test@example.com',
+            },
           },
         },
       };

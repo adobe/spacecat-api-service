@@ -190,7 +190,6 @@ function ReportsController(ctx, log, env) {
   const createReport = async (context) => {
     const { siteId } = context.params;
     const { data } = context;
-
     // Validate site ID
     if (!isValidUUID(siteId)) {
       return badRequest('Valid site ID is required');
@@ -285,18 +284,18 @@ function ReportsController(ctx, log, env) {
       const report = await Report.create(reportData);
 
       // Use the report ID as the job ID
-      const jobId = report.getId();
+      const reportId = report.getId();
 
       // Get user information for tracking
-      const initiatedBy = context.attributes?.user?.email || 'unknown';
+      const initiatedBy = context?.attributes?.authInfo?.profile?.email || 'unknown';
 
       // Create the message to send to the report-jobs queue using the DTO
-      const reportMessage = ReportDto.toQueueMessage(report, jobId, name, initiatedBy);
+      const reportMessage = ReportDto.toQueueMessage(report, name, initiatedBy);
 
       // Send message to the report-jobs queue
       await sendReportTriggerMessage(sqs, reportsQueueUrl, reportMessage, reportType);
 
-      log.info(`Report job queued successfully for site ${siteId}, report type: ${reportType}, jobId: ${jobId}`);
+      log.info(`Report job queued successfully for site ${siteId}, report type: ${reportType}, reportId: ${reportId}`);
 
       // Return response with current structure plus new fields
       return ok({
@@ -304,7 +303,7 @@ function ReportsController(ctx, log, env) {
         siteId,
         reportType,
         status: 'processing',
-        jobId,
+        reportId,
         timestamp: reportMessage.timestamp,
       });
     } catch (error) {

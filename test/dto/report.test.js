@@ -215,14 +215,13 @@ describe('Report DTO', () => {
 
   describe('toQueueMessage', () => {
     it('returns queue message JSON with correct structure', () => {
-      const jobId = 'test-job-id';
       const name = 'Test Report';
       const initiatedBy = 'test-user@example.com';
 
-      const result = ReportDto.toQueueMessage(mockReport, jobId, name, initiatedBy);
+      const result = ReportDto.toQueueMessage(mockReport, name, initiatedBy);
 
       expect(result).to.deep.include({
-        reportId: 'test-job-id',
+        reportId: 'test-report-id',
         siteId: 'test-site-id',
         name: 'Test Report',
         reportType: 'performance',
