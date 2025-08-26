@@ -37,7 +37,7 @@ describe('RunAgenticTrafficBackfillCommand', () => {
       sendMessage: sinon.stub().resolves(),
     };
     configStub = {
-      getQueues: sinon.stub().returns({ imports: 'test-import-queue-url' }),
+      getQueues: sinon.stub().returns({ audits: 'test-audits-queue-url' }),
     };
     siteStub = {
       getId: sinon.stub().returns('test-site-id'),
@@ -99,7 +99,7 @@ describe('RunAgenticTrafficBackfillCommand', () => {
 
       expect(sqsStub.sendMessage.called).to.be.true;
       const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
-      expect(queueUrl).to.equal('test-import-queue-url');
+      expect(queueUrl).to.equal('test-audits-queue-url');
       expect(message).to.have.property('type', 'cdn-logs-report');
       expect(message).to.have.property('siteId', 'test-site-id');
       expect(message).to.have.property('auditContext');

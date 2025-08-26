@@ -39,8 +39,8 @@ async function triggerAgenticTrafficBackfill(context, configuration, siteId, wee
       },
     };
     // eslint-disable-next-line no-await-in-loop
-    await sqs.sendMessage(configuration.getQueues().imports, message);
-    log.info(`Successfully triggered import ${AGENTIC_TRAFFIC_REPORT_AUDIT} with message: ${JSON.stringify(message)}`);
+    await sqs.sendMessage(configuration.getQueues().audits, message);
+    log.info(`Successfully triggered audit ${AGENTIC_TRAFFIC_REPORT_AUDIT} with message: ${JSON.stringify(message)}`);
   }
 }
 
