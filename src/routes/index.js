@@ -242,6 +242,10 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/customer-intent': llmoController.addLlmoCustomerIntent,
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
+    'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
+
+    // Test. TODO: Remove
+    'GET /test/onboard': llmoController.testOnboardCmd,
   };
 
   // Initialization of static and dynamic routes

@@ -19,6 +19,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
+import { onboardSite } from '../support/slack/actions/onboard-llmo-modal.js';
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
@@ -299,6 +300,16 @@ function LlmoController() {
     return ok(config.getLlmoConfig().customerIntent || []);
   };
 
+  // TODO delete
+  const testOnboardCmd = async (context) => {
+    const testInput = { baseURL: 'https://hannes.test', brandName: 'Hannes Test', imsOrgId: 'fakeid' };
+    const fakeSlackCtx = { say: context.log.info };
+
+    await onboardSite(testInput, context, fakeSlackCtx);
+
+    return ok();
+  };
+
   return {
     getLlmoSheetData,
     getLlmoConfig,
@@ -310,6 +321,7 @@ function LlmoController() {
     addLlmoCustomerIntent,
     removeLlmoCustomerIntent,
     patchLlmoCustomerIntent,
+    testOnboardCmd,
   };
 }
 

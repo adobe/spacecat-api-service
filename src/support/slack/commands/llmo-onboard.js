@@ -72,54 +72,6 @@ function LlmoOnboardCommand(context) {
               },
             ],
           },
-          {
-            type: 'input',
-            block_id: 'brand_name_input',
-            element: {
-              type: 'plain_text_input',
-              action_id: 'brand_name',
-              placeholder: {
-                type: 'plain_text',
-                text: 'My Brand',
-              },
-            },
-            label: {
-              type: 'plain_text',
-              text: 'Brand Name',
-            },
-          },
-          {
-            type: 'input',
-            block_id: 'brand_url_input',
-            element: {
-              type: 'plain_text_input',
-              action_id: 'brand_url',
-              placeholder: {
-                type: 'plain_text',
-                text: 'My Brand',
-              },
-            },
-            label: {
-              type: 'plain_text',
-              text: 'Brand Name',
-            },
-          },
-          {
-            type: 'input',
-            block_id: 'ims_org_input',
-            element: {
-              type: 'plain_text_input',
-              action_id: 'ims_org_id',
-              placeholder: {
-                type: 'plain_text',
-                text: 'ABC123@AdobeOrg (default: AEM Sites Engineering)',
-              },
-            },
-            label: {
-              type: 'plain_text',
-              text: 'IMS Organization ID',
-            },
-          },
         ],
         thread_ts: threadTs,
       };

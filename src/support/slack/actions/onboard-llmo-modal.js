@@ -216,8 +216,11 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
   }, { url: SHAREPOINT_URL, type: 'onedrive' });
 
   log.info(`Copying query-index to ${dataFolder}`);
-  const doc = await sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
-  await doc.copy(`/sites/elmo-ui-data/${dataFolder}/query-index.xlsx`);
+  const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
+  const queryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
+
+  await folder.createFolder(dataFolder, '/');
+  await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
 
   await publishToAdminHlx('query-index', dataFolder, log);
 }
@@ -264,7 +267,7 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
   log.info('Done with Git modification of helix query config');
 }
 
-async function onboardSite(input, lambdaCtx, slackCtx) {
+export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
   const { baseURL, brandName, imsOrgId } = input;
