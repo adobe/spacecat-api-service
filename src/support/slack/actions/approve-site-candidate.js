@@ -26,6 +26,45 @@ import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
 export const POLLING_BASE_INTERVAL = 5000;
 export const POLLING_NUM_RETRIES = 8;
 
+async function pollOrgDetectorAgent(jobId, mystiqueApiBaseUrl) {
+  let result = null;
+  let polling = true;
+  let retryCount = 0;
+
+  /* eslint-disable no-await-in-loop */
+  while (polling && retryCount < POLLING_NUM_RETRIES) {
+    let response;
+
+    if (polling) {
+      response = await fetch(`${mystiqueApiBaseUrl}/v1/org-detector/${jobId}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (polling && response.ok) {
+      const { status, matchedCompany = null } = await response.json();
+
+      polling = status !== 'completed';
+      result = matchedCompany;
+    }
+
+    retryCount += 1;
+
+    if (polling && retryCount < POLLING_NUM_RETRIES) {
+      const currentInterval = (2 ** retryCount) * POLLING_BASE_INTERVAL;
+      await new Promise((resolve) => {
+        setTimeout(resolve, currentInterval);
+      });
+    } else if (polling && retryCount >= POLLING_NUM_RETRIES) {
+      throw new Error(`Polling for OrgDetectorAgent job ${jobId} exceeded maximum retries (${POLLING_NUM_RETRIES})`);
+    }
+  }
+  /* eslint-enable no-await-in-loop */
+
+  return result;
+}
+
 async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
   const { SLACK_REPORT_CHANNEL_INTERNAL: channel } = context.env;
   const slackClient = BaseSlackClient.createFrom(context, SLACK_TARGETS.WORKSPACE_INTERNAL);
@@ -140,45 +179,7 @@ export default function approveSiteCandidate(lambdaContext) {
         const jobId = startData.uuid;
 
         // Poll the mystique API to check the status of the Org Detector Agent job
-        /* eslint-disable no-await-in-loop */
-        const org = await (async function doPolling() {
-          let result = null;
-          let polling = true;
-          let retryCount = 0;
-
-          while (polling && retryCount < POLLING_NUM_RETRIES) {
-            // Errors are handled by the outer try-catch block
-            let response;
-
-            if (polling) {
-              response = await fetch(`${mystiqueApiBaseUrl}/v1/org-detector/${jobId}`, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' },
-              });
-            }
-
-            if (polling && response.ok) {
-              const { status, matchedCompany = null } = await response.json();
-
-              polling = status !== 'completed';
-              result = matchedCompany;
-            }
-
-            retryCount += 1;
-
-            if (polling && retryCount < POLLING_NUM_RETRIES) {
-              const currentInterval = (2 ** retryCount) * POLLING_BASE_INTERVAL;
-              await new Promise((resolve) => {
-                setTimeout(resolve, currentInterval);
-              });
-            } else if (polling && retryCount >= POLLING_NUM_RETRIES) {
-              throw new Error(`Polling for OrgDetectorAgent job ${jobId} exceeded maximum retries (${POLLING_NUM_RETRIES})`);
-            }
-          }
-
-          return result;
-        }());
-        /* eslint-enable no-await-in-loop */
+        const org = await pollOrgDetectorAgent(jobId, mystiqueApiBaseUrl);
 
         log.info(`Detected org: ${JSON.stringify(org)}`);
 
