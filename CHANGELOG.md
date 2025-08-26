@@ -1,3 +1,24 @@
+## [1.164.6](https://github.com/adobe/spacecat-api-service/compare/v1.164.5...v1.164.6) (2025-08-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.36.5 ([#1192](https://github.com/adobe/spacecat-api-service/issues/1192)) ([b0ee70d](https://github.com/adobe/spacecat-api-service/commit/b0ee70d65b20a7a129f59189cac0e0bc903c4121))
+
+## [1.164.5](https://github.com/adobe/spacecat-api-service/compare/v1.164.4...v1.164.5) (2025-08-25)
+
+
+### Bug Fixes
+
+* audit enable config save issue + orgId missing ([#1186](https://github.com/adobe/spacecat-api-service/issues/1186)) ([5ba44ce](https://github.com/adobe/spacecat-api-service/commit/5ba44ceed966a6a98c560249473f68dbf6e99a4f))
+
+## [1.164.4](https://github.com/adobe/spacecat-api-service/compare/v1.164.3...v1.164.4) (2025-08-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-gpt-client to v1.5.21 ([#1189](https://github.com/adobe/spacecat-api-service/issues/1189)) ([2dd4730](https://github.com/adobe/spacecat-api-service/commit/2dd47302684c3b2a767d9efebe09be827c137752))
+
 ## [1.164.3](https://github.com/adobe/spacecat-api-service/compare/v1.164.2...v1.164.3) (2025-08-23)
 
 
