@@ -22,6 +22,7 @@ import {
   hasText,
   isNonEmptyObject,
   isValidUUID,
+  isValidEmail,
 } from '@adobe/spacecat-shared-utils';
 import { TrialUser as TrialUserModel } from '@adobe/spacecat-shared-data-access';
 
@@ -94,6 +95,10 @@ function TrialUserController(ctx) {
 
     if (!hasText(emailId)) {
       return badRequest('Email ID is required');
+    }
+
+    if (!isValidEmail(emailId)) {
+      return badRequest('Valid email address is required');
     }
 
     try {

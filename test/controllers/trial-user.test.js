@@ -420,6 +420,129 @@ describe('Trial User Controller', () => {
       expect(body.message).to.equal('Email ID is required');
     });
 
+    it('should return bad request for invalid email format', async () => {
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'invalid-email' },
+      };
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Valid email address is required');
+    });
+
+    it('should return bad request for email missing @ symbol', async () => {
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'user.example.com' },
+      };
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Valid email address is required');
+    });
+
+    it('should return bad request for email missing domain', async () => {
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'user@' },
+      };
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Valid email address is required');
+    });
+
+    it('should return bad request for email missing TLD', async () => {
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'user@example' },
+      };
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Valid email address is required');
+    });
+
+    it('should return bad request for email with spaces', async () => {
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'user name@example.com' },
+      };
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Valid email address is required');
+    });
+
+    it('should accept valid email with subdomain', async () => {
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'user@sub.example.com' },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      // Mock the create method to return a trial user with the passed email
+      const createdTrialUser = {
+        ...mockTrialUser,
+        getEmailId: () => 'user@sub.example.com',
+      };
+      mockDataAccess.TrialUser.create.resolves(createdTrialUser);
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body).to.have.property('id');
+      expect(body).to.have.property('emailId', 'user@sub.example.com');
+    });
+
+    it('should accept valid email with plus addressing', async () => {
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'user+tag@example.com' },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      // Mock the create method to return a trial user with the passed email
+      const createdTrialUser = {
+        ...mockTrialUser,
+        getEmailId: () => 'user+tag@example.com',
+      };
+      mockDataAccess.TrialUser.create.resolves(createdTrialUser);
+
+      const result = await trialUserController.createTrialUserInvite(context);
+
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body).to.have.property('id');
+      expect(body).to.have.property('emailId', 'user+tag@example.com');
+    });
+
     it('should return not found for non-existent organization', async () => {
       mockDataAccess.Organization.findById.resolves(null);
 
