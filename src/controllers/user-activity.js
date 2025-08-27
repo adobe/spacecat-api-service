@@ -124,7 +124,7 @@ function UserActivityController(ctx) {
       }
 
       // Get trial user ID from the authenticated user's context
-      const { authInfo } = context;
+      const { authInfo } = context.attributes;
       context.log.info(`Finding trial user by email ${authInfo?.getProfile()}`);
 
       if (!authInfo?.getProfile()?.email) {
