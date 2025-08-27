@@ -39,8 +39,9 @@ export default class AccessControlUtil {
   constructor(context) {
     const { log, pathInfo, attributes } = context;
     this.authInfo = attributes?.authInfo;
-    this.Entitlment = context.dataAccess.Entitlment;
-    this.TrialUser = context.dataAccess.TrialUser;
+    this.entitlment = context.dataAccess.Entitlment;
+    this.trialUser = context.dataAccess.TrialUser;
+    this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
 
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
@@ -86,20 +87,28 @@ export default class AccessControlUtil {
     }
     const validEntitlement = entitlement.find((ent) => ent.productCode === productCode && ent.tier);
     if (!isNonEmptyObject(validEntitlement)) {
-      throw new Error(`[Error] No Entitlement for ${productCode}`);
+      throw new Error(`[Error] Organization is not entitled for ${productCode}`);
     }
 
     if (validEntitlement.tier === this.Entitlment.TIER.FREE_TRIAL) {
       // this trail_email need to be set in authInfo in IMS handlers
-      const trialUser = await this.TrialUser.findByEmailId(this.authInfo.getProfile().trial_email);
-      if (!isNonEmptyObject(trialUser)) {
+      const profile = this.authInfo.getProfile();
+      const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
+      const identityProviders = await this.IdentityProvider.findByOrganizationId(org.getId());
+      const providerId = identityProviders.find((idp) => idp.provider === profile.provider);
+
+      if (!providerId) {
+        throw new Error('[Error] IDP not supported');
+      }
+
+      if (!trialUser) {
         // create a trial user
         await this.TrialUser.create({
-          emailId: this.authInfo.getProfile().trial_email,
+          emailId: profile.trial_email,
+          provider: providerId.getProvider(),
           organizationId: org.getId(),
           status: this.TrialUser.STATUS.REGISTERED,
-          provider: this.authInfo.getProfile().provider,
-          externalUserId: this.authInfo.getProfile().email,
+          externalUserId: profile.email,
           lastSeenAt: new Date().toISOString(),
         });
       }
