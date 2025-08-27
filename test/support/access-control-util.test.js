@@ -560,6 +560,12 @@ describe('Access Control Util', () => {
 
       mockIdentityProvider = {
         findByOrganizationId: sinon.stub(),
+        create: sinon.stub(),
+        PROVIDER_TYPES: {
+          IMS: 'IMS',
+          MICROSOFT: 'MICROSOFT',
+          GOOGLE: 'GOOGLE',
+        },
       };
 
       const testContext = {
@@ -573,7 +579,7 @@ describe('Access Control Util', () => {
             hasScope: () => true,
             getProfile: () => ({
               trial_email: 'trial@example.com',
-              provider: 'google',
+              provider: 'GOOGLE',
               email: 'user@example.com',
             }),
           },
@@ -633,7 +639,7 @@ describe('Access Control Util', () => {
       mockTrialUser.findByEmailId.resolves(null);
 
       const identityProviders = [
-        { provider: 'google', getProvider: () => 'google' },
+        { provider: 'GOOGLE', getProvider: () => 'GOOGLE' },
       ];
       mockIdentityProvider.findByOrganizationId.resolves(identityProviders);
 
@@ -641,7 +647,7 @@ describe('Access Control Util', () => {
 
       expect(mockTrialUser.create).to.have.been.calledWith({
         emailId: 'trial@example.com',
-        provider: 'google',
+        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -658,7 +664,7 @@ describe('Access Control Util', () => {
       mockTrialUser.findByEmailId.resolves({ id: 'existing-user' });
 
       const identityProviders = [
-        { provider: 'google', getProvider: () => 'google' },
+        { provider: 'GOOGLE', getProvider: () => 'GOOGLE' },
       ];
       mockIdentityProvider.findByOrganizationId.resolves(identityProviders);
 
@@ -667,7 +673,7 @@ describe('Access Control Util', () => {
       expect(mockTrialUser.create).to.not.have.been.called;
     });
 
-    it('should throw error when IDP is not supported for free trial', async () => {
+    it('should throw error when IDP provider is not supported for free trial', async () => {
       const entitlements = [
         { productCode: 'llmo', tier: 'free_trial' },
       ];
@@ -675,14 +681,37 @@ describe('Access Control Util', () => {
 
       mockTrialUser.findByEmailId.resolves(null);
 
-      // No matching IDP found
-      mockIdentityProvider.findByOrganizationId.resolves([]);
+      // Test with unsupported provider
+      const testContext = {
+        log: { info: () => {} },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({
+              trial_email: 'trial@example.com',
+              provider: 'unsupported_provider',
+              email: 'user@example.com',
+            }),
+          },
+        },
+        dataAccess: {
+          Entitlment: mockEntitlment,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+        },
+      };
 
-      await expect(util.validateEntitlement(mockOrg, 'llmo'))
+      const testUtil = AccessControlUtil.fromContext(testContext);
+
+      await expect(testUtil.validateEntitlement(mockOrg, 'llmo'))
         .to.be.rejectedWith('[Error] IDP not supported');
     });
 
-    it('should throw error when IDP provider does not match', async () => {
+    it('should create identity provider when it does not exist for supported provider', async () => {
       const entitlements = [
         { productCode: 'llmo', tier: 'free_trial' },
       ];
@@ -690,14 +719,31 @@ describe('Access Control Util', () => {
 
       mockTrialUser.findByEmailId.resolves(null);
 
-      // IDP with different provider
-      const identityProviders = [
-        { provider: 'microsoft', getProvider: () => 'microsoft' },
-      ];
-      mockIdentityProvider.findByOrganizationId.resolves(identityProviders);
+      // No existing identity provider for this organization
+      mockIdentityProvider.findByOrganizationId.resolves([]);
 
-      await expect(util.validateEntitlement(mockOrg, 'llmo'))
-        .to.be.rejectedWith('[Error] IDP not supported');
+      // Mock the create method to return a new identity provider
+      const newIdentityProvider = { provider: 'GOOGLE' };
+      mockIdentityProvider.create.resolves(newIdentityProvider);
+
+      await util.validateEntitlement(mockOrg, 'llmo');
+
+      // Verify that create was called with the correct parameters
+      expect(mockIdentityProvider.create).to.have.been.calledWith({
+        organizationId: 'org-123',
+        provider: 'GOOGLE',
+        externalId: 'GOOGLE',
+      });
+
+      // Verify that trial user was created with the new identity provider
+      expect(mockTrialUser.create).to.have.been.calledWith({
+        emailId: 'trial@example.com',
+        provider: 'GOOGLE',
+        organizationId: 'org-123',
+        status: 'registered',
+        externalUserId: 'user@example.com',
+        lastSeenAt: sinon.match.string,
+      });
     });
   });
 

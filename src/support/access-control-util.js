@@ -96,11 +96,25 @@ export default class AccessControlUtil {
       // this trail_email need to be set in authInfo in IMS handlers
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
-      const identityProviders = await this.IdentityProvider.findByOrganizationId(org.getId());
-      const providerId = identityProviders.find((idp) => idp.provider === profile.provider);
 
-      if (!providerId) {
+      // First check if the profile provider is one of the supported provider types
+      const supportedProviders = Object.values(this.IdentityProvider.PROVIDER_TYPES);
+      if (!supportedProviders.includes(profile.provider)) {
         throw new Error('[Error] IDP not supported');
+      }
+
+      // Check if the organization already has an identity provider for this provider
+      const identityProviders = await this.IdentityProvider.findByOrganizationId(org.getId());
+      let providerId = identityProviders.find((idp) => idp.provider === profile.provider);
+
+      // If no identity provider exists for this provider, create one
+      if (!providerId) {
+        providerId = await this.IdentityProvider.create({
+          organizationId: org.getId(),
+          provider: profile.provider,
+          // TODO: it should IDP subject/identifier not sure at the moment
+          externalId: profile.provider,
+        });
       }
 
       if (!trialUser) {
