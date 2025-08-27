@@ -75,7 +75,6 @@ describe('Trial User Controller', () => {
     {
       getId: () => 'trial-user-1',
       getOrganizationId: () => organizationId,
-      getOrganizationIdentityProviderId: () => 'provider-1',
       getExternalUserId: () => 'ext-user-1',
       getStatus: () => 'ACTIVE',
       getProvider: () => 'GOOGLE',
@@ -90,7 +89,6 @@ describe('Trial User Controller', () => {
     {
       getId: () => 'trial-user-2',
       getOrganizationId: () => organizationId,
-      getOrganizationIdentityProviderId: () => 'provider-2',
       getExternalUserId: () => 'ext-user-2',
       getStatus: () => 'INVITED',
       getProvider: () => 'GOOGLE',
@@ -107,7 +105,6 @@ describe('Trial User Controller', () => {
   const mockTrialUser = {
     getId: () => 'trial-user-123',
     getOrganizationId: () => organizationId,
-    getOrganizationIdentityProviderId: () => 'provider-123',
     getExternalUserId: () => 'ext-user-123',
     getStatus: () => 'ACTIVE',
     getProvider: () => 'GOOGLE',

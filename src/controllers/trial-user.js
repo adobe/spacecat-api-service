@@ -120,7 +120,6 @@ function TrialUserController(ctx) {
         organizationId,
         status: TrialUserModel.STATUSES.INVITED,
         metadata: { origin: 'invited' },
-        organizationIdentityProviderId: '06c51b9d-728e-46f7-a447-86cb1de0bd12',
       });
 
       return createResponse(TrialUserDto.toJSON(trialUser), 201);

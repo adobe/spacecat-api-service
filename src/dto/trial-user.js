@@ -20,7 +20,6 @@ export const TrialUserDto = {
    * @returns {{
    *   id: string,
    *   organizationId: string,
-   *   organizationIdentityProviderId: string,
    *   externalUserId: string,
    *   status: string,
    *   provider: string,
@@ -36,7 +35,6 @@ export const TrialUserDto = {
   toJSON: (trialUser) => ({
     id: trialUser.getId(),
     organizationId: trialUser.getOrganizationId(),
-    organizationIdentityProviderId: trialUser.getOrganizationIdentityProviderId(),
     externalUserId: trialUser.getExternalUserId(),
     status: trialUser.getStatus(),
     provider: trialUser.getProvider(),
