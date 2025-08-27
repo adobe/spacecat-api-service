@@ -28,44 +28,6 @@ describe('Trial User Controller', () => {
   const sandbox = sinon.createSandbox();
   const organizationId = '123e4567-e89b-12d3-a456-426614174000';
 
-  describe('Constructor Validation', () => {
-    it('should throw error when context is not provided', () => {
-      expect(() => TrialUserController()).to.throw('Context required');
-    });
-
-    it('should throw error when context is null', () => {
-      expect(() => TrialUserController(null)).to.throw('Context required');
-    });
-
-    it('should throw error when context is undefined', () => {
-      expect(() => TrialUserController(undefined)).to.throw('Context required');
-    });
-
-    it('should throw error when context is not an object', () => {
-      expect(() => TrialUserController('not-an-object')).to.throw('Context required');
-    });
-
-    it('should throw error when context is an empty object', () => {
-      expect(() => TrialUserController({})).to.throw('Context required');
-    });
-
-    it('should throw error when dataAccess is missing from context', () => {
-      expect(() => TrialUserController({ someOtherProperty: 'value' })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is null', () => {
-      expect(() => TrialUserController({ dataAccess: null })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is undefined', () => {
-      expect(() => TrialUserController({ dataAccess: undefined })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is not an object', () => {
-      expect(() => TrialUserController({ dataAccess: 'not-an-object' })).to.throw('Data access required');
-    });
-  });
-
   const mockOrganization = {
     getId: () => organizationId,
     getName: () => 'Test Organization',
@@ -172,6 +134,44 @@ describe('Trial User Controller', () => {
 
   afterEach(() => {
     sandbox.restore();
+  });
+
+  describe('Constructor Validation', () => {
+    it('should throw error when context is not provided', () => {
+      expect(() => TrialUserController()).to.throw('Context required');
+    });
+
+    it('should throw error when context is null', () => {
+      expect(() => TrialUserController(null)).to.throw('Context required');
+    });
+
+    it('should throw error when context is undefined', () => {
+      expect(() => TrialUserController(undefined)).to.throw('Context required');
+    });
+
+    it('should throw error when context is not an object', () => {
+      expect(() => TrialUserController('not-an-object')).to.throw('Context required');
+    });
+
+    it('should throw error when context is an empty object', () => {
+      expect(() => TrialUserController({})).to.throw('Context required');
+    });
+
+    it('should throw error when dataAccess is missing from context', () => {
+      expect(() => TrialUserController({ someOtherProperty: 'value' })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is null', () => {
+      expect(() => TrialUserController({ dataAccess: null })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is undefined', () => {
+      expect(() => TrialUserController({ dataAccess: undefined })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is not an object', () => {
+      expect(() => TrialUserController({ dataAccess: 'not-an-object' })).to.throw('Data access required');
+    });
   });
 
   describe('getByOrganizationID', () => {

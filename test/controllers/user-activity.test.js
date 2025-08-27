@@ -29,44 +29,6 @@ describe('User Activity Controller', () => {
   const siteId = '123e4567-e89b-12d3-a456-426614174000';
   const organizationId = '456e7890-e89b-12d3-a456-426614174000';
 
-  describe('Constructor Validation', () => {
-    it('should throw error when context is not provided', () => {
-      expect(() => UserActivityController()).to.throw('Context required');
-    });
-
-    it('should throw error when context is null', () => {
-      expect(() => UserActivityController(null)).to.throw('Context required');
-    });
-
-    it('should throw error when context is undefined', () => {
-      expect(() => UserActivityController(undefined)).to.throw('Context required');
-    });
-
-    it('should throw error when context is not an object', () => {
-      expect(() => UserActivityController('not-an-object')).to.throw('Context required');
-    });
-
-    it('should throw error when context is an empty object', () => {
-      expect(() => UserActivityController({})).to.throw('Context required');
-    });
-
-    it('should throw error when dataAccess is missing from context', () => {
-      expect(() => UserActivityController({ someOtherProperty: 'value' })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is null', () => {
-      expect(() => UserActivityController({ dataAccess: null })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is undefined', () => {
-      expect(() => UserActivityController({ dataAccess: undefined })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is not an object', () => {
-      expect(() => UserActivityController({ dataAccess: 'not-an-object' })).to.throw('Data access required');
-    });
-  });
-
   const mockSite = {
     getId: () => siteId,
     getOrganizationId: () => organizationId,
@@ -181,6 +143,44 @@ describe('User Activity Controller', () => {
 
   afterEach(() => {
     sandbox.restore();
+  });
+
+  describe('Constructor Validation', () => {
+    it('should throw error when context is not provided', () => {
+      expect(() => UserActivityController()).to.throw('Context required');
+    });
+
+    it('should throw error when context is null', () => {
+      expect(() => UserActivityController(null)).to.throw('Context required');
+    });
+
+    it('should throw error when context is undefined', () => {
+      expect(() => UserActivityController(undefined)).to.throw('Context required');
+    });
+
+    it('should throw error when context is not an object', () => {
+      expect(() => UserActivityController('not-an-object')).to.throw('Context required');
+    });
+
+    it('should throw error when context is an empty object', () => {
+      expect(() => UserActivityController({})).to.throw('Context required');
+    });
+
+    it('should throw error when dataAccess is missing from context', () => {
+      expect(() => UserActivityController({ someOtherProperty: 'value' })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is null', () => {
+      expect(() => UserActivityController({ dataAccess: null })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is undefined', () => {
+      expect(() => UserActivityController({ dataAccess: undefined })).to.throw('Data access required');
+    });
+
+    it('should throw error when dataAccess is not an object', () => {
+      expect(() => UserActivityController({ dataAccess: 'not-an-object' })).to.throw('Data access required');
+    });
   });
 
   describe('getBySiteID', () => {
