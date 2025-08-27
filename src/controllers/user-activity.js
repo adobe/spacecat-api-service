@@ -130,6 +130,7 @@ function UserActivityController(ctx) {
       }
 
       // Find the trial user by email
+      context.log.info(`Finding trial user by email ${authInfo.getProfile()}`);
       const trialUser = await TrialUser.findByEmailId(authInfo.getProfile().email);
       if (!trialUser) {
         return badRequest('Trial user not found for the authenticated user');
