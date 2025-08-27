@@ -1805,6 +1805,10 @@ ScrapeOptions:
               - 'section'
               - 'block'
               - 'scroll'
+        rejectRedirects:
+          description: Whether to reject redirects
+          type: boolean
+          default: true
   example:
     pageLoadTimeout: 200
     enableJavascript: true
@@ -1819,6 +1823,11 @@ ScrapeRequest:
       description: The name of the scrape handler to use.
       type: string
       default: 'default'
+    maxScrapeAge:
+      description: The maximum age of a scrape in hours. Providing the value of 0 will result in forcing the scrape (disabling this caching feature)
+      type: integer
+      minimum: 0
+      default: 24
     options:
       description: Optional configuration params, defined as a JSON object
       $ref: '#/ScrapeOptions'
