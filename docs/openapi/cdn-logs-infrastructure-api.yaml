@@ -1,0 +1,85 @@
+# CDN Logs Infrastructure API
+
+cdn-logs-infrastructure-provision:
+  put:
+    tags:
+      - cdn-logs-infrastructure
+    summary: Provision CDN logs infrastructure
+    description: |
+      Provisions S3 bucket and IAM credentials for CDN logs storage.
+      This endpoint follows an idempotent pattern:
+      
+      **If resources do NOT exist:** Creates a new S3 bucket with proper encryption, 
+      access controls, IAM policy, IAM user, and stores credentials in AWS Secrets Manager.
+      
+      **If resources already exist:** Retrieves the existing bucket and credentials 
+      without creating duplicates.
+      
+      This ensures that calling the endpoint multiple times with the same organization ID 
+      will not create duplicate resources, making it safe for automated provisioning workflows.
+      
+      **AWS resources provisioned:**
+      - S3 bucket with AES256 encryption and public access blocked
+      - IAM policy for bucket access (write-only to /raw folder)
+      - IAM user with access keys
+      - Credentials stored in AWS Secrets Manager with proper tagging
+    operationId: provisionCdnLogsInfrastructure
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/CdnLogsInfrastructureProvisionRequest'
+    responses:
+      '200':
+        description: Infrastructure provisioned successfully
+        content:
+          application/json:
+            schema:
+              $ref: '#/CdnLogsInfrastructureProvisionResponse'
+      '400':
+        description: Bad request - missing or invalid parameters
+      '403':
+        description: Forbidden - admin access required
+      '500':
+        description: Internal server error
+    security:
+      - admin_key: []
+
+CdnLogsInfrastructureProvisionRequest:
+  type: object
+  required:
+    - orgId
+  properties:
+    orgId:
+      type: string
+      description: Organization identifier (alphanumeric, optionally ending with @AdobeOrg)
+      example: "adobe123"
+    orgName:
+      type: string
+      description: Organization name (optional)
+      example: "Adobe Inc"
+
+CdnLogsInfrastructureProvisionResponse:
+  type: object
+  properties:
+    message:
+      type: string
+      description: Success message describing what was created/retrieved
+      example: "Bucket 'cdn-logs-adobe123' created successfully with new credentials"
+    bucketName:
+      type: string
+      description: The S3 bucket name
+      example: "cdn-logs-adobe"
+    accessKey:
+      type: string
+      description: AWS access key for the bucket
+      example: "AKIAIOSFODNN7EXAMPLE"
+    secretKey:
+      type: string
+      description: AWS secret key for the bucket
+      example: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    region:
+      type: string
+      description: AWS region where the bucket was created
+      example: "us-east-1"
