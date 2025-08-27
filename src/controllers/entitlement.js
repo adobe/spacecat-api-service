@@ -71,7 +71,6 @@ function EntitlementController(ctx) {
       }
 
       const entitlements = await Entitlement.allByOrganizationId(organizationId);
-
       const orgEntitlements = entitlements
         .map((entitlement) => EntitlementDto.toJSON(entitlement));
       return ok(orgEntitlements);
@@ -130,11 +129,13 @@ function EntitlementController(ctx) {
       // For now, we'll let the database handle uniqueness constraints
 
       // Create new entitlement
+      context.log.info(`Creating new entitlement for organization ${organizationId} with product code ${productCode} and tier ${tier}`);
+      context.log.info(`Quotas: ${JSON.stringify(quotas)}`);
       const entitlement = await Entitlement.create({
         organizationId,
         productCode,
         tier,
-        quotas: quotas || {},
+        quotas: quotas ?? {},
       });
 
       return createResponse(EntitlementDto.toJSON(entitlement), 201);

@@ -124,11 +124,13 @@ function OrganizationIdentityProviderController(ctx) {
       // For now, we'll let the database handle uniqueness constraints
 
       // Create new organization identity provider
+      context.log.info(`Creating new organization identity provider for organization ${organizationId} with provider ${provider} and external ID ${externalId}`);
+      context.log.info(`Metadata: ${JSON.stringify(metadata)}`);
       const organizationIdentityProvider = await OrganizationIdentityProvider.create({
         organizationId,
         provider,
         externalId,
-        metadata: metadata || {},
+        metadata: metadata ?? {},
       });
 
       return createResponse(
