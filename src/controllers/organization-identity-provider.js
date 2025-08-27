@@ -23,6 +23,7 @@ import {
   isValidUUID,
   hasText,
 } from '@adobe/spacecat-shared-utils';
+import { OrganizationIdentityProvider as OrganizationIdentityProviderModel } from '@adobe/spacecat-shared-data-access';
 
 import { OrganizationIdentityProviderDto } from '../dto/organization-identity-provider.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -102,7 +103,7 @@ function OrganizationIdentityProviderController(ctx) {
     }
 
     // Validate provider type
-    const validProviders = Object.values(OrganizationIdentityProvider.PROVIDER_TYPES);
+    const validProviders = Object.values(OrganizationIdentityProviderModel.PROVIDER_TYPES);
     if (!validProviders.includes(provider)) {
       return badRequest(`Provider must be one of: ${validProviders.join(', ')}`);
     }

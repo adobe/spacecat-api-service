@@ -23,6 +23,7 @@ import {
   isValidUUID,
   hasText,
 } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 
 import { EntitlementDto } from '../dto/entitlement.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -101,13 +102,13 @@ function EntitlementController(ctx) {
     }
 
     // Validate product code
-    const validProductCodes = Object.values(Entitlement.PRODUCT_CODES);
+    const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
     if (!validProductCodes.includes(productCode)) {
       return badRequest(`Product code must be one of: ${validProductCodes.join(', ')}`);
     }
 
     // Validate tier
-    const validTiers = Object.values(Entitlement.TIERS);
+    const validTiers = Object.values(EntitlementModel.TIERS);
     if (!validTiers.includes(tier)) {
       return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
     }
