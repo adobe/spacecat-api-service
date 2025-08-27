@@ -24,7 +24,7 @@ import AccessControlUtil from '../../src/support/access-control-util.js';
 use(chaiAsPromised);
 use(sinonChai);
 
-describe.skip('User Activity Controller', () => {
+describe('User Activity Controller', () => {
   const sandbox = sinon.createSandbox();
   const siteId = '123e4567-e89b-12d3-a456-426614174000';
   const organizationId = '456e7890-e89b-12d3-a456-426614174000';
@@ -357,10 +357,12 @@ describe.skip('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
-        authInfo: new AuthInfo()
-          .withType('jwt')
-          .withProfile({ trial_email: 'test@example.com' })
-          .withAuthenticated(true),
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -494,10 +496,12 @@ describe.skip('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
-        authInfo: new AuthInfo()
-          .withType('jwt')
-          .withProfile({})
-          .withAuthenticated(true),
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({})
+            .withAuthenticated(true),
+        },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -514,10 +518,12 @@ describe.skip('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
-        authInfo: new AuthInfo()
-          .withType('jwt')
-          .withProfile({ trial_email: 'test@example.com' })
-          .withAuthenticated(true),
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -534,10 +540,12 @@ describe.skip('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
-        authInfo: new AuthInfo()
-          .withType('jwt')
-          .withProfile({ trial_email: 'test@example.com' })
-          .withAuthenticated(true),
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -554,11 +562,12 @@ describe.skip('User Activity Controller', () => {
       const context = {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
-        dataAccess: mockDataAccess,
-        authInfo: new AuthInfo()
-          .withType('jwt')
-          .withProfile({ trial_email: 'test@example.com' })
-          .withAuthenticated(true),
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -575,11 +584,12 @@ describe.skip('User Activity Controller', () => {
       const context = {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
-        dataAccess: mockDataAccess,
-        authInfo: new AuthInfo()
-          .withType('jwt')
-          .withProfile({ trial_email: 'test@example.com' })
-          .withAuthenticated(true),
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);
@@ -596,11 +606,12 @@ describe.skip('User Activity Controller', () => {
       const context = {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
-        dataAccess: mockDataAccess,
-        authInfo: new AuthInfo()
-          .withType('jwt')
-          .withProfile({ trial_email: 'test@example.com' })
-          .withAuthenticated(true),
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
       };
 
       const result = await userActivityController.createTrialUserActivity(context);

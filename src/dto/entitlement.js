@@ -22,7 +22,6 @@ export const EntitlementDto = {
    *   organizationId: string,
    *   productCode: string,
    *   tier: string,
-   *   status: string,
    *   quotas: any,
    *   createdAt: string,
    *   updatedAt: string
@@ -33,7 +32,6 @@ export const EntitlementDto = {
     organizationId: entitlement.getOrganizationId(),
     productCode: entitlement.getProductCode(),
     tier: entitlement.getTier(),
-    status: entitlement.getStatus(),
     quotas: entitlement.getQuotas(),
     createdAt: entitlement.getCreatedAt(),
     updatedAt: entitlement.getUpdatedAt(),
