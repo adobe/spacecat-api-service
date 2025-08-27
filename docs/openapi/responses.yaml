@@ -102,6 +102,11 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'403-site-access-forbidden':
+  description: User does not have access to this site.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '404':
   description: Not found.
   headers:
