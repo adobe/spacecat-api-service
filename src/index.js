@@ -74,6 +74,7 @@ import UserActivityController from './controllers/user-activity.js';
 import SiteEnrollmentController from './controllers/site-enrollment.js';
 import TrialUserController from './controllers/trial-user.js';
 import EntitlementController from './controllers/entitlement.js';
+import SandboxAuditController from './controllers/sandbox-audit.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -135,6 +136,7 @@ async function run(request, context) {
     const siteEnrollmentController = SiteEnrollmentController(context);
     const trialUserController = TrialUserController(context);
     const entitlementController = EntitlementController(context);
+    const sandboxAuditController = SandboxAuditController(context);
 
     /* ---------- build MCP registry & controller ---------- */
     const mcpRegistry = buildRegistry({
@@ -176,6 +178,7 @@ async function run(request, context) {
       siteEnrollmentController,
       trialUserController,
       entitlementController,
+      sandboxAuditController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

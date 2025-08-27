@@ -77,6 +77,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
  * @param {Object} entitlementController - The entitlement controller.
+ * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -110,6 +111,7 @@ export default function getRouteHandlers(
   siteEnrollmentController,
   trialUserController,
   entitlementController,
+  sandboxAuditController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -261,6 +263,9 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
+
+    // Sandbox audit route
+    'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
   };
 
   // Initialization of static and dynamic routes

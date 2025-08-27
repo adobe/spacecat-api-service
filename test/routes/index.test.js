@@ -190,6 +190,11 @@ describe('getRouteHandlers', () => {
     addLlmoCustomerIntent: () => null,
     removeLlmoCustomerIntent: () => null,
     patchLlmoCustomerIntent: () => null,
+    patchLlmoCdnLogsFilter: () => null,
+  };
+
+  const mockSandboxAuditController = {
+    triggerAudit: sinon.stub(),
   };
 
   const mockOrganizationIdentityProviderController = {
@@ -246,6 +251,7 @@ describe('getRouteHandlers', () => {
       mockSiteEnrollmentController,
       mockTrialUserController,
       mockEntitlementController,
+      mockSandboxAuditController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -410,6 +416,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/llmo/customer-intent/:intentKey',
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
+      'POST /sites/:siteId/sandbox/audit',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -526,5 +533,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /consent-banner/:jobId'].paramNames).to.deep.equal(['jobId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].handler).to.equal(mockLlmoController.patchLlmoCdnLogsFilter);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].handler).to.equal(mockSandboxAuditController.triggerAudit);
+    expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].paramNames).to.deep.equal(['siteId']);
   });
 });
