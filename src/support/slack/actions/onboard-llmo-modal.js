@@ -14,16 +14,167 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { getLastNumberOfWeeks } from '@adobe/spacecat-shared-utils';
 import { Octokit } from '@octokit/rest';
-import { postErrorMessage } from '../../../utils/slack/base.js';
+import {
+  extractURLFromSlackInput,
+  loadProfileConfig,
+  postErrorMessage,
+} from '../../../utils/slack/base.js';
+import { onboardSingleSite } from '../../utils.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
 const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
 
+// site isn't on spacecat yet
+async function fullOnboardingModal(body, client, respond, brandURL) {
+  const { user } = body;
+
+  // Update the original message to show user's choice
+  await respond({
+    text: `:gear: ${user.name} started the onboarding process...`,
+    replace_original: true,
+  });
+
+  // Capture original channel and thread context
+  const originalChannel = body.channel?.id;
+  const originalThreadTs = body.message?.thread_ts || body.message?.ts;
+
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: {
+      type: 'modal',
+      callback_id: 'onboard_llmo_modal',
+      private_metadata: JSON.stringify({
+        originalChannel,
+        originalThreadTs,
+        brandURL,
+      }),
+      title: {
+        type: 'plain_text',
+        text: 'Onboard Site',
+      },
+      submit: {
+        type: 'plain_text',
+        text: 'Start Onboarding',
+      },
+      close: {
+        type: 'plain_text',
+        text: 'Cancel',
+      },
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: ':rocket: *Site Onboarding*\n\nProvide the details to onboard a new site to AEM Sites Optimizer.',
+          },
+        },
+        {
+          type: 'input',
+          block_id: 'brand_name_input',
+          element: {
+            type: 'text_input',
+            action_id: 'brand_name',
+            placeholder: {
+              type: 'plain_text',
+              text: 'Brand Name',
+            },
+          },
+          label: {
+            type: 'plain_text',
+            text: 'Site URL',
+          },
+        },
+        {
+          type: 'input',
+          block_id: 'ims_org_input',
+          element: {
+            type: 'plain_text_input',
+            action_id: 'ims_org_id',
+            placeholder: {
+              type: 'plain_text',
+              text: 'ABC123@AdobeOrg (default: AEM Sites Engineering)',
+            },
+          },
+          label: {
+            type: 'plain_text',
+            text: 'IMS Organization ID',
+          },
+        },
+      ],
+    },
+  });
+}
+
+// site is already on spacecat
+async function elmoOnboardingModal(body, client, respond, brandURL) {
+  const { user } = body;
+
+  // Update the original message to show user's choice
+  await respond({
+    text: `:gear: ${user.name} started the onboarding process...`,
+    replace_original: true,
+  });
+
+  // Capture original channel and thread context
+  const originalChannel = body.channel?.id;
+  const originalThreadTs = body.message?.thread_ts || body.message?.ts;
+
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: {
+      type: 'modal',
+      callback_id: 'onboard_llmo_modal',
+      private_metadata: JSON.stringify({
+        originalChannel,
+        originalThreadTs,
+        brandURL,
+      }),
+      title: {
+        type: 'plain_text',
+        text: 'Onboard Site',
+      },
+      submit: {
+        type: 'plain_text',
+        text: 'Start Onboarding',
+      },
+      close: {
+        type: 'plain_text',
+        text: 'Cancel',
+      },
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: ':rocket: *Site Onboarding*\n\nProvide the details to onboard a new site to AEM Sites Optimizer.',
+          },
+        },
+        {
+          type: 'input',
+          block_id: 'brand_name_input',
+          element: {
+            type: 'text_input',
+            action_id: 'brand_name',
+            placeholder: {
+              type: 'plain_text',
+              text: 'Brand Name',
+            },
+          },
+          label: {
+            type: 'plain_text',
+            text: 'Site URL',
+          },
+        },
+      ],
+    },
+  });
+}
+
 /* displays modal */
 export function startLLMOOnboarding(lambdaContext) {
-  const { log } = lambdaContext;
+  const { log, dataAccess } = lambdaContext;
 
   return async ({
     ack, body, client, respond,
@@ -31,66 +182,30 @@ export function startLLMOOnboarding(lambdaContext) {
     try {
       await ack();
 
-      const { user } = body;
+      const { user, actions } = body;
+      const { Site } = dataAccess;
 
-      // Update the original message to show user's choice
-      await respond({
-        text: `:gear: ${user.name} started the onboarding process...`,
-        replace_original: true,
-      });
+      // check current onboarding status
+      const brandURL = actions?.[0]?.value;
+      const site = await Site.findByBaseURL(brandURL);
 
-      // Capture original channel and thread context
-      const originalChannel = body.channel?.id;
-      const originalThreadTs = body.message?.thread_ts || body.message?.ts;
+      if (!site) {
+        await fullOnboardingModal(body, client, respond, brandURL);
+      }
 
-      await client.views.open({
-        trigger_id: body.trigger_id,
-        view: {
-          type: 'modal',
-          callback_id: 'onboard_llmo_modal',
-          private_metadata: JSON.stringify({
-            originalChannel,
-            originalThreadTs,
-          }),
-          title: {
-            type: 'plain_text',
-            text: 'Onboard Site',
-          },
-          submit: {
-            type: 'plain_text',
-            text: 'Start Onboarding',
-          },
-          close: {
-            type: 'plain_text',
-            text: 'Cancel',
-          },
-          blocks: [
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: ':rocket: *Site Onboarding*\n\nProvide the details to onboard a new site to AEM Sites Optimizer.',
-              },
-            },
-            {
-              type: 'input',
-              block_id: 'site_url_input',
-              element: {
-                type: 'url_text_input',
-                action_id: 'site_url',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'https://site.url',
-                },
-              },
-              label: {
-                type: 'plain_text',
-                text: 'Site URL',
-              },
-            },
-          ],
-        },
-      });
+      const config = await site.getConfig();
+      const brand = config.getLlmoBrand();
+
+      if (brand) {
+        await respond({
+          text: `:cdbot-error: It looks like ${brandURL} is already configured for LLMO with brand ${brand}`,
+          replace_original: true,
+        });
+        log.info(`Aborted ${brandURL} onboarding: Already onboarded with brand ${brand}`);
+        return;
+      }
+
+      await elmoOnboardingModal(body, client, respond, brandURL);
 
       log.info(`User ${user.id} started onboarding process`);
     } catch (e) {
@@ -121,47 +236,6 @@ async function triggerReferralTrafficBackfill(context, configuration, siteId) {
     };
     sqs.sendMessage(configuration.getQueues().imports, message);
     log.info(`Successfully triggered import ${REFERRAL_TRAFFIC_IMPORT} with message: ${JSON.stringify(message)}`);
-  }
-}
-
-async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
-  const { log, dataAccess, imsClient } = lambdaCtx;
-  const { say } = slackCtx;
-  const { Organization } = dataAccess;
-
-  const existingOrgId = site.getOrganizationId();
-  if (existingOrgId && existingOrgId !== imsOrgId) {
-    throw new Error(`Expected provided IMS org id ${imsOrgId} to match IMS org id set on site: ${existingOrgId}`);
-  }
-
-  let spaceCatOrg = await Organization.findByImsOrgId(imsOrgId);
-
-  // if not found, try retrieving from IMS, then create a new spacecat org
-  if (!spaceCatOrg) {
-    let imsOrgDetails;
-    try {
-      imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgId);
-      log.info(`IMS Org Details: ${imsOrgDetails}`);
-    } catch (error) {
-      log.error(`Error retrieving IMS Org details: ${error.message}`);
-      await say(`:x: Could not find an IMS org with the ID *${imsOrgId}*.`);
-      return;
-    }
-
-    if (!imsOrgDetails) {
-      await say(`:x: Could not find an IMS org with the ID *${imsOrgId}*.`);
-      return;
-    }
-
-    // create a new spacecat org
-    spaceCatOrg = await Organization.create({
-      name: imsOrgDetails.orgName,
-      imsOrgId,
-    });
-    await spaceCatOrg.save();
-
-    site.setOrganizationId(spaceCatOrg.getId());
-    await site.save();
   }
 }
 
@@ -277,14 +351,35 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 
   try {
     // Find the site
-    const site = await Site.findByBaseURL(baseURL);
+    let site = await Site.findByBaseURL(baseURL);
     if (!site) {
-      await say(`:x: Site '${baseURL}' not found. Please add the site first using the regular onboard command.`);
-      return;
-    }
+      const profile = await loadProfileConfig('default');
+      const configuration = await Configuration.findLatest();
+      // onboard the site
+      const reportLine = await onboardSingleSite(
+        baseURL,
+        imsOrgId,
+        configuration,
+        profile,
+        300,
+        slackCtx,
+        lambdaCtx,
+        {},
+        {
+          profileName: 'default',
+          urlProcessor: extractURLFromSlackInput,
+        },
+      );
 
-    // check that provided IMS org matches
-    await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
+      await configuration.save();
+
+      if (reportLine.errors.length > 0) {
+        say(`:warning: ${reportLine.errors}`);
+        say('Aborting onboarding process.');
+        return;
+      }
+      site = await Site.findById(reportLine.siteId);
+    }
 
     // upload and publish the query index file
     await copyFilesToSharepoint(dataFolder, lambdaCtx);
@@ -372,16 +467,17 @@ export function onboardLLMOModal(lambdaContext) {
       // Extract original channel and thread context from private metadata
       let originalChannel;
       let originalThreadTs;
+      let brandURL;
       try {
         const metadata = JSON.parse(view.private_metadata || '{}');
         originalChannel = metadata.originalChannel;
         originalThreadTs = metadata.originalThreadTs;
+        brandURL = metadata.brandURL;
       } catch (error) {
         log.warn('Failed to parse private metadata:', error);
       }
 
       const brandName = values.brand_name_input.brand_name.value;
-      const brandURL = values.brand_url_input.brand_url.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
 
       await ack();

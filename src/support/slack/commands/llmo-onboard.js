@@ -11,6 +11,7 @@
  */
 
 import {
+  extractURLFromSlackInput,
   postErrorMessage,
 } from '../../../utils/slack/base.js';
 
@@ -31,7 +32,7 @@ function LlmoOnboardCommand(context) {
     name: 'Onboard LLMO',
     description: 'Onboards a site for LLMO (Large Language Model Optimizer) through a modal interface.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]}`,
+    usageText: `${PHRASES[0]} <site url>`,
   });
 
   const { log } = context;
@@ -46,6 +47,15 @@ function LlmoOnboardCommand(context) {
    */
   const handleExecution = async (args, slackContext) => {
     const { say, threadTs } = slackContext;
+
+    const [site] = args;
+
+    const normalizedSite = extractURLFromSlackInput(site);
+
+    if (!normalizedSite) {
+      await say(baseCommand.usage());
+      return;
+    }
 
     try {
       const message = {
@@ -66,7 +76,7 @@ function LlmoOnboardCommand(context) {
                   type: 'plain_text',
                   text: 'Start Onboarding',
                 },
-                value: 'start_llmo_onboarding',
+                value: normalizedSite,
                 action_id: 'start_llmo_onboarding',
                 style: 'primary',
               },
