@@ -16,6 +16,7 @@ import {
   ok,
   forbidden,
   internalServerError,
+  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isNonEmptyObject,
@@ -77,8 +78,59 @@ function SiteEnrollmentController(ctx) {
     }
   };
 
+  /**
+   * Creates a new site enrollment.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} SiteEnrollment response.
+   */
+  const create = async (context) => {
+    const { siteId } = context.params;
+    const { entitlementId } = context.data;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(entitlementId)) {
+      return badRequest('Entitlement ID required');
+    }
+
+    try {
+      // Check if user has access to the site
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      const accessControlUtil = AccessControlUtil.fromContext(context);
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Access denied to this site');
+      }
+
+      // Check if site enrollment already exists with this site and entitlement
+      const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
+      const existingEnrollment = existingEnrollments.find(
+        (enrollment) => enrollment.getEntitlementId() === entitlementId,
+      );
+      if (existingEnrollment) {
+        return badRequest('Site enrollment with this entitlement already exists for this site');
+      }
+
+      // Create new site enrollment
+      const siteEnrollment = await SiteEnrollment.create({
+        siteId,
+        entitlementId,
+      });
+
+      return createResponse(SiteEnrollmentDto.toJSON(siteEnrollment), 201);
+    } catch (e) {
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getBySiteID,
+    create,
   };
 }
 

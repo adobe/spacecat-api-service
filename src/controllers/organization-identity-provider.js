@@ -16,10 +16,12 @@ import {
   ok,
   forbidden,
   internalServerError,
+  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isNonEmptyObject,
   isValidUUID,
+  hasText,
 } from '@adobe/spacecat-shared-utils';
 
 import { OrganizationIdentityProviderDto } from '../dto/organization-identity-provider.js';
@@ -78,8 +80,72 @@ function OrganizationIdentityProviderController(ctx) {
     }
   };
 
+  /**
+   * Creates a new organization identity provider.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} OrganizationIdentityProvider response.
+   */
+  const create = async (context) => {
+    const { organizationId } = context.params;
+    const { provider, externalId, metadata } = context.data;
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    if (!hasText(provider)) {
+      return badRequest('Provider is required');
+    }
+
+    if (!hasText(externalId)) {
+      return badRequest('External ID is required');
+    }
+
+    // Validate provider type
+    const validProviders = Object.values(OrganizationIdentityProvider.PROVIDER_TYPES);
+    if (!validProviders.includes(provider)) {
+      return badRequest(`Provider must be one of: ${validProviders.join(', ')}`);
+    }
+
+    try {
+      // Check if user has access to the organization
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+
+      const accessControlUtil = AccessControlUtil.fromContext(context);
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only users belonging to the organization can create identity providers');
+      }
+
+      // Check if organization identity provider already exists with this provider and external ID
+      const existingProvider = await OrganizationIdentityProvider
+        .findByProviderAndExternalId(provider, externalId);
+      if (existingProvider) {
+        return badRequest('Organization identity provider with this provider and external ID already exists');
+      }
+
+      // Create new organization identity provider
+      const organizationIdentityProvider = await OrganizationIdentityProvider.create({
+        organizationId,
+        provider,
+        externalId,
+        metadata: metadata || {},
+      });
+
+      return createResponse(
+        OrganizationIdentityProviderDto.toJSON(organizationIdentityProvider),
+        201,
+      );
+    } catch (e) {
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getByOrganizationID,
+    create,
   };
 }
 

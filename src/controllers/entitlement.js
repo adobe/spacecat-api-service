@@ -16,10 +16,12 @@ import {
   ok,
   forbidden,
   internalServerError,
+  createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isNonEmptyObject,
   isValidUUID,
+  hasText,
 } from '@adobe/spacecat-shared-utils';
 
 import { EntitlementDto } from '../dto/entitlement.js';
@@ -78,8 +80,75 @@ function EntitlementController(ctx) {
     }
   };
 
+  /**
+   * Creates a new entitlement for an organization.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Entitlement response.
+   */
+  const create = async (context) => {
+    const { organizationId } = context.params;
+    const { productCode, tier, quotas } = context.data;
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    if (!hasText(productCode)) {
+      return badRequest('Product code is required');
+    }
+
+    if (!hasText(tier)) {
+      return badRequest('Tier is required');
+    }
+
+    // Validate product code
+    const validProductCodes = Object.values(Entitlement.PRODUCT_CODES);
+    if (!validProductCodes.includes(productCode)) {
+      return badRequest(`Product code must be one of: ${validProductCodes.join(', ')}`);
+    }
+
+    // Validate tier
+    const validTiers = Object.values(Entitlement.TIERS);
+    if (!validTiers.includes(tier)) {
+      return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
+    }
+
+    try {
+      // Check if user has access to the organization
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+
+      const accessControlUtil = AccessControlUtil.fromContext(context);
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only users belonging to the organization can create entitlements');
+      }
+
+      // Check if entitlement already exists with this product code
+      const existingEntitlements = await Entitlement
+        .allByOrganizationIdAndProductCode(organizationId, productCode);
+      if (existingEntitlements && existingEntitlements.length > 0) {
+        return badRequest('Entitlement with this product code already exists for this organization');
+      }
+
+      // Create new entitlement
+      const entitlement = await Entitlement.create({
+        organizationId,
+        productCode,
+        tier,
+        quotas: quotas || {},
+      });
+
+      return createResponse(EntitlementDto.toJSON(entitlement), 201);
+    } catch (e) {
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getByOrganizationID,
+    create,
   };
 }
 
