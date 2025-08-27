@@ -19,6 +19,9 @@ export const UserActivityDto = {
    * @param {Readonly<TrialUserActivity>} userActivity - TrialUserActivity object.
    * @returns {{
    *   id: string,
+   *   siteId: string,
+   *   trialUserId: string,
+   *   entitlementId: string,
    *   type: string,
    *   details: any,
    *   productCode: string,
@@ -27,6 +30,9 @@ export const UserActivityDto = {
    */
   toJSON: (userActivity) => ({
     id: userActivity.getId(),
+    siteId: userActivity.getSiteId(),
+    trialUserId: userActivity.getTrialUserId(),
+    entitlementId: userActivity.getEntitlementId(),
     type: userActivity.getType(),
     details: userActivity.getDetails(),
     productCode: userActivity.getProductCode(),
