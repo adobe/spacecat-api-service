@@ -1,3 +1,10 @@
+# [1.166.0](https://github.com/adobe/spacecat-api-service/compare/v1.165.0...v1.166.0) (2025-08-27)
+
+
+### Features
+
+* add sandbox audit API endpoint ([#1122](https://github.com/adobe/spacecat-api-service/issues/1122)) ([e38c7e6](https://github.com/adobe/spacecat-api-service/commit/e38c7e661fdbc3584d14a2ee86f7f13a1b1d7122))
+
 # [1.165.0](https://github.com/adobe/spacecat-api-service/compare/v1.164.7...v1.165.0) (2025-08-26)
 
 
