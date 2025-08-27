@@ -1,7 +1,7 @@
-screenshots:
+consent-banner:
   post:
     tags:
-      - screenshots
+      - consent-banner
     security:
       - api_key: []
     summary: Take screenshots for consent banner analysis
@@ -18,8 +18,8 @@ screenshots:
       - Mobile with consent banner visible
       - Mobile with consent banner dismissed/hidden
 
-      The returned jobId can be used with the GET /screenshots endpoint to retrieve the results.
-    operationId: takeScreenshots
+      The returned jobId can be used with the GET /consent-banner endpoint to retrieve the results.
+    operationId: takeConsentBannerScreenshots
     requestBody:
       required: true
       content:
@@ -106,7 +106,7 @@ screenshots:
         $ref: './responses.yaml#/500'
   get:
     tags:
-      - screenshots
+      - consent-banner
     security:
       - api_key: []
     summary: Get consent banner screenshots
@@ -123,7 +123,7 @@ screenshots:
       - `mobile_cookie_banner_off`: Mobile screenshot with consent banner hidden
 
       Additionally provides access to the raw scrape JSON data for further analysis.
-    operationId: getScreenshots
+    operationId: getConsentBannerScreenshots
     parameters:
       - name: jobId
         in: query
@@ -196,44 +196,68 @@ screenshots:
                       example: 32405
                     dimensions:
                       type: object
-                      description: Dimensional analysis results from the consent banner detection
-                      properties:
-                        bannerDimensions:
-                          type: object
-                          description: Detailed banner positioning and dimensions
-                          properties:
-                            x:
-                              type: integer
-                              description: X coordinate of the banner
-                            y:
-                              type: integer
-                              description: Y coordinate of the banner
-                            width:
-                              type: integer
-                              description: Width of the banner
-                            height:
-                              type: integer
-                              description: Height of the banner
-                            top:
-                              type: integer
-                              description: Top position
-                            right:
-                              type: integer
-                              description: Right position
-                            bottom:
-                              type: integer
-                              description: Bottom position
-                            left:
-                              type: integer
-                              description: Left position
-                        overlayOpacity:
-                          type: string
-                          description: Opacity value of the overlay
-                          example: '1'
-                        overlayBGColor:
-                          type: string
-                          description: Background color of the overlay
-                          example: 'rgba(0, 0, 0, 0)'
+                      description: Dimensional analysis results from the consent banner detection, organized by device type
+                      additionalProperties:
+                        type: object
+                        description: Device-specific dimensional analysis results
+                        title: '[device]'
+                        properties:
+                          bannerSelector:
+                            type: string
+                            description: CSS selector used to identify the consent banner
+                            example: '.truste-consent-content'
+                          overlaySelector:
+                            type: string
+                            description: CSS selector used to identify the overlay element
+                            example: 'div#truste-consent-track'
+                          wrapperSelector:
+                            type: string
+                            description: CSS selector used to identify the wrapper element
+                            example: 'div#truste-consent-track'
+                          bannerDimensions:
+                            type: object
+                            description: Detailed banner positioning and dimensions
+                            properties:
+                              x:
+                                type: number
+                                description: X coordinate of the banner
+                                example: 715
+                              y:
+                                type: number
+                                description: Y coordinate of the banner
+                                example: 15
+                              width:
+                                type: number
+                                description: Width of the banner
+                                example: 490
+                              height:
+                                type: number
+                                description: Height of the banner
+                                example: 620
+                              top:
+                                type: number
+                                description: Top position
+                                example: 15
+                              right:
+                                type: number
+                                description: Right position
+                                example: 1205
+                              bottom:
+                                type: number
+                                description: Bottom position
+                                example: 635
+                              left:
+                                type: number
+                                description: Left position
+                                example: 715
+                          overlayOpacity:
+                            type: string
+                            description: Opacity value of the overlay
+                            example: '1'
+                          overlayBGColor:
+                            type: string
+                            description: Background color of the overlay
+                            example: 'rgba(0, 0, 0, 0)'
               required:
                 - jobId
                 - results
@@ -241,39 +265,58 @@ screenshots:
               success:
                 summary: Successful screenshot retrieval
                 value:
-                  jobId: '44db569b-e2a7-4182-b4e1-05bec07dee10'
+                  jobId: 'b97e531e-119a-4312-996a-da2a6e57d72a'
                   results:
-                    desktop_cookie_banner_on: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/44db569b-e2a7-4182-b4e1-05bec07dee10/ch/screenshot-desktop-viewport-withBanner.png?X-Amz-Algorithm=...'
-                    desktop_cookie_banner_off: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/44db569b-e2a7-4182-b4e1-05bec07dee10/ch/screenshot-desktop-viewport-withoutBanner.png?X-Amz-Algorithm=...'
-                    mobile_cookie_banner_on: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/44db569b-e2a7-4182-b4e1-05bec07dee10/ch/screenshot-iphone-6-viewport-withBanner.png?X-Amz-Algorithm=...'
-                    mobile_cookie_banner_off: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/44db569b-e2a7-4182-b4e1-05bec07dee10/ch/screenshot-iphone-6-viewport-withoutBanner.png?X-Amz-Algorithm=...'
+                    desktop_cookie_banner_on: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/b97e531e-119a-4312-996a-da2a6e57d72a/ch/screenshot-desktop-viewport-withBanner.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=...'
+                    desktop_cookie_banner_off: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/b97e531e-119a-4312-996a-da2a6e57d72a/ch/screenshot-desktop-viewport-withoutBanner.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=...'
+                    mobile_cookie_banner_on: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/b97e531e-119a-4312-996a-da2a6e57d72a/ch/screenshot-iphone-6-viewport-withBanner.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=...'
+                    mobile_cookie_banner_off: 'https://spacecat-dev-scraper.s3.us-east-1.amazonaws.com/scrapes/b97e531e-119a-4312-996a-da2a6e57d72a/ch/screenshot-iphone-6-viewport-withoutBanner.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=...'
                     screenshots:
                       - fileName: 'screenshot-iphone-6-viewport-withBanner.png'
                         contentType: 'image/png'
-                        screenshotTime: 122
-                      - fileName: 'screenshot-desktop-viewport-withBanner.png'
-                        contentType: 'image/png'
-                        screenshotTime: 4275
+                        screenshotTime: 583
                       - fileName: 'screenshot-iphone-6-viewport-withoutBanner.png'
                         contentType: 'image/png'
-                        screenshotTime: 6340
+                        screenshotTime: 307
+                      - fileName: 'screenshot-desktop-viewport-withBanner.png'
+                        contentType: 'image/png'
+                        screenshotTime: 2261
                       - fileName: 'screenshot-desktop-viewport-withoutBanner.png'
                         contentType: 'image/png'
-                        screenshotTime: 3002
+                        screenshotTime: 8717
                     dimensionsDevice: 'desktop'
-                    scrapeTime: 32405
+                    scrapeTime: 21835
                     dimensions:
-                      bannerDimensions:
-                        x: 715
-                        y: 15
-                        width: 490
-                        height: 620
-                        top: 15
-                        right: 1205
-                        bottom: 635
-                        left: 715
-                      overlayOpacity: '1'
-                      overlayBGColor: 'rgba(0, 0, 0, 0)'
+                      'iPhone 6':
+                        bannerSelector: '.truste-consent-content'
+                        overlaySelector: 'div#truste-consent-track'
+                        wrapperSelector: 'div#truste-consent-track'
+                        bannerDimensions:
+                          x: 22.5
+                          y: 15
+                          width: 330
+                          height: 586.9375
+                          top: 15
+                          right: 352.5
+                          bottom: 601.9375
+                          left: 22.5
+                        overlayOpacity: '1'
+                        overlayBGColor: 'rgba(0, 0, 0, 0)'
+                      desktop:
+                        bannerSelector: '.truste-consent-content'
+                        overlaySelector: 'div#truste-consent-track'
+                        wrapperSelector: 'div#truste-consent-track'
+                        bannerDimensions:
+                          x: 715
+                          y: 15
+                          width: 490
+                          height: 620
+                          top: 15
+                          right: 1205
+                          bottom: 635
+                          left: 715
+                        overlayOpacity: '1'
+                        overlayBGColor: 'rgba(0, 0, 0, 0)'
       '400':
         description: Bad request - Missing or invalid jobId
         content:

@@ -1805,6 +1805,10 @@ ScrapeOptions:
               - 'section'
               - 'block'
               - 'scroll'
+        rejectRedirects:
+          description: Whether to reject redirects
+          type: boolean
+          default: true
   example:
     pageLoadTimeout: 200
     enableJavascript: true
@@ -1819,6 +1823,11 @@ ScrapeRequest:
       description: The name of the scrape handler to use.
       type: string
       default: 'default'
+    maxScrapeAge:
+      description: The maximum age of a scrape in hours. Providing the value of 0 will result in forcing the scrape (disabling this caching feature)
+      type: integer
+      minimum: 0
+      default: 24
     options:
       description: Optional configuration params, defined as a JSON object
       $ref: '#/ScrapeOptions'
@@ -3443,6 +3452,35 @@ LlmoCustomerIntentUpdate:
       example: 'enterprise customers'
   additionalProperties: false
 
+LlmoCdnLogsFilter:
+  type: array
+  description: Array of CDN logs filter items
+  items:
+    type: object
+    required:
+      - key
+      - value
+    properties:
+      key:
+        type: string
+        example: 'host'
+      value:
+        type: array
+        items:
+          type: string
+        example: ['example.com', 'abc.com']
+      type:
+        type: string
+        enum: ['include', 'exclude']
+        example: 'include'
+  example:
+    - key: 'host'
+      value: ['example.com', 'abc.com']
+      type: 'include'
+    - key: 'status'
+      value: ['404', '500']
+      type: 'exclude'
+
 LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
@@ -3464,4 +3502,76 @@ LlmoConfig:
     customerIntent:
       description: The customer intent configuration containing key-value pairs
       $ref: '#/LlmoCustomerIntent'
+    cdnlogsFilter:
+      description: The CDN logs filter configuration for filtering log entries
+      $ref: '#/LlmoCdnLogsFilter'
   additionalProperties: false
+
+# Sandbox Audit API Schemas
+SandboxAuditType:
+  type: string
+  description: Supported audit types for sandbox environments
+  enum:
+    - 'meta-tags'
+    - 'alt-text'
+  example: 'meta-tags'
+
+SandboxAuditResult:
+  type: object
+  description: |
+    Result of a single sandbox audit. Fields present depend on status:
+    - triggered: only auditType and status
+    - skipped: includes nextAllowedAt and minutesRemaining
+    - failed: includes error message
+  required:
+    - auditType
+    - status
+  properties:
+    auditType:
+      $ref: '#/SandboxAuditType'
+    status:
+      type: string
+      description: Status of the audit
+      enum:
+        - 'triggered'
+        - 'skipped'
+        - 'failed'
+      example: "triggered"
+    nextAllowedAt:
+      type: string
+      format: date-time
+      description: When the audit can be run again (present when status is "skipped")
+      example: "2025-08-15T15:37:48.419Z"
+    minutesRemaining:
+      type: integer
+      description: Minutes until the audit can be run again (present when status is "skipped")
+      example: 45
+    error:
+      type: string
+      description: Error message (present when status is "failed")
+      example: "Failed to enqueue audit job"
+
+SandboxAuditResponse:
+  type: object
+  description: Response for sandbox audit trigger operation. Same schema used for both success (200) and rate limit (429) responses.
+  required:
+    - message
+    - siteId
+    - baseURL
+    - results
+  properties:
+    message:
+      type: string
+      description: Human-readable summary of operation
+      example: "Triggered 2 of 3 audits for https://sandbox.example.com"
+    siteId:
+      description: The site ID that was audited
+      $ref: '#/Id'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    results:
+      type: array
+      description: Array of audit results
+      items:
+        $ref: '#/SandboxAuditResult'

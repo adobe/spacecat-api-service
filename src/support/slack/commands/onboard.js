@@ -197,8 +197,6 @@ function OnboardCommand(context) {
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
-        await configuration.save();
-
         log.info('All sites were processed and onboarded.');
 
         fileStream.end();
