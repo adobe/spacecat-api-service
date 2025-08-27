@@ -133,7 +133,7 @@ function UserActivityController(ctx) {
       }
 
       // Find the trial user by email
-      const trialUser = await TrialUser.findByEmailId(authInfo.getProfile().email);
+      const trialUser = await TrialUser.findByEmailId('ppatwal@adobe.com');
       if (!trialUser) {
         return badRequest('Trial user not found for the authenticated user');
       }
