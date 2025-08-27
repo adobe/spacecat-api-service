@@ -74,6 +74,7 @@ function TrialUserController(ctx) {
       const users = trialUsers.map((user) => TrialUserDto.toJSON(user));
       return ok(users);
     } catch (e) {
+      context.log.error(`Error getting trial users for organization ${organizationId}: ${e.message}`);
       return internalServerError(e.message);
     }
   };
@@ -123,6 +124,7 @@ function TrialUserController(ctx) {
 
       return createResponse(TrialUserDto.toJSON(trialUser), 201);
     } catch (e) {
+      context.log.error(`Error creating trial user invite for organization ${organizationId}: ${e.message}`);
       return internalServerError(e.message);
     }
   };

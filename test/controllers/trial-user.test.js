@@ -139,6 +139,13 @@ describe('Trial User Controller', () => {
     hasAccess: sandbox.stub().resolves(true),
   };
 
+  const mockLogger = {
+    error: sandbox.stub(),
+    info: sandbox.stub(),
+    debug: sandbox.stub(),
+    warn: sandbox.stub(),
+  };
+
   let trialUserController;
 
   beforeEach(() => {
@@ -201,6 +208,7 @@ describe('Trial User Controller', () => {
       const context = {
         params: { organizationId },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -235,6 +243,7 @@ describe('Trial User Controller', () => {
       const context = {
         params: { organizationId },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -256,6 +265,7 @@ describe('Trial User Controller', () => {
       const context = {
         params: { organizationId },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -278,6 +288,7 @@ describe('Trial User Controller', () => {
       const context = {
         params: { organizationId },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -291,6 +302,7 @@ describe('Trial User Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Database connection failed');
+      expect(mockLogger.error).to.have.been.calledWith(`Error getting trial users for organization ${organizationId}: ${dbError.message}`);
     });
 
     it('should return internal server error when access control check fails', async () => {
@@ -300,6 +312,7 @@ describe('Trial User Controller', () => {
       const context = {
         params: { organizationId },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -313,6 +326,7 @@ describe('Trial User Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Access control error');
+      expect(mockLogger.error).to.have.been.calledWith(`Error getting trial users for organization ${organizationId}: ${accessError.message}`);
     });
 
     it('should return internal server error when Organization.findById fails', async () => {
@@ -322,6 +336,7 @@ describe('Trial User Controller', () => {
       const context = {
         params: { organizationId },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -335,6 +350,7 @@ describe('Trial User Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Organization lookup failed');
+      expect(mockLogger.error).to.have.been.calledWith(`Error getting trial users for organization ${organizationId}: ${orgError.message}`);
     });
   });
 
@@ -344,6 +360,7 @@ describe('Trial User Controller', () => {
         params: { organizationId },
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -413,6 +430,7 @@ describe('Trial User Controller', () => {
         params: { organizationId },
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -435,6 +453,7 @@ describe('Trial User Controller', () => {
         params: { organizationId },
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -457,6 +476,7 @@ describe('Trial User Controller', () => {
         params: { organizationId },
         data: { emailId: 'existing@example.com' },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -482,6 +502,7 @@ describe('Trial User Controller', () => {
         params: { organizationId },
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -495,6 +516,7 @@ describe('Trial User Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Database connection failed');
+      expect(mockLogger.error).to.have.been.calledWith(`Error creating trial user invite for organization ${organizationId}: ${dbError.message}`);
     });
 
     it('should return internal server error when access control check fails', async () => {
@@ -505,6 +527,7 @@ describe('Trial User Controller', () => {
         params: { organizationId },
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -518,6 +541,7 @@ describe('Trial User Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Access control error');
+      expect(mockLogger.error).to.have.been.calledWith(`Error creating trial user invite for organization ${organizationId}: ${accessError.message}`);
     });
 
     it('should return internal server error when Organization.findById fails', async () => {
@@ -528,6 +552,7 @@ describe('Trial User Controller', () => {
         params: { organizationId },
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
+        log: mockLogger,
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -541,6 +566,7 @@ describe('Trial User Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Organization lookup failed');
+      expect(mockLogger.error).to.have.been.calledWith(`Error creating trial user invite for organization ${organizationId}: ${orgError.message}`);
     });
   });
 });
