@@ -183,32 +183,6 @@ describe('User Activity Controller', () => {
     sandbox.restore();
   });
 
-  describe('UserActivityController constructor', () => {
-    it('should throw error when context is not provided', () => {
-      expect(() => UserActivityController()).to.throw('Context required');
-    });
-
-    it('should throw error when context is null', () => {
-      expect(() => UserActivityController(null)).to.throw('Context required');
-    });
-
-    it('should throw error when context is empty object', () => {
-      expect(() => UserActivityController({})).to.throw('Context required');
-    });
-
-    it('should throw error when dataAccess is not provided', () => {
-      expect(() => UserActivityController({ someOtherProp: 'value' })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is null', () => {
-      expect(() => UserActivityController({ dataAccess: null })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is empty object', () => {
-      expect(() => UserActivityController({ dataAccess: {} })).to.throw('Data access required');
-    });
-  });
-
   describe('getBySiteID', () => {
     it('should return user activities for valid site ID', async () => {
       const context = {

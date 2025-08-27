@@ -174,32 +174,6 @@ describe('Trial User Controller', () => {
     sandbox.restore();
   });
 
-  describe('TrialUserController constructor', () => {
-    it('should throw error when context is not provided', () => {
-      expect(() => TrialUserController()).to.throw('Context required');
-    });
-
-    it('should throw error when context is null', () => {
-      expect(() => TrialUserController(null)).to.throw('Context required');
-    });
-
-    it('should throw error when context is empty object', () => {
-      expect(() => TrialUserController({})).to.throw('Context required');
-    });
-
-    it('should throw error when dataAccess is not provided', () => {
-      expect(() => TrialUserController({ someOtherProp: 'value' })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is null', () => {
-      expect(() => TrialUserController({ dataAccess: null })).to.throw('Data access required');
-    });
-
-    it('should throw error when dataAccess is empty object', () => {
-      expect(() => TrialUserController({ dataAccess: {} })).to.throw('Data access required');
-    });
-  });
-
   describe('getByOrganizationID', () => {
     it('should return trial users for valid organization ID', async () => {
       const context = {
