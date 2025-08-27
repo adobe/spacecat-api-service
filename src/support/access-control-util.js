@@ -38,10 +38,6 @@ export default class AccessControlUtil {
 
   constructor(context) {
     const { log, pathInfo, attributes } = context;
-    this.authInfo = attributes?.authInfo;
-    this.entitlment = context.dataAccess.Entitlment;
-    this.trialUser = context.dataAccess.TrialUser;
-    this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
 
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
@@ -51,10 +47,14 @@ export default class AccessControlUtil {
         .withAuthenticated(true)
         .withProfile(profile)
         .withType(this.name);
-    }
-
-    if (!isNonEmptyObject(this.authInfo)) {
-      throw new Error('Missing authInfo');
+    } else {
+      if (!isNonEmptyObject(attributes?.authInfo)) {
+        throw new Error('Missing authInfo');
+      }
+      this.authInfo = attributes?.authInfo;
+      this.Entitlment = context.dataAccess.Entitlment;
+      this.TrialUser = context.dataAccess.TrialUser;
+      this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
     }
   }
 
@@ -81,11 +81,13 @@ export default class AccessControlUtil {
   }
 
   async validateEntitlement(org, productCode) {
-    const entitlement = await org.findByOrganizationIdAndProductCode(org.getId(), productCode);
-    if (!isNonEmptyObject(entitlement)) {
+    // eslint-disable-next-line max-len
+    const entitlements = await this.Entitlment.findByOrganizationIdAndProductCode(org.getId(), productCode);
+    if (!entitlements || entitlements.length === 0) {
       throw new Error('Missing entitlement for organization');
     }
-    const validEntitlement = entitlement.find((ent) => ent.productCode === productCode && ent.tier);
+    // eslint-disable-next-line max-len
+    const validEntitlement = entitlements.find((ent) => ent.productCode === productCode && ent.tier);
     if (!isNonEmptyObject(validEntitlement)) {
       throw new Error(`[Error] Organization is not entitled for ${productCode}`);
     }
@@ -105,7 +107,7 @@ export default class AccessControlUtil {
         // create a trial user
         await this.TrialUser.create({
           emailId: profile.trial_email,
-          provider: providerId.getProvider(),
+          provider: providerId.provider,
           organizationId: org.getId(),
           status: this.TrialUser.STATUS.REGISTERED,
           externalUserId: profile.email,
@@ -138,7 +140,13 @@ export default class AccessControlUtil {
 
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
     if (productCode.length > 0) {
-      await this.validateEntitlement(entity, productCode);
+      let org;
+      if (entity instanceof Site) {
+        org = await entity.getOrganization();
+      } else if (entity instanceof Organization) {
+        org = entity;
+      }
+      await this.validateEntitlement(org, productCode);
     }
     if (subService.length > 0) {
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);

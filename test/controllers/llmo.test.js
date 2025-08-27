@@ -104,6 +104,11 @@ describe('LlmoController', () => {
       Site: {
         findById: sinon.stub().resolves(mockSite),
       },
+      Entitlment: {
+        PRODUCT_CODES: {
+          LLMO: 'llmo',
+        },
+      },
     };
 
     // Create mock log
@@ -135,6 +140,20 @@ describe('LlmoController', () => {
       dataAccess: mockDataAccess,
       log: mockLog,
       env: mockEnv,
+      attributes: {
+        authInfo: {
+          getType: () => 'jwt',
+          isAdmin: () => false,
+          hasOrganization: () => true,
+          hasScope: () => true,
+          getScopes: () => [{ name: 'user' }],
+          getProfile: () => ({ email: 'test@example.com' }),
+        },
+      },
+      pathInfo: {
+        method: 'GET',
+        suffix: '/llmo/sheet-data',
+      },
     };
 
     // Create tracingFetch stub
@@ -148,7 +167,7 @@ describe('LlmoController', () => {
       },
     });
 
-    controller = LlmoController();
+    controller = LlmoController(mockContext);
   });
 
   afterEach(() => {

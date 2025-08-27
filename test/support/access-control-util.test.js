@@ -41,13 +41,48 @@ describe('Access Control Util', () => {
         is_admin: true,
       });
 
-    const context = { attributes: { authInfo } };
+    const context = {
+      attributes: { authInfo },
+      dataAccess: {
+        Entitlment: {
+          TIER: {
+            FREE_TRIAL: 'free_trial',
+            PAID: 'paid',
+          },
+          findByOrganizationIdAndProductCode: sinon.stub(),
+        },
+        TrialUser: {
+          STATUS: {
+            REGISTERED: 'registered',
+          },
+        },
+        OrganizationIdentityProvider: {},
+      },
+    };
+
     const accessControlUtil = AccessControlUtil.fromContext(context);
     expect(accessControlUtil.hasAdminAccess()).to.be.true;
   });
 
   it('should throw an error if entity is not provided', async () => {
-    const context = { attributes: { authInfo: new AuthInfo() } };
+    const context = {
+      attributes: { authInfo: new AuthInfo() },
+      dataAccess: {
+        Entitlment: {
+          TIER: {
+            FREE_TRIAL: 'free_trial',
+            PAID: 'paid',
+          },
+          findByOrganizationIdAndProductCode: sinon.stub(),
+        },
+        TrialUser: {
+          STATUS: {
+            REGISTERED: 'registered',
+          },
+        },
+        OrganizationIdentityProvider: {},
+      },
+    };
     const accessControlUtil = AccessControlUtil.fromContext(context);
     try {
       await accessControlUtil.hasAccess();
@@ -72,6 +107,11 @@ describe('Access Control Util', () => {
           hasScope: () => true,
           getScopes: () => [{ name: 'user' }],
         },
+      },
+      dataAccess: {
+        Entitlment: { TIER: { FREE_TRIAL: 'free_trial', PAID: 'paid' }, findByOrganizationIdAndProductCode: sinon.stub() },
+        TrialUser: { STATUS: { REGISTERED: 'registered' }, findByEmailId: sinon.stub() },
+        OrganizationIdentityProvider: {},
       },
     };
   });
@@ -170,6 +210,49 @@ describe('Access Control Util', () => {
     expect(orgResult).to.be.true;
   });
 
+  it('should handle Organization entity type directly without calling getOrganization', async () => {
+    const util = AccessControlUtil.fromContext(context);
+
+    // Test with Organization entity directly
+    const org = {
+      getImsOrgId: () => 'test-org-id',
+    };
+    Object.setPrototypeOf(org, Organization.prototype);
+
+    // Mock the authInfo.hasOrganization to return true for test-org-id
+    util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+    const result = await util.hasAccess(org);
+
+    expect(result).to.be.true;
+    expect(util.authInfo.hasOrganization).to.have.been.calledWith('test-org-id');
+  });
+
+  it('should handle Organization entity type with productCode validation', async () => {
+    const util = AccessControlUtil.fromContext(context);
+
+    // Test with Organization entity directly
+    const org = {
+      getImsOrgId: () => 'test-org-id',
+      getId: () => 'test-org-id',
+    };
+    Object.setPrototypeOf(org, Organization.prototype);
+
+    // Mock the authInfo.hasOrganization to return true for test-org-id
+    util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+    // Mock the entitlement validation to succeed
+    util.Entitlment.findByOrganizationIdAndProductCode = sinon.stub().resolves([
+      { productCode: 'llmo', tier: 'paid' },
+    ]);
+
+    const result = await util.hasAccess(org, '', 'llmo');
+
+    expect(result).to.be.true;
+    expect(util.authInfo.hasOrganization).to.have.been.calledWith('test-org-id');
+    expect(util.Entitlment.findByOrganizationIdAndProductCode).to.have.been.calledWith('test-org-id', 'llmo');
+  });
+
   // Test constructor error cases
   it('throws error when context is missing', () => {
     expect(() => AccessControlUtil.fromContext()).to.throw('Missing context');
@@ -199,6 +282,20 @@ describe('Access Control Util', () => {
         log: { info: () => {} },
         attributes: {
           authInfo: mockAuthInfo,
+        },
+        dataAccess: {
+          Entitlment: {
+            TIER: {
+              FREE_TRIAL: 'free_trial',
+              PAID: 'paid',
+            },
+          },
+          TrialUser: {
+            STATUS: {
+              REGISTERED: 'registered',
+            },
+          },
+          OrganizationIdentityProvider: {},
         },
       };
 
@@ -291,7 +388,24 @@ describe('Access Control Util', () => {
         })
         .withAuthenticated(true);
 
-      const contextForIMS = { attributes: { authInfo } };
+      const contextForIMS = {
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlment: {
+            TIER: {
+              FREE_TRIAL: 'free_trial',
+              PAID: 'paid',
+            },
+            findByOrganizationIdAndProductCode: sinon.stub(),
+          },
+          TrialUser: {
+            STATUS: {
+              REGISTERED: 'registered',
+            },
+          },
+          OrganizationIdentityProvider: {},
+        },
+      };
       const accessControl = AccessControlUtil.fromContext(contextForIMS);
 
       // Verify IMS specific checks
@@ -330,7 +444,24 @@ describe('Access Control Util', () => {
         .withScopes([{ name: 'admin' }])
         .withAuthenticated(true);
 
-      const contextForIMS = { attributes: { authInfo } };
+      const contextForIMS = {
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlment: {
+            TIER: {
+              FREE_TRIAL: 'free_trial',
+              PAID: 'paid',
+            },
+            findByOrganizationIdAndProductCode: sinon.stub(),
+          },
+          TrialUser: {
+            STATUS: {
+              REGISTERED: 'registered',
+            },
+          },
+          OrganizationIdentityProvider: {},
+        },
+      };
       const accessControl = AccessControlUtil.fromContext(contextForIMS);
 
       // Test Organization instance
@@ -357,7 +488,25 @@ describe('Access Control Util', () => {
         .withType('foo')
         .withAuthenticated(true);
 
-      const contextForIMS = { attributes: { authInfo } };
+      const contextForIMS = {
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlment: {
+            TIER: {
+              FREE_TRIAL: 'free_trial',
+              PAID: 'paid',
+            },
+            findByOrganizationIdAndProductCode: sinon.stub(),
+          },
+          TrialUser: {
+            STATUS: {
+              REGISTERED: 'registered',
+            },
+          },
+          OrganizationIdentityProvider: {},
+        },
+      };
+
       const accessControl = AccessControlUtil.fromContext(contextForIMS);
 
       // Test Organization instance
@@ -377,6 +526,312 @@ describe('Access Control Util', () => {
 
       const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
       expect(hasAccessToDifferentOrg).to.be.true;
+    });
+  });
+
+  describe('Entitlement Validation', () => {
+    let util;
+    let mockOrg;
+    let mockEntitlment;
+    let mockTrialUser;
+    let mockIdentityProvider;
+
+    beforeEach(() => {
+      mockOrg = {
+        getId: () => 'org-123',
+        getImsOrgId: () => 'org-123',
+      };
+
+      mockEntitlment = {
+        TIER: {
+          FREE_TRIAL: 'free_trial',
+          PAID: 'paid',
+        },
+        findByOrganizationIdAndProductCode: sinon.stub(),
+      };
+
+      mockTrialUser = {
+        findByEmailId: sinon.stub(),
+        create: sinon.stub(),
+        STATUS: {
+          REGISTERED: 'registered',
+        },
+      };
+
+      mockIdentityProvider = {
+        findByOrganizationId: sinon.stub(),
+      };
+
+      const testContext = {
+        log: { info: () => {} },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({
+              trial_email: 'trial@example.com',
+              provider: 'google',
+              email: 'user@example.com',
+            }),
+          },
+        },
+        dataAccess: {
+          Entitlment: mockEntitlment,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+        },
+      };
+
+      util = AccessControlUtil.fromContext(testContext);
+    });
+
+    it('should validate entitlement successfully for paid tier', async () => {
+      const entitlements = [
+        { productCode: 'llmo', tier: 'paid' },
+      ];
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(entitlements);
+
+      await expect(util.validateEntitlement(mockOrg, 'llmo')).to.not.be.rejected;
+    });
+
+    it('should throw error when entitlement is missing for organization', async () => {
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(null);
+
+      await expect(util.validateEntitlement(mockOrg, 'llmo'))
+        .to.be.rejectedWith('Missing entitlement for organization');
+    });
+
+    it('should throw error when organization is not entitled for product', async () => {
+      const entitlements = [
+        { productCode: 'other_product', tier: 'paid' },
+      ];
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(entitlements);
+
+      await expect(util.validateEntitlement(mockOrg, 'llmo'))
+        .to.be.rejectedWith('[Error] Organization is not entitled for llmo');
+    });
+
+    it('should throw error when entitlement has no tier', async () => {
+      const entitlements = [
+        { productCode: 'llmo' }, // missing tier
+      ];
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(entitlements);
+
+      await expect(util.validateEntitlement(mockOrg, 'llmo'))
+        .to.be.rejectedWith('[Error] Organization is not entitled for llmo');
+    });
+
+    it('should create trial user when tier is free_trial and trial user does not exist', async () => {
+      const entitlements = [
+        { productCode: 'llmo', tier: 'free_trial' },
+      ];
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(entitlements);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      const identityProviders = [
+        { provider: 'google', getProvider: () => 'google' },
+      ];
+      mockIdentityProvider.findByOrganizationId.resolves(identityProviders);
+
+      await util.validateEntitlement(mockOrg, 'llmo');
+
+      expect(mockTrialUser.create).to.have.been.calledWith({
+        emailId: 'trial@example.com',
+        provider: 'google',
+        organizationId: 'org-123',
+        status: 'registered',
+        externalUserId: 'user@example.com',
+        lastSeenAt: sinon.match.string,
+      });
+    });
+
+    it('should not create trial user when trial user already exists', async () => {
+      const entitlements = [
+        { productCode: 'llmo', tier: 'free_trial' },
+      ];
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(entitlements);
+
+      mockTrialUser.findByEmailId.resolves({ id: 'existing-user' });
+
+      const identityProviders = [
+        { provider: 'google', getProvider: () => 'google' },
+      ];
+      mockIdentityProvider.findByOrganizationId.resolves(identityProviders);
+
+      await util.validateEntitlement(mockOrg, 'llmo');
+
+      expect(mockTrialUser.create).to.not.have.been.called;
+    });
+
+    it('should throw error when IDP is not supported for free trial', async () => {
+      const entitlements = [
+        { productCode: 'llmo', tier: 'free_trial' },
+      ];
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(entitlements);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      // No matching IDP found
+      mockIdentityProvider.findByOrganizationId.resolves([]);
+
+      await expect(util.validateEntitlement(mockOrg, 'llmo'))
+        .to.be.rejectedWith('[Error] IDP not supported');
+    });
+
+    it('should throw error when IDP provider does not match', async () => {
+      const entitlements = [
+        { productCode: 'llmo', tier: 'free_trial' },
+      ];
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(entitlements);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      // IDP with different provider
+      const identityProviders = [
+        { provider: 'microsoft', getProvider: () => 'microsoft' },
+      ];
+      mockIdentityProvider.findByOrganizationId.resolves(identityProviders);
+
+      await expect(util.validateEntitlement(mockOrg, 'llmo'))
+        .to.be.rejectedWith('[Error] IDP not supported');
+    });
+  });
+
+  describe('hasAccess with productCode', () => {
+    let util;
+    let mockOrg;
+    let mockEntitlment;
+    let mockTrialUser;
+    let mockIdentityProvider;
+
+    beforeEach(() => {
+      mockOrg = {
+        getId: () => 'org-123',
+        getImsOrgId: () => 'org-123',
+      };
+
+      mockEntitlment = {
+        TIER: {
+          FREE_TRIAL: 'free_trial',
+          PAID: 'paid',
+        },
+        findByOrganizationIdAndProductCode: sinon.stub(),
+      };
+
+      mockTrialUser = {
+        findByEmailId: sinon.stub(),
+        create: sinon.stub(),
+        STATUS: {
+          REGISTERED: 'registered',
+        },
+      };
+
+      mockIdentityProvider = {
+        findByOrganizationId: sinon.stub(),
+      };
+
+      const testContext = {
+        log: { info: () => {} },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({
+              trial_email: 'trial@example.com',
+              provider: 'google',
+              email: 'user@example.com',
+            }),
+          },
+        },
+        dataAccess: {
+          Entitlment: mockEntitlment,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+        },
+      };
+
+      util = AccessControlUtil.fromContext(testContext);
+    });
+
+    it('should call validateEntitlement when productCode is provided', async () => {
+      const site = {
+        getOrganization: async () => mockOrg,
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      const entitlements = [
+        { productCode: 'llmo', tier: 'paid' },
+      ];
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(entitlements);
+
+      const result = await util.hasAccess(site, '', 'llmo');
+
+      expect(mockEntitlment.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
+      expect(result).to.be.true;
+    });
+
+    it('should not call validateEntitlement when productCode is empty', async () => {
+      const site = {
+        getOrganization: async () => mockOrg,
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      const result = await util.hasAccess(site, '', '');
+
+      expect(mockEntitlment.findByOrganizationIdAndProductCode).to.not.have.been.called;
+      expect(result).to.be.true;
+    });
+
+    it('should handle entitlement validation errors', async () => {
+      const site = {
+        getOrganization: async () => mockOrg,
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      mockEntitlment.findByOrganizationIdAndProductCode.resolves(null);
+
+      await expect(util.hasAccess(site, '', 'llmo'))
+        .to.be.rejectedWith('Missing entitlement for organization');
+    });
+  });
+
+  describe('Constructor with dataAccess dependencies', () => {
+    it('should initialize dataAccess dependencies correctly', () => {
+      const mockEntitlment = { TIER: { FREE_TRIAL: 'free_trial' } };
+      const mockTrialUser = { STATUS: { REGISTERED: 'registered' } };
+      const mockIdentityProvider = {};
+
+      const testContext = {
+        log: { info: () => {} },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({}),
+          },
+        },
+        dataAccess: {
+          Entitlment: mockEntitlment,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+        },
+      };
+
+      const util = AccessControlUtil.fromContext(testContext);
+
+      expect(util.Entitlment).to.equal(mockEntitlment);
+      expect(util.TrialUser).to.equal(mockTrialUser);
+      expect(util.IdentityProvider).to.equal(mockIdentityProvider);
     });
   });
 });
