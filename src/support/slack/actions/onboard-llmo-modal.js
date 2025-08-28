@@ -15,11 +15,8 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { getLastNumberOfWeeks } from '@adobe/spacecat-shared-utils';
 import { Octokit } from '@octokit/rest';
 import {
-  extractURLFromSlackInput,
-  loadProfileConfig,
   postErrorMessage,
 } from '../../../utils/slack/base.js';
-import { onboardSingleSite } from '../../utils.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
@@ -74,7 +71,7 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
           type: 'input',
           block_id: 'brand_name_input',
           element: {
-            type: 'text_input',
+            type: 'plain_text_input',
             action_id: 'brand_name',
             placeholder: {
               type: 'plain_text',
@@ -113,13 +110,6 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
               text: 'Auto-detect (recommended)',
             },
             options: [
-              {
-                text: {
-                  type: 'plain_text',
-                  text: 'Auto-detect (recommended)',
-                },
-                value: 'auto',
-              },
               {
                 text: {
                   type: 'plain_text',
@@ -209,7 +199,7 @@ async function elmoOnboardingModal(body, client, respond, brandURL) {
           type: 'input',
           block_id: 'brand_name_input',
           element: {
-            type: 'text_input',
+            type: 'plain_text_input',
             action_id: 'brand_name',
             placeholder: {
               type: 'plain_text',
@@ -242,29 +232,11 @@ async function elmoOnboardingModal(body, client, respond, brandURL) {
   });
 }
 
-async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
-  const { log, dataAccess, imsClient } = lambdaCtx;
+async function createOrg(imsOrgId, lambdaCtx, slackCtx) {
+  const { log, imsClient, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
   const { Organization } = dataAccess;
 
-  // fetch both existing site's org id and newly provided org id
-  const existingOrgId = site.getOrganizationId();
-  const providedImsOrg = await Organization.findByImsOrgId(imsOrgId);
-  const providedImsOrgId = providedImsOrg?.getId();
-
-  if (existingOrgId === providedImsOrgId) {
-    // no update required
-    return;
-  }
-
-  // if the provided ims org id exists, update the site to use this one
-  if (providedImsOrgId) {
-    site.setOrganizationId(providedImsOrgId);
-    await site.save();
-    return;
-  }
-
-  // the provided ims doesn't have a spacecat org, create it and add to site
   let imsOrgDetails;
   try {
     imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgId);
@@ -277,7 +249,7 @@ async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
 
   if (!imsOrgDetails) {
     await say(`:x: Could not find an IMS org with the ID *${imsOrgId}*.`);
-    return;
+    throw new Error('Failed crating organization.');
   }
 
   // create a new spacecat org
@@ -286,6 +258,33 @@ async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
     imsOrgId,
   });
   await newImsOrg.save();
+  return newImsOrg;
+}
+
+// ensures that the site has the provided imsOrgId set
+async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
+  const { dataAccess } = lambdaCtx;
+  const { Organization } = dataAccess;
+
+  // fetch both existing site's org id and newly provided org id
+  const existingOrgId = site.getOrganizationId();
+  const providedImsOrg = await Organization.findByImsOrgId(imsOrgId);
+  const providedImsOrgId = providedImsOrg?.getId();
+
+  // if the org is already set, do nothing
+  if (existingOrgId === providedImsOrgId) {
+    return;
+  }
+
+  // if the provided ims org id exists, update the site to use this one
+  if (providedImsOrgId) {
+    site.setOrganizationId(providedImsOrgId);
+    await site.save();
+    return;
+  }
+
+  // the provided ims doesn't have a spacecat org, create it and add to site
+  const newImsOrg = await createOrg(imsOrgId, lambdaCtx, slackCtx);
 
   site.setOrganizationId(newImsOrg.getId());
   await site.save();
@@ -460,11 +459,32 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
   log.info('Done with Git modification of helix query config');
 }
 
+async function createSiteAndOrganization(input, lambda, slackContext) {
+  const { dataAccess } = lambda;
+  const {
+    baseURL, imsOrgId, deliveryType,
+  } = input;
+  const { Organization, Site } = dataAccess;
+
+  const org = await Organization.findByImsOrgId(imsOrgId);
+  let orgId = org?.getId();
+  if (!orgId) {
+    const newOrg = createOrg(imsOrgId, lambda, slackContext);
+    orgId = newOrg.getId();
+  }
+
+  const site = await Site.create({
+    baseURL, deliveryType, organizationId: orgId,
+  });
+  site.save();
+  return site.getId();
+}
+
 export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId, deliveryType,
+    baseURL, brandName, imsOrgId,
   } = input;
   const { hostname } = new URL(baseURL);
   const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
@@ -476,34 +496,12 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     let site = await Site.findByBaseURL(baseURL);
     if (!site) {
       // create a new site
-      const profile = await loadProfileConfig('default');
       const configuration = await Configuration.findLatest();
       // onboard the site
-      const reportLine = await onboardSingleSite(
-        baseURL,
-        imsOrgId,
-        configuration,
-        profile,
-        300,
-        slackCtx,
-        lambdaCtx,
-        {
-          deliveryType: deliveryType && deliveryType !== 'auto' ? deliveryType : undefined,
-        },
-        {
-          profileName: 'default',
-          urlProcessor: extractURLFromSlackInput,
-        },
-      );
+      const siteId = await createSiteAndOrganization(input, lambdaCtx, slackCtx);
 
       await configuration.save();
-
-      if (reportLine.errors.length > 0) {
-        say(`:warning: ${reportLine.errors}`);
-        say('Aborting onboarding process.');
-        return;
-      }
-      site = await Site.findById(reportLine.siteId);
+      site = await Site.findById(siteId);
     } else {
       // check that the existing site matches the provided IMS org id
       await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
