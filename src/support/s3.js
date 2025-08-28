@@ -15,6 +15,7 @@ import {
   GetObjectCommand,
   PutObjectCommand,
   ListObjectsV2Command,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -41,6 +42,7 @@ export function s3ClientWrapper(fn) {
         GetObjectCommand,
         PutObjectCommand,
         ListObjectsV2Command,
+        DeleteObjectCommand,
       };
     }
     return fn(request, context);

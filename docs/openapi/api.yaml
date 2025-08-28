@@ -53,6 +53,8 @@ tags:
     description: LLMO (Large Language Model Optimizer) operations
   - name: sandbox
     description: Sandbox audit operations
+  - name: reports
+    description: Report generation and management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -239,6 +241,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-filter'
   /sites/{siteId}/sandbox/audit:
     $ref: './sandbox-audit-api.yaml#/sandbox-audit'
+  /sites/{siteId}/reports:
+    $ref: './site-api.yaml#/site-reports'
+  /sites/{siteId}/reports/{reportId}:
+    $ref: './site-api.yaml#/site-report'
 
 components:
   securitySchemes:
