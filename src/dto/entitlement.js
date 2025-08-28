@@ -24,7 +24,8 @@ export const EntitlementDto = {
    *   tier: string,
    *   quotas: any,
    *   createdAt: string,
-   *   updatedAt: string
+   *   updatedAt: string,
+   *   updatedBy: string
    * }}
    */
   toJSON: (entitlement) => ({
@@ -35,5 +36,6 @@ export const EntitlementDto = {
     quotas: entitlement.getQuotas(),
     createdAt: entitlement.getCreatedAt(),
     updatedAt: entitlement.getUpdatedAt(),
+    updatedBy: entitlement.getUpdatedBy(),
   }),
 };

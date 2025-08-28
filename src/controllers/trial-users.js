@@ -16,6 +16,7 @@ import {
   ok,
   forbidden,
   createResponse,
+  created,
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
@@ -30,12 +31,12 @@ import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
- * TrialUser controller. Provides methods to read and create trial users.
+ * TrialUsers controller. Provides methods to read and create trial users.
  * @param {object} ctx - Context of the request.
- * @returns {object} TrialUser controller.
+ * @returns {object} TrialUsers controller.
  * @constructor
  */
-function TrialUserController(ctx) {
+function TrialUsersController(ctx) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -86,7 +87,7 @@ function TrialUserController(ctx) {
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} TrialUser response.
    */
-  const createTrialUserInvite = async (context) => {
+  const createTrialUserForEmailInvite = async (context) => {
     const { organizationId } = context.params;
     const { emailId } = context.data;
 
@@ -116,7 +117,7 @@ function TrialUserController(ctx) {
       // Check if trial user already exists with this email
       const existingTrialUser = await TrialUser.findByEmailId(emailId);
       if (existingTrialUser) {
-        return badRequest('Trial user with this email already exists');
+        return createResponse({ message: 'Trial user with this email already exists' }, 409);
       }
 
       // Create new trial user invite
@@ -124,10 +125,10 @@ function TrialUserController(ctx) {
         emailId,
         organizationId,
         status: TrialUserModel.STATUSES.INVITED,
-        metadata: { origin: 'invited' },
+        metadata: { origin: TrialUserModel.STATUSES.INVITED },
       });
 
-      return createResponse(TrialUserDto.toJSON(trialUser), 201);
+      return created(TrialUserDto.toJSON(trialUser));
     } catch (e) {
       context.log.error(`Error creating trial user invite for organization ${organizationId}: ${e.message}`);
       return internalServerError(e.message);
@@ -136,8 +137,8 @@ function TrialUserController(ctx) {
 
   return {
     getByOrganizationID,
-    createTrialUserInvite,
+    createTrialUserForEmailInvite,
   };
 }
 
-export default TrialUserController;
+export default TrialUsersController;

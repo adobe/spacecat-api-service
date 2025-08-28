@@ -212,7 +212,7 @@ describe('getRouteHandlers', () => {
 
   const mockTrialUserController = {
     getByOrganizationID: () => null,
-    createTrialUserInvite: () => null,
+    createTrialUserForEmailInvite: () => null,
   };
 
   const mockEntitlementController = {

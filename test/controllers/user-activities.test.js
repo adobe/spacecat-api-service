@@ -18,7 +18,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
-import UserActivityController from '../../src/controllers/user-activity.js';
+import UserActivityController from '../../src/controllers/user-activities.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -59,6 +59,7 @@ describe('User Activity Controller', () => {
       getTimestamp: () => new Date('2023-01-01T00:00:00Z'),
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'user1@example.com',
     },
     {
       getId: () => 'activity-2',
@@ -72,6 +73,7 @@ describe('User Activity Controller', () => {
       getTimestamp: () => new Date('2023-01-01T01:00:00Z'),
       getCreatedAt: () => '2023-01-01T01:00:00Z',
       getUpdatedAt: () => '2023-01-01T01:00:00Z',
+      getUpdatedBy: () => 'user2@example.com',
     },
   ];
 
@@ -240,7 +242,7 @@ describe('User Activity Controller', () => {
 
       const result = await userActivityController.getBySiteID(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(404);
       const body = await result.json();
       expect(body.message).to.equal('Site not found');
     });
@@ -261,7 +263,7 @@ describe('User Activity Controller', () => {
 
       const result = await userActivityController.getBySiteID(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(403);
       const body = await result.json();
       expect(body.message).to.equal('Access denied to this site');
     });
@@ -448,7 +450,7 @@ describe('User Activity Controller', () => {
 
       const result = await userActivityController.createTrialUserActivity(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(404);
       const body = await result.json();
       expect(body.message).to.equal('Site not found');
     });
@@ -468,7 +470,7 @@ describe('User Activity Controller', () => {
 
       const result = await userActivityController.createTrialUserActivity(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(403);
       const body = await result.json();
       expect(body.message).to.equal('Access denied to this site');
     });
@@ -493,7 +495,7 @@ describe('User Activity Controller', () => {
       expect(body.message).to.equal('User\'s trial email not found');
     });
 
-    it('should return bad request when trial user not found', async () => {
+    it('should return not found when trial user not found', async () => {
       mockDataAccess.TrialUser.findByEmailId.resolves(null);
 
       const context = {
@@ -510,12 +512,12 @@ describe('User Activity Controller', () => {
 
       const result = await userActivityController.createTrialUserActivity(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(404);
       const body = await result.json();
       expect(body.message).to.equal('Trial user not found for the authenticated user');
     });
 
-    it('should return bad request when entitlement not found', async () => {
+    it('should return not found when entitlement not found', async () => {
       mockDataAccess.Entitlement.allByOrganizationIdAndProductCode.resolves([]);
 
       const context = {
@@ -532,7 +534,7 @@ describe('User Activity Controller', () => {
 
       const result = await userActivityController.createTrialUserActivity(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(404);
       const body = await result.json();
       expect(body.message).to.equal('Entitlement not found for this organization and product code');
     });
@@ -601,6 +603,72 @@ describe('User Activity Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Site lookup failed');
+    });
+
+    it('should create trial user activity with details field', async () => {
+      const context = {
+        params: { siteId },
+        data: { type: 'SIGN_IN', productCode: 'LLMO', details: { action: 'SIGN_IN', timestamp: '2023-01-01' } },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await userActivityController.createTrialUserActivity(context);
+
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body).to.have.property('id');
+      expect(body).to.have.property('type', 'SIGN_IN');
+
+      // Verify that the create method was called with the correct payload
+      expect(mockDataAccess.TrialUserActivity.create).to.have.been.calledWith(
+        sinon.match({
+          type: 'SIGN_IN',
+          productCode: 'LLMO',
+          details: { action: 'SIGN_IN', timestamp: '2023-01-01' },
+          siteId,
+          trialUserId: 'trial-user-123',
+          entitlementId: 'entitlement-123',
+        }),
+      );
+    });
+
+    it('should create trial user activity without details field when not provided', async () => {
+      const context = {
+        params: { siteId },
+        data: { type: 'SIGN_IN', productCode: 'LLMO' },
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await userActivityController.createTrialUserActivity(context);
+
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body).to.have.property('id');
+      expect(body).to.have.property('type', 'SIGN_IN');
+
+      // Verify that the create method was called without details field
+      expect(mockDataAccess.TrialUserActivity.create).to.have.been.calledWith(
+        sinon.match({
+          type: 'SIGN_IN',
+          productCode: 'LLMO',
+          siteId,
+          trialUserId: 'trial-user-123',
+          entitlementId: 'entitlement-123',
+        }),
+      );
+      expect(mockDataAccess.TrialUserActivity.create.firstCall.args[0]).to.not.have.property('details');
     });
   });
 });

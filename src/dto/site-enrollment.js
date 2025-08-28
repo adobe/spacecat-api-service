@@ -21,7 +21,9 @@ export const SiteEnrollmentDto = {
    *   id: string,
    *   siteId: string,
    *   entitlementId: string,
-   *   createdAt: string
+   *   createdAt: string,
+   *   updatedAt: string,
+   *   updatedBy: string
    * }}
    */
   toJSON: (siteEnrollment) => ({
@@ -29,5 +31,7 @@ export const SiteEnrollmentDto = {
     siteId: siteEnrollment.getSiteId(),
     entitlementId: siteEnrollment.getEntitlementId(),
     createdAt: siteEnrollment.getCreatedAt(),
+    updatedAt: siteEnrollment.getUpdatedAt(),
+    updatedBy: siteEnrollment.getUpdatedBy(),
   }),
 };

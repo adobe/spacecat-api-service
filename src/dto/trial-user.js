@@ -29,7 +29,8 @@ export const TrialUserDto = {
    *   lastSeenAt: string,
    *   metadata: any,
    *   createdAt: string,
-   *   updatedAt: string
+   *   updatedAt: string,
+   *   updatedBy: string
    * }}
    */
   toJSON: (trialUser) => ({
@@ -45,5 +46,6 @@ export const TrialUserDto = {
     metadata: trialUser.getMetadata(),
     createdAt: trialUser.getCreatedAt(),
     updatedAt: trialUser.getUpdatedAt(),
+    updatedBy: trialUser.getUpdatedBy(),
   }),
 };

@@ -19,7 +19,7 @@ import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
-import SiteEnrollmentController from '../../src/controllers/site-enrollment.js';
+import SiteEnrollmentController from '../../src/controllers/site-enrollments.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -42,6 +42,7 @@ describe('Site Enrollment Controller', () => {
       getStatus: () => 'ACTIVE',
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'user1@example.com',
     },
     {
       getId: () => 'enrollment-2',
@@ -50,6 +51,7 @@ describe('Site Enrollment Controller', () => {
       getStatus: () => 'PENDING',
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'user2@example.com',
     },
   ];
 

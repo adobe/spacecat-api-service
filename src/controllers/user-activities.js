@@ -11,30 +11,27 @@
  */
 
 import {
-  createResponse,
   badRequest,
+  forbidden,
+  notFound,
   ok,
+  created,
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-import {
-  TrialUserActivity as TrialUserActivityModel,
-  Entitlement as EntitlementModel,
-} from '@adobe/spacecat-shared-data-access';
-
 import { UserActivityDto } from '../dto/user-activity.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
- * UserActivity controller. Provides methods to read and create user activities.
+ * UserActivities controller. Provides methods to read and create user activities.
  * @param {object} ctx - Context of the request.
- * @returns {object} UserActivity controller.
+ * @returns {object} UserActivities controller.
  * @constructor
  */
-function UserActivityController(ctx) {
+function UserActivitiesController(ctx) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -69,11 +66,11 @@ function UserActivityController(ctx) {
       // Check if user has access to the site
       const site = await Site.findById(siteId);
       if (!site) {
-        return badRequest('Site not found');
+        return notFound('Site not found');
       }
 
       if (!await accessControlUtil.hasAccess(site)) {
-        return badRequest('Access denied to this site');
+        return forbidden('Access denied to this site');
       }
 
       const userActivities = await TrialUserActivity.allBySiteId(siteId);
@@ -101,26 +98,40 @@ function UserActivityController(ctx) {
       return badRequest('Activity data is required');
     }
 
-    // Validate required fields
-    const { type, productCode } = activityData;
+    // Prepare activity data - only include fields that are present
+    const activityPayload = Object.fromEntries(
+      Object.entries({
+        type: activityData.type,
+        productCode: activityData.productCode,
+        details: activityData.details,
+      }).filter(([_, value]) => value !== undefined),
+    );
 
-    if (!type || !Object.values(TrialUserActivityModel.TYPES).includes(type)) {
-      return badRequest(`Valid activity type is required (${Object.values(TrialUserActivityModel.TYPES).join(', ')})`);
+    if (!activityPayload.type
+        || !Object.values(TrialUserActivity.TYPES).includes(activityPayload.type)) {
+      const validTypes = Object.values(TrialUserActivity.TYPES).join(', ');
+      return badRequest(
+        `Valid activity type is required (${validTypes})`,
+      );
     }
 
-    if (!productCode || !Object.values(EntitlementModel.PRODUCT_CODES).includes(productCode)) {
-      return badRequest(`Valid product code is required (${Object.values(EntitlementModel.PRODUCT_CODES).join(', ')})`);
+    if (!activityPayload.productCode
+        || !Object.values(Entitlement.PRODUCT_CODES).includes(activityPayload.productCode)) {
+      const validProductCodes = Object.values(Entitlement.PRODUCT_CODES).join(', ');
+      return badRequest(
+        `Valid product code is required (${validProductCodes})`,
+      );
     }
 
     try {
       // Check if user has access to the site
       const site = await Site.findById(siteId);
       if (!site) {
-        return badRequest('Site not found');
+        return notFound('Site not found');
       }
 
       if (!await accessControlUtil.hasAccess(site)) {
-        return badRequest('Access denied to this site');
+        return forbidden('Access denied to this site');
       }
 
       // Get trial user ID from the authenticated user's context
@@ -133,7 +144,7 @@ function UserActivityController(ctx) {
       // Find the trial user by email
       const trialUser = await TrialUser.findByEmailId(authInfo.getProfile().trial_email);
       if (!trialUser) {
-        return badRequest('Trial user not found for the authenticated user');
+        return notFound('Trial user not found for the authenticated user');
       }
 
       const trialUserId = trialUser.getId();
@@ -144,21 +155,22 @@ function UserActivityController(ctx) {
       // Find entitlement using organization ID and product code
       const entitlements = await Entitlement.allByOrganizationIdAndProductCode(
         organizationId,
-        productCode,
+        activityPayload.productCode,
       );
       if (!entitlements || entitlements.length === 0) {
-        return badRequest('Entitlement not found for this organization and product code');
+        return notFound('Entitlement not found for this organization and product code');
       }
 
       const entitlementId = entitlements[0].getId();
 
+      // Create user activity using prepared payload
       const userActivity = await TrialUserActivity.create({
-        ...activityData,
+        ...activityPayload,
         siteId,
         trialUserId,
         entitlementId,
       });
-      return createResponse(UserActivityDto.toJSON(userActivity), 201);
+      return created(UserActivityDto.toJSON(userActivity));
     } catch (e) {
       return internalServerError(e.message);
     }
@@ -170,4 +182,4 @@ function UserActivityController(ctx) {
   };
 }
 
-export default UserActivityController;
+export default UserActivitiesController;

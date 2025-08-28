@@ -25,7 +25,9 @@ export const UserActivityDto = {
    *   type: string,
    *   details: any,
    *   productCode: string,
-   *   createdAt: string
+   *   createdAt: string,
+   *   updatedAt: string,
+   *   updatedBy: string
    * }}
    */
   toJSON: (userActivity) => ({
@@ -37,5 +39,7 @@ export const UserActivityDto = {
     details: userActivity.getDetails(),
     productCode: userActivity.getProductCode(),
     createdAt: userActivity.getCreatedAt(),
+    updatedAt: userActivity.getUpdatedAt(),
+    updatedBy: userActivity.getUpdatedBy(),
   }),
 };

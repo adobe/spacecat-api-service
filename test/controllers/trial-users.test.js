@@ -18,7 +18,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
-import TrialUserController from '../../src/controllers/trial-user.js';
+import TrialUserController from '../../src/controllers/trial-users.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -33,6 +33,9 @@ describe('Trial User Controller', () => {
     getName: () => 'Test Organization',
   };
 
+  // Define constants for test data
+  const TRIAL_USER_STATUS_INVITED = 'INVITED';
+
   const mockTrialUsers = [
     {
       getId: () => 'trial-user-1',
@@ -44,9 +47,10 @@ describe('Trial User Controller', () => {
       getEmailId: () => 'user1@example.com',
       getFirstName: () => 'John',
       getLastName: () => 'Doe',
-      getMetadata: () => ({ origin: 'invited' }),
+      getMetadata: () => ({ origin: TRIAL_USER_STATUS_INVITED }),
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'user1@example.com',
     },
     {
       getId: () => 'trial-user-2',
@@ -58,9 +62,10 @@ describe('Trial User Controller', () => {
       getEmailId: () => 'user2@example.com',
       getFirstName: () => 'Jane',
       getLastName: () => 'Smith',
-      getMetadata: () => ({ origin: 'invited' }),
+      getMetadata: () => ({ origin: TRIAL_USER_STATUS_INVITED }),
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'user2@example.com',
     },
   ];
 
@@ -74,9 +79,10 @@ describe('Trial User Controller', () => {
     getEmailId: () => 'test@example.com',
     getFirstName: () => 'Test',
     getLastName: () => 'User',
-    getMetadata: () => ({ origin: 'invited' }),
+    getMetadata: () => ({ origin: TRIAL_USER_STATUS_INVITED }),
     getCreatedAt: () => '2023-01-01T00:00:00Z',
     getUpdatedAt: () => '2023-01-01T00:00:00Z',
+    getUpdatedBy: () => 'test@example.com',
   };
 
   const mockDataAccess = {
@@ -333,7 +339,7 @@ describe('Trial User Controller', () => {
     });
   });
 
-  describe('createTrialUserInvite', () => {
+  describe('createTrialUserForEmailInvite', () => {
     it('should create trial user invite for valid data', async () => {
       const context = {
         params: { organizationId },
@@ -355,7 +361,7 @@ describe('Trial User Controller', () => {
       };
       mockDataAccess.TrialUser.create.resolves(createdTrialUser);
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(201);
       const body = await result.json();
@@ -369,7 +375,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -382,7 +388,7 @@ describe('Trial User Controller', () => {
         data: {},
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -395,7 +401,7 @@ describe('Trial User Controller', () => {
         data: { emailId: '' },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -408,7 +414,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'invalid-email' },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -421,7 +427,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'user.example.com' },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -434,7 +440,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'user@' },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -447,7 +453,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'user@example' },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -460,7 +466,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'user name@example.com' },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -488,7 +494,7 @@ describe('Trial User Controller', () => {
       };
       mockDataAccess.TrialUser.create.resolves(createdTrialUser);
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(201);
       const body = await result.json();
@@ -517,7 +523,7 @@ describe('Trial User Controller', () => {
       };
       mockDataAccess.TrialUser.create.resolves(createdTrialUser);
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(201);
       const body = await result.json();
@@ -541,7 +547,7 @@ describe('Trial User Controller', () => {
         },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(404);
       const body = await result.json();
@@ -564,14 +570,14 @@ describe('Trial User Controller', () => {
         },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(403);
       const body = await result.json();
       expect(body.message).to.equal('Access denied to this organization');
     });
 
-    it('should return bad request when trial user already exists', async () => {
+    it('should return conflict when trial user already exists', async () => {
       mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUser);
 
       const context = {
@@ -587,9 +593,9 @@ describe('Trial User Controller', () => {
         },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(409);
       const body = await result.json();
       expect(body.message).to.equal('Trial user with this email already exists');
     });
@@ -613,7 +619,7 @@ describe('Trial User Controller', () => {
         },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -638,7 +644,7 @@ describe('Trial User Controller', () => {
         },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -663,7 +669,7 @@ describe('Trial User Controller', () => {
         },
       };
 
-      const result = await trialUserController.createTrialUserInvite(context);
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
 
       expect(result.status).to.equal(500);
       const body = await result.json();

@@ -26,12 +26,12 @@ import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
- * SiteEnrollment controller. Provides methods to read site enrollments.
+ * SiteEnrollments controller. Provides methods to read site enrollments.
  * @param {object} ctx - Context of the request.
- * @returns {object} SiteEnrollment controller.
+ * @returns {object} SiteEnrollments controller.
  * @constructor
  */
-function SiteEnrollmentController(ctx) {
+function SiteEnrollmentsController(ctx) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -83,4 +83,4 @@ function SiteEnrollmentController(ctx) {
   };
 }
 
-export default SiteEnrollmentController;
+export default SiteEnrollmentsController;

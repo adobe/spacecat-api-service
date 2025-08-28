@@ -18,13 +18,13 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
-import EntitlementController from '../../src/controllers/entitlement.js';
+import OrganizationIdentityProviderController from '../../src/controllers/organization-identity-providers.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
-describe('Entitlement Controller', () => {
+describe('Organization Identity Provider Controller', () => {
   const sandbox = sinon.createSandbox();
   const organizationId = '123e4567-e89b-12d3-a456-426614174000';
 
@@ -33,26 +33,32 @@ describe('Entitlement Controller', () => {
     getName: () => 'Test Organization',
   };
 
-  const mockEntitlements = [
+  const mockIdentityProviders = [
     {
-      getId: () => 'ent1',
+      getId: () => 'provider-1',
       getOrganizationId: () => organizationId,
-      getProductCode: () => 'LLMO',
-      getTier: () => 'FREE_TRIAL',
+      getType: () => 'GOOGLE',
       getStatus: () => 'ACTIVE',
-      getQuotas: () => ({}),
+      getProviderId: () => 'google-123',
+      getExternalId: () => 'ext-123',
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'user1@example.com',
+      getMetadata: () => ({ type: 'GOOGLE', status: 'ACTIVE' }),
+      getProvider: () => 'GOOGLE',
     },
     {
-      getId: () => 'ent2',
+      getId: () => 'provider-2',
       getOrganizationId: () => organizationId,
-      getProductCode: () => 'ASO',
-      getTier: () => 'PAID',
-      getStatus: () => 'ACTIVE',
-      getQuotas: () => ({}),
+      getType: () => 'MICROSOFT',
+      getStatus: () => 'PENDING',
+      getProviderId: () => 'microsoft-456',
+      getExternalId: () => 'ext-456',
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'user2@example.com',
+      getMetadata: () => ({ type: 'MICROSOFT', status: 'PENDING' }),
+      getProvider: () => 'MICROSOFT',
     },
   ];
 
@@ -60,8 +66,8 @@ describe('Entitlement Controller', () => {
     Organization: {
       findById: sandbox.stub().resolves(mockOrganization),
     },
-    Entitlement: {
-      allByOrganizationId: sandbox.stub().resolves(mockEntitlements),
+    OrganizationIdentityProvider: {
+      allByOrganizationId: sandbox.stub().resolves(mockIdentityProviders),
     },
   };
 
@@ -69,7 +75,7 @@ describe('Entitlement Controller', () => {
     hasAccess: sandbox.stub().resolves(true),
   };
 
-  let entitlementController;
+  let organizationIdentityProviderController;
 
   beforeEach(() => {
     sandbox.restore();
@@ -82,7 +88,7 @@ describe('Entitlement Controller', () => {
     // Stub AccessControlUtil.fromContext to return our mock instance
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtilInstance);
 
-    entitlementController = EntitlementController({
+    organizationIdentityProviderController = OrganizationIdentityProviderController({
       dataAccess: mockDataAccess,
       attributes: {
         authInfo: new AuthInfo()
@@ -94,7 +100,8 @@ describe('Entitlement Controller', () => {
 
     // Reset stubs
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
-    mockDataAccess.Entitlement.allByOrganizationId = sandbox.stub().resolves(mockEntitlements);
+    mockDataAccess.OrganizationIdentityProvider.allByOrganizationId = sandbox.stub()
+      .resolves(mockIdentityProviders);
 
     // Store reference to the mock instance for test manipulation
     mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
@@ -104,44 +111,42 @@ describe('Entitlement Controller', () => {
     sandbox.restore();
   });
 
-  describe('EntitlementController constructor', () => {
+  describe('OrganizationIdentityProviderController constructor', () => {
     it('should throw error when context is not provided', () => {
-      expect(() => EntitlementController()).to.throw('Context required');
+      expect(() => OrganizationIdentityProviderController()).to.throw('Context required');
     });
 
     it('should throw error when context is null', () => {
-      expect(() => EntitlementController(null)).to.throw('Context required');
+      expect(() => OrganizationIdentityProviderController(null)).to.throw('Context required');
     });
 
     it('should throw error when context is empty object', () => {
-      expect(() => EntitlementController({})).to.throw('Context required');
+      expect(() => OrganizationIdentityProviderController({})).to.throw('Context required');
     });
 
     it('should throw error when dataAccess is not provided', () => {
-      expect(() => EntitlementController({ someOtherProp: 'value' })).to.throw('Data access required');
+      expect(() => OrganizationIdentityProviderController({ someOtherProp: 'value' })).to.throw('Data access required');
     });
 
     it('should throw error when dataAccess is null', () => {
-      expect(() => EntitlementController({ dataAccess: null })).to.throw('Data access required');
+      expect(() => OrganizationIdentityProviderController({ dataAccess: null })).to.throw('Data access required');
     });
 
     it('should throw error when dataAccess is empty object', () => {
-      expect(() => EntitlementController({ dataAccess: {} })).to.throw('Data access required');
+      expect(() => OrganizationIdentityProviderController({ dataAccess: {} })).to.throw('Data access required');
     });
   });
 
   describe('getByOrganizationID', () => {
-    it('should return entitlements for valid organization ID', async () => {
+    it('should return identity providers for valid organization ID', async () => {
       const context = {
         params: { organizationId },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await entitlementController.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
       expect(result.status).to.equal(200);
-
-      // Parse the response body
       const body = await result.json();
       expect(body).to.be.an('array');
       expect(body).to.have.length(2);
@@ -152,7 +157,7 @@ describe('Entitlement Controller', () => {
         params: { organizationId: 'invalid-uuid' },
       };
 
-      const result = await entitlementController.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
       expect(result.status).to.equal(400);
       const body = await result.json();
@@ -167,7 +172,7 @@ describe('Entitlement Controller', () => {
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await entitlementController.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
       expect(result.status).to.equal(404);
       const body = await result.json();
@@ -182,23 +187,23 @@ describe('Entitlement Controller', () => {
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await entitlementController.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only users belonging to the organization can view its entitlements');
+      expect(body.message).to.equal('Only users belonging to the organization can view its identity providers');
     });
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
-      mockDataAccess.Entitlement.allByOrganizationId.rejects(dbError);
+      mockDataAccess.OrganizationIdentityProvider.allByOrganizationId.rejects(dbError);
 
       const context = {
         params: { organizationId },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await entitlementController.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -214,7 +219,7 @@ describe('Entitlement Controller', () => {
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await entitlementController.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
       expect(result.status).to.equal(500);
       const body = await result.json();
@@ -230,7 +235,7 @@ describe('Entitlement Controller', () => {
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
-      const result = await entitlementController.getByOrganizationID(context);
+      const result = await organizationIdentityProviderController.getByOrganizationID(context);
 
       expect(result.status).to.equal(500);
       const body = await result.json();

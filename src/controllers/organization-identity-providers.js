@@ -22,16 +22,17 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { EntitlementDto } from '../dto/entitlement.js';
+import { OrganizationIdentityProviderDto } from '../dto/organization-identity-provider.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
- * Entitlement controller. Provides methods to read entitlements by organization.
+ * OrganizationIdentityProviders controller. Provides methods to read organization
+ * identity providers.
  * @param {object} ctx - Context of the request.
- * @returns {object} Entitlement controller.
+ * @returns {object} OrganizationIdentityProviders controller.
  * @constructor
  */
-function EntitlementController(ctx) {
+function OrganizationIdentityProvidersController(ctx) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -41,14 +42,14 @@ function EntitlementController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { Entitlement, Organization } = dataAccess;
+  const { Organization, OrganizationIdentityProvider } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Gets entitlements by organization ID.
+   * Gets organization identity providers by organization ID.
    * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Array of entitlements response.
+   * @returns {Promise<Response>} Array of organization identity providers response.
    */
   const getByOrganizationID = async (context) => {
     const { organizationId } = context.params;
@@ -58,21 +59,21 @@ function EntitlementController(ctx) {
     }
 
     try {
-      // Get organization to check access control
       const organization = await Organization.findById(organizationId);
       if (!organization) {
         return notFound('Organization not found');
       }
 
+      // Check if user has access using controller-level AccessControlUtil
       if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('Only users belonging to the organization can view its entitlements');
+        return forbidden('Only users belonging to the organization can view its identity providers');
       }
 
-      const entitlements = await Entitlement.allByOrganizationId(organizationId);
-
-      const orgEntitlements = entitlements
-        .map((entitlement) => EntitlementDto.toJSON(entitlement));
-      return ok(orgEntitlements);
+      const organizationIdentityProviders = await OrganizationIdentityProvider
+        .allByOrganizationId(organizationId);
+      const providers = organizationIdentityProviders
+        .map((provider) => OrganizationIdentityProviderDto.toJSON(provider));
+      return ok(providers);
     } catch (e) {
       return internalServerError(e.message);
     }
@@ -83,4 +84,4 @@ function EntitlementController(ctx) {
   };
 }
 
-export default EntitlementController;
+export default OrganizationIdentityProvidersController;

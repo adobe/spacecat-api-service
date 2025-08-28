@@ -256,12 +256,14 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
+
+    // Tier Specific Routes
     'GET /organizations/:organizationId/organization-identity-provider': organizationIdentityProviderController.getByOrganizationID,
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
-    'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserInvite,
+    'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
 
     // Sandbox audit route
