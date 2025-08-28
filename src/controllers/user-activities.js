@@ -77,6 +77,7 @@ function UserActivitiesController(ctx) {
       const activities = userActivities.map((activity) => UserActivityDto.toJSON(activity));
       return ok(activities);
     } catch (e) {
+      context.log.error(`Error getting user activities for site ${siteId}: ${e.message}`);
       return internalServerError(e.message);
     }
   };
@@ -172,6 +173,7 @@ function UserActivitiesController(ctx) {
       });
       return created(UserActivityDto.toJSON(userActivity));
     } catch (e) {
+      context.log.error(`Error creating user activity for site ${siteId}: ${e.message}`);
       return internalServerError(e.message);
     }
   };

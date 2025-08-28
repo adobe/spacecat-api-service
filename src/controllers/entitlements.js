@@ -74,6 +74,7 @@ function EntitlementsController(ctx) {
         .map((entitlement) => EntitlementDto.toJSON(entitlement));
       return ok(orgEntitlements);
     } catch (e) {
+      context.log.error(`Error getting entitlements for organization ${organizationId}: ${e.message}`);
       return internalServerError(e.message);
     }
   };

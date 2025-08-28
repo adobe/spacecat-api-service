@@ -75,6 +75,7 @@ function OrganizationIdentityProvidersController(ctx) {
         .map((provider) => OrganizationIdentityProviderDto.toJSON(provider));
       return ok(providers);
     } catch (e) {
+      context.log.error(`Error getting organization identity providers for organization ${organizationId}: ${e.message}`);
       return internalServerError(e.message);
     }
   };

@@ -74,6 +74,7 @@ function SiteEnrollmentsController(ctx) {
       );
       return ok(enrollments);
     } catch (e) {
+      context.log.error(`Error getting site enrollments for site ${siteId}: ${e.message}`);
       return internalServerError(e.message);
     }
   };

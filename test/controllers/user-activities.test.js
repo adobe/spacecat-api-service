@@ -198,6 +198,7 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -232,6 +233,7 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -253,6 +255,7 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -275,6 +278,7 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -288,6 +292,9 @@ describe('User Activity Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Database connection failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting user activities for site ${siteId}: ${dbError.message}`);
     });
 
     it('should return internal server error when access control check fails', async () => {
@@ -297,6 +304,7 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -310,6 +318,9 @@ describe('User Activity Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Access control error');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting user activities for site ${siteId}: ${accessError.message}`);
     });
 
     it('should return internal server error when Site.findById fails', async () => {
@@ -319,6 +330,7 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -332,6 +344,9 @@ describe('User Activity Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Site lookup failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting user activities for site ${siteId}: ${siteError.message}`);
     });
   });
 
@@ -341,6 +356,7 @@ describe('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -442,6 +458,7 @@ describe('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         authInfo: new AuthInfo()
           .withType('jwt')
           .withProfile({ trial_email: 'test@example.com' })
@@ -462,6 +479,7 @@ describe('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         authInfo: new AuthInfo()
           .withType('jwt')
           .withProfile({ trial_email: 'test@example.com' })
@@ -480,6 +498,7 @@ describe('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -502,6 +521,7 @@ describe('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -524,6 +544,7 @@ describe('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -546,6 +567,8 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
+        dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -559,6 +582,9 @@ describe('User Activity Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Database connection failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error creating user activity for site ${siteId}: ${dbError.message}`);
     });
 
     it('should return internal server error when access control check fails', async () => {
@@ -568,6 +594,8 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
+        dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -581,6 +609,9 @@ describe('User Activity Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Access control error');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error creating user activity for site ${siteId}: ${accessError.message}`);
     });
 
     it('should return internal server error when Site.findById fails', async () => {
@@ -590,6 +621,8 @@ describe('User Activity Controller', () => {
       const context = {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
+        dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -603,6 +636,9 @@ describe('User Activity Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Site lookup failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error creating user activity for site ${siteId}: ${siteError.message}`);
     });
 
     it('should create trial user activity with details field', async () => {
@@ -610,6 +646,7 @@ describe('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO', details: { action: 'SIGN_IN', timestamp: '2023-01-01' } },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -643,6 +680,7 @@ describe('User Activity Controller', () => {
         params: { siteId },
         data: { type: 'SIGN_IN', productCode: 'LLMO' },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
