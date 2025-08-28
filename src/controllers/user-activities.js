@@ -54,12 +54,10 @@ function UserActivitiesController(ctx) {
   /**
    * Handles user status transition when signing in.
    * @param {object} trialUser - The trial user object.
-   * @param {string} activityType - The type of activity being performed.
    * @returns {Promise<void>}
    */
-  const handleUserStatusTransition = async (trialUser, activityType) => {
-    if (activityType === TrialUserActivityModel.TYPES.SIGN_IN
-        && trialUser.getStatus() === TrialUserModel.STATUSES.INVITED) {
+  const handleUserStatusTransition = async (trialUser) => {
+    if (trialUser.getStatus() === TrialUserModel.STATUSES.INVITED) {
       trialUser.setStatus(TrialUserModel.STATUSES.REGISTERED);
       await trialUser.save();
     }
@@ -180,7 +178,7 @@ function UserActivitiesController(ctx) {
       const entitlementId = entitlements[0].getId();
 
       // Handle user status transition when signing in
-      await handleUserStatusTransition(trialUser, activityPayload.type);
+      await handleUserStatusTransition(trialUser);
 
       // Create user activity using prepared payload
       const userActivity = await TrialUserActivity.create({
