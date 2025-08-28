@@ -3535,6 +3535,9 @@ Entitlement:
     updatedAt:
       description: When the entitlement was last updated
       $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the entitlement
+      $ref: '#/Id'
 
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
@@ -3545,6 +3548,7 @@ Entitlement:
       llmo_trial_prompts: 100
     createdAt: "2024-01-15T10:30:00Z"
     updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
 
 SiteEnrollment:
   type: object
@@ -3563,11 +3567,19 @@ SiteEnrollment:
     createdAt:
       description: When the site enrollment was created
       $ref: '#/DateTime'
+    updatedAt:
+      description: When the site enrollment was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the site enrollment
+      $ref: '#/Id'
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
     siteId: "987fcdeb-51a2-43d7-9876-543210987654"
     entitlementId: "456e4567-e89b-12d3-a456-426614174000"
     createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
 
 TrialUser:
   type: object
@@ -3613,9 +3625,9 @@ TrialUser:
       type: object
       properties:
         origin:
-          description: Origin information for the trial user (e.g., "invited", "self-signup", "partner")
+          description: Origin information for the trial user (e.g., "INVITED", "SELF_SIGNUP", "PARTNER")
           type: string
-          example: "invited"
+          example: "INVITED"
       additionalProperties: true
     createdAt:
       description: When the trial user was created
@@ -3623,6 +3635,9 @@ TrialUser:
     updatedAt:
       description: When the trial user was last updated
       $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the trial user
+      $ref: '#/Id'
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
     organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
@@ -3634,9 +3649,10 @@ TrialUser:
     status: "INVITED"
     lastSeenAt: "2024-01-15T10:30:00Z"
     metadata:
-      origin: "invited"
+      origin: "INVITED"
     createdAt: "2024-01-15T10:30:00Z"
     updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
 
 TrialUserActivity:
   type: object
@@ -3675,6 +3691,12 @@ TrialUserActivity:
     createdAt:
       description: When the activity was recorded
       $ref: '#/DateTime'
+    updatedAt:
+      description: When the activity was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the activity
+      $ref: '#/Id'
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
     siteId: "987fcdeb-51a2-43d7-9876-543210987654"
@@ -3686,6 +3708,8 @@ TrialUserActivity:
       ip: "192.168.1.1"
     productCode: "LLMO"
     createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
 
 OrganizationIdentityProvider:
   type: object
@@ -3722,6 +3746,12 @@ OrganizationIdentityProvider:
     createdAt:
       description: When the identity provider mapping was created
       $ref: '#/DateTime'
+    updatedAt:
+      description: When the identity provider mapping was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the identity provider mapping
+      $ref: '#/Id'
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
     organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
@@ -3731,3 +3761,5 @@ OrganizationIdentityProvider:
       domain: "adobe.com"
       ssoEnabled: true
     createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
