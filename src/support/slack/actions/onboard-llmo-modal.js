@@ -82,7 +82,7 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
           },
           label: {
             type: 'plain_text',
-            text: 'Site URL',
+            text: 'Brand Name',
           },
         },
         {
@@ -495,6 +495,8 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 
   const { Site, Configuration } = dataAccess;
 
+  say(`:gear: ${brandName} onboarding started...`);
+
   try {
     // Find the site
     let site = await Site.findByBaseURL(baseURL);
@@ -594,6 +596,8 @@ export function onboardLLMOModal(lambdaContext) {
     try {
       const { view, user } = body;
       const { values } = view.state;
+
+      log.info('Onboard site modal starting to process...');
 
       // Extract original channel and thread context from private metadata
       let originalChannel;
