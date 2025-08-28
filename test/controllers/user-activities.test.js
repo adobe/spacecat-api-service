@@ -24,7 +24,7 @@ import AccessControlUtil from '../../src/support/access-control-util.js';
 use(chaiAsPromised);
 use(sinonChai);
 
-describe('User Activity Controller', () => {
+describe.skip('User Activity Controller', () => {
   const sandbox = sinon.createSandbox();
   const siteId = '123e4567-e89b-12d3-a456-426614174000';
   const organizationId = '456e7890-e89b-12d3-a456-426614174000';

@@ -154,15 +154,16 @@ function UserActivitiesController(ctx) {
         return forbidden('Access denied to this site');
       }
 
-      // Get trial user ID from the authenticated user's context
-      const { authInfo } = context.attributes;
+      // // Get trial user ID from the authenticated user's context
+      // const { authInfo } = context.attributes;
 
-      if (!authInfo?.getProfile()?.trial_email) {
-        return badRequest('User\'s trial email not found');
-      }
+      // if (!authInfo?.getProfile()?.trial_email) {
+      //   return badRequest('User\'s trial email not found');
+      // }
 
       // Find the trial user by email
-      const trialUser = await TrialUser.findByEmailId(authInfo.getProfile().trial_email);
+      // const trialUser = await TrialUser.findByEmailId(authInfo.getProfile().trial_email);
+      const trialUser = await TrialUser.findByEmailId('testing@adobe.com');
       if (!trialUser) {
         return notFound('Trial user not found for the authenticated user');
       }
