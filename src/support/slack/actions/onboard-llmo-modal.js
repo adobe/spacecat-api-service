@@ -14,7 +14,6 @@
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
-import { getLastNumberOfWeeks } from '@adobe/spacecat-shared-utils';
 import { Octokit } from '@octokit/rest';
 import {
   postErrorMessage,
@@ -340,27 +339,6 @@ export function startLLMOOnboarding(lambdaContext) {
   };
 }
 
-async function triggerReferralTrafficBackfill(context, configuration, siteId) {
-  const { log, sqs } = context;
-
-  const last4Weeks = getLastNumberOfWeeks(4);
-
-  for (const last4Week of last4Weeks) {
-    const { week, year } = last4Week;
-    const message = {
-      type: REFERRAL_TRAFFIC_IMPORT,
-      siteId,
-      auditContext: {
-        auditType: REFERRAL_TRAFFIC_AUDIT,
-        week,
-        year,
-      },
-    };
-    sqs.sendMessage(configuration.getQueues().imports, message);
-    log.info(`Successfully triggered import ${REFERRAL_TRAFFIC_IMPORT} with message: ${JSON.stringify(message)}`);
-  }
-}
-
 async function publishToAdminHlx(filename, outputLocation, log) {
   try {
     const org = 'adobe';
@@ -428,7 +406,7 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
   log.info('Starting Git modification of helix query config');
 
   const octokit = new Octokit({
-    auth: process.env.GITHUB_TOKEN,
+    auth: process.env.LLMO_ONBOARDING_GITHUB_TOKEN,
   });
 
   const owner = 'hannessolo'; // TODO change to adobe instead of fork
@@ -566,14 +544,13 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       await site.save();
       log.info(`Successfully updated LLMO config for site ${siteId}`);
 
-      await triggerReferralTrafficBackfill(lambdaCtx, configuration, siteId);
-
       const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
 :link: *Site:* ${baseURL}
 :identification_card: *Site ID:* ${siteId}
 :file_folder: *Data Folder:* ${dataFolder}
 :label: *Brand:* ${brandName}
+:identification_card: *IMS Org ID:* ${imsOrgId}
 
 The site is now ready for LLMO operations. You can access the configuration at the LLMO API endpoints.`;
 
@@ -648,17 +625,6 @@ export function onboardLLMOModal(lambdaContext) {
       await onboardSite({
         brandName, baseURL: brandURL, imsOrgId, deliveryType,
       }, lambdaContext, slackContext);
-
-      const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
-
-:ims: *IMS Org ID:* ${imsOrgId || 'n/a'}
-        `;
-
-      await client.chat.postMessage({
-        channel: responseChannel,
-        text: message,
-        thread_ts: responseThreadTs,
-      });
 
       log.info(`Onboard site modal processed for user ${user.id}, site ${brandURL}`);
     } catch (e) {
