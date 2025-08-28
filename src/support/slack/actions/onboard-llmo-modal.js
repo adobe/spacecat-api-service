@@ -250,7 +250,7 @@ async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
   // fetch both existing site's org id and newly provided org id
   const existingOrgId = site.getOrganizationId();
   const providedImsOrg = await Organization.findByImsOrgId(imsOrgId);
-  const providedImsOrgId = providedImsOrg.getId();
+  const providedImsOrgId = providedImsOrg?.getId();
 
   if (existingOrgId === providedImsOrgId) {
     // no update required
