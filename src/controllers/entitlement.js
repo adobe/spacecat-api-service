@@ -43,6 +43,8 @@ function EntitlementController(ctx) {
 
   const { Entitlement, Organization } = dataAccess;
 
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
   /**
    * Gets entitlements by organization ID.
    * @param {object} context - Context of the request.
@@ -62,8 +64,6 @@ function EntitlementController(ctx) {
         return notFound('Organization not found');
       }
 
-      // Check if user has access to this organization
-      const accessControlUtil = AccessControlUtil.fromContext(context);
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('Only users belonging to the organization can view its entitlements');
       }

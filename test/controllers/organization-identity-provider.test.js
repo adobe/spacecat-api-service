@@ -77,6 +77,15 @@ describe('Organization Identity Provider Controller', () => {
 
   beforeEach(() => {
     sandbox.restore();
+
+    // Create a mock AccessControlUtil instance that will be used by the controller
+    const mockAccessControlUtilInstance = {
+      hasAccess: sandbox.stub().resolves(true),
+    };
+
+    // Stub AccessControlUtil.fromContext to return our mock instance
+    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtilInstance);
+
     organizationIdentityProviderController = OrganizationIdentityProviderController({
       dataAccess: mockDataAccess,
       attributes: {
@@ -91,10 +100,9 @@ describe('Organization Identity Provider Controller', () => {
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
     mockDataAccess.OrganizationIdentityProvider.allByOrganizationId = sandbox.stub()
       .resolves(mockIdentityProviders);
-    mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
 
-    // Stub AccessControlUtil.fromContext
-    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
+    // Store reference to the mock instance for test manipulation
+    mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
   });
 
   afterEach(() => {

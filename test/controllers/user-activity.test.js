@@ -114,6 +114,15 @@ describe('User Activity Controller', () => {
 
   beforeEach(() => {
     sandbox.restore();
+
+    // Create a mock AccessControlUtil instance that will be used by the controller
+    const mockAccessControlUtilInstance = {
+      hasAccess: sandbox.stub().resolves(true),
+    };
+
+    // Stub AccessControlUtil.fromContext to return our mock instance
+    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtilInstance);
+
     userActivityController = UserActivityController({
       dataAccess: mockDataAccess,
       attributes: {
@@ -135,10 +144,9 @@ describe('User Activity Controller', () => {
     mockDataAccess.Entitlement.allByOrganizationIdAndProductCode = sandbox
       .stub()
       .resolves([mockEntitlement]);
-    mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
 
-    // Stub AccessControlUtil.fromContext
-    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
+    // Store reference to the mock instance for test manipulation
+    mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
   });
 
   afterEach(() => {

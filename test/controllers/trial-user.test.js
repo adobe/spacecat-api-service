@@ -109,6 +109,15 @@ describe('Trial User Controller', () => {
 
   beforeEach(() => {
     sandbox.restore();
+
+    // Create a mock AccessControlUtil instance that will be used by the controller
+    const mockAccessControlUtilInstance = {
+      hasAccess: sandbox.stub().resolves(true),
+    };
+
+    // Stub AccessControlUtil.fromContext to return our mock instance
+    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtilInstance);
+
     trialUserController = TrialUserController({
       dataAccess: mockDataAccess,
       attributes: {
@@ -126,10 +135,9 @@ describe('Trial User Controller', () => {
       .stub()
       .resolves(mockTrialUsers);
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
-    mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
 
-    // Stub AccessControlUtil.fromContext
-    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
+    // Store reference to the mock instance for test manipulation
+    mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
   });
 
   afterEach(() => {

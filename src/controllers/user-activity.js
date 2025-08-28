@@ -51,6 +51,8 @@ function UserActivityController(ctx) {
     Entitlement,
   } = dataAccess;
 
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
   /**
    * Gets user activities by site ID.
    * @param {object} context - Context of the request.
@@ -70,7 +72,6 @@ function UserActivityController(ctx) {
         return badRequest('Site not found');
       }
 
-      const accessControlUtil = AccessControlUtil.fromContext(context);
       if (!await accessControlUtil.hasAccess(site)) {
         return badRequest('Access denied to this site');
       }
@@ -118,7 +119,6 @@ function UserActivityController(ctx) {
         return badRequest('Site not found');
       }
 
-      const accessControlUtil = AccessControlUtil.fromContext(context);
       if (!await accessControlUtil.hasAccess(site)) {
         return badRequest('Access denied to this site');
       }

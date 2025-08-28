@@ -70,6 +70,15 @@ describe('Site Enrollment Controller', () => {
 
   beforeEach(() => {
     sandbox.restore();
+
+    // Create a mock AccessControlUtil instance that will be used by the controller
+    const mockAccessControlUtilInstance = {
+      hasAccess: sandbox.stub().resolves(true),
+    };
+
+    // Stub AccessControlUtil.fromContext to return our mock instance
+    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtilInstance);
+
     siteEnrollmentController = SiteEnrollmentController({
       dataAccess: mockDataAccess,
       attributes: {
@@ -83,10 +92,9 @@ describe('Site Enrollment Controller', () => {
     // Reset stubs
     mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
     mockDataAccess.SiteEnrollment.allBySiteId = sandbox.stub().resolves(mockSiteEnrollments);
-    mockAccessControlUtil.hasAccess = sandbox.stub().resolves(true);
 
-    // Stub AccessControlUtil.fromContext
-    sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
+    // Store reference to the mock instance for test manipulation
+    mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
   });
 
   afterEach(() => {

@@ -44,6 +44,8 @@ function OrganizationIdentityProviderController(ctx) {
 
   const { Organization, OrganizationIdentityProvider } = dataAccess;
 
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
   /**
    * Gets organization identity providers by organization ID.
    * @param {object} context - Context of the request.
@@ -62,8 +64,7 @@ function OrganizationIdentityProviderController(ctx) {
         return notFound('Organization not found');
       }
 
-      // Check if user has access to the specific organization
-      const accessControlUtil = AccessControlUtil.fromContext(context);
+      // Check if user has access using controller-level AccessControlUtil
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('Only users belonging to the organization can view its identity providers');
       }
