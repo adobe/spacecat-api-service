@@ -65,7 +65,7 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: ':rocket: *Site Onboarding*\n\nProvide the details to onboard a new site to AEM Sites Optimizer.',
+            text: ':rocket: *LLMO Site Onboarding*\n\nProvide the details to onboard a new site to LLMO.',
           },
         },
         {
@@ -92,7 +92,7 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
             action_id: 'ims_org_id',
             placeholder: {
               type: 'plain_text',
-              text: 'ABC123@AdobeOrg (default: AEM Sites Engineering)',
+              text: 'ABC123@AdobeOrg',
             },
           },
           label: {
@@ -145,7 +145,6 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
             type: 'plain_text',
             text: 'Delivery Type',
           },
-          optional: true,
         },
       ],
     },
@@ -220,7 +219,7 @@ async function elmoOnboardingModal(body, client, respond, brandURL) {
             action_id: 'ims_org_id',
             placeholder: {
               type: 'plain_text',
-              text: 'ABC123@AdobeOrg (default: AEM Sites Engineering)',
+              text: 'ABC123@AdobeOrg',
             },
           },
           label: {

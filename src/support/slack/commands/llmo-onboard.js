@@ -66,7 +66,7 @@ function LlmoOnboardCommand(context) {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: ':rocket: *Site Onboarding*\n\nClick the button below to start the interactive onboarding process.',
+              text: ':rocket: *LLMO Onboarding*\n\nClick the button below to start the interactive onboarding process.',
             },
           },
           {
