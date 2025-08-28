@@ -109,7 +109,7 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
             action_id: 'delivery_type',
             placeholder: {
               type: 'plain_text',
-              text: 'Auto-detect (recommended)',
+              text: 'Please Select Value',
             },
             options: [
               {
@@ -311,6 +311,8 @@ export function startLLMOOnboarding(lambdaContext) {
 
       if (!site) {
         await fullOnboardingModal(body, client, respond, brandURL);
+        log.info(`User ${user.id} started full onboarding process for ${brandURL}.`);
+        return;
       }
 
       const config = await site.getConfig();
@@ -327,7 +329,7 @@ export function startLLMOOnboarding(lambdaContext) {
 
       await elmoOnboardingModal(body, client, respond, brandURL);
 
-      log.info(`User ${user.id} started onboarding process`);
+      log.info(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
       await respond({
