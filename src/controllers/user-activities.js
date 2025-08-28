@@ -22,6 +22,7 @@ import {
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { TrialUserActivity as TrialUserActivityModel, Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { UserActivityDto } from '../dto/user-activity.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
@@ -109,16 +110,16 @@ function UserActivitiesController(ctx) {
     );
 
     if (!activityPayload.type
-        || !Object.values(TrialUserActivity.TYPES).includes(activityPayload.type)) {
-      const validTypes = Object.values(TrialUserActivity.TYPES).join(', ');
+        || !Object.values(TrialUserActivityModel.TYPES).includes(activityPayload.type)) {
+      const validTypes = Object.values(TrialUserActivityModel.TYPES).join(', ');
       return badRequest(
         `Valid activity type is required (${validTypes})`,
       );
     }
 
     if (!activityPayload.productCode
-        || !Object.values(Entitlement.PRODUCT_CODES).includes(activityPayload.productCode)) {
-      const validProductCodes = Object.values(Entitlement.PRODUCT_CODES).join(', ');
+        || !Object.values(EntitlementModel.PRODUCT_CODES).includes(activityPayload.productCode)) {
+      const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES).join(', ');
       return badRequest(
         `Valid product code is required (${validProductCodes})`,
       );
