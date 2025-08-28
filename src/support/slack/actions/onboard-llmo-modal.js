@@ -102,6 +102,60 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
             text: 'IMS Organization ID',
           },
         },
+        {
+          type: 'input',
+          block_id: 'delivery_type_input',
+          element: {
+            type: 'static_select',
+            action_id: 'delivery_type',
+            placeholder: {
+              type: 'plain_text',
+              text: 'Auto-detect (recommended)',
+            },
+            options: [
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Auto-detect (recommended)',
+                },
+                value: 'auto',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'AEM Edge Delivery',
+                },
+                value: 'aem_edge',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'AEM Cloud Service',
+                },
+                value: 'aem_cs',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Adobe Managed Services',
+                },
+                value: 'aem_ams',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Other',
+                },
+                value: 'other',
+              },
+            ],
+          },
+          label: {
+            type: 'plain_text',
+            text: 'Delivery Type',
+          },
+          optional: true,
+        },
       ],
     },
   });
@@ -167,9 +221,74 @@ async function elmoOnboardingModal(body, client, respond, brandURL) {
             text: 'Site URL',
           },
         },
+        {
+          type: 'input',
+          block_id: 'ims_org_input',
+          element: {
+            type: 'plain_text_input',
+            action_id: 'ims_org_id',
+            placeholder: {
+              type: 'plain_text',
+              text: 'ABC123@AdobeOrg (default: AEM Sites Engineering)',
+            },
+          },
+          label: {
+            type: 'plain_text',
+            text: 'IMS Organization ID',
+          },
+        },
       ],
     },
   });
+}
+
+async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
+  const { log, dataAccess, imsClient } = lambdaCtx;
+  const { say } = slackCtx;
+  const { Organization } = dataAccess;
+
+  // fetch both existing site's org id and newly provided org id
+  const existingOrgId = site.getOrganizationId();
+  const providedImsOrg = await Organization.findByImsOrgId(imsOrgId);
+  const providedImsOrgId = providedImsOrg.getId();
+
+  if (existingOrgId === providedImsOrgId) {
+    // no update required
+    return;
+  }
+
+  // if the provided ims org id exists, update the site to use this one
+  if (providedImsOrgId) {
+    site.setOrganizationId(providedImsOrgId);
+    await site.save();
+    return;
+  }
+
+  // the provided ims doesn't have a spacecat org, create it and add to site
+  let imsOrgDetails;
+  try {
+    imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgId);
+    log.info(`IMS Org Details: ${imsOrgDetails}`);
+  } catch (error) {
+    log.error(`Error retrieving IMS Org details: ${error.message}`);
+    await say(`:x: Could not find an IMS org with the ID *${imsOrgId}*.`);
+    throw error;
+  }
+
+  if (!imsOrgDetails) {
+    await say(`:x: Could not find an IMS org with the ID *${imsOrgId}*.`);
+    return;
+  }
+
+  // create a new spacecat org
+  const newImsOrg = await Organization.create({
+    name: imsOrgDetails.orgName,
+    imsOrgId,
+  });
+  await newImsOrg.save();
+
+  site.setOrganizationId(newImsOrg.getId());
+  await site.save();
 }
 
 /* displays modal */
@@ -344,7 +463,9 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
 export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
-  const { baseURL, brandName, imsOrgId } = input;
+  const {
+    baseURL, brandName, imsOrgId, deliveryType,
+  } = input;
   const { hostname } = new URL(baseURL);
   const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
 
@@ -354,6 +475,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // Find the site
     let site = await Site.findByBaseURL(baseURL);
     if (!site) {
+      // create a new site
       const profile = await loadProfileConfig('default');
       const configuration = await Configuration.findLatest();
       // onboard the site
@@ -365,7 +487,9 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
         300,
         slackCtx,
         lambdaCtx,
-        {},
+        {
+          deliveryType: deliveryType && deliveryType !== 'auto' ? deliveryType : undefined,
+        },
         {
           profileName: 'default',
           urlProcessor: extractURLFromSlackInput,
@@ -380,6 +504,9 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
         return;
       }
       site = await Site.findById(reportLine.siteId);
+    } else {
+      // check that the existing site matches the provided IMS org id
+      await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
     }
 
     // upload and publish the query index file
@@ -481,6 +608,7 @@ export function onboardLLMOModal(lambdaContext) {
 
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
+      const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
 
       await ack();
 
@@ -502,7 +630,9 @@ export function onboardLLMOModal(lambdaContext) {
         threadTs: responseThreadTs,
       };
 
-      await onboardSite({ brandName, brandURL, imsOrgId }, lambdaContext, slackContext);
+      await onboardSite({
+        brandName, brandURL, imsOrgId, deliveryType,
+      }, lambdaContext, slackContext);
 
       const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
 
