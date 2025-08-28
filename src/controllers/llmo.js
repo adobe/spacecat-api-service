@@ -302,7 +302,7 @@ function LlmoController() {
 
   // TODO delete
   const testOnboardCmd = async (context) => {
-    const testInput = { baseURL: 'https://hannes2.test', brandName: 'Hannes Test', imsOrgId: 'fakeid' };
+    const testInput = { baseURL: 'https://hannes2.test', brandName: 'Hannes Test', imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg' };
     const fakeSlackCtx = { say: context.log.info };
 
     await onboardSite(testInput, context, fakeSlackCtx);

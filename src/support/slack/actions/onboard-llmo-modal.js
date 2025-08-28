@@ -345,7 +345,8 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
   const { baseURL, brandName, imsOrgId } = input;
-  const dataFolder = brandName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const { hostname } = new URL(baseURL);
+  const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
 
   const { Site, Configuration } = dataAccess;
 
@@ -412,17 +413,18 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     configuration.enableHandlerForSite('geo-brand-presence', site);
 
     // enable the cdn-analysis only if no other site in this organization already has it enabled
-    const sitesInOrg = await Site.allByOrganizationId(imsOrgId);
+    const orgId = site.getOrganizationId();
+    const sitesInOrg = await Site.allByOrganizationId(orgId);
 
     const hasAgenticTrafficEnabled = sitesInOrg.some(
       (orgSite) => configuration.isHandlerEnabledForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, orgSite),
     );
 
     if (!hasAgenticTrafficEnabled) {
-      log.info(`Enabling agentic traffic audits for organization ${imsOrgId} (first site in org)`);
+      log.info(`Enabling agentic traffic audits for organization ${orgId} (first site in org)`);
       configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
     } else {
-      log.info(`Agentic traffic audits already enabled for organization ${imsOrgId}, skipping`);
+      log.info(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
     }
 
     // enable the cdn-logs-report audits for agentic traffic
