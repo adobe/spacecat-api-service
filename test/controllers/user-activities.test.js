@@ -40,6 +40,7 @@ describe('User Activity Controller', () => {
     getEmailId: () => 'test@example.com',
     getStatus: () => 'INVITED',
     setStatus: sandbox.stub(),
+    setLastSeenAt: sandbox.stub(),
     save: sandbox.stub().resolves(),
   };
 
@@ -712,7 +713,7 @@ describe('User Activity Controller', () => {
       expect(mockDataAccess.TrialUserActivity.create.firstCall.args[0]).to.not.have.property('details');
     });
 
-    describe('handleUserStatusTransition', () => {
+    describe('handleUserActivityUpdates', () => {
       let mockTrialUserWithStatus;
 
       beforeEach(() => {
@@ -721,11 +722,40 @@ describe('User Activity Controller', () => {
           getEmailId: () => 'test@example.com',
           getStatus: sandbox.stub(),
           setStatus: sandbox.stub(),
+          setLastSeenAt: sandbox.stub(),
           save: sandbox.stub().resolves(),
         };
       });
 
-      it('should update status from INVITED to REGISTERED when user signs in', async () => {
+      it('should always update lastSeenAt timestamp for any activity', async () => {
+        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'PROMPT_RUN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({ trial_email: 'test@example.com' })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+
+        // Verify lastSeenAt is always updated
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
+        expect(mockTrialUserWithStatus.setLastSeenAt.firstCall.args[0]).to.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should update status from INVITED to REGISTERED when user is INVITED', async () => {
         mockTrialUserWithStatus.getStatus.returns('INVITED');
 
         const context = {
@@ -741,14 +771,14 @@ describe('User Activity Controller', () => {
           },
         };
 
-        // Mock the trial user lookup to return our test user
         mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
 
         const result = await userActivityController.createTrialUserActivity(context);
 
         expect(result.status).to.equal(201);
 
-        // Verify status transition occurred
+        // Verify both lastSeenAt and status are updated
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
         expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
         expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
       });
@@ -775,17 +805,50 @@ describe('User Activity Controller', () => {
 
         expect(result.status).to.equal(201);
 
-        // Verify status transition did not occur
+        // Verify lastSeenAt is updated but status is not changed
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
         expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
-        expect(mockTrialUserWithStatus.save).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
       });
 
-      it('should not update status when activity type is not SIGN_IN', async () => {
-        mockTrialUserWithStatus.getStatus.returns('INVITED');
+      it('should handle multiple calls correctly', async () => {
+        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
 
         const context = {
           params: { siteId },
-          data: { type: 'SIGN_UP', productCode: 'LLMO' },
+          data: { type: 'PROMPT_RUN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({ trial_email: 'test@example.com' })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        // First call
+        const result1 = await userActivityController.createTrialUserActivity(context);
+        expect(result1.status).to.equal(201);
+
+        // Second call
+        const result2 = await userActivityController.createTrialUserActivity(context);
+        expect(result2.status).to.equal(201);
+
+        // Verify lastSeenAt was updated twice
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledTwice;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledTwice;
+      });
+
+      it('should handle save errors gracefully', async () => {
+        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
+        mockTrialUserWithStatus.save.rejects(new Error('Database error'));
+
+        const context = {
+          params: { siteId },
+          data: { type: 'PROMPT_RUN', productCode: 'LLMO' },
           dataAccess: mockDataAccess,
           log: { error: sinon.stub() },
           attributes: {
@@ -800,11 +863,9 @@ describe('User Activity Controller', () => {
 
         const result = await userActivityController.createTrialUserActivity(context);
 
-        expect(result.status).to.equal(201);
-
-        // Verify status transition did not occur
-        expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
-        expect(mockTrialUserWithStatus.save).to.not.have.been.called;
+        expect(result.status).to.equal(500);
+        const body = await result.json();
+        expect(body.message).to.equal('Database error');
       });
 
       it('should not update status when user status is neither INVITED nor REGISTERED', async () => {
@@ -829,9 +890,10 @@ describe('User Activity Controller', () => {
 
         expect(result.status).to.equal(201);
 
-        // Verify status transition did not occur
+        // Verify lastSeenAt is updated but status is not changed
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
         expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
-        expect(mockTrialUserWithStatus.save).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
       });
 
       it('should handle status update failure gracefully', async () => {
@@ -890,14 +952,16 @@ describe('User Activity Controller', () => {
 
         // Reset stubs for second call
         mockTrialUserWithStatus.setStatus.resetHistory();
+        mockTrialUserWithStatus.setLastSeenAt.resetHistory();
         mockTrialUserWithStatus.save.resetHistory();
         mockTrialUserWithStatus.getStatus.returns('REGISTERED');
 
-        // Second sign-in (should not update status)
+        // Second sign-in (should not update status but should update lastSeenAt)
         const result2 = await userActivityController.createTrialUserActivity(context);
         expect(result2.status).to.equal(201);
         expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
-        expect(mockTrialUserWithStatus.save).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
       });
     });
   });
