@@ -57,7 +57,7 @@ function LlmoController() {
     const aiQuestions = config.getLlmoAIQuestions() || [];
 
     if (!humanQuestions.some((question) => question.key === questionKey)
-        && !aiQuestions.some((question) => question.key === questionKey)) {
+      && !aiQuestions.some((question) => question.key === questionKey)) {
       throw new Error('Invalid question key, please provide a valid question key');
     }
   };
@@ -76,25 +76,24 @@ function LlmoController() {
     const { log } = context;
     const { siteId, dataSource, sheetType } = context.params;
     const { env } = context;
-
-    const { llmoConfig } = await getSiteAndValidateLlmo(context);
-    const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
-
-    // Add limit, offset and sheet query params to the url
-    const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
-    const { limit, offset, sheet } = context.data;
-    if (limit) {
-      url.searchParams.set('limit', limit);
-    }
-    if (offset) {
-      url.searchParams.set('offset', offset);
-    }
-    // allow fetching a specific sheet from the sheet data source
-    if (sheet) {
-      url.searchParams.set('sheet', sheet);
-    }
-
     try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+
+      // Add limit, offset and sheet query params to the url
+      const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+      const { limit, offset, sheet } = context.data;
+      if (limit) {
+        url.searchParams.set('limit', limit);
+      }
+      if (offset) {
+        url.searchParams.set('offset', offset);
+      }
+      // allow fetching a specific sheet from the sheet data source
+      if (sheet) {
+        url.searchParams.set('sheet', sheet);
+      }
+
       // Fetch data from the external endpoint using the dataFolder from config
       const response = await fetch(url.toString(), {
         headers: {
@@ -118,15 +117,22 @@ function LlmoController() {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
-      log.error(`Error proxying data for siteId: ${siteId}, sheetURL: ${sheetURL}`, error);
-      throw error;
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
     }
   };
 
   // Handles requests to the LLMO config endpoint
   const getLlmoConfig = async (context) => {
-    const { llmoConfig } = await getSiteAndValidateLlmo(context);
-    return ok(llmoConfig);
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      return ok(llmoConfig);
+    } catch (error) {
+      log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
   };
 
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
@@ -310,6 +316,32 @@ function LlmoController() {
     return ok();
   };
 
+  // Handles requests to the LLMO CDN logs filter endpoint, updates CDN logs filter configuration
+  const patchLlmoCdnLogsFilter = async (context) => {
+    const { log } = context;
+    const { data } = context;
+    const { siteId } = context.params;
+
+    try {
+      const { site, config } = await getSiteAndValidateLlmo(context);
+
+      if (!isObject(data)) {
+        return badRequest('Update data must be provided as an object');
+      }
+
+      const { cdnlogsFilter } = data;
+
+      config.updateLlmoCdnlogsFilter(cdnlogsFilter);
+
+      await saveSiteConfig(site, config, log, 'updating CDN logs filter');
+
+      return ok(config.getLlmoConfig().cdnlogsFilter || []);
+    } catch (error) {
+      log.error(`Error updating CDN logs filter for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     getLlmoConfig,
@@ -322,6 +354,7 @@ function LlmoController() {
     removeLlmoCustomerIntent,
     patchLlmoCustomerIntent,
     testOnboardCmd,
+    patchLlmoCdnLogsFilter,
   };
 }
 

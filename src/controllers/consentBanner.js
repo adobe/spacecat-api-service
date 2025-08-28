@@ -147,6 +147,13 @@ function ConsentBannerController(ctx) {
         return acc;
       }, {});
 
+      Object.keys(scrapeJsonData.scrapeResults).forEach((device) => {
+        const deviceDimensions = scrapeJsonData.scrapeResults[device];
+        delete deviceDimensions.bannerElement;
+        delete deviceDimensions.overlayElement;
+        delete deviceDimensions.wrapperElement;
+      });
+
       return ok({
         jobId,
         results: {
@@ -154,7 +161,7 @@ function ConsentBannerController(ctx) {
           screenshots: scrapeJsonData.screenshots,
           dimensionsDevice: scrapeJsonData.device,
           scrapeTime: scrapeJsonData.scrapeTime,
-          dimensions: scrapeJsonData.scrapeResult.results,
+          dimensions: scrapeJsonData.scrapeResults,
         },
       });
     } catch (error) {
