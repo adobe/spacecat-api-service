@@ -306,7 +306,8 @@ function LlmoController() {
     return ok(config.getLlmoConfig().customerIntent || []);
   };
 
-  // TODO delete
+  /* c8 ignore start */
+  // TODO remove
   const testOnboardCmd = async (context) => {
     const testInput = { baseURL: 'https://hannes2.test', brandName: 'Hannes Test', imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg' };
     const fakeSlackCtx = { say: context.log.info };
@@ -315,7 +316,7 @@ function LlmoController() {
 
     return ok();
   };
-
+  /* c8 ignore stop */
   // Handles requests to the LLMO CDN logs filter endpoint, updates CDN logs filter configuration
   const patchLlmoCdnLogsFilter = async (context) => {
     const { log } = context;

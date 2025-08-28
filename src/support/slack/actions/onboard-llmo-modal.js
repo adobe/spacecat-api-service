@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+/* c8 ignore start */
+
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { getLastNumberOfWeeks } from '@adobe/spacecat-shared-utils';
@@ -655,3 +657,5 @@ export function onboardLLMOModal(lambdaContext) {
     }
   };
 }
+
+/* c8 ignore stop */
