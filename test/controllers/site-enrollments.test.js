@@ -134,6 +134,7 @@ describe('Site Enrollment Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -168,6 +169,7 @@ describe('Site Enrollment Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -189,6 +191,7 @@ describe('Site Enrollment Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -211,6 +214,7 @@ describe('Site Enrollment Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -224,6 +228,9 @@ describe('Site Enrollment Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Database connection failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting site enrollments for site ${siteId}: ${dbError.message}`);
     });
 
     it('should return internal server error when access control check fails', async () => {
@@ -233,6 +240,7 @@ describe('Site Enrollment Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -246,6 +254,9 @@ describe('Site Enrollment Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Access control error');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting site enrollments for site ${siteId}: ${accessError.message}`);
     });
 
     it('should return internal server error when Site.findById fails', async () => {
@@ -255,6 +266,7 @@ describe('Site Enrollment Controller', () => {
       const context = {
         params: { siteId },
         dataAccess: mockDataAccess,
+        log: { error: sinon.stub() },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -268,6 +280,9 @@ describe('Site Enrollment Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Site lookup failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting site enrollments for site ${siteId}: ${siteError.message}`);
     });
   });
 });

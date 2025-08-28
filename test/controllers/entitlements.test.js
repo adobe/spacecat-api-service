@@ -136,6 +136,7 @@ describe('Entitlements Controller', () => {
     it('should return entitlements for valid organization ID', async () => {
       const context = {
         params: { organizationId },
+        log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
@@ -174,6 +175,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
@@ -189,6 +191,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
@@ -205,6 +208,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
@@ -213,6 +217,9 @@ describe('Entitlements Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Database connection failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting entitlements for organization ${organizationId}: ${dbError.message}`);
     });
 
     it('should return internal server error when access control check fails', async () => {
@@ -221,6 +228,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
@@ -229,6 +237,9 @@ describe('Entitlements Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Access control error');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting entitlements for organization ${organizationId}: ${accessError.message}`);
     });
 
     it('should return internal server error when Organization.findById fails', async () => {
@@ -237,6 +248,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'test@example.com' }) },
       };
 
@@ -245,6 +257,9 @@ describe('Entitlements Controller', () => {
       expect(result.status).to.equal(500);
       const body = await result.json();
       expect(body.message).to.equal('Organization lookup failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error getting entitlements for organization ${organizationId}: ${orgError.message}`);
     });
   });
 });
