@@ -22,7 +22,7 @@ import {
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-import { TrialUserActivity as TrialUserActivityModel, Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import { TrialUserActivity as TrialUserActivityModel, Entitlement as EntitlementModel, TrialUser as TrialUserModel } from '@adobe/spacecat-shared-data-access';
 import { UserActivityDto } from '../dto/user-activity.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
@@ -50,6 +50,20 @@ function UserActivitiesController(ctx) {
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Handles user status transition when signing in.
+   * @param {object} trialUser - The trial user object.
+   * @param {string} activityType - The type of activity being performed.
+   * @returns {Promise<void>}
+   */
+  const handleUserStatusTransition = async (trialUser, activityType) => {
+    if (activityType === TrialUserActivityModel.TYPES.SIGN_IN
+        && trialUser.getStatus() === TrialUserModel.STATUSES.INVITED) {
+      trialUser.setStatus(TrialUserModel.STATUSES.REGISTERED);
+      await trialUser.save();
+    }
+  };
 
   /**
    * Gets user activities by site ID.
@@ -164,6 +178,9 @@ function UserActivitiesController(ctx) {
       }
 
       const entitlementId = entitlements[0].getId();
+
+      // Handle user status transition when signing in
+      await handleUserStatusTransition(trialUser, activityPayload.type);
 
       // Create user activity using prepared payload
       const userActivity = await TrialUserActivity.create({

@@ -38,6 +38,9 @@ describe('User Activity Controller', () => {
   const mockTrialUser = {
     getId: () => 'trial-user-123',
     getEmailId: () => 'test@example.com',
+    getStatus: () => 'INVITED',
+    setStatus: sandbox.stub(),
+    save: sandbox.stub().resolves(),
   };
 
   const mockEntitlement = {
@@ -707,6 +710,195 @@ describe('User Activity Controller', () => {
         }),
       );
       expect(mockDataAccess.TrialUserActivity.create.firstCall.args[0]).to.not.have.property('details');
+    });
+
+    describe('handleUserStatusTransition', () => {
+      let mockTrialUserWithStatus;
+
+      beforeEach(() => {
+        mockTrialUserWithStatus = {
+          getId: () => 'trial-user-123',
+          getEmailId: () => 'test@example.com',
+          getStatus: sandbox.stub(),
+          setStatus: sandbox.stub(),
+          save: sandbox.stub().resolves(),
+        };
+      });
+
+      it('should update status from INVITED to REGISTERED when user signs in', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({ trial_email: 'test@example.com' })
+              .withAuthenticated(true),
+          },
+        };
+
+        // Mock the trial user lookup to return our test user
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+
+        // Verify status transition occurred
+        expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should not update status when user is not INVITED', async () => {
+        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({ trial_email: 'test@example.com' })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+
+        // Verify status transition did not occur
+        expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.save).to.not.have.been.called;
+      });
+
+      it('should not update status when activity type is not SIGN_IN', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_UP', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({ trial_email: 'test@example.com' })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+
+        // Verify status transition did not occur
+        expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.save).to.not.have.been.called;
+      });
+
+      it('should not update status when user status is neither INVITED nor REGISTERED', async () => {
+        mockTrialUserWithStatus.getStatus.returns('BLOCKED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({ trial_email: 'test@example.com' })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+
+        // Verify status transition did not occur
+        expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.save).to.not.have.been.called;
+      });
+
+      it('should handle status update failure gracefully', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+        mockTrialUserWithStatus.save.rejects(new Error('Database error'));
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({ trial_email: 'test@example.com' })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(500);
+        const body = await result.json();
+        expect(body.message).to.equal('Database error');
+
+        // Verify status was attempted to be set but save failed
+        expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should handle multiple sign-ins correctly', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({ trial_email: 'test@example.com' })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        // First sign-in
+        const result1 = await userActivityController.createTrialUserActivity(context);
+        expect(result1.status).to.equal(201);
+        expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+
+        // Reset stubs for second call
+        mockTrialUserWithStatus.setStatus.resetHistory();
+        mockTrialUserWithStatus.save.resetHistory();
+        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
+
+        // Second sign-in (should not update status)
+        const result2 = await userActivityController.createTrialUserActivity(context);
+        expect(result2.status).to.equal(201);
+        expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.save).to.not.have.been.called;
+      });
     });
   });
 });
