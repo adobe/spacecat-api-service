@@ -52,15 +52,21 @@ function UserActivitiesController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Handles user status transition when signing in.
+   * Handles user status transition and updates lastSeenAt timestamp.
    * @param {object} trialUser - The trial user object.
    * @returns {Promise<void>}
    */
-  const handleUserStatusTransition = async (trialUser) => {
+  const handleUserActivityUpdates = async (trialUser) => {
+    // Update lastSeenAt to current timestamp for any activity
+    const now = new Date().toISOString();
+    trialUser.setLastSeenAt(now);
+
+    // Handle status transition if user is INVITED
     if (trialUser.getStatus() === TrialUserModel.STATUSES.INVITED) {
       trialUser.setStatus(TrialUserModel.STATUSES.REGISTERED);
-      await trialUser.save();
     }
+
+    await trialUser.save();
   };
 
   /**
@@ -177,8 +183,8 @@ function UserActivitiesController(ctx) {
 
       const entitlementId = entitlements[0].getId();
 
-      // Handle user status transition when signing in
-      await handleUserStatusTransition(trialUser);
+      // Handle user status transition and lastSeenAt updates
+      await handleUserActivityUpdates(trialUser);
 
       // Create user activity using prepared payload
       const userActivity = await TrialUserActivity.create({
