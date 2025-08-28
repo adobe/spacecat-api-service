@@ -245,7 +245,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
 
     // Test. TODO: Remove
-    'GET /test/onboard': llmoController.testOnboardCmd,
+    // 'GET /test/onboard': llmoController.testOnboardCmd,
   };
 
   // Initialization of static and dynamic routes
