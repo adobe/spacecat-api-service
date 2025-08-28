@@ -53,6 +53,7 @@ export default class AccessControlUtil {
       }
       this.authInfo = attributes?.authInfo;
       this.Entitlment = context.dataAccess.Entitlment;
+      this.SiteEnrollment = context.dataAccess.SiteEnrollment;
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
     }
@@ -80,7 +81,7 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
-  async validateEntitlement(org, productCode) {
+  async validateEntitlement(org, site, productCode) {
     // eslint-disable-next-line max-len
     const entitlements = await this.Entitlment.findByOrganizationIdAndProductCode(org.getId(), productCode);
     if (!entitlements || entitlements.length === 0) {
@@ -92,8 +93,15 @@ export default class AccessControlUtil {
       throw new Error(`[Error] Organization is not entitled for ${productCode}`);
     }
 
+    if (site) {
+      const siteEnrollment = await this.SiteEnrollment.findBySiteId(site.getId());
+      const siteEntitlement = await siteEnrollment.getEntitlement();
+      if (siteEntitlement && siteEntitlement.productCode !== productCode) {
+        throw new Error(`[Error] Site is not enrolled for ${productCode}`);
+      }
+    }
+
     if (validEntitlement.tier === this.Entitlment.TIER.FREE_TRIAL) {
-      // this trail_email need to be set in authInfo in IMS handlers
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
@@ -155,12 +163,14 @@ export default class AccessControlUtil {
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
     if (productCode.length > 0) {
       let org;
+      let site;
       if (entity instanceof Site) {
+        site = entity;
         org = await entity.getOrganization();
       } else if (entity instanceof Organization) {
         org = entity;
       }
-      await this.validateEntitlement(org, productCode);
+      await this.validateEntitlement(org, site, productCode);
     }
     if (subService.length > 0) {
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
