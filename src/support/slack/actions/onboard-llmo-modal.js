@@ -616,6 +616,15 @@ export function onboardLLMOModal(lambdaContext) {
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
 
+      log.info('Acknowledging onboarding request with parameters:', {
+        brandName,
+        imsOrgId,
+        deliveryType,
+        brandURL,
+        originalChannel,
+        originalThreadTs,
+      });
+
       await ack();
 
       // Create a slack context for the onboarding process
@@ -637,7 +646,7 @@ export function onboardLLMOModal(lambdaContext) {
       };
 
       await onboardSite({
-        brandName, brandURL, imsOrgId, deliveryType,
+        brandName, baseURL: brandURL, imsOrgId, deliveryType,
       }, lambdaContext, slackContext);
 
       const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
