@@ -92,7 +92,7 @@ export default class AccessControlUtil {
     this.log.info(`in validateEntitlement control util:  ${org.getId()}, site: ${site?.getId()}, productCode: ${productCode}`);
     // eslint-disable-next-line max-len
     const entitlements = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
-    this.log.info(`found entitlements: ${entitlements}`);
+    this.log.info('found entitlements:', entitlements);
     if (!entitlements || entitlements.length === 0) {
       throw new Error('Missing entitlement for organization');
     }
