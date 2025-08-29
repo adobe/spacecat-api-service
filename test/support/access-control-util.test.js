@@ -87,7 +87,9 @@ describe('Access Control Util', () => {
   beforeEach(() => {
     logSpy = sandbox.spy();
     context = {
-      log: { info: logSpy },
+      log: {
+        info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+      },
       attributes: {
         authInfo: {
           getType: () => 'jwt',
@@ -101,6 +103,7 @@ describe('Access Control Util', () => {
         Entitlement: { TIER: { FREE_TRIAL: 'free_trial', PAID: 'paid' }, findByOrganizationIdAndProductCode: sinon.stub() },
         TrialUser: { STATUS: { REGISTERED: 'registered' }, findByEmailId: sinon.stub() },
         OrganizationIdentityProvider: {},
+        SiteEnrollment: { findBySiteId: sinon.stub() },
       },
     };
   });
@@ -268,7 +271,9 @@ describe('Access Control Util', () => {
       };
 
       const testContext = {
-        log: { info: () => {} },
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: {
           authInfo: mockAuthInfo,
         },
@@ -378,6 +383,9 @@ describe('Access Control Util', () => {
         .withAuthenticated(true);
 
       const contextForIMS = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: { authInfo },
         dataAccess: {
           Entitlement: {
@@ -434,6 +442,9 @@ describe('Access Control Util', () => {
         .withAuthenticated(true);
 
       const contextForIMS = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: { authInfo },
         dataAccess: {
           Entitlement: {
@@ -478,6 +489,9 @@ describe('Access Control Util', () => {
         .withAuthenticated(true);
 
       const contextForIMS = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: { authInfo },
         dataAccess: {
           Entitlement: {
@@ -567,7 +581,9 @@ describe('Access Control Util', () => {
       };
 
       const testContext = {
-        log: { info: () => {} },
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: {
           authInfo: {
             getType: () => 'jwt',
@@ -579,6 +595,8 @@ describe('Access Control Util', () => {
               trial_email: 'trial@example.com',
               provider: 'GOOGLE',
               email: 'user@example.com',
+              first_name: 'John',
+              last_name: 'Doe',
             }),
           },
         },
@@ -753,6 +771,8 @@ describe('Access Control Util', () => {
 
       expect(mockTrialUser.create).to.have.been.calledWith({
         emailId: 'trial@example.com',
+        firstName: 'John',
+        lastName: 'Doe',
         provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
@@ -789,7 +809,9 @@ describe('Access Control Util', () => {
 
       // Test with unsupported provider
       const testContext = {
-        log: { info: () => {} },
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: {
           authInfo: {
             getType: () => 'jwt',
@@ -848,6 +870,8 @@ describe('Access Control Util', () => {
       // Verify that trial user was created with the new identity provider
       expect(mockTrialUser.create).to.have.been.calledWith({
         emailId: 'trial@example.com',
+        firstName: 'John',
+        lastName: 'Doe',
         provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
@@ -889,7 +913,9 @@ describe('Access Control Util', () => {
       };
 
       const testContext = {
-        log: { info: () => {} },
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: {
           authInfo: {
             getType: () => 'jwt',
@@ -1029,11 +1055,13 @@ describe('Access Control Util', () => {
       const mockSiteEnrollment = {};
 
       const testContext = {
-        log: { info: () => {} },
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: {
           authInfo: {
             getType: () => 'jwt',
-            isAdmin: () => false,
+            isAdmin: () => true,
             getScopes: () => [],
             hasOrganization: () => true,
             hasScope: () => true,

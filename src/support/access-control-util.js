@@ -61,6 +61,9 @@ export default class AccessControlUtil {
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
     }
+
+    // Always assign the log property
+    this.log = log;
   }
 
   isAccessTypeJWT() {
@@ -97,12 +100,15 @@ export default class AccessControlUtil {
       throw new Error(`[Error] Organization is not entitled for ${productCode}`);
     }
 
+    this.log.info(`Valid entitlement found: ${validEntitlement}`);
+
     if (site) {
       const siteEnrollment = await this.SiteEnrollment.findBySiteId(site.getId());
       const siteEntitlement = await siteEnrollment.getEntitlement();
       if (siteEntitlement && siteEntitlement.productCode !== productCode) {
         throw new Error(`[Error] Site is not enrolled for ${productCode}`);
       }
+      this.log.info(`Valid site siteEnrollment found: ${siteEnrollment}`);
     }
 
     if (validEntitlement.tier === EntitlementModel.TIERS.FREE_TRIAL) {
@@ -130,15 +136,20 @@ export default class AccessControlUtil {
       }
 
       if (!trialUser) {
+        this.log.info(`Creating trial user: ${profile.trial_email}`);
         // create a trial user
         await this.TrialUser.create({
           emailId: profile.trial_email,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
           provider: providerId.provider,
           organizationId: org.getId(),
           status: TrialUserModel.STATUSES.REGISTERED,
           externalUserId: profile.email,
           lastSeenAt: new Date().toISOString(),
         });
+      } else {
+        this.log.info(`Trial user already exists: ${profile.trial_email}`);
       }
     }
   }
