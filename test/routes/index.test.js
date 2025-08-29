@@ -355,6 +355,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/page-type-campaign',
       'GET /sites/:siteId/traffic/paid/page-type-platform',
       'GET /sites/:siteId/traffic/paid/page-type-platform-device',
+      'GET /sites/:siteId/traffic/paid/url-page-type',
       'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device',
@@ -501,5 +502,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].handler).to.equal(mockSandboxAuditController.triggerAudit);
     expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageType);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].paramNames).to.deep.equal(['siteId']);
   });
 });
