@@ -583,8 +583,6 @@ export function onboardLLMOModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     try {
-      await ack();
-
       log.info('Starting onboarding process...');
 
       const { view, user } = body;
@@ -607,6 +605,18 @@ export function onboardLLMOModal(lambdaContext) {
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
 
+      if (!brandName || !imsOrgId || !deliveryType) {
+        await ack({
+          response_action: 'errors',
+          errors: {
+            brand_name_input: !brandName ? 'Brand name is required' : undefined,
+            ims_org_input: !imsOrgId ? 'IMS Org ID is required' : undefined,
+            delivery_type_input: !deliveryType ? 'Delivery type is required' : undefined,
+          },
+        });
+        return;
+      }
+
       log.info('Onboarding request with parameters:', {
         brandName,
         imsOrgId,
@@ -615,6 +625,8 @@ export function onboardLLMOModal(lambdaContext) {
         originalChannel,
         originalThreadTs,
       });
+
+      await ack();
 
       // Create a slack context for the onboarding process
       // Use original channel/thread if available, otherwise fall back to DM
@@ -644,7 +656,7 @@ export function onboardLLMOModal(lambdaContext) {
       await ack({
         response_action: 'errors',
         errors: {
-          site_url_input: 'There was an error processing the onboarding request.',
+          brand_name_input: 'There was an error processing the onboarding request.',
         },
       });
     }
