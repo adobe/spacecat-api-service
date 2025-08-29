@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
+import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
 import {
   Site, Organization, TrialUser as TrialUserModel,
   Entitlement as EntitlementModel,
@@ -91,18 +91,16 @@ export default class AccessControlUtil {
   async validateEntitlement(org, site, productCode) {
     this.log.info(`in validateEntitlement control util:  ${org.getId()}, site: ${site?.getId()}, productCode: ${productCode}`);
     // eslint-disable-next-line max-len
-    const entitlements = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
-    this.log.info('found entitlements:', entitlements);
-    if (!entitlements || entitlements.length === 0) {
+    const entitlement = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
+    if (!isNonEmptyObject(entitlement)) {
       throw new Error('Missing entitlement for organization');
     }
+    this.log.info(`entitlement product code: ${entitlement.getProductCode()} entitlement tier: ${entitlement.getTier()}`);
     // eslint-disable-next-line max-len
-    const validEntitlement = entitlements.find((ent) => ent.getProductCode() === productCode && ent.getTier());
-    if (!isNonEmptyObject(validEntitlement)) {
-      throw new Error(`[Error] Organization is not entitled for ${productCode}`);
+    if (!hasText(entitlement.getTier())) {
+      throw new Error(`[Error] Entitlement tier is not set for ${productCode}`);
     }
-
-    this.log.info('Valid entitlement found:', validEntitlement);
+    this.log.info(`valid entitlement found: ${entitlement.getProductCode()} ${entitlement.getTier()}`);
 
     if (site) {
       const siteEnrollment = await this.SiteEnrollment.findBySiteId(site.getId());
@@ -113,7 +111,7 @@ export default class AccessControlUtil {
       this.log.info(`Valid site siteEnrollment found: ${siteEnrollment}`);
     }
 
-    if (validEntitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
+    if (entitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
