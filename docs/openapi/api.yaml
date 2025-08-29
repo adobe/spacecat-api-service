@@ -61,6 +61,8 @@ tags:
     description: User activity management operations
   - name: organization-identity-providers
     description: Organization identity provider management operations
+  - name: sandbox
+    description: Sandbox audit operations
 
 paths:
   /audits/latest/{auditType}:
@@ -260,6 +262,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-customer-intent-item'
   /sites/{siteId}/llmo/cdn-logs-filter:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-filter'
+  /sites/{siteId}/sandbox/audit:
+    $ref: './sandbox-audit-api.yaml#/sandbox-audit'
 
 components:
   securitySchemes:
