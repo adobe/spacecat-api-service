@@ -29,7 +29,7 @@ function LlmoController(ctx) {
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
     const { dataAccess } = context;
-    const { Site, Entitlment } = dataAccess;
+    const { Site, Entitlement } = dataAccess;
 
     const site = await Site.findById(siteId);
     const config = site.getConfig();
@@ -38,7 +38,7 @@ function LlmoController(ctx) {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-    accessControlUtil.hasAccess(site, '', Entitlment.PRODUCT_CODES.LLMO);
+    accessControlUtil.hasAccess(site, '', Entitlement.PRODUCT_CODES.LLMO);
     return { site, config, llmoConfig };
   };
 

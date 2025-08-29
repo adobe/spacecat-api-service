@@ -52,7 +52,7 @@ export default class AccessControlUtil {
         throw new Error('Missing authInfo');
       }
       this.authInfo = attributes?.authInfo;
-      this.Entitlment = context.dataAccess.Entitlment;
+      this.Entitlement = context.dataAccess.Entitlement;
       this.SiteEnrollment = context.dataAccess.SiteEnrollment;
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
@@ -83,7 +83,7 @@ export default class AccessControlUtil {
 
   async validateEntitlement(org, site, productCode) {
     // eslint-disable-next-line max-len
-    const entitlements = await this.Entitlment.findByOrganizationIdAndProductCode(org.getId(), productCode);
+    const entitlements = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
     if (!entitlements || entitlements.length === 0) {
       throw new Error('Missing entitlement for organization');
     }
@@ -101,7 +101,7 @@ export default class AccessControlUtil {
       }
     }
 
-    if (validEntitlement.tier === this.Entitlment.TIER.FREE_TRIAL) {
+    if (validEntitlement.tier === this.Entitlement.TIER.FREE_TRIAL) {
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 

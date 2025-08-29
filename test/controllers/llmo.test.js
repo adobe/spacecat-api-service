@@ -104,7 +104,7 @@ describe('LlmoController', () => {
       Site: {
         findById: sinon.stub().resolves(mockSite),
       },
-      Entitlment: {
+      Entitlement: {
         PRODUCT_CODES: {
           LLMO: 'llmo',
         },
