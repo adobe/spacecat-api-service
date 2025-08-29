@@ -626,6 +626,8 @@ export function onboardLLMOModal(lambdaContext) {
         originalThreadTs,
       });
 
+      // eslint-disable-next-line max-statements-per-line
+      await new Promise((resolve) => { setTimeout(resolve, 1000); });
       await ack();
 
       // Create a slack context for the onboarding process

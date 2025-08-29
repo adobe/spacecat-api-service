@@ -19,7 +19,6 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
-import { onboardSite } from '../support/slack/actions/onboard-llmo-modal.js';
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
@@ -306,17 +305,6 @@ function LlmoController() {
     return ok(config.getLlmoConfig().customerIntent || []);
   };
 
-  /* c8 ignore start */
-  // TODO remove
-  const testOnboardCmd = async (context) => {
-    const testInput = { baseURL: 'https://hannes2.test', brandName: 'Hannes Test', imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg' };
-    const fakeSlackCtx = { say: context.log.info };
-
-    await onboardSite(testInput, context, fakeSlackCtx);
-
-    return ok();
-  };
-  /* c8 ignore stop */
   // Handles requests to the LLMO CDN logs filter endpoint, updates CDN logs filter configuration
   const patchLlmoCdnLogsFilter = async (context) => {
     const { log } = context;
@@ -354,7 +342,6 @@ function LlmoController() {
     addLlmoCustomerIntent,
     removeLlmoCustomerIntent,
     patchLlmoCustomerIntent,
-    testOnboardCmd,
     patchLlmoCdnLogsFilter,
   };
 }

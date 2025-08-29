@@ -246,9 +246,6 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
 
-    // Test. TODO: Remove
-    // 'GET /test/onboard': llmoController.testOnboardCmd,
-
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
   };
