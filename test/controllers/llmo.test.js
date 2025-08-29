@@ -217,7 +217,8 @@ describe('LlmoController', () => {
             this.log = context.log;
           }
 
-          static async hasAccess() {
+          // eslint-disable-next-line class-methods-use-this
+          async hasAccess() {
             // Mock successful access for tests
             return true;
           }
