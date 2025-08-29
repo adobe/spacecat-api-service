@@ -28,6 +28,7 @@ import {
   noContent,
   notFound,
   ok,
+  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import {
@@ -386,6 +387,201 @@ export class FixesController {
       return noContent();
     } catch (e) {
       return createResponse({ message: `Error removing fix: ${e.message}` }, 500);
+    }
+  }
+
+  /**
+   * Applies accessibility fixes by calling AIO app to create PR
+   * @param {RequestContext} context - request context
+   * @returns {Promise<Response>}
+   */
+  async applyAccessibilityFix(context) {
+    const { siteId, opportunityId } = context.params;
+    const { log, env, imsClient } = context;
+
+    const res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
+    if (res) return res;
+
+    if (!context.data) {
+      return badRequest('Request body is required');
+    }
+
+    const { form, formSource, ruleId } = context.data;
+
+    if (!hasText(form)) {
+      return badRequest('form URL is required');
+    }
+
+    if (!hasText(formSource)) {
+      return badRequest('formSource is required');
+    }
+
+    if (!hasText(ruleId)) {
+      return badRequest('ruleId is required');
+    }
+
+    // Get the opportunity and verify it belongs to the site
+    const opportunity = await this.#Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    const { AIO_AUTOFIX_API_URL: aioApiUrl } = env;
+    if (!hasText(aioApiUrl)) {
+      log.error('AIO_AUTOFIX_API_URL environment variable is not configured');
+      return internalServerError('AIO autofix service is not configured');
+    }
+
+    try {
+      // Get site details to access the IMS org ID
+      const site = await this.#Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      // Get the organization to access IMS org ID
+      const organization = await site.getOrganization();
+      if (!organization || !organization.getImsOrgId()) {
+        return badRequest('Site must belong to an organization with IMS Org ID');
+      }
+
+      const prContent = FixesController.#extractDiffFromOpportunity(
+        opportunity,
+        form,
+        formSource,
+        ruleId,
+      );
+      if (!prContent) {
+        return badRequest('No accessibility guidance found for the specified form and rule ID');
+      }
+
+      const { diffContent, title } = prContent;
+
+      // Prepare payload for AIO app
+      const aioPayload = {
+        diffContent,
+        siteId,
+        title,
+        vcsType: 'github',
+      };
+
+      // Get service access token from IMS client
+      const serviceToken = await FixesController.#getServiceAccessToken(imsClient, env, log);
+      if (!serviceToken) {
+        log.error('Failed to obtain service access token from IMS');
+        return internalServerError('Authentication failed');
+      }
+
+      // Make request to AIO app
+      const aioResponse = await fetch(aioApiUrl, {
+        method: 'POST',
+        headers: {
+          'x-gw-ims-org-id': organization.getImsOrgId(),
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${serviceToken}`,
+        },
+        body: JSON.stringify(aioPayload),
+      });
+
+      if (!aioResponse.ok) {
+        log.error(`AIO app request failed: ${aioResponse.status} ${aioResponse.statusText}`);
+        const errorText = await aioResponse.text();
+        log.error(`AIO app error response: ${errorText}`);
+        return createResponse({
+          message: 'Failed to apply accessibility fix',
+          details: `AIO app returned ${aioResponse.status}: ${aioResponse.statusText}`,
+        }, 500);
+      }
+
+      const aioResult = await aioResponse.json();
+      log.info(`Successfully applied accessibility fix for site ${siteId}, opportunity ${opportunityId}`);
+
+      return ok({
+        message: 'Accessibility fix applied successfully',
+        prUrl: aioResult.prUrl || aioResult.pullRequestUrl,
+        diffContent: aioPayload.diffContent,
+        appliedRule: ruleId,
+      });
+    } catch (error) {
+      log.error(`Error applying accessibility fix: ${error?.message || error}`, error);
+      return internalServerError('Failed to apply accessibility fix');
+    }
+  }
+
+  /**
+   * Extracts guidance (diff content) from opportunity data for a specific accessibility issue
+   * @param {Object} opportunity - The opportunity object
+   * @param {string} form - Form URL to match
+   * @param {string} formSource - Form source to match
+   * @param {string} ruleId - Rule ID to match
+   * @returns {string|null} The guidance diff content or null if not found
+   * @private
+   */
+  static #extractDiffFromOpportunity(opportunity, form, formSource, ruleId) {
+    try {
+      const opportunityData = opportunity.getData();
+
+      // Check if accessibility data exists
+      if (!opportunityData?.accessibility || !Array.isArray(opportunityData.accessibility)) {
+        return null;
+      }
+
+      // Find the accessibility entry that matches form and formSource
+      const accessibilityEntry = opportunityData.accessibility.find(
+        (entry) => entry.form === form && entry.formSource === formSource,
+      );
+
+      if (!accessibilityEntry || !Array.isArray(accessibilityEntry.a11yIssues)) {
+        return null;
+      }
+
+      // Find the issue that matches the ruleId
+      const issue = accessibilityEntry.a11yIssues.find(
+        (a11yIssue) => a11yIssue.ruleId === ruleId,
+      );
+
+      if (!issue || !hasText(issue.guidance)) {
+        return null;
+      }
+
+      return {
+        diffContent: issue.guidance,
+        title: issue.issue,
+      };
+    } catch (error) {
+      // Log error but don't expose internal details
+      return null;
+    }
+  }
+
+  /**
+   * Gets service access token from IMS client using client credentials
+   * @param {Object} imsClient - The IMS client from context
+   * @param {Object} env - Environment variables
+   * @param {Object} log - Logger instance
+   * @returns {Promise<string|null>} Service access token or null if failed
+   * @private
+   */
+  static async #getServiceAccessToken(imsClient, env, log) {
+    try {
+      // Use existing IMS configuration pattern similar to other controllers
+      const {
+        IMS_HOST: host,
+        IMS_CLIENT_ID: clientId,
+        IMS_CLIENT_SECRET: clientSecret,
+      } = env;
+
+      if (!hasText(host) || !hasText(clientId) || !hasText(clientSecret)) {
+        log.error('IMS client credentials not found in environment');
+        return null;
+      }
+
+      // Generate service token using client credentials
+      const serviceToken = await imsClient.getServiceAccessToken();
+      return serviceToken;
+    } catch (error) {
+      log.error(`Error obtaining IMS service token: ${error?.message || error}`);
+      return null;
     }
   }
 

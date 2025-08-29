@@ -14,6 +14,9 @@
 /* eslint-disable no-param-reassign */
 /* eslint-disable no-use-before-define */
 
+// Add global fetch polyfill for tests
+import { fetch } from '@adobe/fetch';
+
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -23,11 +26,16 @@ import EntityRegistry from '@adobe/spacecat-shared-data-access/src/models/base/e
 import * as electrodb from 'electrodb';
 import * as crypto from 'crypto';
 
-import { FixEntity, Suggestion } from '@adobe/spacecat-shared-data-access';
+import {
+  FixEntity, Suggestion,
+} from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 import { FixesController } from '../../src/controllers/fixes.js';
 import { FixDto } from '../../src/dto/fix.js';
 import { SuggestionDto } from '../../src/dto/suggestion.js';
+
+// Make fetch available globally
+global.fetch = fetch;
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -59,6 +67,7 @@ describe('Fixes Controller', () => {
   /** @type {RequestContext} */
   let requestContext;
   let opportunityGetStub;
+  let dataAccess;
 
   const siteId = '86ef4aae-7296-417d-9658-8cd4c7edc374';
   const opportunityId = 'a3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
@@ -76,7 +85,7 @@ describe('Fixes Controller', () => {
       .callsFake((data) => ({ go: async () => ({ data: { ...data, siteId } }) }));
 
     const entityRegistry = new EntityRegistry(electroService, log);
-    const dataAccess = entityRegistry.getCollections();
+    dataAccess = entityRegistry.getCollections();
     fixEntityCollection = dataAccess.FixEntity;
     suggestionCollection = dataAccess.Suggestion;
     sandbox.stub(fixEntityCollection, 'allByOpportunityId');
@@ -93,6 +102,11 @@ describe('Fixes Controller', () => {
     fixesController = new FixesController({ dataAccess }, accessControlUtil);
     requestContext = {
       params: { siteId, opportunityId },
+      log,
+      env: {},
+      imsClient: {
+        getServiceAccessToken: sandbox.stub().resolves('test-service-token'),
+      },
     };
   });
 
@@ -999,6 +1013,416 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals({
         message: 'Error removing fix: Failed to remove entity fixEntity with ID a4a6055c-de4b-4552-bc0c-01fdb45b98d5',
       });
+    });
+  });
+
+  describe('applyAccessibilityFix', () => {
+    let fetchStub;
+    let mockSite;
+    let mockOrganization;
+    let mockOpportunity;
+
+    beforeEach(() => {
+      // Ensure fetch is available globally before stubbing
+      if (!global.fetch) {
+        global.fetch = fetch;
+      }
+      fetchStub = sandbox.stub(global, 'fetch');
+
+      mockOrganization = {
+        getImsOrgId: sandbox.stub().returns('test-ims-org-id'),
+      };
+
+      mockSite = {
+        getOrganization: sandbox.stub().returns(Promise.resolve(mockOrganization)),
+      };
+
+      mockOpportunity = {
+        getSiteId: sandbox.stub().returns(siteId),
+        getData: sandbox.stub().returns({
+          accessibility: [
+            {
+              form: 'https://example.com/form',
+              formSource: 'form source content',
+              a11yIssues: [
+                {
+                  ruleId: 'aria-combobox',
+                  issue: 'Accessibility fix for rule aria-combobox',
+                  // eslint-disable-next-line no-template-curly-in-string
+                  guidance: 'diff --git a/blocks/form/util.js b/blocks/form/util.js\nindex e21a57c..f4179d5 100644\n--- a/blocks/form/util.js\n+++ b/blocks/form/util.js\n@@ -293,6 +293,16 @@ export function createInput(fd) {\n   }\n   setPlaceholder(input, fd);\n   setConstraints(input, fd);\n+\n+  // Accessibility: Add required ARIA attributes for combobox/autocomplete\n+  if (fd.fieldType === \'autocomplete\' || input.getAttribute(\'role\') === \'combobox\') {\n+    input.setAttribute(\'role\', \'combobox\');\n+    input.setAttribute(\'aria-expanded\', \'false\'); // default collapsed\n+    input.setAttribute(\'aria-controls\', `${fd.id}-listbox`);\n+  }\n+\n   return input;\n }\n \n',
+                },
+                {
+                  ruleId: 'form-label',
+                  issue: 'Accessibility fix for form labels',
+                  guidance: 'diff --git a/blocks/form/util.js b/blocks/form/util.js\nindex e21a57c..f4179d5 100644\n--- a/blocks/form/util.js\n+++ b/blocks/form/util.js\n@@ -293,6 +293,16 @@ export function createInput(fd) {\n   }\n   setPlaceholder(input, fd);\n   setConstraints(input, fd);\n+\n+  // Accessibility: Ensure form controls have labels\n+  if (input && !input.getAttribute(\'aria-label\') && !input.getAttribute(\'aria-labelledby\')) {\n+    const label = fd.label || fd.name || \'Input field\';\n+    input.setAttribute(\'aria-label\', label);\n+  }\n+\n   return input;\n }\n \n',
+                },
+              ],
+            },
+          ],
+        }),
+      };
+
+      // Mock IMS client
+      requestContext.imsClient = {
+        getServiceAccessToken: sandbox.stub().resolves('test-service-token'),
+      };
+
+      // Stub the dataAccess methods used by the controller
+      sandbox.stub(dataAccess.Site, 'findById').resolves(mockSite);
+      sandbox.stub(dataAccess.Opportunity, 'findById').resolves(mockOpportunity);
+    });
+
+    afterEach(() => {
+      if (fetchStub && fetchStub.restore) {
+        fetchStub.restore();
+      }
+    });
+
+    it('successfully applies accessibility fix', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      fetchStub.resolves({
+        ok: true,
+        json: async () => ({ prUrl: 'https://github.com/test/repo/pull/123' }),
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(fetchStub).calledOnce;
+      expect(requestContext.imsClient.getServiceAccessToken).calledOnce;
+
+      const callArgs = fetchStub.firstCall.args;
+      expect(callArgs[0]).equals(requestContext.env.AIO_AUTOFIX_API_URL);
+      expect(callArgs[1].method).equals('POST');
+      expect(callArgs[1].headers['x-gw-ims-org-id']).equals('test-ims-org-id');
+      expect(callArgs[1].headers['Content-Type']).equals('application/json');
+      expect(callArgs[1].headers.Authorization).equals('Bearer test-service-token');
+
+      const body = JSON.parse(callArgs[1].body);
+      expect(body.siteId).equals(siteId);
+      expect(body.title).equals('Accessibility fix for rule aria-combobox');
+      expect(body.diffContent).includes('Add required ARIA attributes for combobox/autocomplete');
+
+      const responseData = await response.json();
+      expect(responseData.message).equals('Accessibility fix applied successfully');
+      expect(responseData.prUrl).equals('https://github.com/test/repo/pull/123');
+      expect(responseData.appliedRule).equals('aria-combobox');
+    });
+
+    it('responds 400 if request body is missing', async () => {
+      requestContext.data = null;
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Request body is required' });
+    });
+
+    it('responds 400 if form is missing', async () => {
+      requestContext.data = {
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'form URL is required' });
+    });
+
+    it('responds 400 if formSource is missing', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        ruleId: 'aria-combobox',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'formSource is required' });
+    });
+
+    it('responds 400 if ruleId is missing', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'ruleId is required' });
+    });
+
+    it('responds 500 if AIO_AUTOFIX_API_URL is not configured', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {};
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      expect(await response.json()).deep.equals({ message: 'AIO autofix service is not configured' });
+    });
+
+    it('responds 404 if site is not found', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+      };
+
+      dataAccess.Site.findById.resolves(null);
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Site not found' });
+    });
+
+    it('responds 400 if organization has no IMS org ID', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+      };
+
+      mockOrganization.getImsOrgId.returns(null);
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Site must belong to an organization with IMS Org ID' });
+    });
+
+    it('responds 500 if IMS service token cannot be obtained', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      // Mock IMS client to fail
+      requestContext.imsClient.getServiceAccessToken.rejects(new Error('IMS authentication failed'));
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      expect(await response.json()).deep.equals({ message: 'Authentication failed' });
+    });
+
+    it('responds 500 if IMS credentials are missing', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        // Missing IMS credentials
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      expect(await response.json()).deep.equals({ message: 'Authentication failed' });
+    });
+
+    it('responds 500 if AIO app request fails', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      fetchStub.resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        text: async () => 'AIO app error',
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      const responseData = await response.json();
+      expect(responseData.message).equals('Failed to apply accessibility fix');
+      expect(responseData.details).equals('AIO app returned 500: Internal Server Error');
+    });
+
+    it('responds 500 if fetch throws an error', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      fetchStub.throws(new Error('Network error'));
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      expect(await response.json()).deep.equals({ message: 'Failed to apply accessibility fix' });
+    });
+
+    it('generates different diff content for different rule IDs', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'form-label',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      fetchStub.resolves({
+        ok: true,
+        json: async () => ({ prUrl: 'https://github.com/test/repo/pull/124' }),
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+
+      expect(response).includes({ status: 200 });
+
+      const callArgs = fetchStub.firstCall.args;
+      const body = JSON.parse(callArgs[1].body);
+      expect(body.diffContent).includes('Ensure form controls have labels');
+      expect(body.diffContent).includes('aria-label');
+    });
+
+    it('responds 400 if site ID parameter is not a uuid', async () => {
+      requestContext.params.siteId = 'not-a-uuid';
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+    });
+
+    it('responds 400 if opportunity ID parameter is not a uuid', async () => {
+      requestContext.params.opportunityId = 'not-a-uuid';
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+    });
+
+    it('responds 400 if no accessibility guidance found for the specified form and rule ID', async () => {
+      requestContext.data = {
+        form: 'https://example.com/different-form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No accessibility guidance found for the specified form and rule ID',
+      });
+    });
+
+    it('responds 400 if rule ID not found in accessibility issues', async () => {
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'nonexistent-rule',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No accessibility guidance found for the specified form and rule ID',
+      });
+    });
+
+    it('responds 400 if opportunity has no accessibility data', async () => {
+      mockOpportunity.getData.returns({ someOtherData: true });
+
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+      requestContext.env = {
+        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No accessibility guidance found for the specified form and rule ID',
+      });
+    });
+
+    it('responds 404 if opportunity not found', async () => {
+      dataAccess.Opportunity.findById.resolves(null);
+
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Opportunity not found' });
+    });
+
+    it('responds 404 if opportunity belongs to different site', async () => {
+      mockOpportunity.getSiteId.returns('different-site-id');
+
+      requestContext.data = {
+        form: 'https://example.com/form',
+        formSource: 'form source content',
+        ruleId: 'aria-combobox',
+      };
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Opportunity not found' });
     });
   });
 });
