@@ -105,8 +105,7 @@ export default class AccessControlUtil {
     if (site) {
       this.log.info(`inside if site: ${site.getId()}`);
       const siteEnrollment = await this.SiteEnrollment.findBySiteId(site.getId());
-      this.log.info('siteEnrollment', siteEnrollment.getEntitlementId());
-      if (siteEnrollment.getEntitlementId() !== entitlement.getId()) {
+      if (!siteEnrollment || siteEnrollment.getEntitlementId() !== entitlement.getId()) {
         throw new Error(`[Error] Site is not enrolled for ${productCode}`);
       }
       this.log.info(`Valid site siteEnrollment found: ${siteEnrollment}`);
