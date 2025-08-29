@@ -43,7 +43,7 @@ const EMAIL_TEMPLATE_PATH = './static/email-templates/trial-user-email.xml';
 async function buildEmailPayload(emailAddress) {
   const template = await readFile(EMAIL_TEMPLATE_PATH, { encoding: 'utf8' });
   return template
-    .replace('{{emailAddresses}}', emailAddress);
+    .replace('{{emailAddress}}', emailAddress);
 }
 
 /**
