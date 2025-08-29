@@ -701,7 +701,7 @@ describe('Access Control Util', () => {
       mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
-        .to.be.rejectedWith('[Error] Valid site siteEnrollment not found');
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
 
       expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
     });
@@ -723,7 +723,7 @@ describe('Access Control Util', () => {
       mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
-        .to.be.rejectedWith('[Error] Valid site siteEnrollment not found');
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
 
       expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
     });
@@ -745,7 +745,7 @@ describe('Access Control Util', () => {
       mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
-        .to.be.rejectedWith('[Error] Valid site siteEnrollment not found');
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
 
       expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
     });
@@ -981,7 +981,7 @@ describe('Access Control Util', () => {
       mockSiteEnrollment.allBySiteId.resolves([]);
 
       await expect(util.hasAccess(site, '', 'llmo'))
-        .to.be.rejectedWith('[Error] Valid site siteEnrollment not found');
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
 
       expect(mockEntitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
       expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
@@ -1064,7 +1064,7 @@ describe('Access Control Util', () => {
       mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
 
       await expect(util.hasAccess(site, '', 'llmo'))
-        .to.be.rejectedWith('[Error] Valid site siteEnrollment not found');
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
 
       expect(mockEntitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
       expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');

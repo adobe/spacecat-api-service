@@ -102,8 +102,7 @@ export default class AccessControlUtil {
       // eslint-disable-next-line max-len
       const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement.getId());
       if (!validSiteEnrollment) {
-        this.log.error('Valid site siteEnrollment not found');
-        throw new Error('[Error] Valid site siteEnrollment not found');
+        throw new Error('[Error] Valid site enrollment not found');
       }
     }
 
@@ -177,7 +176,6 @@ export default class AccessControlUtil {
       } else if (entity instanceof Organization) {
         org = entity;
       }
-      this.log.info(`in access control util:  ${org.getId()}, site: ${site?.getId()}, productCode: ${productCode}`);
       await this.validateEntitlement(org, site, productCode);
     }
     if (subService.length > 0) {
