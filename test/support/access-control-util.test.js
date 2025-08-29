@@ -235,7 +235,10 @@ describe('Access Control Util', () => {
 
     // Mock the entitlement validation to succeed
     util.Entitlement.findByOrganizationIdAndProductCode = sinon.stub().resolves([
-      { productCode: 'llmo', tier: 'paid' },
+      {
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      },
     ]);
 
     const result = await util.hasAccess(org, '', 'llmo');
@@ -613,7 +616,10 @@ describe('Access Control Util', () => {
 
     it('should validate entitlement successfully for paid tier', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -621,7 +627,7 @@ describe('Access Control Util', () => {
     });
 
     it('should throw error when entitlement is missing for organization', async () => {
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(null);
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves([]);
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo'))
         .to.be.rejectedWith('Missing entitlement for organization');
@@ -629,7 +635,10 @@ describe('Access Control Util', () => {
 
     it('should throw error when organization is not entitled for product', async () => {
       const entitlements = [
-        { productCode: 'other_product', tier: 'paid' },
+        {
+          getProductCode: () => 'other_product',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -639,7 +648,10 @@ describe('Access Control Util', () => {
 
     it('should throw error when entitlement has no tier', async () => {
       const entitlements = [
-        { productCode: 'llmo' }, // missing tier
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => undefined,
+        }, // missing tier
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -649,7 +661,10 @@ describe('Access Control Util', () => {
 
     it('should validate site enrollment when site is provided and matches product code', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -659,7 +674,7 @@ describe('Access Control Util', () => {
 
       const mockSiteEnrollmentInstance = {
         getEntitlement: sinon.stub().resolves({
-          productCode: 'llmo',
+          getProductCode: () => 'llmo',
         }),
       };
 
@@ -673,7 +688,10 @@ describe('Access Control Util', () => {
 
     it('should throw error when site is enrolled for different product code', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -683,7 +701,7 @@ describe('Access Control Util', () => {
 
       const mockSiteEnrollmentInstance = {
         getEntitlement: sinon.stub().resolves({
-          productCode: 'different_product',
+          getProductCode: () => 'different_product',
         }),
       };
 
@@ -698,7 +716,10 @@ describe('Access Control Util', () => {
 
     it('should proceed when site has no entitlement (null)', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -720,7 +741,10 @@ describe('Access Control Util', () => {
 
     it('should proceed when site has no entitlement (undefined)', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -742,7 +766,10 @@ describe('Access Control Util', () => {
 
     it('should not call site enrollment validation when site is not provided', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -753,7 +780,10 @@ describe('Access Control Util', () => {
 
     it('should create trial user when tier is free_trial and trial user does not exist', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'free_trial' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'free_trial',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -783,7 +813,10 @@ describe('Access Control Util', () => {
 
     it('should not create trial user when trial user already exists', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'free_trial' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'free_trial',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -801,7 +834,10 @@ describe('Access Control Util', () => {
 
     it('should throw error when IDP provider is not supported for free trial', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'free_trial' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'free_trial',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -842,7 +878,10 @@ describe('Access Control Util', () => {
 
     it('should create identity provider when it does not exist for supported provider', async () => {
       const entitlements = [
-        { productCode: 'llmo', tier: 'free_trial' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'free_trial',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -949,7 +988,10 @@ describe('Access Control Util', () => {
       Object.setPrototypeOf(site, Site.prototype);
 
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
@@ -985,7 +1027,7 @@ describe('Access Control Util', () => {
       };
       Object.setPrototypeOf(site, Site.prototype);
 
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(null);
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves([]);
 
       await expect(util.hasAccess(site, '', 'llmo'))
         .to.be.rejectedWith('Missing entitlement for organization');
@@ -999,13 +1041,16 @@ describe('Access Control Util', () => {
       Object.setPrototypeOf(site, Site.prototype);
 
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
       const mockSiteEnrollmentInstance = {
         getEntitlement: sinon.stub().resolves({
-          productCode: 'llmo',
+          getProductCode: () => 'llmo',
         }),
       };
 
@@ -1027,13 +1072,16 @@ describe('Access Control Util', () => {
       Object.setPrototypeOf(site, Site.prototype);
 
       const entitlements = [
-        { productCode: 'llmo', tier: 'paid' },
+        {
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
       ];
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlements);
 
       const mockSiteEnrollmentInstance = {
         getEntitlement: sinon.stub().resolves({
-          productCode: 'different_product',
+          getProductCode: () => 'different_product',
         }),
       };
 

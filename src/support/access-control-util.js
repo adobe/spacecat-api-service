@@ -97,23 +97,23 @@ export default class AccessControlUtil {
       throw new Error('Missing entitlement for organization');
     }
     // eslint-disable-next-line max-len
-    const validEntitlement = entitlements.find((ent) => ent.productCode === productCode && ent.tier);
+    const validEntitlement = entitlements.find((ent) => ent.getProductCode() === productCode && ent.getTier());
     if (!isNonEmptyObject(validEntitlement)) {
       throw new Error(`[Error] Organization is not entitled for ${productCode}`);
     }
 
-    this.log.info(`Valid entitlement found: ${validEntitlement}`);
+    this.log.info('Valid entitlement found:', validEntitlement);
 
     if (site) {
       const siteEnrollment = await this.SiteEnrollment.findBySiteId(site.getId());
       const siteEntitlement = await siteEnrollment.getEntitlement();
-      if (siteEntitlement && siteEntitlement.productCode !== productCode) {
+      if (siteEntitlement && siteEntitlement.getProductCode() !== productCode) {
         throw new Error(`[Error] Site is not enrolled for ${productCode}`);
       }
       this.log.info(`Valid site siteEnrollment found: ${siteEnrollment}`);
     }
 
-    if (validEntitlement.tier === EntitlementModel.TIERS.FREE_TRIAL) {
+    if (validEntitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
