@@ -26,9 +26,25 @@ import {
   isValidEmail,
 } from '@adobe/spacecat-shared-utils';
 import { TrialUser as TrialUserModel } from '@adobe/spacecat-shared-data-access';
+import { readFile } from 'fs/promises';
 
+import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
+
+// Path to email template
+const EMAIL_TEMPLATE_PATH = './static/email-templates/trial-user-email.xml';
+
+/**
+ * Loads and processes the email template with provided data.
+ * @param {string} emailAddress - Single email address.
+ * @returns {Promise<string>} Processed email template.
+ */
+async function buildEmailPayload(emailAddress) {
+  const template = await readFile(EMAIL_TEMPLATE_PATH, { encoding: 'utf8' });
+  return template
+    .replace('{{emailAddress}}', emailAddress);
+}
 
 /**
  * TrialUsers controller. Provides methods to read and create trial users.
@@ -88,6 +104,7 @@ function TrialUsersController(ctx) {
    * @returns {Promise<Response>} TrialUser response.
    */
   const createTrialUserForEmailInvite = async (context) => {
+    const { env } = ctx;
     const { organizationId } = context.params;
     const { emailId } = context.data;
 
@@ -126,6 +143,27 @@ function TrialUsersController(ctx) {
         organizationId,
         status: TrialUserModel.STATUSES.INVITED,
         metadata: { origin: TrialUserModel.STATUSES.INVITED },
+      });
+
+      env.IMS_CLIENT_ID = env.EMAIL_IMS_CLIENT_ID;
+      env.IMS_CLIENT_SECRET = env.EMAIL_IMS_CLIENT_SECRET;
+      env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
+      env.IMS_SCOPE = env.EMAIL_IMS_SCOPE;
+      const imsClient = ImsClient.createFrom(ctx);
+      const imsToken = await imsClient.getServiceAccessTokenV3();
+      const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
+
+      const emailPayload = await buildEmailPayload(emailId);
+
+      // Send email using Adobe Post Office API
+      await fetch(`${postOfficeEndpoint}/po-server/message?templateName=expdev_xwalk_trial_confirm&locale=en-us`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/xml',
+          Authorization: `IMS ${imsToken}`,
+          'Content-Type': 'application/xml',
+        },
+        body: emailPayload,
       });
 
       return created(TrialUserDto.toJSON(trialUser));

@@ -1,0 +1,3 @@
+<sendTemplateEmailReq>
+    <toList>{emailAddress}</toList>
+</sendTemplateEmailReq>
