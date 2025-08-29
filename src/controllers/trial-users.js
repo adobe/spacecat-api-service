@@ -145,6 +145,10 @@ function TrialUsersController(ctx) {
         metadata: { origin: TrialUserModel.STATUSES.INVITED },
       });
 
+      env.IMS_CLIENT_ID = env.EMAIL_IMS_CLIENT_ID;
+      env.IMS_CLIENT_SECRET = env.EMAIL_IMS_CLIENT_SECRET;
+      env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
+      env.IMS_SCOPE = env.EMAIL_IMS_SCOPE;
       const imsClient = ImsClient.createFrom(ctx);
       const imsToken = await imsClient.getServiceAccessTokenV3();
       const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
