@@ -100,15 +100,18 @@ export default class AccessControlUtil {
     if (!hasText(entitlement.getTier())) {
       throw new Error(`[Error] Entitlement tier is not set for ${productCode}`);
     }
-    this.log.info(`valid entitlement found: ${entitlement.getProductCode()} ${entitlement.getTier()}`);
+    this.log.info(`valid entitlement found: ${entitlement.getProductCode()} ${entitlement.getTier()} ${entitlement.getId()}`);
 
     if (site) {
       this.log.info(`inside if site: ${site.getId()}`);
       try {
-        const siteEnrollment = await this.SiteEnrollment.findBySiteId(site.getId());
-        if (!siteEnrollment || siteEnrollment.getEntitlementId() !== entitlement.getId()) {
-          throw new Error(`[Error] Site is not enrolled for ${productCode}`);
+        const siteEnrollments = await this.SiteEnrollment.allBySiteId(site.getId());
+        // eslint-disable-next-line max-len
+        const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement.getId());
+        if (!validSiteEnrollment) {
+          throw new Error(`[Error] from inside Site is not enrolled for ${productCode}`);
         }
+        this.log.info(`siteEnrollment: ${validSiteEnrollment.getEntitlementId()}`);
       } catch (error) {
         this.log.error(`Error finding site enrollment: ${error}`, error);
         throw new Error(`[Error] Site is not enrolled for ${productCode}`);
