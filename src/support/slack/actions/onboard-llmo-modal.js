@@ -347,6 +347,10 @@ async function publishToAdminHlx(filename, outputLocation, log) {
     const path = `${outputLocation}/${jsonFilename}`;
     const headers = { Cookie: `auth_token=${process.env.ADMIN_HLX_API_KEY}` };
 
+    if (!process.env.ADMIN_HLX_API_KEY) {
+      log.warn('LLMO onboarding: ADMIN_HLX_API_KEY is not set');
+    }
+
     const baseUrl = 'https://admin.hlx.page';
     const endpoints = [
       { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
@@ -409,7 +413,7 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
     auth: process.env.LLMO_ONBOARDING_GITHUB_TOKEN,
   });
 
-  const owner = 'hannessolo'; // TODO change to adobe instead of fork
+  const owner = 'adobe';
   const repo = 'project-elmo-ui-data';
   const ref = 'main';
   const path = 'helix-query.yaml';
@@ -628,7 +632,7 @@ export function onboardLLMOModal(lambdaContext) {
       });
 
       // eslint-disable-next-line max-statements-per-line
-      await new Promise((resolve) => { setTimeout(resolve, 1000); });
+      await new Promise((resolve) => { setTimeout(resolve, 500); });
       await ack();
 
       // Create a slack context for the onboarding process
