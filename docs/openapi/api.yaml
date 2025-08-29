@@ -53,6 +53,8 @@ tags:
     description: LLMO (Large Language Model Optimizer) operations
   - name: sandbox
     description: Sandbox audit operations
+  - name: trial-users
+    description: Trial user management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -239,6 +241,12 @@ paths:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-filter'
   /sites/{siteId}/sandbox/audit:
     $ref: './sandbox-audit-api.yaml#/sandbox-audit'
+  /organizations/{organizationId}/trial-users:
+    $ref: './trial-users-api.yaml#/trial-users'
+  /organizations/{organizationId}/trial-user-invite:
+    $ref: './trial-users-api.yaml#/trial-user-invite'
+  /organizations/{organizationId}/trial-users/send-emails:
+    $ref: './trial-users-api.yaml#/send-trial-emails'
 
 components:
   securitySchemes:

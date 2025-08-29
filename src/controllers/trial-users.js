@@ -26,9 +26,38 @@ import {
   isValidEmail,
 } from '@adobe/spacecat-shared-utils';
 import { TrialUser as TrialUserModel } from '@adobe/spacecat-shared-data-access';
+import { readFile } from 'fs/promises';
+import path from 'path';
 
+import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
+
+// Path to email template
+const EMAIL_TEMPLATE_PATH = path.resolve(process.cwd(), 'static/email-templates/trial-user-email.xml');
+
+/**
+ * Loads and processes the email template with provided data.
+ * @param {string} emailAddress - Single email address.
+ * @param {object} templateData - Template data for substitution.
+ * @returns {Promise<string>} Processed email template.
+ */
+async function buildEmailPayload(emailAddress, templateData) {
+  const template = await readFile(EMAIL_TEMPLATE_PATH, { encoding: 'utf8' });
+
+  // Build template data XML
+  const templateDataXml = Object.entries(templateData)
+    .map(([key, value]) => `
+        <data>
+            <key>${key}</key>
+            <value>${value}</value>
+        </data>`)
+    .join('');
+
+  return template
+    .replace('{{emailAddresses}}', emailAddress)
+    .replace('{{templateData}}', templateDataXml);
+}
 
 /**
  * TrialUsers controller. Provides methods to read and create trial users.
@@ -135,9 +164,110 @@ function TrialUsersController(ctx) {
     }
   };
 
+  /**
+   * Sends emails to trial users using Adobe Post Office API.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Success response.
+   */
+  const sendEmailsToTrialUsers = async (context) => {
+    const { organizationId } = context.params;
+    const { emailAddresses, templateData = {} } = context.data;
+    const { env, log } = ctx;
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    if (!Array.isArray(emailAddresses) || emailAddresses.length === 0) {
+      return badRequest('Email addresses array is required and cannot be empty');
+    }
+
+    // Validate email addresses
+    for (const email of emailAddresses) {
+      if (!isValidEmail(email)) {
+        return badRequest(`Invalid email address: ${email}`);
+      }
+    }
+
+    try {
+      // Check if user has access to the organization
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Access denied to this organization');
+      }
+
+      // Generate IMS token for Adobe Post Office API
+      const imsClient = ImsClient.createFrom(ctx);
+      const imsToken = await imsClient.getServiceAccessTokenV3();
+
+      const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
+      const results = [];
+      let successCount = 0;
+      let failureCount = 0;
+
+      // Send individual emails to each address
+      await Promise.all(emailAddresses.map(async (emailAddress) => {
+        try {
+          // Build email payload for this specific email address
+          const emailPayload = await buildEmailPayload(emailAddress, templateData);
+
+          // Send email using Adobe Post Office API
+          const response = await fetch(`${postOfficeEndpoint}/po-server/message?templateName=expdev_xwalk_trial_confirm&locale=en-us`, {
+            method: 'POST',
+            headers: {
+              Accept: 'application/xml',
+              Authorization: `IMS ${imsToken}`,
+              'Content-Type': 'application/xml',
+            },
+            body: emailPayload,
+          });
+
+          if (response.ok) {
+            successCount += 1;
+            results.push({ email: emailAddress, status: 'success' });
+          } else {
+            failureCount += 1;
+            results.push({ email: emailAddress, status: 'failed', error: `${response.status} ${response.statusText}` });
+          }
+        } catch (emailError) {
+          failureCount += 1;
+          results.push({ email: emailAddress, status: 'failed', error: emailError.message });
+          log.error(`Error sending email to ${emailAddress}: ${emailError.message}`);
+        }
+      }));
+
+      // Return summary of results
+      if (successCount === 0) {
+        log.error(`Failed to send any emails for organization ${organizationId}`);
+        return internalServerError(`Failed to send any emails. All ${failureCount} attempts failed.`);
+      }
+
+      const message = successCount === emailAddresses.length
+        ? `Successfully sent emails to all ${successCount} trial users`
+        : `Sent emails to ${successCount} out of ${emailAddresses.length} trial users (${failureCount} failed)`;
+
+      log.info(`Email sending completed for organization ${organizationId}: ${message}`);
+      return ok({
+        message,
+        successCount,
+        failureCount,
+        totalCount: emailAddresses.length,
+        results,
+      });
+    } catch (e) {
+      log.error(`Error sending emails to trial users for organization ${organizationId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getByOrganizationID,
     createTrialUserForEmailInvite,
+    sendEmailsToTrialUsers,
   };
 }
 

@@ -3172,60 +3172,58 @@ LlmoQuestion:
 LlmoQuestions:
   type: object
   description: LLMO questions configuration containing both human and AI questions
+
+TrialUserStatus:
+  type: string
+  enum:
+    - 'invited'
+    - 'active'
+    - 'expired'
+    - 'deactivated'
+  example: 'invited'
+
+TrialUser:
+  type: object
+  required:
+    - id
+    - emailId
+    - organizationId
+    - status
+    - createdAt
+    - updatedAt
   properties:
-    Human:
-      description: Array of human-generated questions
-      type: array
-      items:
-        $ref: '#/LlmoQuestion'
+    id:
+      description: Unique identifier for the trial user
+      $ref: '#/Id'
+    emailId:
+      description: Email address of the trial user
+      type: string
+      format: email
+      example: 'user@example.com'
+    organizationId:
+      description: ID of the organization the trial user belongs to
+      $ref: '#/Id'
+    status:
+      description: Current status of the trial user
+      $ref: '#/TrialUserStatus'
+    metadata:
+      description: Additional metadata for the trial user
+      type: object
+      additionalProperties: true
       example:
-        - key: '123e4567-e89b-12d3-a456-426614174000'
-          question: 'What is the main value proposition of this product?'
-          source: 'human'
-          country: 'US'
-          product: 'Adobe Creative Cloud'
-          volume: 'high'
-          importTime: '2024-01-20T12:00:00Z'
-          keyword: 'creative software'
-          url: 'https://www.adobe.com/creativecloud.html'
-          tags: ['product', 'pricing', 'features']
-        - key: '456e7890-e89b-12d3-a456-426614174001'
-          question: 'How does this service solve customer problems?'
-          source: 'ai'
-          country: 'US'
-          product: 'Adobe Creative Cloud'
-          volume: 'medium'
-          importTime: '2024-01-20T12:00:00Z'
-          keyword: 'customer support'
-          url: 'https://www.adobe.com/support.html'
-          tags: ['support', 'benefits']
-    AI:
-      description: Array of AI-generated questions
-      type: array
-      items:
-        $ref: '#/LlmoQuestion'
-      example:
-        - key: '789e0123-e89b-12d3-a456-426614174002'
-          question: 'What are the key features that differentiate this product?'
-          source: 'ai'
-          country: 'US'
-          product: 'Adobe Creative Cloud'
-          volume: 'high'
-          importTime: '2024-01-20T12:00:00Z'
-          keyword: 'features comparison'
-          url: 'https://www.adobe.com/features.html'
-          tags: ['features', 'differentiation']
-        - key: '012e3456-e89b-12d3-a456-426614174003'
-          question: 'How does this compare to competitors in the market?'
-          source: 'ai'
-          country: 'US'
-          product: 'Adobe Creative Cloud'
-          volume: 'medium'
-          importTime: '2024-01-20T12:00:00Z'
-          keyword: 'competitive analysis'
-          url: 'https://www.adobe.com/competitive.html'
-          tags: ['competitive', 'analysis']
-  additionalProperties: false
+        origin: 'invited'
+        source: 'admin_panel'
+    createdAt:
+      description: Date and time when the trial user was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: Date and time when the trial user was last updated
+      $ref: '#/DateTime'
+
+TrialUserList:
+  type: array
+  items:
+    $ref: '#/TrialUser'
 
 LlmoQuestionsInput:
   type: object
