@@ -176,8 +176,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
-  /sites/{siteId}/userActivities:
-    $ref: './user-activities-api.yaml#/paths/~1sites~1{siteId}~1userActivities'
+  /sites/{siteId}/user-activities:
+    $ref: './user-activities-api.yaml#/paths/~1sites~1{siteId}~1user-activities'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:

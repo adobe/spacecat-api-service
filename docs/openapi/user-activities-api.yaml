@@ -1,5 +1,5 @@
 paths:
-  /sites/{siteId}/userActivities:
+  /sites/{siteId}/user-activities:
     parameters:
       - $ref: './parameters.yaml#/siteId'
     get:
