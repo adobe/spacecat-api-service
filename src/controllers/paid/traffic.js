@@ -263,7 +263,7 @@ function TrafficController(context, log, env) {
     getPaidTrafficByPageTypePlatform: async () => fetchPaidTrafficData(['page_type', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypePlatformDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypePlatformCampaign: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign'], TrafficDataWithCWVDto),
-
+    getPaidTrafficByUrlPageType: async () => fetchPaidTrafficData(['path', 'page_type'], TrafficDataWithCWVDto),
   };
 }
 
