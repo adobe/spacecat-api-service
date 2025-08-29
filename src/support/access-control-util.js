@@ -89,39 +89,26 @@ export default class AccessControlUtil {
   }
 
   async validateEntitlement(org, site, productCode) {
-    this.log.info(`in validateEntitlement control util:  ${org.getId()}, site: ${site?.getId()}, productCode: ${productCode}`);
     // eslint-disable-next-line max-len
     const entitlement = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
     if (!isNonEmptyObject(entitlement)) {
       throw new Error('Missing entitlement for organization');
     }
-    this.log.info(`entitlement product code: ${entitlement.getProductCode()} entitlement tier: ${entitlement.getTier()}`);
-    // eslint-disable-next-line max-len
     if (!hasText(entitlement.getTier())) {
       throw new Error(`[Error] Entitlement tier is not set for ${productCode}`);
     }
-    this.log.info(`valid entitlement found: ${entitlement.getProductCode()} ${entitlement.getTier()} ${entitlement.getId()}`);
-
     if (site) {
-      this.log.info(`inside if site: ${site.getId()}`);
-      try {
-        const siteEnrollments = await this.SiteEnrollment.allBySiteId(site.getId());
-        // eslint-disable-next-line max-len
-        const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement.getId());
-        if (!validSiteEnrollment) {
-          throw new Error(`[Error] from inside Site is not enrolled for ${productCode}`);
-        }
-        this.log.info(`siteEnrollment: ${validSiteEnrollment.getEntitlementId()}`);
-      } catch (error) {
-        this.log.error(`Error finding site enrollment: ${error}`, error);
-        throw new Error(`[Error] Site is not enrolled for ${productCode}`);
+      const siteEnrollments = await this.SiteEnrollment.allBySiteId(site.getId());
+      // eslint-disable-next-line max-len
+      const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement.getId());
+      if (!validSiteEnrollment) {
+        this.log.error('Valid site siteEnrollment not found');
+        throw new Error('[Error] Valid site siteEnrollment not found');
       }
-      this.log.info('Valid site siteEnrollment found');
     }
 
     if (entitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
       const profile = this.authInfo.getProfile();
-      this.log.info(`profile trial_email: ${profile.trial_email}`);
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
       // First check if the profile provider is one of the supported provider types
@@ -145,8 +132,6 @@ export default class AccessControlUtil {
       }
 
       if (!trialUser) {
-        this.log.info(`Creating trial user: ${profile.trial_email}`);
-        // create a trial user
         await this.TrialUser.create({
           emailId: profile.trial_email,
           firstName: profile.first_name,
@@ -157,8 +142,6 @@ export default class AccessControlUtil {
           externalUserId: profile.email,
           lastSeenAt: new Date().toISOString(),
         });
-      } else {
-        this.log.info(`Trial user already exists: ${profile.trial_email}`);
       }
     }
   }
