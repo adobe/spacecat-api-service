@@ -91,12 +91,19 @@ describe('LlmoController', () => {
       updateImports: sinon.stub(),
     };
 
+    // Create mock organization
+    const mockOrganization = {
+      getId: sinon.stub().returns('test-org-id'),
+      getImsOrgId: sinon.stub().returns('test-ims-org-id'),
+    };
+
     // Create mock site
     mockSite = {
       getId: sinon.stub().returns('test-site-id'),
       getConfig: sinon.stub().returns(mockConfig),
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
+      getOrganization: sinon.stub().resolves(mockOrganization),
     };
 
     // Create mock data access
@@ -107,6 +114,35 @@ describe('LlmoController', () => {
       Entitlement: {
         PRODUCT_CODES: {
           LLMO: 'llmo',
+        },
+        findByOrganizationIdAndProductCode: sinon.stub().resolves({
+          getId: sinon.stub().returns('entitlement-123'),
+          getProductCode: sinon.stub().returns('llmo'),
+          getTier: sinon.stub().returns('premium'),
+        }),
+        TIERS: {
+          FREE_TRIAL: 'free_trial',
+        },
+      },
+      SiteEnrollment: {
+        allBySiteId: sinon.stub().resolves([{
+          getEntitlementId: sinon.stub().returns('entitlement-123'),
+        }]),
+      },
+      TrialUser: {
+        findByEmailId: sinon.stub().resolves(null),
+        STATUSES: {
+          REGISTERED: 'registered',
+        },
+      },
+      OrganizationIdentityProvider: {
+        allByOrganizationId: sinon.stub().resolves([]),
+        create: sinon.stub().resolves({
+          provider: 'GOOGLE',
+        }),
+        PROVIDER_TYPES: {
+          GOOGLE: 'GOOGLE',
+          AZURE: 'AZURE',
         },
       },
     };
@@ -147,7 +183,13 @@ describe('LlmoController', () => {
           hasOrganization: () => true,
           hasScope: () => true,
           getScopes: () => [{ name: 'user' }],
-          getProfile: () => ({ email: 'test@example.com' }),
+          getProfile: () => ({
+            email: 'test@example.com',
+            trial_email: 'trial@example.com',
+            first_name: 'Test',
+            last_name: 'User',
+            provider: 'GOOGLE',
+          }),
         },
       },
       pathInfo: {
@@ -164,6 +206,22 @@ describe('LlmoController', () => {
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: 'test-user-agent',
         tracingFetch: tracingFetchStub,
+      },
+      '../../src/support/access-control-util.js': {
+        default: class MockAccessControlUtil {
+          static fromContext(context) {
+            return new MockAccessControlUtil(context);
+          }
+
+          constructor(context) {
+            this.log = context.log;
+          }
+
+          static async hasAccess() {
+            // Mock successful access for tests
+            return true;
+          }
+        },
       },
     });
 
