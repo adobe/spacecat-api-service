@@ -1,3 +1,10 @@
+# [1.167.0](https://github.com/adobe/spacecat-api-service/compare/v1.166.2...v1.167.0) (2025-08-29)
+
+
+### Features
+
+* added traffic endpoint url-page-type ([#1204](https://github.com/adobe/spacecat-api-service/issues/1204)) ([fed0597](https://github.com/adobe/spacecat-api-service/commit/fed05970977feb40c3287625cd0b1049a9b95f8f))
+
 ## [1.166.2](https://github.com/adobe/spacecat-api-service/compare/v1.166.1...v1.166.2) (2025-08-28)
 
 
