@@ -1,3 +1,10 @@
+# [1.168.0](https://github.com/adobe/spacecat-api-service/compare/v1.167.0...v1.168.0) (2025-08-29)
+
+
+### Features
+
+* added new audit-type llm-error-pages ([#1156](https://github.com/adobe/spacecat-api-service/issues/1156)) ([42d8c2b](https://github.com/adobe/spacecat-api-service/commit/42d8c2b16b06118d5b12d5e0d668d38618eb14b5))
+
 # [1.167.0](https://github.com/adobe/spacecat-api-service/compare/v1.166.2...v1.167.0) (2025-08-29)
 
 
