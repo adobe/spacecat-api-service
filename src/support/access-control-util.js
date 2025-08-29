@@ -89,8 +89,10 @@ export default class AccessControlUtil {
   }
 
   async validateEntitlement(org, site, productCode) {
+    this.log.info(`in validateEntitlement control util:  ${org.getId()}, site: ${site?.getId()}, productCode: ${productCode}`);
     // eslint-disable-next-line max-len
     const entitlements = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
+    this.log.info(`found entitlements: ${entitlements}`);
     if (!entitlements || entitlements.length === 0) {
       throw new Error('Missing entitlement for organization');
     }
@@ -185,6 +187,7 @@ export default class AccessControlUtil {
       } else if (entity instanceof Organization) {
         org = entity;
       }
+      this.log.info(`in access control util:  ${org.getId()}, site: ${site?.getId()}, productCode: ${productCode}`);
       await this.validateEntitlement(org, site, productCode);
     }
     if (subService.length > 0) {
