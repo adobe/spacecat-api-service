@@ -132,7 +132,7 @@ export default class AccessControlUtil {
 
       // Check if the organization already has an identity provider for this provider
       const identityProviders = await this.IdentityProvider.allByOrganizationId(org.getId());
-      let providerId = identityProviders.find((idp) => idp.provider === profile.provider);
+      let providerId = identityProviders.find((idp) => idp.getProvider() === profile.provider);
 
       // If no identity provider exists for this provider, create one
       if (!providerId) {
