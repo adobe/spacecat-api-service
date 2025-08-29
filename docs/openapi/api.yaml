@@ -245,8 +245,6 @@ paths:
     $ref: './trial-users-api.yaml#/trial-users'
   /organizations/{organizationId}/trial-user-invite:
     $ref: './trial-users-api.yaml#/trial-user-invite'
-  /organizations/{organizationId}/trial-users/send-emails:
-    $ref: './trial-users-api.yaml#/send-trial-emails'
 
 components:
   securitySchemes:

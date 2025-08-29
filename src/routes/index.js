@@ -264,7 +264,6 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
-    'POST /organizations/:organizationId/trial-users/send-emails': trialUserController.sendEmailsToTrialUsers,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
 
     // Sandbox audit route
