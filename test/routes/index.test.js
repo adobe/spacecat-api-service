@@ -190,6 +190,11 @@ describe('getRouteHandlers', () => {
     addLlmoCustomerIntent: () => null,
     removeLlmoCustomerIntent: () => null,
     patchLlmoCustomerIntent: () => null,
+    patchLlmoCdnLogsFilter: () => null,
+  };
+
+  const mockSandboxAuditController = {
+    triggerAudit: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -219,6 +224,7 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockSandboxAuditController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -349,6 +355,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/page-type-campaign',
       'GET /sites/:siteId/traffic/paid/page-type-platform',
       'GET /sites/:siteId/traffic/paid/page-type-platform-device',
+      'GET /sites/:siteId/traffic/paid/url-page-type',
       'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device',
@@ -376,6 +383,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/llmo/customer-intent/:intentKey',
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
+      'POST /sites/:siteId/sandbox/audit',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -492,5 +500,9 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /consent-banner/:jobId'].paramNames).to.deep.equal(['jobId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].handler).to.equal(mockLlmoController.patchLlmoCdnLogsFilter);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].handler).to.equal(mockSandboxAuditController.triggerAudit);
+    expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageType);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].paramNames).to.deep.equal(['siteId']);
   });
 });

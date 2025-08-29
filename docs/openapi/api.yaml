@@ -51,6 +51,8 @@ tags:
     description: APIs for taking and retrieving webpage screenshots, specifically for consent banner analysis
   - name: llmo
     description: LLMO (Large Language Model Optimizer) operations
+  - name: sandbox
+    description: Sandbox audit operations
 
 paths:
   /audits/latest/{auditType}:
@@ -167,6 +169,8 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
+  /sites/{siteId}/traffic/paid/url-page-type:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-page-type'
   /sites/{siteId}/traffic/paid/url-page-type-platform-campaign-device:
     $ref: './site-paid.yaml#/site-traffic-paid-url-page-type-platform-campaign-device'
   /sites/{siteId}/traffic/paid/page-type-platform-campaign-device:
@@ -235,6 +239,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-customer-intent-item'
   /sites/{siteId}/llmo/cdn-logs-filter:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-filter'
+  /sites/{siteId}/sandbox/audit:
+    $ref: './sandbox-audit-api.yaml#/sandbox-audit'
 
 components:
   securitySchemes:

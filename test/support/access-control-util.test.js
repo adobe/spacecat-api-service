@@ -981,6 +981,7 @@ describe('Access Control Util', () => {
     it('should handle entitlement validation errors', async () => {
       const site = {
         getOrganization: async () => mockOrg,
+        getId: () => 'site-123',
       };
       Object.setPrototypeOf(site, Site.prototype);
 

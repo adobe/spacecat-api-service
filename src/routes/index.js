@@ -71,6 +71,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -99,6 +100,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  sandboxAuditController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -165,6 +167,7 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
+    'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,
     'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device': trafficController.getPaidTrafficByUrlPageTypePlatformCampaignDevice,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device': trafficController.getPaidTrafficByPageTypePlatformCampaignDevice,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device': trafficController.getPaidTrafficByUrlPageTypeCampaignDevice,
@@ -243,6 +246,9 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
+
+    // Sandbox audit route
+    'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
   };
 
   // Initialization of static and dynamic routes
