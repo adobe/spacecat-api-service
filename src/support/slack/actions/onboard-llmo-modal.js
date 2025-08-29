@@ -462,7 +462,7 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
 }
 
 export async function onboardSite(input, lambdaCtx, slackCtx) {
-  const { log, dataAccess } = lambdaCtx;
+  const { log, dataAccess, sqs } = lambdaCtx;
   const { say } = slackCtx;
   const {
     baseURL, brandName, imsOrgId,
@@ -538,10 +538,23 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // enable the cdn-logs-report audits for agentic traffic
     configuration.enableHandlerForSite(AGENTIC_TRAFFIC_REPORT_AUDIT, site);
 
+    // enable llmo-customer-analysis handler - this generates LLMO excel sheets and triggers audits
+    configuration.enableHandlerForSite('llmo-customer-analysis', site);
+
     try {
       await configuration.save();
       await site.save();
       log.info(`Successfully updated LLMO config for site ${siteId}`);
+
+      // trigger the llmo-customer-analysis handler
+      const sqsTriggerMesasage = {
+        type: 'llmo-customer-analysis',
+        siteId,
+        auditContext: {
+          auditType: 'llmo-customer-analysis',
+        },
+      };
+      sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
 
       const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
@@ -551,7 +564,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 :label: *Brand:* ${brandName}
 :identification_card: *IMS Org ID:* ${imsOrgId}
 
-The site is now ready for LLMO operations. You can access the configuration at the LLMO API endpoints.`;
+The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
       await say(message);
     } catch (error) {
@@ -573,7 +586,8 @@ export function onboardLLMOModal(lambdaContext) {
       const { view, user } = body;
       const { values } = view.state;
 
-      log.info('Onboard site modal starting to process...');
+      log.info('Acknowledging onboarding request...');
+      await ack();
 
       // Extract original channel and thread context from private metadata
       let originalChannel;
@@ -592,7 +606,7 @@ export function onboardLLMOModal(lambdaContext) {
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
 
-      log.info('Acknowledging onboarding request with parameters:', {
+      log.info('Onboarding request with parameters:', {
         brandName,
         imsOrgId,
         deliveryType,
@@ -600,8 +614,6 @@ export function onboardLLMOModal(lambdaContext) {
         originalChannel,
         originalThreadTs,
       });
-
-      await ack();
 
       // Create a slack context for the onboarding process
       // Use original channel/thread if available, otherwise fall back to DM
