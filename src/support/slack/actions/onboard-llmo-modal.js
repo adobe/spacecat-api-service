@@ -395,6 +395,7 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
   await folder.createFolder(dataFolder, '/');
   await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
 
+  log.info('Publishing query-index to admin.hlx.page');
   await publishToAdminHlx('query-index', dataFolder, log);
 }
 
