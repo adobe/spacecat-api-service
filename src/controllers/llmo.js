@@ -39,7 +39,7 @@ function LlmoController(ctx) {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-    log.info(`Validating LLMO config for siteId: ${siteId}`);
+    log.info(`Validating LLMO config for siteId: ${siteId} and entitlement: ${EntitlementModel.PRODUCT_CODES.LLMO}`);
     accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO);
     return { site, config, llmoConfig };
   };
