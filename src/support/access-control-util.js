@@ -11,7 +11,11 @@
  */
 
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
-import { Site, Organization } from '@adobe/spacecat-shared-data-access';
+import {
+  Site, Organization, TrialUser as TrialUserModel,
+  Entitlement as EntitlementModel,
+  OrganizationIdentityProvider as OrganizationIdentityProviderModel,
+} from '@adobe/spacecat-shared-data-access';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { sanitizePath } from '../utils/route-utils.js';
@@ -101,12 +105,12 @@ export default class AccessControlUtil {
       }
     }
 
-    if (validEntitlement.tier === this.Entitlement.TIER.FREE_TRIAL) {
+    if (validEntitlement.tier === EntitlementModel.TIERS.FREE_TRIAL) {
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
       // First check if the profile provider is one of the supported provider types
-      const supportedProviders = Object.values(this.IdentityProvider.PROVIDER_TYPES);
+      const supportedProviders = Object.values(OrganizationIdentityProviderModel.PROVIDER_TYPES);
       if (!supportedProviders.includes(profile.provider)) {
         throw new Error('[Error] IDP not supported');
       }
@@ -131,7 +135,7 @@ export default class AccessControlUtil {
           emailId: profile.trial_email,
           provider: providerId.provider,
           organizationId: org.getId(),
-          status: this.TrialUser.STATUS.REGISTERED,
+          status: TrialUserModel.STATUSES.REGISTERED,
           externalUserId: profile.email,
           lastSeenAt: new Date().toISOString(),
         });

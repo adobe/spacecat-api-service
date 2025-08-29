@@ -13,7 +13,12 @@
 /* eslint-env mocha */
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { Site, Organization } from '@adobe/spacecat-shared-data-access';
+import {
+  Site, Organization,
+  Entitlement as EntitlementModel,
+  TrialUser as TrialUserModel,
+  OrganizationIdentityProvider as OrganizationIdentityProviderModel,
+} from '@adobe/spacecat-shared-data-access';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -45,17 +50,9 @@ describe('Access Control Util', () => {
       attributes: { authInfo },
       dataAccess: {
         Entitlement: {
-          TIER: {
-            FREE_TRIAL: 'free_trial',
-            PAID: 'paid',
-          },
           findByOrganizationIdAndProductCode: sinon.stub(),
         },
-        TrialUser: {
-          STATUS: {
-            REGISTERED: 'registered',
-          },
-        },
+        TrialUser: {},
         OrganizationIdentityProvider: {},
       },
     };
@@ -69,17 +66,9 @@ describe('Access Control Util', () => {
       attributes: { authInfo: new AuthInfo() },
       dataAccess: {
         Entitlement: {
-          TIER: {
-            FREE_TRIAL: 'free_trial',
-            PAID: 'paid',
-          },
           findByOrganizationIdAndProductCode: sinon.stub(),
         },
-        TrialUser: {
-          STATUS: {
-            REGISTERED: 'registered',
-          },
-        },
+        TrialUser: {},
         OrganizationIdentityProvider: {},
       },
     };
@@ -538,35 +527,39 @@ describe('Access Control Util', () => {
     let mockSiteEnrollment;
 
     beforeEach(() => {
+      // Mock the constant calls directly
+      sandbox.stub(EntitlementModel, 'TIERS').value({
+        FREE_TRIAL: 'free_trial',
+        PAID: 'paid',
+      });
+
+      sandbox.stub(TrialUserModel, 'STATUSES').value({
+        REGISTERED: 'registered',
+      });
+
+      sandbox.stub(OrganizationIdentityProviderModel, 'PROVIDER_TYPES').value({
+        IMS: 'IMS',
+        MICROSOFT: 'MICROSOFT',
+        GOOGLE: 'GOOGLE',
+      });
+
       mockOrg = {
         getId: () => 'org-123',
         getImsOrgId: () => 'org-123',
       };
 
       mockEntitlement = {
-        TIER: {
-          FREE_TRIAL: 'free_trial',
-          PAID: 'paid',
-        },
         findByOrganizationIdAndProductCode: sinon.stub(),
       };
 
       mockTrialUser = {
         findByEmailId: sinon.stub(),
         create: sinon.stub(),
-        STATUS: {
-          REGISTERED: 'registered',
-        },
       };
 
       mockIdentityProvider = {
         findByOrganizationId: sinon.stub(),
         create: sinon.stub(),
-        PROVIDER_TYPES: {
-          IMS: 'IMS',
-          MICROSOFT: 'MICROSOFT',
-          GOOGLE: 'GOOGLE',
-        },
       };
 
       mockSiteEnrollment = {
@@ -753,6 +746,9 @@ describe('Access Control Util', () => {
       ];
       mockIdentityProvider.findByOrganizationId.resolves(identityProviders);
 
+      // Mock the create method to return a value
+      mockTrialUser.create.resolves({ id: 'new-trial-user' });
+
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
       expect(mockTrialUser.create).to.have.been.calledWith({
@@ -837,6 +833,9 @@ describe('Access Control Util', () => {
       const newIdentityProvider = { provider: 'GOOGLE' };
       mockIdentityProvider.create.resolves(newIdentityProvider);
 
+      // Mock the trial user create method
+      mockTrialUser.create.resolves({ id: 'new-trial-user' });
+
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
       // Verify that create was called with the correct parameters
@@ -873,19 +872,12 @@ describe('Access Control Util', () => {
       };
 
       mockEntitlement = {
-        TIER: {
-          FREE_TRIAL: 'free_trial',
-          PAID: 'paid',
-        },
         findByOrganizationIdAndProductCode: sinon.stub(),
       };
 
       mockTrialUser = {
         findByEmailId: sinon.stub(),
         create: sinon.stub(),
-        STATUS: {
-          REGISTERED: 'registered',
-        },
       };
 
       mockIdentityProvider = {
@@ -1031,8 +1023,8 @@ describe('Access Control Util', () => {
 
   describe('Constructor with dataAccess dependencies', () => {
     it('should initialize dataAccess dependencies correctly', () => {
-      const mockEntitlement = { TIER: { FREE_TRIAL: 'free_trial' } };
-      const mockTrialUser = { STATUS: { REGISTERED: 'registered' } };
+      const mockEntitlement = {};
+      const mockTrialUser = {};
       const mockIdentityProvider = {};
       const mockSiteEnrollment = {};
 
