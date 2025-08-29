@@ -57,6 +57,7 @@ AuditType:
     - 'meta-tags'
     - 'broken-internal-links'
     - 'experimentation-opportunities'
+    - 'llm-error-pages'
   example: 'cwv'
 URL:
   type: string
@@ -702,6 +703,48 @@ AuditResult:
               description: |
                 The final URL for the audited page.
               type: string
+    - type: object
+      description: The result of LLM error pages audit.
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        totalErrors:
+          type: integer
+          description: Total number of LLM error requests found
+        periodIdentifier:
+          type: string
+          description: The reporting period identifier
+          example: 'w01-2025'
+        summary:
+          type: object
+          description: Summary statistics of the audit
+          properties:
+            uniqueUrls:
+              type: integer
+              description: Number of unique URLs with errors
+            uniqueUserAgents:
+              type: integer
+              description: Number of unique LLM user agents
+        errorPages:
+          type: array
+          description: List of LLM error page details
+          items:
+            type: object
+            properties:
+              user_agent:
+                type: string
+                description: The LLM user agent string
+              url:
+                type: string
+                description: The URL that returned an error
+              status:
+                type: integer
+                description: HTTP status code
+              total_requests:
+                type: integer
+                description: Number of requests for this URL/user agent combination
+      additionalProperties: true
     - type: object
       description: The result of CWV audit
       properties:
