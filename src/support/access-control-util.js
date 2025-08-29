@@ -103,9 +103,10 @@ export default class AccessControlUtil {
     this.log.info(`valid entitlement found: ${entitlement.getProductCode()} ${entitlement.getTier()}`);
 
     if (site) {
+      this.log.info(`inside if site: ${site.getId()}`);
       const siteEnrollment = await this.SiteEnrollment.findBySiteId(site.getId());
-      const siteEntitlement = await siteEnrollment.getEntitlement();
-      if (siteEntitlement && siteEntitlement.getProductCode() !== productCode) {
+      this.log.info('siteEnrollment', siteEnrollment.getEntitlementId());
+      if (siteEnrollment.getEntitlementId() !== entitlement.getId()) {
         throw new Error(`[Error] Site is not enrolled for ${productCode}`);
       }
       this.log.info(`Valid site siteEnrollment found: ${siteEnrollment}`);
@@ -113,6 +114,7 @@ export default class AccessControlUtil {
 
     if (entitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
       const profile = this.authInfo.getProfile();
+      this.log.info(`profile trial_email: ${profile.trial_email}`);
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
       // First check if the profile provider is one of the supported provider types
@@ -122,7 +124,7 @@ export default class AccessControlUtil {
       }
 
       // Check if the organization already has an identity provider for this provider
-      const identityProviders = await this.IdentityProvider.findByOrganizationId(org.getId());
+      const identityProviders = await this.IdentityProvider.allByOrganizationId(org.getId());
       let providerId = identityProviders.find((idp) => idp.provider === profile.provider);
 
       // If no identity provider exists for this provider, create one
