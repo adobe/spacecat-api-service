@@ -583,11 +583,12 @@ export function onboardLLMOModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     try {
+      await ack();
+
+      log.info('Starting onboarding process...');
+
       const { view, user } = body;
       const { values } = view.state;
-
-      log.info('Acknowledging onboarding request...');
-      await ack();
 
       // Extract original channel and thread context from private metadata
       let originalChannel;
@@ -637,7 +638,7 @@ export function onboardLLMOModal(lambdaContext) {
         brandName, baseURL: brandURL, imsOrgId, deliveryType,
       }, lambdaContext, slackContext);
 
-      log.info(`Onboard site modal processed for user ${user.id}, site ${brandURL}`);
+      log.info(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);
     } catch (e) {
       log.error('Error handling onboard site modal:', e);
       await ack({
