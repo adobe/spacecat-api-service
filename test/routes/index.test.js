@@ -197,6 +197,28 @@ describe('getRouteHandlers', () => {
     triggerAudit: sinon.stub(),
   };
 
+  const mockOrganizationIdentityProviderController = {
+    getByOrganizationID: () => null,
+  };
+
+  const mockUserActivityController = {
+    getBySiteID: () => null,
+    createTrialUserActivity: () => null,
+  };
+
+  const mockSiteEnrollmentController = {
+    getBySiteID: () => null,
+  };
+
+  const mockTrialUserController = {
+    getByOrganizationID: () => null,
+    createTrialUserForEmailInvite: () => null,
+  };
+
+  const mockEntitlementController = {
+    getByOrganizationID: () => null,
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -224,6 +246,11 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockOrganizationIdentityProviderController,
+      mockUserActivityController,
+      mockSiteEnrollmentController,
+      mockTrialUserController,
+      mockEntitlementController,
       mockSandboxAuditController,
     );
 
@@ -279,6 +306,10 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/sites',
+      'GET /organizations/:organizationId/organization-identity-provider',
+      'GET /organizations/:organizationId/entitlements',
+      'GET /organizations/:organizationId/trial-users',
+      'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'PATCH /organizations/:organizationId',
@@ -303,6 +334,9 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
+      'GET /sites/:siteId/site-enrollments',
+      'GET /sites/:siteId/user-activities',
+      'POST /sites/:siteId/user-activities',
       'DELETE /tools/api-keys/:id',
       'GET /tools/import/jobs/:jobId',
       'PATCH /tools/import/jobs/:jobId',
