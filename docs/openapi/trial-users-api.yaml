@@ -1,0 +1,75 @@
+trial-users-by-organization:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+  get:
+    tags:
+      - trial-users
+    summary: List all trial users for an organization
+    description: |
+      This endpoint retrieves all trial users associated with a specific organization.
+    operationId: getTrialUsersByOrganization
+    responses:
+      '200':
+        description: List of trial users for organization retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/TrialUser'
+      '400':
+        $ref: './responses.yaml#/400-no-organization-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+
+
+trial-user-invite:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+  post:
+    tags:
+      - trial-users
+    summary: Invite a trial user to an organization
+    description: |
+      This endpoint allows inviting a new trial user to an organization by providing their email address.
+    operationId: inviteTrialUser
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - emailId
+            properties:
+              emailId:
+                type: string
+                format: email
+                description: Email address of the user to invite
+                example: "user@example.com"
+    responses:
+      '201':
+        description: Trial user invite sent successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/TrialUser'
+      '400':
+        $ref: './responses.yaml#/400-no-organization-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '409':
+        description: User already exists or is already invited
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]

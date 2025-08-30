@@ -1,0 +1,31 @@
+entitlements-by-organization:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+  get:
+    tags:
+      - entitlements
+    summary: List all entitlements for an organization
+    description: |
+      This endpoint retrieves all entitlements associated with a specific organization.
+    operationId: getEntitlementsByOrganization
+    responses:
+      '200':
+        description: List of entitlements for organization retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Entitlement'
+      '400':
+        $ref: './responses.yaml#/400-no-organization-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+

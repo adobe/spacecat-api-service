@@ -1,0 +1,31 @@
+site-enrollments-by-site:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site-enrollments
+    summary: List all site enrollments for a specific site
+    description: |
+      This endpoint retrieves all site enrollments associated with a specific site.
+    operationId: getSiteEnrollmentsBySite
+    responses:
+      '200':
+        description: List of site enrollments for site retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/SiteEnrollment'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+
