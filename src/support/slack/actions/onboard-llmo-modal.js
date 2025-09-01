@@ -455,14 +455,14 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
   const org = await Organization.findByImsOrgId(imsOrgId);
   let orgId = org?.getId();
   if (!orgId) {
-    const newOrg = createOrg(imsOrgId, lambda, slackContext);
+    const newOrg = await createOrg(imsOrgId, lambda, slackContext);
     orgId = newOrg.getId();
   }
 
   const site = await Site.create({
     baseURL, deliveryType, organizationId: orgId,
   });
-  site.save();
+  await site.save();
   return site.getId();
 }
 
