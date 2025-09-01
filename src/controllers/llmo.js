@@ -331,6 +331,32 @@ function LlmoController() {
     }
   };
 
+  // Handles requests to the LLMO CDN bucket config endpoint, updates CDN bucket configuration
+  const patchLlmoCdnBucketConfig = async (context) => {
+    const { log } = context;
+    const { data } = context;
+    const { siteId } = context.params;
+
+    try {
+      const { site, config } = await getSiteAndValidateLlmo(context);
+
+      if (!isObject(data)) {
+        return badRequest('Update data must be provided as an object');
+      }
+
+      const { cdnBucketConfig } = data;
+
+      config.updateLlmoCdnBucketConfig(cdnBucketConfig);
+
+      await saveSiteConfig(site, config, log, 'updating CDN logs bucket config');
+
+      return ok(config.getLlmoConfig().cdnBucketConfig || {});
+    } catch (error) {
+      log.error(`Error updating CDN bucket config for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     getLlmoConfig,
@@ -343,6 +369,7 @@ function LlmoController() {
     removeLlmoCustomerIntent,
     patchLlmoCustomerIntent,
     patchLlmoCdnLogsFilter,
+    patchLlmoCdnBucketConfig,
   };
 }
 
