@@ -50,6 +50,11 @@ describe('LlmoController', () => {
         { key: 'host', value: ['www.example.com', 'abc.com'], type: 'exclude' },
         { key: 'host', value: ['www.example.com', 'abc.com'], type: 'include' },
       ],
+      cdnBucketConfig: {
+        bucketName: 'test-bucket',
+        orgId: 'test-org-id',
+        cdnProvider: 'aem-cs-fastly',
+      },
     };
 
     // Create mock config
@@ -67,6 +72,7 @@ describe('LlmoController', () => {
       removeLlmoCustomerIntent: sinon.stub(),
       updateLlmoCustomerIntent: sinon.stub(),
       updateLlmoCdnlogsFilter: sinon.stub(),
+      updateLlmoCdnBucketConfig: sinon.stub(),
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
       getLlmoDataFolder: sinon.stub().returns('test-folder'),
@@ -85,6 +91,7 @@ describe('LlmoController', () => {
       getFetchConfig: sinon.stub().returns({}),
       getBrandConfig: sinon.stub().returns({}),
       getCdnLogsConfig: sinon.stub().returns({}),
+      getCdnBucketConfig: sinon.stub().returns({}),
       updateSlackConfig: sinon.stub(),
       updateLlmoDataFolder: sinon.stub(),
       updateLlmoBrand: sinon.stub(),
@@ -1256,6 +1263,89 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
+    });
+  });
+
+  describe('patchLlmoCdnBucketConfig', () => {
+    beforeEach(() => {
+      mockContext.data = {
+        cdnBucketConfig: {
+          bucketName: 'test-bucket',
+          orgId: 'test-org-id',
+        },
+      };
+    });
+
+    it('should update CDN bucket config successfully', async () => {
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.cdnBucketConfig);
+    });
+
+    it('should return bad request when no data provided', async () => {
+      mockContext.data = null;
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Update data must be provided as an object');
+    });
+
+    it('should return bad request when data is not an object', async () => {
+      mockContext.data = 'invalid data';
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Update data must be provided as an object');
+    });
+
+    it('should handle save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.cdnBucketConfig);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error updating CDN logs bucket config for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should handle null cdnBucketConfig in response', async () => {
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+        cdnBucketConfig: null,
+      });
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({});
+    });
+
+    it('should return bad request when getSiteAndValidateLlmo throws an error', async () => {
+      const error = new Error('Site not found');
+      mockDataAccess.Site.findById.rejects(error);
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site not found');
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error updating CDN bucket config for siteId: test-site-id, error: Site not found',
+      );
     });
   });
 });

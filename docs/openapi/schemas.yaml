@@ -3524,6 +3524,24 @@ LlmoCdnLogsFilter:
       value: ['404', '500']
       type: 'exclude'
 
+LlmoCdnBucketConfig:
+  type: object
+  description: CDN bucket configuration for LLMO
+  properties:
+    bucketName:
+      description: The name of the S3 bucket for CDN logs
+      type: string
+      example: 'my-cdn-logs-bucket'
+    orgId:
+      description: The ID associated with the bucket, for adobe orgs this is the imsOrgId ID and for non-adobe orgs this is the org ID
+      type: string
+      example: 'org-12345'
+    cdnProvider:
+      description: The CDN provider (e.g., aem-cs-fastly, byocdn-fastly, etc.)
+      type: string
+      example: 'aem-cs-fastly'
+  additionalProperties: false
+
 LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
@@ -3548,6 +3566,9 @@ LlmoConfig:
     cdnlogsFilter:
       description: The CDN logs filter configuration for filtering log entries
       $ref: '#/LlmoCdnLogsFilter'
+    cdnBucketConfig:
+      description: The CDN bucket configuration for log storage
+      $ref: '#/LlmoCdnBucketConfig'
   additionalProperties: false
 
 # New schemas for entitlements, trial users, and site enrollments APIs
