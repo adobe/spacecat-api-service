@@ -1,3 +1,11 @@
+# [1.169.0](https://github.com/adobe/spacecat-api-service/compare/v1.168.0...v1.169.0) (2025-09-01)
+
+
+### Features
+
+* add tier APIs ([#1197](https://github.com/adobe/spacecat-api-service/issues/1197)) ([58639b4](https://github.com/adobe/spacecat-api-service/commit/58639b44e1c6713bacd7cd625cd08a1e5000ca81))
+* Tier APIs spec ([#1190](https://github.com/adobe/spacecat-api-service/issues/1190)) ([2aa626d](https://github.com/adobe/spacecat-api-service/commit/2aa626d0eab7d4d59d3bbe299132bec2e8a1a2f7))
+
 # [1.168.0](https://github.com/adobe/spacecat-api-service/compare/v1.167.0...v1.168.0) (2025-08-29)
 
 
