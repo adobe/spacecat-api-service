@@ -266,6 +266,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-filter'
   /sites/{siteId}/sandbox/audit:
     $ref: './sandbox-audit-api.yaml#/sandbox-audit'
+  /sites/{siteId}/llmo/cdn-bucket-config:
+    $ref: './llmo-api.yaml#/llmo-cdn-bucket-config'
 
 components:
   securitySchemes:
