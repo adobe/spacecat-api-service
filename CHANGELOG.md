@@ -1,3 +1,10 @@
+# [1.171.0](https://github.com/adobe/spacecat-api-service/compare/v1.170.0...v1.171.0) (2025-09-01)
+
+
+### Features
+
+* automated onboarding for llmo ([#1181](https://github.com/adobe/spacecat-api-service/issues/1181)) ([5113405](https://github.com/adobe/spacecat-api-service/commit/51134055008e0d56f7d551a1d119dbeae322f721))
+
 # [1.170.0](https://github.com/adobe/spacecat-api-service/compare/v1.169.0...v1.170.0) (2025-09-01)
 
 
