@@ -34,6 +34,7 @@ const ALL_AUDITS = [
   'canonical',
   'broken-backlinks',
   'broken-internal-links',
+  'llm-error-pages',
   'experimentation-opportunities',
   'meta-tags',
   'structured-data',

@@ -1,3 +1,25 @@
+# [1.169.0](https://github.com/adobe/spacecat-api-service/compare/v1.168.0...v1.169.0) (2025-09-01)
+
+
+### Features
+
+* add tier APIs ([#1197](https://github.com/adobe/spacecat-api-service/issues/1197)) ([58639b4](https://github.com/adobe/spacecat-api-service/commit/58639b44e1c6713bacd7cd625cd08a1e5000ca81))
+* Tier APIs spec ([#1190](https://github.com/adobe/spacecat-api-service/issues/1190)) ([2aa626d](https://github.com/adobe/spacecat-api-service/commit/2aa626d0eab7d4d59d3bbe299132bec2e8a1a2f7))
+
+# [1.168.0](https://github.com/adobe/spacecat-api-service/compare/v1.167.0...v1.168.0) (2025-08-29)
+
+
+### Features
+
+* added new audit-type llm-error-pages ([#1156](https://github.com/adobe/spacecat-api-service/issues/1156)) ([42d8c2b](https://github.com/adobe/spacecat-api-service/commit/42d8c2b16b06118d5b12d5e0d668d38618eb14b5))
+
+# [1.167.0](https://github.com/adobe/spacecat-api-service/compare/v1.166.2...v1.167.0) (2025-08-29)
+
+
+### Features
+
+* added traffic endpoint url-page-type ([#1204](https://github.com/adobe/spacecat-api-service/issues/1204)) ([fed0597](https://github.com/adobe/spacecat-api-service/commit/fed05970977feb40c3287625cd0b1049a9b95f8f))
+
 ## [1.166.2](https://github.com/adobe/spacecat-api-service/compare/v1.166.1...v1.166.2) (2025-08-28)
 
 
