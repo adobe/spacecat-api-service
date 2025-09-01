@@ -1,3 +1,10 @@
+# [1.170.0](https://github.com/adobe/spacecat-api-service/compare/v1.169.0...v1.170.0) (2025-09-01)
+
+
+### Features
+
+* add bucket config in llmo ([#1205](https://github.com/adobe/spacecat-api-service/issues/1205)) ([d901fa2](https://github.com/adobe/spacecat-api-service/commit/d901fa2b4f4316b649027543371694a91170e118))
+
 # [1.169.0](https://github.com/adobe/spacecat-api-service/compare/v1.168.0...v1.169.0) (2025-09-01)
 
 
