@@ -419,7 +419,7 @@ describe('getRouteHandlers', () => {
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
-      'PATCH /sites/:siteId/llmo/cdn-bucket-config',
+      'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -540,7 +540,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageType);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].paramNames).to.deep.equal(['siteId']);
-    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-bucket-config'].handler).to.equal(mockLlmoController.patchLlmoCdnBucketConfig);
-    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-bucket-config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].handler).to.equal(mockLlmoController.patchLlmoCdnBucketConfig);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].paramNames).to.deep.equal(['siteId']);
   });
 });

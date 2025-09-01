@@ -379,7 +379,7 @@ llmo-cdn-logs-filter:
     security:
       - api_key: [ ]
 
-llmo-cdn-bucket-config:
+llmo-cdn-logs-bucket-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
   patch:
