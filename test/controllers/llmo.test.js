@@ -29,6 +29,14 @@ describe('LlmoController', () => {
   let mockEnv;
   let tracingFetchStub;
 
+  // Helper function to create mock objects
+  const createMockAccessControlUtil = (accessResult) => ({
+    fromContext: (context) => ({
+      log: context.log,
+      hasAccess: async () => accessResult,
+    }),
+  });
+
   beforeEach(async () => {
     // Create mock LLMO config
     mockLlmoConfig = {
@@ -632,6 +640,27 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
+    });
+
+    it('should throw error when access is denied', async () => {
+      // Create a new controller instance with a mock that denies access
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
     });
   });
 

@@ -167,7 +167,7 @@ export default class AccessControlUtil {
     }
 
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
-    if (productCode.length > 0) {
+    if (hasOrgAccess && productCode.length > 0) {
       let org;
       let site;
       if (entity instanceof Site) {
