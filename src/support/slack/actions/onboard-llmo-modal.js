@@ -345,10 +345,10 @@ async function publishToAdminHlx(filename, outputLocation, log) {
     const ref = 'main';
     const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
     const path = `${outputLocation}/${jsonFilename}`;
-    const headers = { Cookie: `auth_token=${process.env.ADMIN_HLX_API_KEY}` };
+    const headers = { Cookie: `auth_token=${process.env.HLX_ADMIN_TOKEN}` };
 
-    if (!process.env.ADMIN_HLX_API_KEY) {
-      log.warn('LLMO onboarding: ADMIN_HLX_API_KEY is not set');
+    if (!process.env.HLX_ADMIN_TOKEN) {
+      log.warn('LLMO onboarding: HLX_ADMIN_TOKEN is not set');
     }
 
     const baseUrl = 'https://admin.hlx.page';
