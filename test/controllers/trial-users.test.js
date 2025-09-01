@@ -18,6 +18,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
+import esmock from 'esmock';
 import TrialUserController from '../../src/controllers/trial-users.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -113,7 +114,7 @@ describe('Trial User Controller', () => {
 
   let trialUserController;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sandbox.restore();
 
     // Create a mock AccessControlUtil instance that will be used by the controller
@@ -124,7 +125,38 @@ describe('Trial User Controller', () => {
     // Stub AccessControlUtil.fromContext to return our mock instance
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtilInstance);
 
-    trialUserController = TrialUserController({
+    // Mock IMS client
+    const mockImsClient = {
+      createFrom: sandbox.stub().returns({
+        getServiceAccessTokenV3: sandbox.stub().resolves('mock-access-token'),
+      }),
+    };
+
+    // Mock fetch globally
+    global.fetch = sandbox.stub().resolves({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: sandbox.stub().resolves({ success: true }),
+    });
+
+    // Mock fs
+    const mockFs = {
+      readFile: sandbox.stub().resolves('<sendTemplateEmailReq><toList>{{emailAddress}}</toList></sendTemplateEmailReq>'),
+    };
+
+    // Create mocked controller with all necessary mocks
+    const MockedTrialUserController = await esmock('../../src/controllers/trial-users.js', {
+      '@adobe/spacecat-shared-ims-client': { ImsClient: mockImsClient },
+      fs: mockFs,
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => mockAccessControlUtilInstance,
+        },
+      },
+    });
+
+    trialUserController = MockedTrialUserController({
       dataAccess: mockDataAccess,
       attributes: {
         authInfo: new AuthInfo()
@@ -346,6 +378,13 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_ID: 'test-client-id',
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+        },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -479,6 +518,13 @@ describe('Trial User Controller', () => {
         data: { emailId: 'user@sub.example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_ID: 'test-client-id',
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+        },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -508,6 +554,13 @@ describe('Trial User Controller', () => {
         data: { emailId: 'user+tag@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_ID: 'test-client-id',
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+        },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -539,6 +592,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -562,6 +616,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -585,6 +640,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'existing@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -611,6 +667,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -636,6 +693,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -661,6 +719,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
