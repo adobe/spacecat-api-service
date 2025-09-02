@@ -131,7 +131,7 @@ function TrialUsersController(ctx) {
       // Check if trial user already exists with this email
       const existingTrialUser = await TrialUser.findByEmailId(emailId);
       if (existingTrialUser) {
-        return createResponse({ message: 'Trial user with this email already exists' }, 409);
+        return createResponse({ message: `Trial user with this email already exists ${existingTrialUser.getId()}` }, 409);
       }
 
       // Create new trial user invite
@@ -152,7 +152,7 @@ function TrialUsersController(ctx) {
       const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
       const emailPayload = await buildEmailPayload(emailId);
       // Send email using Adobe Post Office API
-      await fetch(`${postOfficeEndpoint}/po-server/message?templateName=expdev_xwalk_trial_confirm&locale=en-us`, {
+      const response = await fetch(`${postOfficeEndpoint}/po-server/message?templateName=expdev_xwalk_trial_confirm&locale=en-us`, {
         method: 'POST',
         headers: {
           Accept: 'application/xml',
@@ -161,6 +161,9 @@ function TrialUsersController(ctx) {
         },
         body: emailPayload,
       });
+
+      // Log the response status code
+      context.log.info(`Email sent to ${emailId}, response status: ${response.status}`);
 
       return created(TrialUserDto.toJSON(trialUser));
     } catch (e) {

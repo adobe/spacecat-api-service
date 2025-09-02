@@ -406,6 +406,9 @@ describe('Trial User Controller', () => {
       const body = await result.json();
       expect(body).to.have.property('id');
       expect(body).to.have.property('emailId', 'newuser@example.com');
+
+      // Verify that the response status was logged
+      expect(mockLogger.info).to.have.been.calledWith('Email sent to newuser@example.com, response status: 200');
     });
 
     it('should return bad request for invalid organization ID', async () => {
@@ -653,7 +656,7 @@ describe('Trial User Controller', () => {
 
       expect(result.status).to.equal(409);
       const body = await result.json();
-      expect(body.message).to.equal('Trial user with this email already exists');
+      expect(body.message).to.equal(`Trial user with this email already exists ${mockTrialUser.getId()}`);
     });
 
     it('should return internal server error when database operation fails', async () => {
