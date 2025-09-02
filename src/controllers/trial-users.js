@@ -32,7 +32,7 @@ import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 // Path to email template
-const EMAIL_TEMPLATE_PATH = './static/email-templates/trial-user-email.xml';
+const EMAIL_TEMPLATE_PATH = '../../static/email-templates/trial-user-email.xml';
 /**
  * Loads and processes the email template with provided data.
  * @param {string} emailAddress - Single email address.
@@ -155,6 +155,7 @@ function TrialUsersController(ctx) {
         body: emailPayload,
       });
 
+      context.log.info(`Email sent to ${emailId}, email payload : ${emailPayload}, response : ${emailSentResponse.status}`);
       // create use only when email is sent successfully
       if (emailSentResponse.status === 200) {
         const trialUser = await TrialUser.create({

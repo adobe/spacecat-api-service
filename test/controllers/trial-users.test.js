@@ -142,13 +142,13 @@ describe('Trial User Controller', () => {
 
     // Mock fs
     const mockFs = {
-      readFile: sandbox.stub().resolves('<sendTemplateEmailReq><toList>{{emailAddress}}</toList></sendTemplateEmailReq>'),
+      readFile: sandbox.stub().resolves('<sendTemplateEmailReq><toList>{emailAddress}</toList></sendTemplateEmailReq>'),
     };
 
     // Create mocked controller with all necessary mocks
     const MockedTrialUserController = await esmock('../../src/controllers/trial-users.js', {
       '@adobe/spacecat-shared-ims-client': { ImsClient: mockImsClient },
-      fs: mockFs,
+      'fs/promises': mockFs,
       '../../src/support/access-control-util.js': {
         default: {
           fromContext: () => mockAccessControlUtilInstance,
@@ -410,6 +410,9 @@ describe('Trial User Controller', () => {
 
       // Verify that the IMS token retrieval was logged
       expect(mockLogger.info).to.have.been.calledWith('Getting IMS service access token for client_id', 'test-client-id');
+
+      // Verify that the email response was logged
+      expect(mockLogger.info).to.have.been.calledWith('Email sent to newuser@example.com, email payload : <sendTemplateEmailReq><toList>{emailAddress}</toList></sendTemplateEmailReq>, response : 200');
     });
 
     it('should return bad request for invalid organization ID', async () => {
