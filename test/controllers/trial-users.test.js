@@ -384,6 +384,7 @@ describe('Trial User Controller', () => {
           EMAIL_IMS_CLIENT_CODE: 'test-client-code',
           EMAIL_IMS_SCOPE: 'test-scope',
           ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
         },
         attributes: {
           authInfo: new AuthInfo()
@@ -407,8 +408,8 @@ describe('Trial User Controller', () => {
       expect(body).to.have.property('id');
       expect(body).to.have.property('emailId', 'newuser@example.com');
 
-      // Verify that the response status was logged
-      expect(mockLogger.info).to.have.been.calledWith('Email sent to newuser@example.com, response status: 200');
+      // Verify that the IMS token retrieval was logged
+      expect(mockLogger.info).to.have.been.calledWith('Getting IMS service access token for client_id', 'test-client-id');
     });
 
     it('should return bad request for invalid organization ID', async () => {
@@ -527,6 +528,7 @@ describe('Trial User Controller', () => {
           EMAIL_IMS_CLIENT_CODE: 'test-client-code',
           EMAIL_IMS_SCOPE: 'test-scope',
           ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
         },
         attributes: {
           authInfo: new AuthInfo()
@@ -563,6 +565,7 @@ describe('Trial User Controller', () => {
           EMAIL_IMS_CLIENT_CODE: 'test-client-code',
           EMAIL_IMS_SCOPE: 'test-scope',
           ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
         },
         attributes: {
           authInfo: new AuthInfo()
@@ -737,6 +740,43 @@ describe('Trial User Controller', () => {
       const body = await result.json();
       expect(body.message).to.equal('Organization lookup failed');
       expect(mockLogger.error).to.have.been.calledWith(`Error creating trial user invite for organization ${organizationId}: ${orgError.message}`);
+    });
+
+    it('should return bad request when email sending fails', async () => {
+      // Mock fetch to return a non-200 status
+      global.fetch = sandbox.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: sandbox.stub().resolves({ success: false }),
+      });
+
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_ID: 'test-client-id',
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
+        },
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Some Error Occured while sending email to the user');
     });
   });
 });

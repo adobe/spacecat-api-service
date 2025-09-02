@@ -134,14 +134,6 @@ function TrialUsersController(ctx) {
         return createResponse({ message: `Trial user with this email already exists ${existingTrialUser.getId()}` }, 409);
       }
 
-      // Create new trial user invite
-      const trialUser = await TrialUser.create({
-        emailId,
-        organizationId,
-        status: TrialUserModel.STATUSES.INVITED,
-        metadata: { origin: TrialUserModel.STATUSES.INVITED },
-      });
-
       env.IMS_CLIENT_ID = env.EMAIL_IMS_CLIENT_ID;
       env.IMS_CLIENT_SECRET = env.EMAIL_IMS_CLIENT_SECRET;
       env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
@@ -150,9 +142,10 @@ function TrialUsersController(ctx) {
       context.log.info('Getting IMS service access token for client_id', env.IMS_CLIENT_ID);
       const imsToken = await imsClient.getServiceAccessToken();
       const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
+      const emailTemplateName = env.EMAIL_LLMO_TEMPLATE;
       const emailPayload = await buildEmailPayload(emailId);
       // Send email using Adobe Post Office API
-      const response = await fetch(`${postOfficeEndpoint}/po-server/message?templateName=expdev_xwalk_trial_confirm&locale=en-us`, {
+      const emailSentResponse = await fetch(`${postOfficeEndpoint}/po-server/message?templateName=${emailTemplateName}&locale=en-us`, {
         method: 'POST',
         headers: {
           Accept: 'application/xml',
@@ -162,10 +155,18 @@ function TrialUsersController(ctx) {
         body: emailPayload,
       });
 
-      // Log the response status code
-      context.log.info(`Email sent to ${emailId}, response status: ${response.status}`);
-
-      return created(TrialUserDto.toJSON(trialUser));
+      // create use only when email is sent successfully
+      if (emailSentResponse.status === 200) {
+        const trialUser = await TrialUser.create({
+          emailId,
+          organizationId,
+          status: TrialUserModel.STATUSES.INVITED,
+          metadata: { origin: TrialUserModel.STATUSES.INVITED },
+        });
+        return created(TrialUserDto.toJSON(trialUser));
+      } else {
+        return badRequest('Some Error Occured while sending email to the user');
+      }
     } catch (e) {
       context.log.error(`Error creating trial user invite for organization ${organizationId}: ${e.message}`);
       return internalServerError(e.message);
