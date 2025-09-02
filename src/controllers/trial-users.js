@@ -26,22 +26,20 @@ import {
   isValidEmail,
 } from '@adobe/spacecat-shared-utils';
 import { TrialUser as TrialUserModel } from '@adobe/spacecat-shared-data-access';
-import { readFile } from 'fs/promises';
+
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
-// Path to email template
-const EMAIL_TEMPLATE_PATH = '../../static/email-templates/trial-user-email.xml';
 /**
- * Loads and processes the email template with provided data.
+ * Builds the email payload XML for trial user invitation.
  * @param {string} emailAddress - Single email address.
- * @returns {Promise<string>} Processed email template.
+ * @returns {string} XML email payload.
  */
-
-async function buildEmailPayload(emailAddress) {
-  const template = await readFile(EMAIL_TEMPLATE_PATH, { encoding: 'utf8' });
-  return template.replace('{{emailAddress}}', emailAddress);
+function buildEmailPayload(emailAddress) {
+  return `<sendTemplateEmailReq>
+    <toList>${emailAddress}</toList>
+</sendTemplateEmailReq>`;
 }
 /**
  * TrialUsers controller. Provides methods to read and create trial users.
@@ -143,7 +141,7 @@ function TrialUsersController(ctx) {
       const imsToken = await imsClient.getServiceAccessToken();
       const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
       const emailTemplateName = env.EMAIL_LLMO_TEMPLATE;
-      const emailPayload = await buildEmailPayload(emailId);
+      const emailPayload = buildEmailPayload(emailId);
       // Send email using Adobe Post Office API
       const emailSentResponse = await fetch(`${postOfficeEndpoint}/po-server/message?templateName=${emailTemplateName}&locale=en-us`, {
         method: 'POST',
