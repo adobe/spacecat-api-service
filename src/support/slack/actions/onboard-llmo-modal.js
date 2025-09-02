@@ -466,6 +466,44 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
   return site.getId();
 }
 
+async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
+  const { dataAccess, log } = lambdaCtx;
+  const { say } = slackCtx;
+  const { Entitlement, SiteEnrollment } = dataAccess;
+
+  const orgId = site.getOrganizationId();
+
+  // find if there are any entitlements for this site enabling LLMO
+  const enrollments = await SiteEnrollment.allBySiteId(site.getId());
+  const llmoEntitlements = (await Promise.all(enrollments.map(async (enrollment) => {
+    const entitlement = await Entitlement.findById(enrollment.entitlementId);
+    return entitlement.productCode === 'llmo' ? entitlement : null;
+  }))).filter((x) => !!x);
+
+  if (llmoEntitlements.length > 0) {
+    say(`Site ${site.getId()} is already entitled to LLMO. Skipping entitlement grant.`);
+    log.warn(`Site ${site.getId()} already entitled to LLMO. Skipping.`);
+    return;
+  }
+
+  // create an entitlement
+  const newEntitlement = await Entitlement.create({
+    organizationId: orgId,
+    productCode: 'LLMO',
+    tier: 'FREE_TRIAL',
+    quotas: { llmo_trial_prompts: 200 },
+  });
+  await newEntitlement.save();
+  const newEntitlementId = newEntitlement.getId();
+
+  // create enrollment
+  const newEnrollment = await SiteEnrollment.create({
+    entitlementId: newEntitlementId,
+    siteId: site.getId(),
+  });
+  await newEnrollment.save();
+}
+
 export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess, sqs } = lambdaCtx;
   const { say } = slackCtx;
@@ -475,7 +513,9 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { hostname } = new URL(baseURL);
   const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
 
-  const { Site, Configuration } = dataAccess;
+  const {
+    Site, Configuration,
+  } = dataAccess;
 
   say(`:gear: ${brandName} onboarding started...`);
 
@@ -494,6 +534,9 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       // check that the existing site matches the provided IMS org id
       await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
     }
+
+    // create entitlement
+    await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx);
 
     // upload and publish the query index file
     await copyFilesToSharepoint(dataFolder, lambdaCtx);
