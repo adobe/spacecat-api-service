@@ -608,15 +608,14 @@ export function onboardLLMOModal(lambdaContext) {
 
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
-      const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
+      const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
 
-      if (!brandName || !imsOrgId || !deliveryType) {
+      if (!brandName || !imsOrgId) {
         await ack({
           response_action: 'errors',
           errors: {
             brand_name_input: !brandName ? 'Brand name is required' : undefined,
             ims_org_input: !imsOrgId ? 'IMS Org ID is required' : undefined,
-            delivery_type_input: !deliveryType ? 'Delivery type is required' : undefined,
           },
         });
         return;
@@ -625,7 +624,7 @@ export function onboardLLMOModal(lambdaContext) {
       log.info('Onboarding request with parameters:', {
         brandName,
         imsOrgId,
-        deliveryType,
+        deliveryType: deliveryType ?? 'not set',
         brandURL,
         originalChannel,
         originalThreadTs,
