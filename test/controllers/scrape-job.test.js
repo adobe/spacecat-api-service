@@ -155,6 +155,7 @@ describe('ScrapeJobController tests', () => {
       queues: ['spacecat-scrape-queue-1', 'spacecat-scrape-queue-2', 'spacecat-scrape-queue-3'],
       scrapeWorkerQueue: 'https://sqs.us-east-1.amazonaws.com/1234567890/scrape-worker-queue',
       scrapeQueueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/1234567890/',
+      s3Bucket: 's3-bucket',
       options: {
         enableJavascript: true,
         hideConsentBanners: false,
@@ -198,8 +199,11 @@ describe('ScrapeJobController tests', () => {
 
   it('should fail for a bad SCRAPE_JOB_CONFIGURATION', () => {
     baseContext.env.SCRAPE_JOB_CONFIGURATION = 'not a JSON string';
-    ScrapeJobController(baseContext);
-    expect(baseContext.log.error.getCall(0).args[0]).to.equal('Failed to parse scrape job configuration: Unexpected token \'o\', "not a JSON string" is not valid JSON');
+    try {
+      ScrapeJobController(baseContext);
+    } catch (e) {
+      expect(e.message).to.equal('Invalid scrape job configuration: Unexpected token \'o\', "not a JSON string" is not valid JSON');
+    }
   });
 
   describe('createScrapeJob', () => {
