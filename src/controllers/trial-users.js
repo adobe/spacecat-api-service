@@ -138,7 +138,7 @@ function TrialUsersController(ctx) {
       env.IMS_SCOPE = env.EMAIL_IMS_SCOPE;
       const imsClient = ImsClient.createFrom(context);
       context.log.info('Getting IMS service access token for client_id', env.IMS_CLIENT_ID);
-      const imsToken = await imsClient.getServiceAccessToken();
+      const imsTokenPayload = await imsClient.getServiceAccessToken();
       const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
       const emailTemplateName = env.EMAIL_LLMO_TEMPLATE;
       const emailPayload = buildEmailPayload(emailId);
@@ -147,7 +147,7 @@ function TrialUsersController(ctx) {
         method: 'POST',
         headers: {
           Accept: 'application/xml',
-          Authorization: `IMS ${imsToken}`,
+          Authorization: `IMS ${imsTokenPayload.access_token}`,
           'Content-Type': 'application/xml',
         },
         body: emailPayload,
