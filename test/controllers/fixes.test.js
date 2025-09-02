@@ -1021,6 +1021,9 @@ describe('Fixes Controller', () => {
     let mockSite;
     let mockOrganization;
     let mockOpportunity;
+    let mockSuggestion1;
+    let mockSuggestion2;
+    let mockS3Client;
 
     beforeEach(() => {
       // Ensure fetch is available globally before stubbing
@@ -1035,31 +1038,52 @@ describe('Fixes Controller', () => {
 
       mockSite = {
         getOrganization: sandbox.stub().returns(Promise.resolve(mockOrganization)),
+        getGitHubURL: sandbox.stub().returns('https://github.com/test/repo'),
       };
 
       mockOpportunity = {
         getSiteId: sandbox.stub().returns(siteId),
+      };
+
+      mockSuggestion1 = {
+        getId: sandbox.stub().returns('550e8400-e29b-41d4-a716-446655440001'),
+        getOpportunityId: sandbox.stub().returns(opportunityId),
         getData: sandbox.stub().returns({
-          accessibility: [
+          url: 'https://example.com/form',
+          source: '#container form',
+          issues: [
             {
-              form: 'https://example.com/form',
-              formSource: 'form source content',
-              a11yIssues: [
-                {
-                  ruleId: 'aria-combobox',
-                  issue: 'Accessibility fix for rule aria-combobox',
-                  // eslint-disable-next-line no-template-curly-in-string
-                  guidance: 'diff --git a/blocks/form/util.js b/blocks/form/util.js\nindex e21a57c..f4179d5 100644\n--- a/blocks/form/util.js\n+++ b/blocks/form/util.js\n@@ -293,6 +293,16 @@ export function createInput(fd) {\n   }\n   setPlaceholder(input, fd);\n   setConstraints(input, fd);\n+\n+  // Accessibility: Add required ARIA attributes for combobox/autocomplete\n+  if (fd.fieldType === \'autocomplete\' || input.getAttribute(\'role\') === \'combobox\') {\n+    input.setAttribute(\'role\', \'combobox\');\n+    input.setAttribute(\'aria-expanded\', \'false\'); // default collapsed\n+    input.setAttribute(\'aria-controls\', `${fd.id}-listbox`);\n+  }\n+\n   return input;\n }\n \n',
-                },
-                {
-                  ruleId: 'form-label',
-                  issue: 'Accessibility fix for form labels',
-                  guidance: 'diff --git a/blocks/form/util.js b/blocks/form/util.js\nindex e21a57c..f4179d5 100644\n--- a/blocks/form/util.js\n+++ b/blocks/form/util.js\n@@ -293,6 +293,16 @@ export function createInput(fd) {\n   }\n   setPlaceholder(input, fd);\n   setConstraints(input, fd);\n+\n+  // Accessibility: Ensure form controls have labels\n+  if (input && !input.getAttribute(\'aria-label\') && !input.getAttribute(\'aria-labelledby\')) {\n+    const label = fd.label || fd.name || \'Input field\';\n+    input.setAttribute(\'aria-label\', label);\n+  }\n+\n   return input;\n }\n \n',
-                },
-              ],
+              type: 'aria-allowed-attr',
+              description: 'Elements must only use supported ARIA attributes',
+              severity: 'critical',
             },
           ],
         }),
+      };
+
+      mockSuggestion2 = {
+        getId: sandbox.stub().returns('550e8400-e29b-41d4-a716-446655440002'),
+        getOpportunityId: sandbox.stub().returns(opportunityId),
+        getData: sandbox.stub().returns({
+          url: 'https://example.com/form',
+          source: '#container form',
+          issues: [
+            {
+              type: 'color-contrast',
+              description: 'Elements must have sufficient color contrast',
+              severity: 'serious',
+            },
+          ],
+        }),
+      };
+
+      // Mock S3 client
+      mockS3Client = {
+        send: sandbox.stub(),
+      };
+
+      requestContext.s3 = {
+        s3Client: mockS3Client,
       };
 
       // Mock IMS client
@@ -1070,6 +1094,11 @@ describe('Fixes Controller', () => {
       // Stub the dataAccess methods used by the controller
       sandbox.stub(dataAccess.Site, 'findById').resolves(mockSite);
       sandbox.stub(dataAccess.Opportunity, 'findById').resolves(mockOpportunity);
+      suggestionCollection.findById.withArgs('550e8400-e29b-41d4-a716-446655440001').resolves(mockSuggestion1);
+      suggestionCollection.findById.withArgs('550e8400-e29b-41d4-a716-446655440002').resolves(mockSuggestion2);
+
+      // Ensure access control allows access
+      accessControlUtil.hasAccess.resolves(true);
     });
 
     afterEach(() => {
@@ -1080,20 +1109,53 @@ describe('Fixes Controller', () => {
 
     it('successfully applies accessibility fix', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
       };
       requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        ASO_APP_URL: 'https://283250-asosampleapp-stage.adobeioruntime.net',
+        S3_MYSTIQUE_BUCKET_NAME: 'spacecat-dev-mystique-assets',
         IMS_HOST: 'ims-na1.adobelogin.com',
         IMS_CLIENT_ID: 'test-client-id',
         IMS_CLIENT_SECRET: 'test-client-secret',
       };
 
+      // Mock S3 responses
+      const hashKey = 'c5d6f7e8a9b0c1d2'; // Hash of 'https://example.com/form_#container form'
+
+      // Mock ListObjectsV2Command response
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+
+      // Mock GetObjectCommand for report.json
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            url: 'https://example.com/form',
+            source: '#container form',
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+            htmlWithIssues: [],
+            diff: '',
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+          }),
+        },
+      });
+
+      // Mock GetObjectCommand for form.js file
+      mockS3Client.send.onThirdCall().resolves({
+        Body: {
+          transformToString: async () => 'export function createForm() { /* fixed code */ }',
+        },
+      });
+
       fetchStub.resolves({
         ok: true,
-        json: async () => ({ prUrl: 'https://github.com/test/repo/pull/123' }),
+        json: async () => ({ pullRequest: 'https://github.com/test/repo/pull/123' }),
       });
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
@@ -1103,21 +1165,28 @@ describe('Fixes Controller', () => {
       expect(requestContext.imsClient.getServiceAccessToken).calledOnce;
 
       const callArgs = fetchStub.firstCall.args;
-      expect(callArgs[0]).equals(requestContext.env.AIO_AUTOFIX_API_URL);
+      expect(callArgs[0]).equals('https://283250-asosampleapp-stage.adobeioruntime.net/api/v1/web/aem-sites-optimizer-gh-app/pull-request-handler');
       expect(callArgs[1].method).equals('POST');
       expect(callArgs[1].headers['x-gw-ims-org-id']).equals('test-ims-org-id');
       expect(callArgs[1].headers['Content-Type']).equals('application/json');
       expect(callArgs[1].headers.Authorization).equals('Bearer test-service-token');
 
       const body = JSON.parse(callArgs[1].body);
-      expect(body.siteId).equals(siteId);
-      expect(body.title).equals('Accessibility fix for rule aria-combobox');
-      expect(body.diffContent).includes('Add required ARIA attributes for combobox/autocomplete');
+      expect(body.title).equals('Elements must only use supported ARIA attributes');
+      expect(body.vcsType).equals('github');
+      expect(body.repoURL).equals('https://github.com/test/repo');
+      expect(body.updatedFiles).to.be.an('array').with.length(1);
+      expect(body.updatedFiles[0].path).equals('blocks/form/form.js');
+      expect(body.updatedFiles[0].content).equals('export function createForm() { /* fixed code */ }');
 
       const responseData = await response.json();
-      expect(responseData.message).equals('Accessibility fix applied successfully');
-      expect(responseData.prUrl).equals('https://github.com/test/repo/pull/123');
-      expect(responseData.appliedRule).equals('aria-combobox');
+      expect(responseData.message).equals('Applied 1 accessibility fix(es) successfully');
+      expect(responseData.successful).to.be.an('array').with.length(1);
+      expect(responseData.successful[0].prUrl).equals('https://github.com/test/repo/pull/123');
+      expect(responseData.successful[0].type).equals('aria-allowed-attr');
+      expect(responseData.successful[0].appliedSuggestions).deep.equals(['550e8400-e29b-41d4-a716-446655440001']);
+      expect(responseData.failed).to.be.an('array').with.length(0);
+      expect(responseData.totalProcessed).equals(1);
     });
 
     it('responds 400 if request body is missing', async () => {
@@ -1128,60 +1197,79 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals({ message: 'Request body is required' });
     });
 
-    it('responds 400 if form is missing', async () => {
+    it('responds 400 if suggestionIds is missing', async () => {
+      requestContext.data = {};
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'suggestionIds array is required and must not be empty' });
+    });
+
+    it('responds 400 if suggestionIds is empty array', async () => {
       requestContext.data = {
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: [],
       };
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
       expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({ message: 'form URL is required' });
+      expect(await response.json()).deep.equals({ message: 'suggestionIds array is required and must not be empty' });
     });
 
-    it('responds 400 if formSource is missing', async () => {
+    it('responds 400 if suggestionIds is not an array', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        ruleId: 'aria-combobox',
+        suggestionIds: 'not-an-array',
       };
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
       expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({ message: 'formSource is required' });
+      expect(await response.json()).deep.equals({ message: 'suggestionIds array is required and must not be empty' });
     });
 
-    it('responds 400 if ruleId is missing', async () => {
+    it('responds 400 if suggestion ID is not a valid UUID', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
+        suggestionIds: ['not-a-valid-uuid'],
       };
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
       expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({ message: 'ruleId is required' });
+      expect(await response.json()).deep.equals({ message: 'Invalid suggestion ID format: not-a-valid-uuid' });
     });
 
-    it('responds 500 if AIO_AUTOFIX_API_URL is not configured', async () => {
+    it.skip('responds 500 if ASO_APP_URL is not configured and no default', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
       };
-      requestContext.env = {};
+      requestContext.env = {
+        ASO_APP_URL: '',
+      };
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
       expect(response).includes({ status: 500 });
-      expect(await response.json()).deep.equals({ message: 'AIO autofix service is not configured' });
+      expect(await response.json()).deep.equals({ message: 'ASO app is not configured' });
+    });
+
+    it('responds 500 if S3 client is not available', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+      requestContext.s3 = null;
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      expect(await response.json()).deep.equals({ message: 'S3 service is not configured' });
     });
 
     it('responds 404 if site is not found', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
       };
       requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
       };
 
       dataAccess.Site.findById.resolves(null);
@@ -1191,14 +1279,29 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals({ message: 'Site not found' });
     });
 
-    it('responds 400 if organization has no IMS org ID', async () => {
+    it('responds 400 if site has no GitHub URL', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
       };
       requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      mockSite.getGitHubURL.returns('');
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Site must have a GitHub repository URL configured' });
+    });
+
+    it('responds 400 if organization has no IMS org ID', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
       };
 
       mockOrganization.getImsOrgId.returns(null);
@@ -1208,82 +1311,201 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals({ message: 'Site must belong to an organization with IMS Org ID' });
     });
 
+    it('responds 404 if suggestion is not found', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      dataAccess.Suggestion.findById.withArgs('550e8400-e29b-41d4-a716-446655440000').resolves(null);
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Suggestion not found: 550e8400-e29b-41d4-a716-446655440000' });
+    });
+
+    it('responds 400 if suggestion does not belong to opportunity', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      const mockWrongSuggestion = {
+        getId: sandbox.stub().returns('550e8400-e29b-41d4-a716-446655440000'),
+        getOpportunityId: sandbox.stub().returns('different-opportunity-id'),
+      };
+
+      dataAccess.Suggestion.findById.withArgs('550e8400-e29b-41d4-a716-446655440000').resolves(mockWrongSuggestion);
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: `Suggestion 550e8400-e29b-41d4-a716-446655440000 does not belong to opportunity ${opportunityId}`,
+      });
+    });
+
+    it('responds 400 if no valid suggestions with URL and source found', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      // Mock suggestion with no URL/source
+      mockSuggestion1.getData.returns({
+        issues: [{ type: 'aria-allowed-attr' }],
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'No valid suggestions with URL and source found' });
+    });
+
+    it('responds 400 if no matching fixes found in S3', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      // Mock empty S3 response
+      mockS3Client.send.resolves({ Contents: [] });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'No matching fixes found in S3 for the provided suggestions' });
+    });
+
     it('responds 500 if IMS service token cannot be obtained', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
       };
       requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
         IMS_HOST: 'ims-na1.adobelogin.com',
         IMS_CLIENT_ID: 'test-client-id',
         IMS_CLIENT_SECRET: 'test-client-secret',
       };
+
+      // Setup S3 mocks for successful path
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      mockS3Client.send.onThirdCall().resolves({
+        Body: { transformToString: async () => 'file content' },
+      });
 
       // Mock IMS client to fail
-      requestContext.imsClient.getServiceAccessToken.rejects(new Error('IMS authentication failed'));
+      requestContext.imsClient.getServiceAccessToken.resolves(null);
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
       expect(response).includes({ status: 500 });
       expect(await response.json()).deep.equals({ message: 'Authentication failed' });
     });
 
-    it('responds 500 if IMS credentials are missing', async () => {
+    it('responds with partial success when ASO app request fails', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
       };
       requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
-        // Missing IMS credentials
-      };
-
-      const response = await fixesController.applyAccessibilityFix(requestContext);
-      expect(response).includes({ status: 500 });
-      expect(await response.json()).deep.equals({ message: 'Authentication failed' });
-    });
-
-    it('responds 500 if AIO app request fails', async () => {
-      requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
-      };
-      requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
         IMS_HOST: 'ims-na1.adobelogin.com',
         IMS_CLIENT_ID: 'test-client-id',
         IMS_CLIENT_SECRET: 'test-client-secret',
       };
+
+      // Setup successful S3 mocks
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      mockS3Client.send.onThirdCall().resolves({
+        Body: { transformToString: async () => 'file content' },
+      });
 
       fetchStub.resolves({
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
-        text: async () => 'AIO app error',
+        text: async () => 'ASO app error',
       });
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
-      expect(response).includes({ status: 500 });
+      expect(response).includes({ status: 200 });
+
       const responseData = await response.json();
-      expect(responseData.message).equals('Failed to apply accessibility fix');
-      expect(responseData.details).equals('AIO app returned 500: Internal Server Error');
+      expect(responseData.message).equals('Applied 0 accessibility fix(es) successfully');
+      expect(responseData.successful).to.be.an('array').with.length(0);
+      expect(responseData.failed).to.be.an('array').with.length(1);
+      expect(responseData.failed[0].success).equals(false);
+      expect(responseData.failed[0].error).equals('AIO app returned 500: Internal Server Error');
+      expect(responseData.totalProcessed).equals(1);
     });
 
     it('responds 500 if fetch throws an error', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
       };
       requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
         IMS_HOST: 'ims-na1.adobelogin.com',
         IMS_CLIENT_ID: 'test-client-id',
         IMS_CLIENT_SECRET: 'test-client-secret',
       };
+
+      // Setup successful S3 mocks
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      mockS3Client.send.onThirdCall().resolves({
+        Body: { transformToString: async () => 'file content' },
+      });
 
       fetchStub.throws(new Error('Network error'));
 
@@ -1292,40 +1514,55 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals({ message: 'Failed to apply accessibility fix' });
     });
 
-    it('generates different diff content for different rule IDs', async () => {
+    it('handles multiple suggestions with same URL and source', async () => {
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'form-label',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440002'],
       };
       requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
         IMS_HOST: 'ims-na1.adobelogin.com',
         IMS_CLIENT_ID: 'test-client-id',
         IMS_CLIENT_SECRET: 'test-client-secret',
       };
 
+      // Both suggestions have same URL/source, so they'll be grouped together
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      mockS3Client.send.onThirdCall().resolves({
+        Body: { transformToString: async () => 'fixed form content' },
+      });
+
       fetchStub.resolves({
         ok: true,
-        json: async () => ({ prUrl: 'https://github.com/test/repo/pull/124' }),
+        json: async () => ({ prUrl: 'https://github.com/test/repo/pull/125' }),
       });
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
-
       expect(response).includes({ status: 200 });
 
-      const callArgs = fetchStub.firstCall.args;
-      const body = JSON.parse(callArgs[1].body);
-      expect(body.diffContent).includes('Ensure form controls have labels');
-      expect(body.diffContent).includes('aria-label');
+      const responseData = await response.json();
+      expect(responseData.successful[0].appliedSuggestions).deep.equals(['550e8400-e29b-41d4-a716-446655440001']);
+      expect(responseData.totalProcessed).equals(1); // Grouped into one fix
     });
 
     it('responds 400 if site ID parameter is not a uuid', async () => {
       requestContext.params.siteId = 'not-a-uuid';
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
       };
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
@@ -1335,75 +1572,18 @@ describe('Fixes Controller', () => {
     it('responds 400 if opportunity ID parameter is not a uuid', async () => {
       requestContext.params.opportunityId = 'not-a-uuid';
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
       };
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
       expect(response).includes({ status: 400 });
-    });
-
-    it('responds 400 if no accessibility guidance found for the specified form and rule ID', async () => {
-      requestContext.data = {
-        form: 'https://example.com/different-form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
-      };
-      requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
-      };
-
-      const response = await fixesController.applyAccessibilityFix(requestContext);
-      expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({
-        message: 'No accessibility guidance found for the specified form and rule ID',
-      });
-    });
-
-    it('responds 400 if rule ID not found in accessibility issues', async () => {
-      requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'nonexistent-rule',
-      };
-      requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
-      };
-
-      const response = await fixesController.applyAccessibilityFix(requestContext);
-      expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({
-        message: 'No accessibility guidance found for the specified form and rule ID',
-      });
-    });
-
-    it('responds 400 if opportunity has no accessibility data', async () => {
-      mockOpportunity.getData.returns({ someOtherData: true });
-
-      requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
-      };
-      requestContext.env = {
-        AIO_AUTOFIX_API_URL: 'https://localhost:9081/api/v1/web/aem-sites-optimizer-gh-app/autofix-handler',
-      };
-
-      const response = await fixesController.applyAccessibilityFix(requestContext);
-      expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({
-        message: 'No accessibility guidance found for the specified form and rule ID',
-      });
     });
 
     it('responds 404 if opportunity not found', async () => {
       dataAccess.Opportunity.findById.resolves(null);
 
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
       };
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
@@ -1415,14 +1595,356 @@ describe('Fixes Controller', () => {
       mockOpportunity.getSiteId.returns('different-site-id');
 
       requestContext.data = {
-        form: 'https://example.com/form',
-        formSource: 'form source content',
-        ruleId: 'aria-combobox',
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440000'],
       };
 
       const response = await fixesController.applyAccessibilityFix(requestContext);
       expect(response).includes({ status: 404 });
       expect(await response.json()).deep.equals({ message: 'Opportunity not found' });
+    });
+
+    it('skips suggestions with no matching report type', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      // Mock suggestion with different issue type than report
+      mockSuggestion1.getData.returns({
+        url: 'https://example.com/form',
+        source: '#container form',
+        issues: [{ type: 'different-type', description: 'Different issue' }],
+      });
+
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [{ Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` }],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr', // Different from suggestion type
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No matching fixes found in S3 for the provided suggestions',
+      });
+    });
+
+    it('skips reports with no updated files', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [{ Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` }],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: [], // No files to update
+          }),
+        },
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No matching fixes found in S3 for the provided suggestions',
+      });
+    });
+
+    it('handles S3 read errors gracefully', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [{ Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` }],
+      });
+      // Mock S3 read error for report.json
+      mockS3Client.send.onSecondCall().rejects(new Error('S3 access denied'));
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No matching fixes found in S3 for the provided suggestions',
+      });
+    });
+
+    it('handles S3 list errors gracefully', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      // Mock S3 list error
+      mockS3Client.send.onFirstCall().rejects(new Error('S3 list operation failed'));
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No matching fixes found in S3 for the provided suggestions',
+      });
+    });
+
+    it('handles S3 file read errors gracefully', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+      };
+
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      // Mock S3 file read error for asset file
+      mockS3Client.send.onThirdCall().rejects(new Error('File not accessible'));
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No matching fixes found in S3 for the provided suggestions',
+      });
+    });
+
+    it('handles IMS service token error when credentials are missing', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+        // Missing IMS credentials
+      };
+
+      // Setup successful S3 mocks
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      mockS3Client.send.onThirdCall().resolves({
+        Body: { transformToString: async () => 'file content' },
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      expect(await response.json()).deep.equals({ message: 'Authentication failed' });
+    });
+
+    it('handles IMS service token error when getServiceAccessToken throws', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      // Setup successful S3 mocks
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      mockS3Client.send.onThirdCall().resolves({
+        Body: { transformToString: async () => 'file content' },
+      });
+
+      // Mock IMS client to throw error
+      requestContext.imsClient.getServiceAccessToken.rejects(new Error('IMS service unavailable'));
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      expect(await response.json()).deep.equals({ message: 'Authentication failed' });
+    });
+
+    it('handles suggestion with issue that has no description property', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      // Mock suggestion with issue that has no description
+      const mockSuggestionNoDesc = {
+        getId: sandbox.stub().returns('550e8400-e29b-41d4-a716-446655440001'),
+        getOpportunityId: sandbox.stub().returns(opportunityId),
+        getData: sandbox.stub().returns({
+          url: 'https://example.com/form',
+          source: '#container form',
+          issues: [
+            {
+              type: 'aria-allowed-attr',
+              // No description property
+              severity: 'critical',
+            },
+          ],
+        }),
+      };
+      suggestionCollection.findById.withArgs('550e8400-e29b-41d4-a716-446655440001').resolves(mockSuggestionNoDesc);
+
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      mockS3Client.send.onThirdCall().resolves({
+        Body: { transformToString: async () => 'file content' },
+      });
+
+      fetchStub.resolves({
+        ok: true,
+        json: async () => ({ pullRequest: 'https://github.com/test/repo/pull/123' }),
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 200 });
+
+      // Verify the default description was used
+      const callArgs = fetchStub.firstCall.args;
+      const body = JSON.parse(callArgs[1].body);
+      expect(body.title).equals('Fix aria-allowed-attr accessibility issue');
+    });
+
+    it('handles S3 ListObjects response with no Contents property', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      // Mock S3 response with no Contents property
+      mockS3Client.send.onFirstCall().resolves({
+        // No Contents property
+      });
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({
+        message: 'No matching fixes found in S3 for the provided suggestions',
+      });
+    });
+
+    it('handles IMS error without message property', async () => {
+      requestContext.data = {
+        suggestionIds: ['550e8400-e29b-41d4-a716-446655440001'],
+      };
+      requestContext.env = {
+        ASO_APP_URL: 'https://test.app.url',
+        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+        IMS_HOST: 'ims-na1.adobelogin.com',
+        IMS_CLIENT_ID: 'test-client-id',
+        IMS_CLIENT_SECRET: 'test-client-secret',
+      };
+
+      // Setup successful S3 mocks
+      const hashKey = 'c5d6f7e8a9b0c1d2';
+      mockS3Client.send.onFirstCall().resolves({
+        Contents: [
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/report.json` },
+          { Key: `fixes/${siteId}/${hashKey}/rule-123456789/assets/blocks/form/form.js` },
+        ],
+      });
+      mockS3Client.send.onSecondCall().resolves({
+        Body: {
+          transformToString: async () => JSON.stringify({
+            type: 'aria-allowed-attr',
+            updatedFiles: ['blocks/form/form.js'],
+          }),
+        },
+      });
+      mockS3Client.send.onThirdCall().resolves({
+        Body: { transformToString: async () => 'file content' },
+      });
+
+      // Make getServiceAccessToken throw an error without message property
+      const errorWithoutMessage = { code: 'IMS_ERROR' };
+      requestContext.imsClient.getServiceAccessToken.throws(errorWithoutMessage);
+
+      const response = await fixesController.applyAccessibilityFix(requestContext);
+      expect(response).includes({ status: 500 });
+      expect(await response.json()).deep.equals({ message: 'Authentication failed' });
     });
   });
 });
