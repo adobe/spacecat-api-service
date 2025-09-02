@@ -1,3 +1,10 @@
+# [1.174.0](https://github.com/adobe/spacecat-api-service/compare/v1.173.1...v1.174.0) (2025-09-02)
+
+
+### Features
+
+* added and modified  api routes for optimization reports ([#1079](https://github.com/adobe/spacecat-api-service/issues/1079)) ([f11caa7](https://github.com/adobe/spacecat-api-service/commit/f11caa71f6c8195835504b6d9b06f647a213e826))
+
 ## [1.173.1](https://github.com/adobe/spacecat-api-service/compare/v1.173.0...v1.173.1) (2025-09-02)
 
 
