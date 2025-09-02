@@ -19,10 +19,13 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import AccessControlUtil from '../support/access-control-util.js';
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
-function LlmoController() {
+function LlmoController(ctx) {
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
@@ -36,7 +39,9 @@ function LlmoController() {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-
+    if (!await accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO)) {
+      throw new Error('Only users belonging to the organization can view its sites');
+    }
     return { site, config, llmoConfig };
   };
 
@@ -76,6 +81,7 @@ function LlmoController() {
     const { siteId, dataSource, sheetType } = context.params;
     const { env } = context;
     try {
+      log.info(`validating LLMO sheet data for siteId: ${siteId}, dataSource: ${dataSource}, sheetType: ${sheetType}`);
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 

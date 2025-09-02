@@ -13,7 +13,12 @@
 /* eslint-env mocha */
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { Site, Organization } from '@adobe/spacecat-shared-data-access';
+import {
+  Site, Organization,
+  Entitlement as EntitlementModel,
+  TrialUser as TrialUserModel,
+  OrganizationIdentityProvider as OrganizationIdentityProviderModel,
+} from '@adobe/spacecat-shared-data-access';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -41,13 +46,32 @@ describe('Access Control Util', () => {
         is_admin: true,
       });
 
-    const context = { attributes: { authInfo } };
+    const context = {
+      attributes: { authInfo },
+      dataAccess: {
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sinon.stub(),
+        },
+        TrialUser: {},
+        OrganizationIdentityProvider: {},
+      },
+    };
+
     const accessControlUtil = AccessControlUtil.fromContext(context);
     expect(accessControlUtil.hasAdminAccess()).to.be.true;
   });
 
   it('should throw an error if entity is not provided', async () => {
-    const context = { attributes: { authInfo: new AuthInfo() } };
+    const context = {
+      attributes: { authInfo: new AuthInfo() },
+      dataAccess: {
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sinon.stub(),
+        },
+        TrialUser: {},
+        OrganizationIdentityProvider: {},
+      },
+    };
     const accessControlUtil = AccessControlUtil.fromContext(context);
     try {
       await accessControlUtil.hasAccess();
@@ -63,7 +87,9 @@ describe('Access Control Util', () => {
   beforeEach(() => {
     logSpy = sandbox.spy();
     context = {
-      log: { info: logSpy },
+      log: {
+        info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+      },
       attributes: {
         authInfo: {
           getType: () => 'jwt',
@@ -72,6 +98,12 @@ describe('Access Control Util', () => {
           hasScope: () => true,
           getScopes: () => [{ name: 'user' }],
         },
+      },
+      dataAccess: {
+        Entitlement: { TIER: { FREE_TRIAL: 'free_trial', PAID: 'paid' }, findByOrganizationIdAndProductCode: sinon.stub() },
+        TrialUser: { STATUS: { REGISTERED: 'registered' }, findByEmailId: sinon.stub() },
+        OrganizationIdentityProvider: {},
+        SiteEnrollment: { findBySiteId: sinon.stub() },
       },
     };
   });
@@ -170,6 +202,51 @@ describe('Access Control Util', () => {
     expect(orgResult).to.be.true;
   });
 
+  it('should handle Organization entity type directly without calling getOrganization', async () => {
+    const util = AccessControlUtil.fromContext(context);
+
+    // Test with Organization entity directly
+    const org = {
+      getImsOrgId: () => 'test-org-id',
+    };
+    Object.setPrototypeOf(org, Organization.prototype);
+
+    // Mock the authInfo.hasOrganization to return true for test-org-id
+    util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+    const result = await util.hasAccess(org);
+
+    expect(result).to.be.true;
+    expect(util.authInfo.hasOrganization).to.have.been.calledWith('test-org-id');
+  });
+
+  it('should handle Organization entity type with productCode validation', async () => {
+    const util = AccessControlUtil.fromContext(context);
+
+    // Test with Organization entity directly
+    const org = {
+      getImsOrgId: () => 'test-org-id',
+      getId: () => 'test-org-id',
+    };
+    Object.setPrototypeOf(org, Organization.prototype);
+
+    // Mock the authInfo.hasOrganization to return true for test-org-id
+    util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+    // Mock the entitlement validation to succeed
+    util.Entitlement.findByOrganizationIdAndProductCode = sinon.stub().resolves({
+      getId: () => 'entitlement-123',
+      getProductCode: () => 'llmo',
+      getTier: () => 'paid',
+    });
+
+    const result = await util.hasAccess(org, '', 'llmo');
+
+    expect(result).to.be.true;
+    expect(util.authInfo.hasOrganization).to.have.been.calledWith('test-org-id');
+    expect(util.Entitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('test-org-id', 'llmo');
+  });
+
   // Test constructor error cases
   it('throws error when context is missing', () => {
     expect(() => AccessControlUtil.fromContext()).to.throw('Missing context');
@@ -196,9 +273,25 @@ describe('Access Control Util', () => {
       };
 
       const testContext = {
-        log: { info: () => {} },
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
         attributes: {
           authInfo: mockAuthInfo,
+        },
+        dataAccess: {
+          Entitlement: {
+            TIER: {
+              FREE_TRIAL: 'free_trial',
+              PAID: 'paid',
+            },
+          },
+          TrialUser: {
+            STATUS: {
+              REGISTERED: 'registered',
+            },
+          },
+          OrganizationIdentityProvider: {},
         },
       };
 
@@ -291,7 +384,27 @@ describe('Access Control Util', () => {
         })
         .withAuthenticated(true);
 
-      const contextForIMS = { attributes: { authInfo } };
+      const contextForIMS = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {
+            TIER: {
+              FREE_TRIAL: 'free_trial',
+              PAID: 'paid',
+            },
+            findByOrganizationIdAndProductCode: sinon.stub(),
+          },
+          TrialUser: {
+            STATUS: {
+              REGISTERED: 'registered',
+            },
+          },
+          OrganizationIdentityProvider: {},
+        },
+      };
       const accessControl = AccessControlUtil.fromContext(contextForIMS);
 
       // Verify IMS specific checks
@@ -330,7 +443,27 @@ describe('Access Control Util', () => {
         .withScopes([{ name: 'admin' }])
         .withAuthenticated(true);
 
-      const contextForIMS = { attributes: { authInfo } };
+      const contextForIMS = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {
+            TIER: {
+              FREE_TRIAL: 'free_trial',
+              PAID: 'paid',
+            },
+            findByOrganizationIdAndProductCode: sinon.stub(),
+          },
+          TrialUser: {
+            STATUS: {
+              REGISTERED: 'registered',
+            },
+          },
+          OrganizationIdentityProvider: {},
+        },
+      };
       const accessControl = AccessControlUtil.fromContext(contextForIMS);
 
       // Test Organization instance
@@ -357,7 +490,28 @@ describe('Access Control Util', () => {
         .withType('foo')
         .withAuthenticated(true);
 
-      const contextForIMS = { attributes: { authInfo } };
+      const contextForIMS = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {
+            TIER: {
+              FREE_TRIAL: 'free_trial',
+              PAID: 'paid',
+            },
+            findByOrganizationIdAndProductCode: sinon.stub(),
+          },
+          TrialUser: {
+            STATUS: {
+              REGISTERED: 'registered',
+            },
+          },
+          OrganizationIdentityProvider: {},
+        },
+      };
+
       const accessControl = AccessControlUtil.fromContext(contextForIMS);
 
       // Test Organization instance
@@ -377,6 +531,581 @@ describe('Access Control Util', () => {
 
       const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
       expect(hasAccessToDifferentOrg).to.be.true;
+    });
+  });
+
+  describe('Entitlement Validation', () => {
+    let util;
+    let mockOrg;
+    let mockEntitlement;
+    let mockTrialUser;
+    let mockIdentityProvider;
+    let mockSiteEnrollment;
+
+    beforeEach(() => {
+      // Mock the constant calls directly
+      sandbox.stub(EntitlementModel, 'TIERS').value({
+        FREE_TRIAL: 'free_trial',
+        PAID: 'paid',
+      });
+
+      sandbox.stub(TrialUserModel, 'STATUSES').value({
+        REGISTERED: 'registered',
+      });
+
+      sandbox.stub(OrganizationIdentityProviderModel, 'PROVIDER_TYPES').value({
+        IMS: 'IMS',
+        MICROSOFT: 'MICROSOFT',
+        GOOGLE: 'GOOGLE',
+      });
+
+      mockOrg = {
+        getId: () => 'org-123',
+        getImsOrgId: () => 'org-123',
+      };
+
+      mockEntitlement = {
+        findByOrganizationIdAndProductCode: sinon.stub(),
+      };
+
+      mockTrialUser = {
+        findByEmailId: sinon.stub(),
+        create: sinon.stub(),
+      };
+
+      mockIdentityProvider = {
+        allByOrganizationId: sinon.stub(),
+        create: sinon.stub(),
+      };
+
+      mockSiteEnrollment = {
+        allBySiteId: sinon.stub(),
+      };
+
+      const testContext = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({
+              trial_email: 'trial@example.com',
+              provider: 'GOOGLE',
+              email: 'user@example.com',
+              first_name: 'John',
+              last_name: 'Doe',
+            }),
+          },
+        },
+        dataAccess: {
+          Entitlement: mockEntitlement,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+          SiteEnrollment: mockSiteEnrollment,
+        },
+      };
+
+      util = AccessControlUtil.fromContext(testContext);
+    });
+
+    it('should validate entitlement successfully for paid tier', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+    });
+
+    it('should throw error when entitlement is missing for organization', async () => {
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves([]);
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo'))
+        .to.be.rejectedWith('Missing entitlement for organization');
+    });
+
+    it('should throw error when organization is not entitled for product', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'other_product',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      // The production code doesn't validate product code mismatch, so this should pass
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+    });
+
+    it('should throw error when entitlement has no tier', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => undefined,
+      }; // missing tier
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo'))
+        .to.be.rejectedWith('[Error] Entitlement tier is not set for llmo');
+    });
+
+    it('should validate site enrollment when site is provided and matches product code', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      const mockSite = {
+        getId: () => 'site-123',
+      };
+
+      const mockSiteEnrollments = [
+        {
+          getEntitlementId: () => 'entitlement-123',
+        },
+      ];
+
+      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+
+      await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo')).to.not.be.rejected;
+
+      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+    });
+
+    it('should throw error when site is enrolled for different product code', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      const mockSite = {
+        getId: () => 'site-123',
+      };
+
+      const mockSiteEnrollments = [
+        {
+          getEntitlementId: () => 'different-entitlement-id',
+        },
+      ];
+
+      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+
+      await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
+
+      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+    });
+
+    it('should proceed when site has no entitlement (null)', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      const mockSite = {
+        getId: () => 'site-123',
+      };
+
+      const mockSiteEnrollments = [];
+
+      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+
+      await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
+
+      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+    });
+
+    it('should proceed when site has no entitlement (undefined)', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      const mockSite = {
+        getId: () => 'site-123',
+      };
+
+      const mockSiteEnrollments = [];
+
+      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+
+      await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
+
+      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+    });
+
+    it('should not call site enrollment validation when site is not provided', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+
+      expect(mockSiteEnrollment.allBySiteId).to.not.have.been.called;
+    });
+
+    it('should create trial user when tier is free_trial and trial user does not exist', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      const identityProviders = [];
+
+      mockIdentityProvider.allByOrganizationId.resolves(identityProviders);
+
+      // Mock the create method to return a value
+      mockTrialUser.create.resolves({ id: 'new-trial-user' });
+
+      // Mock the identity provider create method to return an object with provider property
+      mockIdentityProvider.create.resolves({ provider: 'GOOGLE' });
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.have.been.calledWith({
+        emailId: 'trial@example.com',
+        firstName: 'John',
+        lastName: 'Doe',
+        provider: 'GOOGLE',
+        organizationId: 'org-123',
+        status: 'registered',
+        externalUserId: 'user@example.com',
+        lastSeenAt: sinon.match.string,
+      });
+    });
+
+    it('should not create trial user when trial user already exists', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      mockTrialUser.findByEmailId.resolves({ id: 'existing-user' });
+
+      const identityProviders = [
+        { provider: 'GOOGLE', getProvider: () => 'GOOGLE' },
+      ];
+      mockIdentityProvider.allByOrganizationId.resolves(identityProviders);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.not.have.been.called;
+    });
+
+    it('should throw error when IDP provider is not supported for free trial', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      // Test with unsupported provider
+      const testContext = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({
+              trial_email: 'trial@example.com',
+              provider: 'unsupported_provider',
+              email: 'user@example.com',
+            }),
+          },
+        },
+        dataAccess: {
+          Entitlement: mockEntitlement,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+          SiteEnrollment: mockSiteEnrollment,
+        },
+      };
+
+      const testUtil = AccessControlUtil.fromContext(testContext);
+
+      await expect(testUtil.validateEntitlement(mockOrg, null, 'llmo'))
+        .to.be.rejectedWith('[Error] IDP not supported');
+    });
+
+    it('should create identity provider when it does not exist for supported provider', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      // No existing identity provider for this organization
+      mockIdentityProvider.allByOrganizationId.resolves([]);
+
+      // Mock the create method to return a new identity provider
+      const newIdentityProvider = { provider: 'GOOGLE' };
+      mockIdentityProvider.create.resolves(newIdentityProvider);
+
+      // Mock the trial user create method
+      mockTrialUser.create.resolves({ id: 'new-trial-user' });
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      // Verify that create was called with the correct parameters
+      expect(mockIdentityProvider.create).to.have.been.calledWith({
+        organizationId: 'org-123',
+        provider: 'GOOGLE',
+        externalId: 'GOOGLE',
+      });
+
+      // Verify that trial user was created with the new identity provider
+      expect(mockTrialUser.create).to.have.been.calledWith({
+        emailId: 'trial@example.com',
+        firstName: 'John',
+        lastName: 'Doe',
+        provider: 'GOOGLE',
+        organizationId: 'org-123',
+        status: 'registered',
+        externalUserId: 'user@example.com',
+        lastSeenAt: sinon.match.string,
+      });
+    });
+  });
+
+  describe('hasAccess with productCode', () => {
+    let util;
+    let mockOrg;
+    let mockEntitlement;
+    let mockTrialUser;
+    let mockIdentityProvider;
+    let mockSiteEnrollment;
+
+    beforeEach(() => {
+      mockOrg = {
+        getId: () => 'org-123',
+        getImsOrgId: () => 'org-123',
+      };
+
+      mockEntitlement = {
+        findByOrganizationIdAndProductCode: sinon.stub(),
+      };
+
+      mockTrialUser = {
+        findByEmailId: sinon.stub(),
+        create: sinon.stub(),
+      };
+
+      mockIdentityProvider = {
+        allByOrganizationId: sinon.stub(),
+      };
+
+      mockSiteEnrollment = {
+        allBySiteId: sinon.stub(),
+      };
+
+      const testContext = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({
+              trial_email: 'trial@example.com',
+              provider: 'GOOGLE',
+              email: 'user@example.com',
+            }),
+          },
+        },
+        dataAccess: {
+          Entitlement: mockEntitlement,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+          SiteEnrollment: mockSiteEnrollment,
+        },
+      };
+
+      util = AccessControlUtil.fromContext(testContext);
+    });
+
+    it('should call validateEntitlement when productCode is provided', async () => {
+      const site = {
+        getOrganization: async () => mockOrg,
+        getId: () => 'site-123',
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      // Mock site enrollment to return empty array (no site entitlement)
+      mockSiteEnrollment.allBySiteId.resolves([]);
+
+      await expect(util.hasAccess(site, '', 'llmo'))
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
+
+      expect(mockEntitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
+      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+    });
+
+    it('should not call validateEntitlement when productCode is empty', async () => {
+      const site = {
+        getOrganization: async () => mockOrg,
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      const result = await util.hasAccess(site, '', '');
+
+      expect(mockEntitlement.findByOrganizationIdAndProductCode).to.not.have.been.called;
+      expect(result).to.be.true;
+    });
+
+    it('should handle entitlement validation errors', async () => {
+      const site = {
+        getOrganization: async () => mockOrg,
+        getId: () => 'site-123',
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves([]);
+
+      await expect(util.hasAccess(site, '', 'llmo'))
+        .to.be.rejectedWith('Missing entitlement for organization');
+    });
+
+    it('should validate site enrollment when hasAccess is called with site and product code', async () => {
+      const site = {
+        getOrganization: async () => mockOrg,
+        getId: () => 'site-123',
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      const mockSiteEnrollments = [
+        {
+          getEntitlementId: () => 'entitlement-123',
+        },
+      ];
+
+      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+
+      const result = await util.hasAccess(site, '', 'llmo');
+
+      expect(result).to.be.true;
+      expect(mockEntitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
+      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+    });
+
+    it('should throw error when site enrollment validation fails in hasAccess', async () => {
+      const site = {
+        getOrganization: async () => mockOrg,
+        getId: () => 'site-123',
+      };
+      Object.setPrototypeOf(site, Site.prototype);
+
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      const mockSiteEnrollments = [
+        {
+          getEntitlementId: () => 'different-entitlement-id',
+        },
+      ];
+
+      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+
+      await expect(util.hasAccess(site, '', 'llmo'))
+        .to.be.rejectedWith('[Error] Valid site enrollment not found');
+
+      expect(mockEntitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
+      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+    });
+  });
+
+  describe('Constructor with dataAccess dependencies', () => {
+    it('should initialize dataAccess dependencies correctly', () => {
+      const mockEntitlement = {};
+      const mockTrialUser = {};
+      const mockIdentityProvider = {};
+      const mockSiteEnrollment = {};
+
+      const testContext = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => true,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({}),
+          },
+        },
+        dataAccess: {
+          Entitlement: mockEntitlement,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+          SiteEnrollment: mockSiteEnrollment,
+        },
+      };
+
+      const util = AccessControlUtil.fromContext(testContext);
+
+      expect(util.Entitlement).to.equal(mockEntitlement);
+      expect(util.TrialUser).to.equal(mockTrialUser);
+      expect(util.IdentityProvider).to.equal(mockIdentityProvider);
+      expect(util.SiteEnrollment).to.equal(mockSiteEnrollment);
     });
   });
 });

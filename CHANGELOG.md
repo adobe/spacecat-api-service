@@ -1,3 +1,10 @@
+# [1.172.0](https://github.com/adobe/spacecat-api-service/compare/v1.171.0...v1.172.0) (2025-09-02)
+
+
+### Features
+
+* adding auth layer for entitlement ([#1194](https://github.com/adobe/spacecat-api-service/issues/1194)) ([68a0343](https://github.com/adobe/spacecat-api-service/commit/68a0343bc21293977f91974c5c17228777c6ffe8))
+
 # [1.171.0](https://github.com/adobe/spacecat-api-service/compare/v1.170.0...v1.171.0) (2025-09-01)
 
 
