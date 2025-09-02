@@ -88,6 +88,9 @@ describe('Index Tests', () => {
         IMS_CLIENT_CODE: 'mock-client-code',
         IMS_CLIENT_SECRET: 'mock-client-secret',
         IMPORT_CONFIGURATION: '{}',
+        REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/reports-queue',
+        S3_REPORT_BUCKET: 'test-reports-bucket',
+        S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
         SCRAPE_JOB_CONFIGURATION: JSON.stringify(scrapeJobConfiguration),
       },
       dataAccess: {

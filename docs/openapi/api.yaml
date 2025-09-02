@@ -63,6 +63,8 @@ tags:
     description: Organization identity provider management operations
   - name: sandbox
     description: Sandbox audit operations
+  - name: reports
+    description: Report generation and management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -268,6 +270,10 @@ paths:
     $ref: './sandbox-audit-api.yaml#/sandbox-audit'
   /sites/{siteId}/llmo/cdn-logs-bucket-config:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-bucket-config'
+  /sites/{siteId}/reports:
+    $ref: './site-api.yaml#/site-reports'
+  /sites/{siteId}/reports/{reportId}:
+    $ref: './site-api.yaml#/site-report'
 
 components:
   securitySchemes:
