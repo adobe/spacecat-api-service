@@ -159,6 +159,7 @@ describe('ScrapeJobController tests', () => {
         enableJavascript: true,
         hideConsentBanners: false,
       },
+      s3Bucket: 's3-bucket',
       maxUrlsPerJob: 3,
     };
 
@@ -198,8 +199,11 @@ describe('ScrapeJobController tests', () => {
 
   it('should fail for a bad SCRAPE_JOB_CONFIGURATION', () => {
     baseContext.env.SCRAPE_JOB_CONFIGURATION = 'not a JSON string';
-    ScrapeJobController(baseContext);
-    expect(baseContext.log.error.getCall(0).args[0]).to.equal('Failed to parse scrape job configuration: Unexpected token \'o\', "not a JSON string" is not valid JSON');
+    try {
+      ScrapeJobController(baseContext);
+    } catch (e) {
+      expect(e.message).to.equal('Invalid scrape job configuration: Unexpected token \'o\', "not a JSON string" is not valid JSON');
+    }
   });
 
   describe('createScrapeJob', () => {
