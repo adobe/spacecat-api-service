@@ -137,7 +137,6 @@ function TrialUsersController(ctx) {
       env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
       env.IMS_SCOPE = env.EMAIL_IMS_SCOPE;
       const imsClient = ImsClient.createFrom(context);
-      context.log.info('Getting IMS service access token for client_id', env.IMS_CLIENT_ID);
       const imsTokenPayload = await imsClient.getServiceAccessToken();
       const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
       const emailTemplateName = env.EMAIL_LLMO_TEMPLATE;
@@ -153,7 +152,6 @@ function TrialUsersController(ctx) {
         body: emailPayload,
       });
 
-      context.log.info(`Email sent to ${emailId}, email payload : ${emailPayload}, response : ${emailSentResponse.status}`);
       // create use only when email is sent successfully
       if (emailSentResponse.status === 200) {
         const trialUser = await TrialUser.create({

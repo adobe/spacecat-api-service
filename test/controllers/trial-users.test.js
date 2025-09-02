@@ -128,7 +128,7 @@ describe('Trial User Controller', () => {
     // Mock IMS client
     const mockImsClient = {
       createFrom: sandbox.stub().returns({
-        getServiceAccessToken: sandbox.stub().resolves('mock-access-token'),
+        getServiceAccessToken: sandbox.stub().resolves({ access_token: 'mock-access-token' }),
       }),
     };
 
@@ -401,12 +401,6 @@ describe('Trial User Controller', () => {
       const body = await result.json();
       expect(body).to.have.property('id');
       expect(body).to.have.property('emailId', 'newuser@example.com');
-
-      // Verify that the IMS token retrieval was logged
-      expect(mockLogger.info).to.have.been.calledWith('Getting IMS service access token for client_id', 'test-client-id');
-
-      // Verify that the email response was logged
-      expect(mockLogger.info).to.have.been.calledWith('Email sent to newuser@example.com, email payload : <sendTemplateEmailReq>\n    <toList>newuser@example.com</toList>\n</sendTemplateEmailReq>, response : 200');
     });
 
     it('should return bad request for invalid organization ID', async () => {
