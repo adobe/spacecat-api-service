@@ -29,6 +29,14 @@ describe('LlmoController', () => {
   let mockEnv;
   let tracingFetchStub;
 
+  // Helper function to create mock objects
+  const createMockAccessControlUtil = (accessResult) => ({
+    fromContext: (context) => ({
+      log: context.log,
+      hasAccess: async () => accessResult,
+    }),
+  });
+
   beforeEach(async () => {
     // Create mock LLMO config
     mockLlmoConfig = {
@@ -98,18 +106,59 @@ describe('LlmoController', () => {
       updateImports: sinon.stub(),
     };
 
+    // Create mock organization
+    const mockOrganization = {
+      getId: sinon.stub().returns('test-org-id'),
+      getImsOrgId: sinon.stub().returns('test-ims-org-id'),
+    };
+
     // Create mock site
     mockSite = {
       getId: sinon.stub().returns('test-site-id'),
       getConfig: sinon.stub().returns(mockConfig),
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
+      getOrganization: sinon.stub().resolves(mockOrganization),
     };
 
     // Create mock data access
     mockDataAccess = {
       Site: {
         findById: sinon.stub().resolves(mockSite),
+      },
+      Entitlement: {
+        PRODUCT_CODES: {
+          LLMO: 'llmo',
+        },
+        findByOrganizationIdAndProductCode: sinon.stub().resolves({
+          getId: sinon.stub().returns('entitlement-123'),
+          getProductCode: sinon.stub().returns('llmo'),
+          getTier: sinon.stub().returns('premium'),
+        }),
+        TIERS: {
+          FREE_TRIAL: 'free_trial',
+        },
+      },
+      SiteEnrollment: {
+        allBySiteId: sinon.stub().resolves([{
+          getEntitlementId: sinon.stub().returns('entitlement-123'),
+        }]),
+      },
+      TrialUser: {
+        findByEmailId: sinon.stub().resolves(null),
+        STATUSES: {
+          REGISTERED: 'registered',
+        },
+      },
+      OrganizationIdentityProvider: {
+        allByOrganizationId: sinon.stub().resolves([]),
+        create: sinon.stub().resolves({
+          provider: 'GOOGLE',
+        }),
+        PROVIDER_TYPES: {
+          GOOGLE: 'GOOGLE',
+          AZURE: 'AZURE',
+        },
       },
     };
 
@@ -142,6 +191,26 @@ describe('LlmoController', () => {
       dataAccess: mockDataAccess,
       log: mockLog,
       env: mockEnv,
+      attributes: {
+        authInfo: {
+          getType: () => 'jwt',
+          isAdmin: () => false,
+          hasOrganization: () => true,
+          hasScope: () => true,
+          getScopes: () => [{ name: 'user' }],
+          getProfile: () => ({
+            email: 'test@example.com',
+            trial_email: 'trial@example.com',
+            first_name: 'Test',
+            last_name: 'User',
+            provider: 'GOOGLE',
+          }),
+        },
+      },
+      pathInfo: {
+        method: 'GET',
+        suffix: '/llmo/sheet-data',
+      },
     };
 
     // Create tracingFetch stub
@@ -153,9 +222,26 @@ describe('LlmoController', () => {
         SPACECAT_USER_AGENT: 'test-user-agent',
         tracingFetch: tracingFetchStub,
       },
+      '../../src/support/access-control-util.js': {
+        default: class MockAccessControlUtil {
+          static fromContext(context) {
+            return new MockAccessControlUtil(context);
+          }
+
+          constructor(context) {
+            this.log = context.log;
+          }
+
+          // eslint-disable-next-line class-methods-use-this
+          async hasAccess() {
+            // Mock successful access for tests
+            return true;
+          }
+        },
+      },
     });
 
-    controller = LlmoController();
+    controller = LlmoController(mockContext);
   });
 
   afterEach(() => {
@@ -561,6 +647,27 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
+    });
+
+    it('should throw error when access is denied', async () => {
+      // Create a new controller instance with a mock that denies access
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
     });
   });
 

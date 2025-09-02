@@ -10,8 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
-import { Site, Organization } from '@adobe/spacecat-shared-data-access';
+import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
+import {
+  Site, Organization, TrialUser as TrialUserModel,
+  Entitlement as EntitlementModel,
+  OrganizationIdentityProvider as OrganizationIdentityProviderModel,
+} from '@adobe/spacecat-shared-data-access';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { sanitizePath } from '../utils/route-utils.js';
@@ -38,7 +42,6 @@ export default class AccessControlUtil {
 
   constructor(context) {
     const { log, pathInfo, attributes } = context;
-    this.authInfo = attributes?.authInfo;
 
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
@@ -48,11 +51,19 @@ export default class AccessControlUtil {
         .withAuthenticated(true)
         .withProfile(profile)
         .withType(this.name);
+    } else {
+      if (!isNonEmptyObject(attributes?.authInfo)) {
+        throw new Error('Missing authInfo');
+      }
+      this.authInfo = attributes?.authInfo;
+      this.Entitlement = context.dataAccess.Entitlement;
+      this.SiteEnrollment = context.dataAccess.SiteEnrollment;
+      this.TrialUser = context.dataAccess.TrialUser;
+      this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
     }
 
-    if (!isNonEmptyObject(this.authInfo)) {
-      throw new Error('Missing authInfo');
-    }
+    // Always assign the log property
+    this.log = log;
   }
 
   isAccessTypeJWT() {
@@ -77,7 +88,64 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
-  async hasAccess(entity, subService = '') {
+  async validateEntitlement(org, site, productCode) {
+    // eslint-disable-next-line max-len
+    const entitlement = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
+    if (!isNonEmptyObject(entitlement)) {
+      throw new Error('Missing entitlement for organization');
+    }
+    if (!hasText(entitlement.getTier())) {
+      throw new Error(`[Error] Entitlement tier is not set for ${productCode}`);
+    }
+    if (site) {
+      const siteEnrollments = await this.SiteEnrollment.allBySiteId(site.getId());
+      // eslint-disable-next-line max-len
+      const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement.getId());
+      if (!validSiteEnrollment) {
+        throw new Error('[Error] Valid site enrollment not found');
+      }
+    }
+
+    if (entitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
+      const profile = this.authInfo.getProfile();
+      const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
+
+      // First check if the profile provider is one of the supported provider types
+      const supportedProviders = Object.values(OrganizationIdentityProviderModel.PROVIDER_TYPES);
+      if (!supportedProviders.includes(profile.provider)) {
+        throw new Error('[Error] IDP not supported');
+      }
+
+      // Check if the organization already has an identity provider for this provider
+      const identityProviders = await this.IdentityProvider.allByOrganizationId(org.getId());
+      let providerId = identityProviders.find((idp) => idp.getProvider() === profile.provider);
+
+      // If no identity provider exists for this provider, create one
+      if (!providerId) {
+        providerId = await this.IdentityProvider.create({
+          organizationId: org.getId(),
+          provider: profile.provider,
+          // TODO: it should IDP subject/identifier not sure at the moment
+          externalId: profile.provider,
+        });
+      }
+
+      if (!trialUser) {
+        await this.TrialUser.create({
+          emailId: profile.trial_email,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+          provider: providerId.provider,
+          organizationId: org.getId(),
+          status: TrialUserModel.STATUSES.REGISTERED,
+          externalUserId: profile.email,
+          lastSeenAt: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  async hasAccess(entity, subService = '', productCode = '') {
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
@@ -99,6 +167,17 @@ export default class AccessControlUtil {
     }
 
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+    if (hasOrgAccess && productCode.length > 0) {
+      let org;
+      let site;
+      if (entity instanceof Site) {
+        site = entity;
+        org = await entity.getOrganization();
+      } else if (entity instanceof Organization) {
+        org = entity;
+      }
+      await this.validateEntitlement(org, site, productCode);
+    }
     if (subService.length > 0) {
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
     }
