@@ -1,3 +1,10 @@
+# [1.173.0](https://github.com/adobe/spacecat-api-service/compare/v1.172.0...v1.173.0) (2025-09-02)
+
+
+### Features
+
+* adding send email flow ([#1207](https://github.com/adobe/spacecat-api-service/issues/1207)) ([0594c74](https://github.com/adobe/spacecat-api-service/commit/0594c74f028b087be514d1f6aee6132e896a1681))
+
 # [1.172.0](https://github.com/adobe/spacecat-api-service/compare/v1.171.0...v1.172.0) (2025-09-02)
 
 
