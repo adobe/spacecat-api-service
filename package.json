@@ -43,8 +43,7 @@
     "timeout": 900000,
     "nodeVersion": 22,
     "static": [
-      "static/onboard/profiles.json",
-      "static/email-templates/trial-user-email.xml"
+      "static/onboard/profiles.json"
     ]
   },
   "repository": {
