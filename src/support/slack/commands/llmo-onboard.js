@@ -10,8 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { getLastNumberOfWeeks, isValidUrl } from '@adobe/spacecat-shared-utils';
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+/* c8 ignore start */
 
 import {
   extractURLFromSlackInput,
@@ -20,33 +19,7 @@ import {
 
 import BaseCommand from './base.js';
 
-const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
-const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
-const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
-const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
-
 const PHRASES = ['onboard-llmo'];
-
-async function triggerReferralTrafficBackfill(context, configuration, siteId) {
-  const { log, sqs } = context;
-
-  const last4Weeks = getLastNumberOfWeeks(4);
-
-  for (const last4Week of last4Weeks) {
-    const { week, year } = last4Week;
-    const message = {
-      type: REFERRAL_TRAFFIC_IMPORT,
-      siteId,
-      auditContext: {
-        auditType: REFERRAL_TRAFFIC_AUDIT,
-        week,
-        year,
-      },
-    };
-    sqs.sendMessage(configuration.getQueues().imports, message);
-    log.info(`Successfully triggered import ${REFERRAL_TRAFFIC_IMPORT} with message: ${JSON.stringify(message)}`);
-  }
-}
 
 /**
  * Factory function to create the LlmoOnboardCommand object.
@@ -59,15 +32,12 @@ function LlmoOnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-llmo',
     name: 'Onboard LLMO',
-    description: 'Onboards a site for LLMO (Large Language Model Optimizer) by setting dataFolder and brand.',
+    description: 'Onboards a site for LLMO (Large Language Model Optimizer) through a modal interface.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {baseURL} {dataFolder} {brandName}`,
+    usageText: `${PHRASES[0]} <site url>`,
   });
 
-  const {
-    dataAccess, log,
-  } = context;
-  const { Site, Configuration } = dataAccess;
+  const { log } = context;
 
   /**
    * Handles LLMO onboarding for a single site.
@@ -78,102 +48,47 @@ function LlmoOnboardCommand(context) {
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say } = slackContext;
+    const { say, threadTs } = slackContext;
+
+    const [site] = args;
+
+    const normalizedSite = extractURLFromSlackInput(site);
+
+    if (!normalizedSite) {
+      await say(baseCommand.usage());
+      return;
+    }
 
     try {
-      if (args.length < 3) {
-        await say(':warning: Missing required arguments. Please provide: `baseURL`, `dataFolder`, and `brandName`.');
-        await say(`Usage: _${baseCommand.usage().replace('Usage: _', '').replace('_', '')}_`);
-        return;
-      }
+      const message = {
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: ':rocket: *LLMO Onboarding*\n\nClick the button below to start the interactive onboarding process.',
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Start Onboarding',
+                },
+                value: normalizedSite,
+                action_id: 'start_llmo_onboarding',
+                style: 'primary',
+              },
+            ],
+          },
+        ],
+        thread_ts: threadTs,
+      };
 
-      const [baseURLInput, dataFolder, ...brandNameParts] = args;
-      const brandName = brandNameParts.join(' '); // Allow brand names with spaces
-
-      if (!brandName.trim()) {
-        await say(':warning: Brand name cannot be empty.');
-        return;
-      }
-
-      const baseURL = extractURLFromSlackInput(baseURLInput);
-
-      if (!isValidUrl(baseURL)) {
-        await say(':warning: Please provide a valid site base URL.');
-        return;
-      }
-
-      await say(`:gear: Starting LLMO onboarding for site ${baseURL}...`);
-
-      // Find the site
-      const site = await Site.findByBaseURL(baseURL);
-      if (!site) {
-        await say(`:x: Site '${baseURL}' not found. Please add the site first using the regular onboard command.`);
-        return;
-      }
-
-      const siteId = site.getId();
-      log.info(`Found site ${baseURL} with ID: ${siteId}`);
-
-      // Get current site config
-      const siteConfig = site.getConfig();
-
-      // Update brand and data directory
-      siteConfig.updateLlmoBrand(brandName.trim());
-      siteConfig.updateLlmoDataFolder(dataFolder.trim());
-
-      // enable the traffic-analysis import for referral-traffic
-      siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
-
-      // enable the llmo-prompts-ahrefs import
-      siteConfig.enableImport('llmo-prompts-ahrefs', { limit: 50 });
-
-      // update the site config object
-      site.setConfig(Config.toDynamoItem(siteConfig));
-
-      // enable all necessary handlers
-      const configuration = await Configuration.findLatest();
-      configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
-      configuration.enableHandlerForSite('geo-brand-presence', site);
-
-      // enable the cdn-analysis only if no other site in this organization already has it enabled
-      const organizationId = site.getOrganizationId();
-      const sitesInOrg = await Site.allByOrganizationId(organizationId);
-
-      const hasAgenticTrafficEnabled = sitesInOrg.some(
-        (orgSite) => configuration.isHandlerEnabledForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, orgSite),
-      );
-
-      if (!hasAgenticTrafficEnabled) {
-        log.info(`Enabling agentic traffic audits for organization ${organizationId} (first site in org)`);
-        configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
-      } else {
-        log.info(`Agentic traffic audits already enabled for organization ${organizationId}, skipping`);
-      }
-
-      // enable the cdn-logs-report audits for agentic traffic
-      configuration.enableHandlerForSite(AGENTIC_TRAFFIC_REPORT_AUDIT, site);
-
-      try {
-        await configuration.save();
-        await site.save();
-        log.info(`Successfully updated LLMO config for site ${siteId}`);
-
-        await triggerReferralTrafficBackfill(context, configuration, siteId);
-
-        const message = `:white_check_mark: *LLMO onboarding completed successfully!*
-        
-:link: *Site:* ${baseURL}
-:identification_card: *Site ID:* ${siteId}
-:file_folder: *Data Folder:* ${dataFolder}
-:label: *Brand:* ${brandName}
-
-The site is now ready for LLMO operations. You can access the configuration at the LLMO API endpoints.`;
-
-        await say(message);
-      } catch (error) {
-        log.error(`Error saving LLMO config for site ${siteId}: ${error.message}`);
-        await say(`:x: Failed to save LLMO configuration: ${error.message}`);
-      }
+      await say(message);
     } catch (error) {
       log.error('Error in LLMO onboarding:', error);
       await postErrorMessage(say, error);
@@ -185,3 +100,5 @@ The site is now ready for LLMO operations. You can access the configuration at t
 }
 
 export default LlmoOnboardCommand;
+
+/* c8 ignore stop */

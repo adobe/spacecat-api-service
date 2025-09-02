@@ -29,6 +29,14 @@ describe('LlmoController', () => {
   let mockEnv;
   let tracingFetchStub;
 
+  // Helper function to create mock objects
+  const createMockAccessControlUtil = (accessResult) => ({
+    fromContext: (context) => ({
+      log: context.log,
+      hasAccess: async () => accessResult,
+    }),
+  });
+
   beforeEach(async () => {
     // Create mock LLMO config
     mockLlmoConfig = {
@@ -50,6 +58,11 @@ describe('LlmoController', () => {
         { key: 'host', value: ['www.example.com', 'abc.com'], type: 'exclude' },
         { key: 'host', value: ['www.example.com', 'abc.com'], type: 'include' },
       ],
+      cdnBucketConfig: {
+        bucketName: 'test-bucket',
+        orgId: 'test-org-id',
+        cdnProvider: 'aem-cs-fastly',
+      },
     };
 
     // Create mock config
@@ -67,6 +80,7 @@ describe('LlmoController', () => {
       removeLlmoCustomerIntent: sinon.stub(),
       updateLlmoCustomerIntent: sinon.stub(),
       updateLlmoCdnlogsFilter: sinon.stub(),
+      updateLlmoCdnBucketConfig: sinon.stub(),
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
       getLlmoDataFolder: sinon.stub().returns('test-folder'),
@@ -85,10 +99,17 @@ describe('LlmoController', () => {
       getFetchConfig: sinon.stub().returns({}),
       getBrandConfig: sinon.stub().returns({}),
       getCdnLogsConfig: sinon.stub().returns({}),
+      getCdnBucketConfig: sinon.stub().returns({}),
       updateSlackConfig: sinon.stub(),
       updateLlmoDataFolder: sinon.stub(),
       updateLlmoBrand: sinon.stub(),
       updateImports: sinon.stub(),
+    };
+
+    // Create mock organization
+    const mockOrganization = {
+      getId: sinon.stub().returns('test-org-id'),
+      getImsOrgId: sinon.stub().returns('test-ims-org-id'),
     };
 
     // Create mock site
@@ -97,12 +118,47 @@ describe('LlmoController', () => {
       getConfig: sinon.stub().returns(mockConfig),
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
+      getOrganization: sinon.stub().resolves(mockOrganization),
     };
 
     // Create mock data access
     mockDataAccess = {
       Site: {
         findById: sinon.stub().resolves(mockSite),
+      },
+      Entitlement: {
+        PRODUCT_CODES: {
+          LLMO: 'llmo',
+        },
+        findByOrganizationIdAndProductCode: sinon.stub().resolves({
+          getId: sinon.stub().returns('entitlement-123'),
+          getProductCode: sinon.stub().returns('llmo'),
+          getTier: sinon.stub().returns('premium'),
+        }),
+        TIERS: {
+          FREE_TRIAL: 'free_trial',
+        },
+      },
+      SiteEnrollment: {
+        allBySiteId: sinon.stub().resolves([{
+          getEntitlementId: sinon.stub().returns('entitlement-123'),
+        }]),
+      },
+      TrialUser: {
+        findByEmailId: sinon.stub().resolves(null),
+        STATUSES: {
+          REGISTERED: 'registered',
+        },
+      },
+      OrganizationIdentityProvider: {
+        allByOrganizationId: sinon.stub().resolves([]),
+        create: sinon.stub().resolves({
+          provider: 'GOOGLE',
+        }),
+        PROVIDER_TYPES: {
+          GOOGLE: 'GOOGLE',
+          AZURE: 'AZURE',
+        },
       },
     };
 
@@ -135,6 +191,26 @@ describe('LlmoController', () => {
       dataAccess: mockDataAccess,
       log: mockLog,
       env: mockEnv,
+      attributes: {
+        authInfo: {
+          getType: () => 'jwt',
+          isAdmin: () => false,
+          hasOrganization: () => true,
+          hasScope: () => true,
+          getScopes: () => [{ name: 'user' }],
+          getProfile: () => ({
+            email: 'test@example.com',
+            trial_email: 'trial@example.com',
+            first_name: 'Test',
+            last_name: 'User',
+            provider: 'GOOGLE',
+          }),
+        },
+      },
+      pathInfo: {
+        method: 'GET',
+        suffix: '/llmo/sheet-data',
+      },
     };
 
     // Create tracingFetch stub
@@ -146,9 +222,26 @@ describe('LlmoController', () => {
         SPACECAT_USER_AGENT: 'test-user-agent',
         tracingFetch: tracingFetchStub,
       },
+      '../../src/support/access-control-util.js': {
+        default: class MockAccessControlUtil {
+          static fromContext(context) {
+            return new MockAccessControlUtil(context);
+          }
+
+          constructor(context) {
+            this.log = context.log;
+          }
+
+          // eslint-disable-next-line class-methods-use-this
+          async hasAccess() {
+            // Mock successful access for tests
+            return true;
+          }
+        },
+      },
     });
 
-    controller = LlmoController();
+    controller = LlmoController(mockContext);
   });
 
   afterEach(() => {
@@ -554,6 +647,27 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
+    });
+
+    it('should throw error when access is denied', async () => {
+      // Create a new controller instance with a mock that denies access
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
     });
   });
 
@@ -1256,6 +1370,89 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
+    });
+  });
+
+  describe('patchLlmoCdnBucketConfig', () => {
+    beforeEach(() => {
+      mockContext.data = {
+        cdnBucketConfig: {
+          bucketName: 'test-bucket',
+          orgId: 'test-org-id',
+        },
+      };
+    });
+
+    it('should update CDN bucket config successfully', async () => {
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.cdnBucketConfig);
+    });
+
+    it('should return bad request when no data provided', async () => {
+      mockContext.data = null;
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Update data must be provided as an object');
+    });
+
+    it('should return bad request when data is not an object', async () => {
+      mockContext.data = 'invalid data';
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Update data must be provided as an object');
+    });
+
+    it('should handle save errors gracefully', async () => {
+      const saveError = new Error('Database connection failed');
+      mockSite.save.rejects(saveError);
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockLlmoConfig.cdnBucketConfig);
+      expect(mockSite.setConfig).to.have.been.calledOnce;
+      expect(mockSite.save).to.have.been.calledOnce;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error updating CDN logs bucket config for site\'s llmo config test-site-id: Database connection failed',
+      );
+    });
+
+    it('should handle null cdnBucketConfig in response', async () => {
+      mockConfig.getLlmoConfig.returns({
+        dataFolder: 'test-folder',
+        brand: 'test-brand',
+        cdnBucketConfig: null,
+      });
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({});
+    });
+
+    it('should return bad request when getSiteAndValidateLlmo throws an error', async () => {
+      const error = new Error('Site not found');
+      mockDataAccess.Site.findById.rejects(error);
+
+      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site not found');
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error updating CDN bucket config for siteId: test-site-id, error: Site not found',
+      );
     });
   });
 });

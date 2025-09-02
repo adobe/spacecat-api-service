@@ -79,6 +79,7 @@ export function initSlackBot(lambdaContext, App) {
 
   app.view('onboard_site_modal', actions.onboardSiteModal(lambdaContext));
   app.view('preflight_config_modal', actions.preflight_config_modal(lambdaContext));
+  app.view('onboard_llmo_modal', actions.onboardLLMOModal(lambdaContext));
 
   return app;
 }
