@@ -18,6 +18,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
+import esmock from 'esmock';
 import TrialUserController from '../../src/controllers/trial-users.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -113,7 +114,7 @@ describe('Trial User Controller', () => {
 
   let trialUserController;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sandbox.restore();
 
     // Create a mock AccessControlUtil instance that will be used by the controller
@@ -124,7 +125,32 @@ describe('Trial User Controller', () => {
     // Stub AccessControlUtil.fromContext to return our mock instance
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtilInstance);
 
-    trialUserController = TrialUserController({
+    // Mock IMS client
+    const mockImsClient = {
+      createFrom: sandbox.stub().returns({
+        getServiceAccessToken: sandbox.stub().resolves({ access_token: 'mock-access-token' }),
+      }),
+    };
+
+    // Mock fetch globally
+    global.fetch = sandbox.stub().resolves({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: sandbox.stub().resolves({ success: true }),
+    });
+
+    // Create mocked controller with all necessary mocks
+    const MockedTrialUserController = await esmock('../../src/controllers/trial-users.js', {
+      '@adobe/spacecat-shared-ims-client': { ImsClient: mockImsClient },
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => mockAccessControlUtilInstance,
+        },
+      },
+    });
+
+    trialUserController = MockedTrialUserController({
       dataAccess: mockDataAccess,
       attributes: {
         authInfo: new AuthInfo()
@@ -346,6 +372,14 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_ID: 'test-client-id',
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
+        },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -479,6 +513,14 @@ describe('Trial User Controller', () => {
         data: { emailId: 'user@sub.example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_ID: 'test-client-id',
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
+        },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -508,6 +550,14 @@ describe('Trial User Controller', () => {
         data: { emailId: 'user+tag@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_ID: 'test-client-id',
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
+        },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -539,6 +589,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -562,6 +613,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -585,6 +637,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'existing@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -597,7 +650,7 @@ describe('Trial User Controller', () => {
 
       expect(result.status).to.equal(409);
       const body = await result.json();
-      expect(body.message).to.equal('Trial user with this email already exists');
+      expect(body.message).to.equal(`Trial user with this email already exists ${mockTrialUser.getId()}`);
     });
 
     it('should return internal server error when database operation fails', async () => {
@@ -611,6 +664,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -636,6 +690,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -661,6 +716,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
+        env: {},
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -675,6 +731,43 @@ describe('Trial User Controller', () => {
       const body = await result.json();
       expect(body.message).to.equal('Organization lookup failed');
       expect(mockLogger.error).to.have.been.calledWith(`Error creating trial user invite for organization ${organizationId}: ${orgError.message}`);
+    });
+
+    it('should return bad request when email sending fails', async () => {
+      // Mock fetch to return a non-200 status
+      global.fetch = sandbox.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: sandbox.stub().resolves({ success: false }),
+      });
+
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_ID: 'test-client-id',
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
+        },
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Some Error Occured while sending email to the user');
     });
   });
 });
