@@ -147,7 +147,8 @@ function TrialUsersController(ctx) {
       env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
       env.IMS_SCOPE = env.EMAIL_IMS_SCOPE;
       const imsClient = ImsClient.createFrom(context);
-      const imsToken = await imsClient.getServiceAccessTokenV3();
+      context.log.info('Getting IMS service access token for client_id', env.IMS_CLIENT_ID);
+      const imsToken = await imsClient.getServiceAccessToken();
       const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
       const emailPayload = await buildEmailPayload(emailId);
       // Send email using Adobe Post Office API

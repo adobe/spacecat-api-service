@@ -128,7 +128,7 @@ describe('Trial User Controller', () => {
     // Mock IMS client
     const mockImsClient = {
       createFrom: sandbox.stub().returns({
-        getServiceAccessTokenV3: sandbox.stub().resolves('mock-access-token'),
+        getServiceAccessToken: sandbox.stub().resolves('mock-access-token'),
       }),
     };
 
