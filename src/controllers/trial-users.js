@@ -152,7 +152,7 @@ function TrialUsersController(ctx) {
         body: emailPayload,
       });
 
-      // create use only when email is sent successfully
+      // create user only when email is sent successfully
       if (emailSentResponse.status === 200) {
         const trialUser = await TrialUser.create({
           emailId,
