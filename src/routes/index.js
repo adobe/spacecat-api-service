@@ -248,6 +248,9 @@ export default function getRouteHandlers(
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
+
+    // Sandbox configuration route
+    'PATCH /configurations/sandbox': configurationController.updateSandboxConfig,
   };
 
   // Initialization of static and dynamic routes

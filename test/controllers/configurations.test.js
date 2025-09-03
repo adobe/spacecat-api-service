@@ -235,4 +235,130 @@ describe('Configurations Controller', () => {
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Configuration version required to be an integer');
   });
+
+  describe('Sandbox Configuration Methods', () => {
+    let mockGlobalConfig;
+
+    beforeEach(() => {
+      mockGlobalConfig = {
+        updateSandboxAuditConfigs: sandbox.stub(),
+      };
+
+      mockDataAccess.Configuration.findByType = sandbox.stub().resolves(mockGlobalConfig);
+      mockDataAccess.Configuration.save = sandbox.stub().resolves();
+    });
+
+    describe('updateSandboxConfig', () => {
+      it('should update sandbox configurations successfully', async () => {
+        const requestContext = {
+          data: {
+            sandboxConfigs: {
+              cwv: { expire: '10' },
+              'meta-tags': { expire: '15' },
+            },
+          },
+        };
+
+        const updatedConfig = { ...mockGlobalConfig };
+        mockGlobalConfig.updateSandboxAuditConfigs.returns(updatedConfig);
+
+        const result = await configurationsController.updateSandboxConfig(requestContext);
+        const response = await result.json();
+
+        expect(result.status).to.equal(200);
+        expect(response).to.have.property('message', 'Sandbox configurations updated successfully');
+        expect(response).to.have.property('updatedConfigs');
+        expect(response.updatedConfigs).to.deep.equal({
+          cwv: { expire: '10' },
+          'meta-tags': { expire: '15' },
+        });
+        expect(response).to.have.property('totalUpdated', 2);
+        expect(mockGlobalConfig.updateSandboxAuditConfigs).to.have.been.calledWith({
+          cwv: { expire: '10' },
+          'meta-tags': { expire: '15' },
+        });
+        expect(mockDataAccess.Configuration.save).to.have.been.calledWith(updatedConfig);
+      });
+
+      it('should return bad request when sandboxConfigs is missing', async () => {
+        const requestContext = {
+          data: {},
+        };
+
+        const result = await configurationsController.updateSandboxConfig(requestContext);
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error.message).to.include('sandboxConfigs object is required');
+      });
+
+      it('should return bad request when sandboxConfigs is not an object', async () => {
+        const requestContext = {
+          data: {
+            sandboxConfigs: 'invalid',
+          },
+        };
+
+        const result = await configurationsController.updateSandboxConfig(requestContext);
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error.message).to.include('sandboxConfigs object is required');
+      });
+
+      it('should return forbidden for non-admin users', async () => {
+        context.attributes.authInfo.withProfile({ is_admin: false });
+
+        const requestContext = {
+          data: {
+            sandboxConfigs: {
+              cwv: { expire: '10' },
+            },
+          },
+        };
+
+        const result = await configurationsController.updateSandboxConfig(requestContext);
+        const error = await result.json();
+
+        expect(result.status).to.equal(403);
+        expect(error.message).to.include('Only admins can update sandbox configurations');
+      });
+
+      it('should return not found when global configuration does not exist', async () => {
+        mockDataAccess.Configuration.findByType.resolves(null);
+
+        const requestContext = {
+          data: {
+            sandboxConfigs: {
+              cwv: { expire: '10' },
+            },
+          },
+        };
+
+        const result = await configurationsController.updateSandboxConfig(requestContext);
+        const error = await result.json();
+
+        expect(result.status).to.equal(404);
+        expect(error.message).to.include('Global configuration not found');
+      });
+
+      it('should return bad request when updateSandboxAuditConfigs throws an error', async () => {
+        const requestContext = {
+          data: {
+            sandboxConfigs: {
+              cwv: { expire: '10' },
+            },
+          },
+        };
+
+        mockGlobalConfig.updateSandboxAuditConfigs.throws(new Error('Update failed'));
+
+        const result = await configurationsController.updateSandboxConfig(requestContext);
+        const error = await result.json();
+
+        expect(result.status).to.equal(400);
+        expect(error.message).to.include('Error updating sandbox configuration: Update failed');
+      });
+    });
+  });
 });
