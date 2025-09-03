@@ -159,6 +159,7 @@ describe('Brands Controller', () => {
       pathInfo: {
         headers: {
           authorization: 'Bearer token123',
+          'x-product': 'llmo',
         },
       },
       dataAccess: mockDataAccess,
@@ -253,7 +254,9 @@ describe('Brands Controller', () => {
         },
       };
       const unauthorizedBrandsController = BrandsController({
-        dataAccess: mockDataAccess, ...authContextUser,
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
       }, loggerStub, mockEnv);
       const response = await unauthorizedBrandsController.getBrandsForOrganization({
         params: { organizationId: ORGANIZATION_ID },
@@ -395,7 +398,9 @@ describe('Brands Controller', () => {
         },
       };
       const unauthorizedBrandsController = BrandsController({
-        dataAccess: mockDataAccess, ...authContextUser,
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
       }, loggerStub, mockEnv);
       const response = await unauthorizedBrandsController.getBrandGuidelinesForSite({
         params: { siteId: SITE_ID },

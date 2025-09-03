@@ -62,7 +62,11 @@ describe('PaidController', () => {
   describe('getTopPaidPages', () => {
     it('returns 400 if siteId is invalid', async () => {
       const context = { params: { siteId: 'bad-id' } };
-      const paidController = PaidController({ dataAccess: mockDataAccess, ...authContextAdmin });
+      const paidController = PaidController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextAdmin,
+      });
       const res = await paidController.getTopPaidPages(context);
       expect(res.status).to.equal(400);
     });
@@ -70,7 +74,11 @@ describe('PaidController', () => {
     it('returns 404 if site not found', async () => {
       Site.findById.resolves(null);
       const context = { params: { siteId: SITE_ID } };
-      const paidController = PaidController({ dataAccess: mockDataAccess, ...authContextAdmin });
+      const paidController = PaidController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextAdmin,
+      });
       const res = await paidController.getTopPaidPages(context);
       expect(res.status).to.equal(404);
     });
@@ -79,7 +87,11 @@ describe('PaidController', () => {
       Site.findById.resolves({ id: SITE_ID });
       LatestAudit.allBySiteIdAndAuditType.resolves([]);
       const context = { params: { siteId: SITE_ID } };
-      const paidController = PaidController({ dataAccess: mockDataAccess, ...authContextAdmin });
+      const paidController = PaidController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextAdmin,
+      });
       const res = await paidController.getTopPaidPages(context);
       expect(res.status).to.equal(404);
     });
@@ -90,7 +102,11 @@ describe('PaidController', () => {
         { getAuditResult: () => [{ key: 'other', value: [] }] },
       ]);
       const context = { params: { siteId: SITE_ID } };
-      const paidController = PaidController({ dataAccess: mockDataAccess, ...authContextAdmin });
+      const paidController = PaidController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextAdmin,
+      });
       const res = await paidController.getTopPaidPages(context);
       expect(res.status).to.equal(404);
     });
@@ -101,7 +117,11 @@ describe('PaidController', () => {
         { getAuditResult: () => [{ key: 'urlTrafficSource', value: [] }] },
       ]);
       const context = { params: { siteId: SITE_ID } };
-      const paidController = PaidController({ dataAccess: mockDataAccess, ...authContextAdmin });
+      const paidController = PaidController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextAdmin,
+      });
       const res = await paidController.getTopPaidPages(context);
       expect(res.status).to.equal(404);
     });
@@ -124,7 +144,11 @@ describe('PaidController', () => {
         { getAuditResult: () => [{ key: 'urlTrafficSource', value: urlTrafficSource }] },
       ]);
       const context = { params: { siteId: SITE_ID } };
-      const paidController = PaidController({ dataAccess: mockDataAccess, ...authContextAdmin });
+      const paidController = PaidController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextAdmin,
+      });
       const res = await paidController.getTopPaidPages(context);
       expect(res.status).to.equal(200);
       const body = await res.json();
@@ -140,7 +164,11 @@ describe('PaidController', () => {
         { getAuditResult: () => [{ key: 'urlTrafficSource', value: [{}] }] },
       ]);
 
-      const paidController = PaidController({ dataAccess: mockDataAccess, ...authContextAdmin });
+      const paidController = PaidController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextAdmin,
+      });
 
       const context = { params: { siteId: SITE_ID } };
       const res = await paidController.getTopPaidPages(context);

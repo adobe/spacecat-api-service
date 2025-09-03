@@ -105,6 +105,9 @@ describe('Configurations Controller', () => {
 
     context = {
       dataAccess: mockDataAccess,
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
       attributes: {
         authInfo: new AuthInfo()
           .withType('jwt')

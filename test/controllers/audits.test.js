@@ -257,6 +257,9 @@ describe('Audits Controller', () => {
     };
     const ctx = {
       dataAccess: mockDataAccess,
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
       ...authContextAdmin,
     };
 
@@ -344,6 +347,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
@@ -391,6 +395,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
@@ -434,6 +439,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
@@ -498,6 +504,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
@@ -537,6 +544,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 

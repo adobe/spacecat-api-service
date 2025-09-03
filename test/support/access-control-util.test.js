@@ -47,6 +47,9 @@ describe('Access Control Util', () => {
       });
 
     const context = {
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
       attributes: { authInfo },
       dataAccess: {
         Entitlement: {
@@ -63,6 +66,9 @@ describe('Access Control Util', () => {
 
   it('should throw an error if entity is not provided', async () => {
     const context = {
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
       attributes: { authInfo: new AuthInfo() },
       dataAccess: {
         Entitlement: {
@@ -89,6 +95,9 @@ describe('Access Control Util', () => {
     context = {
       log: {
         info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+      },
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
       },
       attributes: {
         authInfo: {
@@ -276,6 +285,9 @@ describe('Access Control Util', () => {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
         },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
         attributes: {
           authInfo: mockAuthInfo,
         },
@@ -388,6 +400,9 @@ describe('Access Control Util', () => {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
         },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
         attributes: { authInfo },
         dataAccess: {
           Entitlement: {
@@ -447,6 +462,9 @@ describe('Access Control Util', () => {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
         },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
         attributes: { authInfo },
         dataAccess: {
           Entitlement: {
@@ -493,6 +511,9 @@ describe('Access Control Util', () => {
       const contextForIMS = {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
         },
         attributes: { authInfo },
         dataAccess: {
@@ -585,6 +606,9 @@ describe('Access Control Util', () => {
       const testContext = {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
         },
         attributes: {
           authInfo: {
@@ -832,6 +856,9 @@ describe('Access Control Util', () => {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
         },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
         attributes: {
           authInfo: {
             getType: () => 'jwt',
@@ -901,6 +928,97 @@ describe('Access Control Util', () => {
         lastSeenAt: sinon.match.string,
       });
     });
+
+    it('should throw error when x-product header does not match productCode', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      // Set up context with x-product header
+      const testContextWithHeader = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'different-product' },
+        },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({
+              trial_email: 'trial@example.com',
+              provider: 'GOOGLE',
+              email: 'user@example.com',
+              first_name: 'John',
+              last_name: 'Doe',
+            }),
+          },
+        },
+        dataAccess: {
+          Entitlement: mockEntitlement,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+          SiteEnrollment: mockSiteEnrollment,
+        },
+      };
+
+      const utilWithHeader = AccessControlUtil.fromContext(testContextWithHeader);
+
+      await expect(utilWithHeader.validateEntitlement(mockOrg, null, 'llmo'))
+        .to.be.rejectedWith('[Error] Invalid origin of request');
+    });
+
+    it('should validate successfully when x-product header matches productCode', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'paid',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      // Set up context with matching x-product header
+      const testContextWithHeader = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isAdmin: () => false,
+            getScopes: () => [],
+            hasOrganization: () => true,
+            hasScope: () => true,
+            getProfile: () => ({
+              trial_email: 'trial@example.com',
+              provider: 'GOOGLE',
+              email: 'user@example.com',
+              first_name: 'John',
+              last_name: 'Doe',
+            }),
+          },
+        },
+        dataAccess: {
+          Entitlement: mockEntitlement,
+          TrialUser: mockTrialUser,
+          OrganizationIdentityProvider: mockIdentityProvider,
+          SiteEnrollment: mockSiteEnrollment,
+        },
+      };
+
+      const utilWithHeader = AccessControlUtil.fromContext(testContextWithHeader);
+
+      await expect(utilWithHeader.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+    });
   });
 
   describe('hasAccess with productCode', () => {
@@ -937,6 +1055,9 @@ describe('Access Control Util', () => {
       const testContext = {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
         },
         attributes: {
           authInfo: {
@@ -1081,6 +1202,9 @@ describe('Access Control Util', () => {
       const testContext = {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
         },
         attributes: {
           authInfo: {

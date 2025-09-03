@@ -26,6 +26,7 @@ const ANONYMOUS_ENDPOINTS = [
   /^POST \/hooks\/site-detection.+/,
 ];
 const SERVICE_CODE = 'dx_aem_perf';
+const X_PRODUCT_HEADER = 'x-product';
 
 function isAnonymous(endpoint) {
   return ANONYMOUS_ENDPOINTS.some((rgx) => rgx.test(endpoint));
@@ -60,6 +61,7 @@ export default class AccessControlUtil {
       this.SiteEnrollment = context.dataAccess.SiteEnrollment;
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
+      this.xProductHeader = pathInfo.headers[X_PRODUCT_HEADER];
     }
 
     // Always assign the log property
@@ -89,6 +91,10 @@ export default class AccessControlUtil {
   }
 
   async validateEntitlement(org, site, productCode) {
+    this.log.info(`X-Product header: ${this.xProductHeader}`);
+    if (this.xProductHeader !== productCode) {
+      throw new Error('[Error] Invalid origin of request');
+    }
     // eslint-disable-next-line max-len
     const entitlement = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
     if (!isNonEmptyObject(entitlement)) {
