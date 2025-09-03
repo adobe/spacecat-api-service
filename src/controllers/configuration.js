@@ -88,10 +88,49 @@ function ConfigurationController(ctx) {
     return ok(ConfigurationDto.toJSON(configuration));
   };
 
+  /**
+   * Updates sandbox configuration for audit types.
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Update result response.
+   */
+  const updateSandboxConfig = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update sandbox configurations');
+    }
+
+    const { sandboxConfigs } = context.data || {};
+
+    if (!sandboxConfigs || typeof sandboxConfigs !== 'object') {
+      return badRequest('sandboxConfigs object is required');
+    }
+
+    try {
+      // Load latest configuration
+      const config = await Configuration.findLatest();
+      if (!config) {
+        return notFound('Configuration not found');
+      }
+
+      // Update sandbox configurations
+      const updatedConfig = await config.updateSandboxAuditConfigs(sandboxConfigs);
+      // Save the updated configuration
+      await Configuration.save(updatedConfig);
+
+      return ok({
+        message: 'Sandbox configurations updated successfully',
+        updatedConfigs: sandboxConfigs,
+        totalUpdated: Object.keys(sandboxConfigs).length,
+      });
+    } catch (error) {
+      return badRequest(`Error updating sandbox configuration: ${error.message}`);
+    }
+  };
+
   return {
     getAll,
     getByVersion,
     getLatest,
+    updateSandboxConfig,
   };
 }
 

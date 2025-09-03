@@ -29,6 +29,7 @@ describe('getRouteHandlers', () => {
     getByVersion: sinon.stub(),
     getLatest: sinon.stub(),
     updateConfiguration: sinon.stub(),
+    updateSandboxConfig: sinon.stub(),
   };
 
   const mockHooksController = {
@@ -231,6 +232,7 @@ describe('getRouteHandlers', () => {
       'GET /configurations',
       'GET /configurations/latest',
       'PUT /configurations/latest',
+      'PATCH /configurations/sandbox',
       'PATCH /configurations/sites/audits',
       'GET /organizations',
       'POST /organizations',
@@ -256,6 +258,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PUT /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
+    expect(staticRoutes['PATCH /configurations/sandbox']).to.equal(mockConfigurationController.updateSandboxConfig);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);

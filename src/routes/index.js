@@ -111,6 +111,7 @@ export default function getRouteHandlers(
     'GET /configurations/latest': configurationController.getLatest,
     'PUT /configurations/latest': configurationController.updateConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
+    'PATCH /configurations/sandbox': configurationController.updateSandboxConfig,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
