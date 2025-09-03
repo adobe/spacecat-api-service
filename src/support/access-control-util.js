@@ -45,7 +45,7 @@ export default class AccessControlUtil {
 
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
-      log.info(`Anonymous endpoint, skipping authorization: ${sanitizePath(endpoint)}`);
+      log.info(`Anonymous endpoint, skipping authorization: ${sanitizePath(endpoint)}`); // keep?
       const profile = { user_id: 'anonymous' };
       this.authInfo = new AuthInfo()
         .withAuthenticated(true)

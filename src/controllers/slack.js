@@ -122,7 +122,7 @@ function SlackController(SlackApp) {
 
     // Suppress retry events due to HTTP timeout (usually caused by cold starts)
     if (headers['x-slack-retry-reason'] === 'http_timeout') {
-      log.info(`Ignoring retry event: ${payload.event_id}`);
+      log.info(`Ignoring retry event: ${payload.event_id}`); // probably keep?
       return new Response('', { headers: { 'x-error': 'ignored-event' } });
     }
 
@@ -186,7 +186,7 @@ function SlackController(SlackApp) {
       return notFound('Slack channel not found for this organization.');
     }
 
-    log.info(`Inviting userId: ${userProfile.userId} to the Slack channel for IMS org ID: ${imsOrgId} (organizationId ${spaceCatOrg.getId()}).`);
+    log.info(`Inviting userId: ${userProfile.userId} to the Slack channel for IMS org ID: ${imsOrgId} (organizationId ${spaceCatOrg.getId()}).`); // unsure
 
     try {
       await elevatedClient.inviteUsersByEmail(orgSlackChannelId, [userProfile]);

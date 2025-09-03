@@ -136,8 +136,6 @@ function ImportController(context) {
    * @return {object} the user profile.
    */
   function validateAccessScopes(scopes) {
-    log.debug(`validating scopes: ${scopes}`);
-
     try {
       auth.checkScopes(scopes);
     } catch (error) {
@@ -236,8 +234,6 @@ function ImportController(context) {
         isUrlInBaseDomains(urls, allowedDomains);
       }
 
-      log.info(`Creating a new import job with ${urls.length} URLs.`);
-
       // Merge the import configuration options with the request options allowing the user options
       // to override the defaults
       const mergedOptions = {
@@ -282,7 +278,7 @@ function ImportController(context) {
    */
   async function getImportJobsByDateRange(requestContext) {
     const { startDate, endDate } = parseRequestContext(requestContext);
-    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}.`);
+    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}.`); // unsure
 
     try {
       validateAccessScopes([SCOPE.READ_ALL]);

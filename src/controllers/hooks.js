@@ -148,14 +148,12 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
   const { hlxVersion, rso } = hlxConfig;
 
   if (hlxVersion < 5) {
-    log.info(`HLX version is ${hlxVersion}. Skipping fetching hlx config`);
+    log.info(`HLX version is ${hlxVersion}. Skipping fetching hlx config`); // unsure
     return null;
   }
 
   const { owner, site } = rso;
   const url = `https://admin.hlx.page/config/${owner}/aggregated/${site}.json`;
-
-  log.info(`Fetching hlx config for ${owner}/${site} with url: ${url}`);
 
   try {
     const response = await fetch(url, {
@@ -163,7 +161,7 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
     });
 
     if (response.status === 200) {
-      log.info(`HLX config found for ${owner}/${site}`);
+      log.info(`HLX config found for ${owner}/${site}`); // remove?
       return response.json();
     }
 
@@ -186,7 +184,7 @@ async function getContentSource(hlxConfig, log) {
   const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
 
   if (fstabResponse.status !== 200) {
-    log.info(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
+    log.info(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`); // log as error?
     return null;
   }
 
@@ -198,7 +196,7 @@ async function getContentSource(hlxConfig, log) {
     : null;
 
   if (!isValidUrl(url)) {
-    log.info(`No content source found for ${owner}/${repo} in fstab.yaml`);
+    log.info(`No content source found for ${owner}/${repo} in fstab.yaml`); // log as error?
     return null;
   }
 
@@ -224,7 +222,6 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
     const rso = parseHlxRSO(domain);
     if (isObject(rso)) {
       hlxConfig.rso = rso;
-      log.info(`Parsed RSO: ${JSON.stringify(rso)} for domain: ${domain}`);
       // eslint-disable-next-line no-await-in-loop
       const config = await fetchHlxConfig(hlxConfig, hlxAdminToken, log);
       if (isObject(config)) {
@@ -239,7 +236,7 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
           hlxConfig.content = content;
         }
         hlxConfig.hlxVersion = 5;
-        log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`);
+        log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`); // unsure
       } else {
         try {
           // eslint-disable-next-line no-await-in-loop
@@ -374,7 +371,6 @@ function HooksController(lambdaContext) {
           if (!deepEqual(siteHlxConfig[key], candidateHlxConfig[key])) {
             updatedHlxConfig[key] = candidateHlxConfig[key];
             hlxConfigChanged = true;
-            log.info(`HLX config key "${key}" updated for site: ${baseURL}`);
           }
         });
 
@@ -383,7 +379,7 @@ function HooksController(lambdaContext) {
           await site.save();
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
-          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`);
+          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`); // unsure
         }
       }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
@@ -407,8 +403,6 @@ function HooksController(lambdaContext) {
 
   async function processCDNHook(context) {
     const { log } = context;
-
-    log.info(`Processing CDN site candidate. Input: ${JSON.stringify(context.data)}`);
 
     const {
       // eslint-disable-next-line camelcase,no-unused-vars

@@ -91,7 +91,7 @@ function ScrapeJobController(context) {
    */
   async function getScrapeJobsByDateRange(requestContext) {
     const { startDate, endDate } = parseRequestContext(requestContext);
-    log.debug(`Fetching scrape jobs between startDate: ${startDate} and endDate: ${endDate}.`);
+    log.debug(`Fetching scrape jobs between startDate: ${startDate} and endDate: ${endDate}.`); // unsure
 
     try {
       const jobs = await scrapeClient.getScrapeJobsByDateRange(startDate, endDate);
@@ -166,8 +166,6 @@ function ScrapeJobController(context) {
     if (!hasText(encodedBaseURL)) {
       return badRequest('Base URL required');
     }
-
-    log.debug(`Fetching scrape jobs by baseURL: ${encodedBaseURL} and processingType: ${processingType}.`);
 
     let decodedBaseURL = null;
     try {

@@ -242,7 +242,6 @@ function ImportSupervisor(services, config) {
 
     // if the job type is 'xwalk', then we need to write the 3 files to S3
     if (options?.type === ImportJobModel.ImportOptionTypes.XWALK) {
-      log.info('Writing component models, filters, and definitions to S3 for jobId: ', newImportJob.getId());
       await writeFileToS3('component-models.json', newImportJob.getId(), models);
       await writeFileToS3('component-filters.json', newImportJob.getId(), filters);
       await writeFileToS3('component-definition.json', newImportJob.getId(), definitions);
@@ -386,13 +385,9 @@ function ImportSupervisor(services, config) {
     job.setStatus(ImportJobModel.ImportJobStatus.STOPPED);
     await job.save();
 
-    log.info(`Stopping import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)}`);
-
-    log.info(`Purging the queue ${importQueueUrlPrefix}${job.getImportQueueId()} for the import job with jobId: ${jobId}`);
-
     await sqs.purgeQueue(`${importQueueUrlPrefix}${job.getImportQueueId()}`);
 
-    log.info(`Import job with jobId: ${jobId} has been stopped successfully`);
+    log.info(`Import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)} has been stopped successfully`); // keep?
   }
 
   return {

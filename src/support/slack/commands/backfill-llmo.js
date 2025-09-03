@@ -49,7 +49,7 @@ async function triggerBackfill(context, configuration, siteId, streamType, weeks
     };
     // eslint-disable-next-line no-await-in-loop
     await sqs.sendMessage(configuration.getQueues().audits, message);
-    log.info(`Successfully triggered ${streamType} backfill ${auditType} with message: ${JSON.stringify(message)}`);
+    log.info(`Successfully triggered ${streamType} backfill ${auditType} with message: ${JSON.stringify(message)}`); // keep?
   }
 }
 
@@ -122,7 +122,6 @@ function BackfillLlmoCommand(context) {
       }
 
       const siteId = site.getId();
-      log.info(`Found site ${baseURL} with ID: ${siteId}`);
 
       const configuration = await Configuration.findLatest();
 

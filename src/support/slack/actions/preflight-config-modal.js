@@ -142,7 +142,7 @@ export function preflightConfigModal(lambdaContext) {
         configDetails = `:gear: *Delivery Config:* Program ${deliveryConfigFromPreview.programId}, Environment ${deliveryConfigFromPreview.environmentId}\n`
                        + `:link: *Preview URL:* ${previewUrl}`;
 
-        log.info(`Preflight audit enabled for site ${siteId} with delivery config:`, {
+        log.info(`Preflight audit enabled for site ${siteId} with delivery config:`, { // keep?
           authoringType,
           deliveryConfig: deliveryConfigFromPreview,
         });
@@ -151,7 +151,7 @@ export function preflightConfigModal(lambdaContext) {
         configDetails = `:gear: *Helix Config:* ${helixConfigFromPreview.rso.ref}--${helixConfigFromPreview.rso.site}--${helixConfigFromPreview.rso.owner}.${helixConfigFromPreview.rso.tld}\n`
                        + `:link: *Preview URL:* ${previewUrl}`;
 
-        log.info(`Preflight audit enabled for site ${siteId} with helix config:`, {
+        log.info(`Preflight audit enabled for site ${siteId} with helix config:`, { // keep?
           authoringType,
           helixConfig: helixConfigFromPreview,
         });

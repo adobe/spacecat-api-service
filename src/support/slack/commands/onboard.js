@@ -197,13 +197,11 @@ function OnboardCommand(context) {
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
 
-        log.info('All sites were processed and onboarded.');
-
         fileStream.end();
 
         fileStream.on('finish', async () => {
           try {
-            const uploadResponse = client.files.upload({
+            client.files.upload({ // this should work without the constant no?
               channels: channelId,
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',
@@ -211,7 +209,6 @@ function OnboardCommand(context) {
               initial_comment: ':spacecat: *Batch onboarding in progress!* :satellite:\nHere you can find the *execution report*. :memo:',
               thread_ts: threadTs,
             });
-            log.info(uploadResponse);
           } catch (error) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
           }

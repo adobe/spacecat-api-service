@@ -201,7 +201,7 @@ async function run(request, context) {
       return await handler(context);
     } else {
       const notFoundMessage = `no such route /${route}`;
-      log.info(notFoundMessage);
+      log.info(notFoundMessage); // keep? we already return notfound with the message
       return notFound(notFoundMessage);
     }
   } catch (e) {

@@ -21,8 +21,6 @@ export default function rejectOrg(lambdaContext) {
       const { channel, message = {}, user } = body;
       const { blocks, ts: threadTs } = message;
 
-      log.info(JSON.stringify(body));
-
       await ack(); // slack expects acknowledgement within 3s
 
       const messageText = blocks[0]?.text?.text;
@@ -40,8 +38,6 @@ export default function rejectOrg(lambdaContext) {
         ...replyText,
         replace_original: true,
       };
-
-      log.info(`Responding org rejection with: ${JSON.stringify(reply)}`);
 
       await respond(reply);
 

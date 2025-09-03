@@ -516,17 +516,12 @@ const createSiteAndOrganization = async (
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 
-  // Check if site already exists
   if (site) {
     const siteOrgId = site.getOrganizationId();
     organizationId = siteOrgId; // Set organizationId for existing sites
     const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
     await say(message);
-    log.info(message);
   } else {
-    // New site - handle organization logic
-    log.info(`Site ${baseURL} doesn't exist. Processing organization...`);
-
     // Check if the organization with IMS Org ID already exists; create if it doesn't
     let organization = await Organization.findByImsOrgId(imsOrgID);
     if (!organization) {
@@ -536,7 +531,6 @@ const createSiteAndOrganization = async (
         localReportLine.status = 'Failed';
         throw new Error(localReportLine.errors);
       }
-      log.info(`IMS Org Details: ${imsOrgDetails}`);
       organization = await Organization.create({
         name: imsOrgDetails.orgName,
         imsOrgId: imsOrgID,
@@ -544,17 +538,13 @@ const createSiteAndOrganization = async (
 
       const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
       await say(message);
-      log.info(message);
     }
 
-    organizationId = organization.getId(); // Set organizationId for new site
-    log.info(`Organization ${organizationId} was successfully retrieved or created`);
+    organizationId = organization.getId();
     localReportLine.spacecatOrgId = organizationId;
 
-    // Create new site
-    log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
     const deliveryType = customDeliveryType || await findDeliveryType(baseURL);
-    log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
+
     localReportLine.deliveryType = deliveryType;
     const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
@@ -570,7 +560,6 @@ const createSiteAndOrganization = async (
           site.setAuthoringType(authoringType);
         }
         await site.save();
-        log.info(`Applied delivery configuration for site ${site.getId()}:`, { deliveryConfig, authoringType });
       }
     } catch (error) {
       log.error(`Error creating site: ${error.message}`);
@@ -621,14 +610,11 @@ export const onboardSingleSite = async (
   const { Configuration } = dataAccess;
   const sfnClient = new SFNClient();
 
-  // Process URL - allow customization for different input formats
   const baseURL = options.urlProcessor ? options.urlProcessor(baseURLInput) : baseURLInput.trim();
   const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
 
-  // Extract profile name for logging and reporting (assume it's passed in options)
   const profileName = options.profileName || 'unknown';
 
-  log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
   await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
@@ -673,10 +659,7 @@ export const onboardSingleSite = async (
     );
 
     const siteID = site.getId();
-    log.info(`Site ${baseURL} was successfully retrieved or created. Site ID: ${siteID}`);
     reportLine.siteId = siteID;
-
-    log.info(`Profile ${profileName} was successfully loaded`);
 
     if (!isObject(profile)) {
       const error = `Profile "${profileName}" not found or invalid.`;
@@ -712,28 +695,15 @@ export const onboardSingleSite = async (
     for (const importType of importTypes) {
       const isEnabled = isImportEnabled(importType, imports);
       if (!isEnabled) {
-        log.info(`Enabling import: ${importType}`);
         siteConfig.enableImport(importType);
         importsEnabled.push(importType);
-      } else {
-        log.info(`Import '${importType}' is already enabled, skipping`);
       }
     }
-
-    if (importsEnabled.length > 0) {
-      log.info(`Enabled the following imports for ${siteID}: ${importsEnabled.join(', ')}`);
-    } else {
-      log.info(`All imports are already enabled for ${siteID}`);
-    }
-
-    log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
 
     // Resolve canonical URL for the site from the base URL
     const resolvedUrl = await resolveCanonicalUrl(baseURL);
     const { pathname: baseUrlPathName } = new URL(baseURL);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
-
-    log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
 
     // Update the fetch configuration only if the pathname is different from the resolved URL
     if (baseUrlPathName !== resolvedUrlPathName) {
@@ -752,8 +722,6 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
-    log.info(`Site config successfully saved for site ${siteID}`);
-
     for (const importType of importTypes) {
       /* eslint-disable no-await-in-loop */
       await triggerImportRun(
@@ -766,8 +734,6 @@ export const onboardSingleSite = async (
         context,
       );
     }
-
-    log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
 
     const auditTypes = Object.keys(profile.audits);
 
@@ -787,20 +753,19 @@ export const onboardSingleSite = async (
     if (auditsEnabled.length > 0) {
       try {
         await latestConfiguration.save();
-        log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+        log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`); // keep?
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
       }
     } else {
-      log.info(`All audits are already enabled for site ${siteID}`);
+      log.info(`All audits are already enabled for site ${siteID}`); // keep?
     }
 
     reportLine.audits = auditTypes.join(', ');
     await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
 
     // trigger audit runs
-    log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
     await say(`:gear: Starting audits: ${auditTypes}`);
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
@@ -865,10 +830,6 @@ export const onboardSingleSite = async (
         },
       },
     };
-
-    log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
-    log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
-    log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
 
     // Prepare and start step function workflow with the necessary parameters
     const workflowInput = {
