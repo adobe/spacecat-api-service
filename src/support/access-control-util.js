@@ -90,7 +90,6 @@ export default class AccessControlUtil {
   }
 
   async validateEntitlement(org, site, productCode) {
-    this.log.info(`X-Product header: ${this.xProductHeader}`);
     if (this.xProductHeader !== productCode) {
       throw new Error('[Error] Invalid origin of request');
     }
