@@ -29,14 +29,12 @@ function LlmoController(ctx) {
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
-    const { dataAccess, log } = context;
+    const { dataAccess } = context;
     const { Site } = dataAccess;
 
     const site = await Site.findById(siteId);
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
-
-    log.info(`headers: ${JSON.stringify(context.pathInfo.headers)}`);
 
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
