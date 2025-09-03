@@ -147,7 +147,7 @@ export default class AccessControlUtil {
   }
 
   async hasAccess(entity, subService = '', productCode = '') {
-    if (productCode.length > 0 && this.xProductHeader !== productCode) {
+    if (hasText(productCode) && this.xProductHeader !== productCode) {
       this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
       throw new Error('[Error] Unauthorized request');
     }
