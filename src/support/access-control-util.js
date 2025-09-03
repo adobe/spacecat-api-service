@@ -43,7 +43,6 @@ export default class AccessControlUtil {
 
   constructor(context) {
     const { log, pathInfo, attributes } = context;
-    log.info(`Path info: ${JSON.stringify(pathInfo)}`);
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
       log.info(`Anonymous endpoint, skipping authorization: ${sanitizePath(endpoint)}`);
