@@ -366,7 +366,7 @@ function LlmoController(ctx) {
 
   const test = async (context) => {
     await onboardSite({
-      baseURL: 'https://hannes-slack.test', brandName: 'Hannes Test', imsOrgId: 'Test',
+      baseURL: 'https://hannes-new-slack.test', brandName: 'Hannes Test', imsOrgId: '8C6043F15F43B6390A49401A@AdobeOrg',
     }, context, { say: context.log.info });
   };
 

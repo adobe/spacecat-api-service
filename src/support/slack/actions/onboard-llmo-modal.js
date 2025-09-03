@@ -380,8 +380,9 @@ async function publishToAdminHlx(filename, outputLocation, log) {
   }
 }
 
-async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
+async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
   const { log } = lambdaCtx;
+  const { say } = slackCtx;
 
   const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/Shared%20Documents/sites/elmo-ui-data';
 
@@ -394,7 +395,8 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
 
   log.info(`Copying query-index to ${dataFolder}`);
   const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
-  const queryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
+  const templateQueryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
+  const newQueryIndex = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/query-index.xlsx`);
 
   // TODO: Instead of patching .exists, add this method https://github.com/adobe/spacecat-helix-content-sdk/issues/190
   const folderExists = await folder.exists();
@@ -402,13 +404,15 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
     await folder.createFolder(dataFolder, '/');
   } else {
     log.warn(`Warning: Folder ${dataFolder} already exists. Skipping creation.`);
+    await say(`Folder ${dataFolder} already exists. Skipping creation.`);
   }
 
-  const queryIndexExists = await queryIndex.exists();
+  const queryIndexExists = await newQueryIndex.exists();
   if (!queryIndexExists) {
-    await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
+    await templateQueryIndex.copy(`/${dataFolder}/query-index.xlsx`);
   } else {
     log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
+    await say(`Query index in ${dataFolder} already exists. Skipping creation.`);
   }
 
   log.info('Publishing query-index to admin.hlx.page');
@@ -416,8 +420,9 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
 }
 
 // update https://github.com/adobe/project-elmo-ui-data/blob/main/helix-query.yaml
-async function updateIndexConfig(dataFolder, lambdaCtx) {
+async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
   const { log } = lambdaCtx;
+  const { say } = slackCtx;
 
   log.info('Starting Git modification of helix query config');
 
@@ -434,6 +439,12 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
     owner, repo, ref, path,
   });
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
+
+  if (content.includes(dataFolder)) {
+    log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
+    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
+    return;
+  }
 
   // add new config to end of file
   const modifiedContent = `${content}${content.endsWith('\n') ? '' : '\n'}
@@ -488,12 +499,12 @@ async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
   // find if there are any entitlements for this site enabling LLMO
   const enrollments = await SiteEnrollment.allBySiteId(site.getId());
   const llmoEntitlements = (await Promise.all(enrollments.map(async (enrollment) => {
-    const entitlement = await Entitlement.findById(enrollment.entitlementId);
-    return entitlement.productCode === 'llmo' ? entitlement : null;
+    const entitlement = await Entitlement.findById(enrollment.getEntitlementId());
+    return entitlement.getProductCode() === 'LLMO' ? entitlement : null;
   }))).filter((x) => !!x);
 
   if (llmoEntitlements.length > 0) {
-    say(`Site ${site.getId()} is already entitled to LLMO. Skipping entitlement grant.`);
+    await say(`Site ${site.getId()} is already entitled to LLMO. Skipping entitlement grant.`);
     log.warn(`Site ${site.getId()} already entitled to LLMO. Skipping.`);
     return;
   }
@@ -529,7 +540,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     Site, Configuration,
   } = dataAccess;
 
-  say(`:gear: ${brandName} onboarding started...`);
+  await say(`:gear: ${brandName} onboarding started...`);
 
   try {
     // Find the site
@@ -551,10 +562,10 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx);
 
     // upload and publish the query index file
-    await copyFilesToSharepoint(dataFolder, lambdaCtx);
+    await copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx);
 
     // update indexing config in helix
-    await updateIndexConfig(dataFolder, lambdaCtx);
+    await updateIndexConfig(dataFolder, lambdaCtx, slackCtx);
 
     const siteId = site.getId();
     log.info(`Found site ${baseURL} with ID: ${siteId}`);
