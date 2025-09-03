@@ -396,8 +396,20 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
   const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
   const queryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
 
-  await folder.createFolder(dataFolder, '/');
-  await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
+  // TODO: Instead of patching .exists, add this method https://github.com/adobe/spacecat-helix-content-sdk/issues/190
+  const folderExists = await folder.exists();
+  if (!folderExists) {
+    await folder.createFolder(dataFolder, '/');
+  } else {
+    log.warn(`Warning: Folder ${dataFolder} already exists. Skipping creation.`);
+  }
+
+  const queryIndexExists = await queryIndex.exists();
+  if (!queryIndexExists) {
+    await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
+  } else {
+    log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
+  }
 
   log.info('Publishing query-index to admin.hlx.page');
   await publishToAdminHlx('query-index', dataFolder, log);

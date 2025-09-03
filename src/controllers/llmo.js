@@ -21,6 +21,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../support/access-control-util.js';
+import { onboardSite } from '../support/slack/actions/onboard-llmo-modal.js';
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
@@ -363,6 +364,12 @@ function LlmoController(ctx) {
     }
   };
 
+  const test = async (context) => {
+    await onboardSite({
+      baseURL: 'https://hannes-slack.test', brandName: 'Hannes Test', imsOrgId: 'Test',
+    }, context, { say: context.log.info });
+  };
+
   return {
     getLlmoSheetData,
     getLlmoConfig,
@@ -376,6 +383,7 @@ function LlmoController(ctx) {
     patchLlmoCustomerIntent,
     patchLlmoCdnLogsFilter,
     patchLlmoCdnBucketConfig,
+    test,
   };
 }
 
