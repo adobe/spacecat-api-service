@@ -90,10 +90,6 @@ export default class AccessControlUtil {
   }
 
   async validateEntitlement(org, site, productCode) {
-    if (this.xProductHeader !== productCode) {
-      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
-      throw new Error('[Error] Unauthorized request');
-    }
     // eslint-disable-next-line max-len
     const entitlement = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
     if (!isNonEmptyObject(entitlement)) {
@@ -151,6 +147,11 @@ export default class AccessControlUtil {
   }
 
   async hasAccess(entity, subService = '', productCode = '') {
+    if (productCode.length > 0 && this.xProductHeader !== productCode) {
+      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
+      throw new Error('[Error] Unauthorized request');
+    }
+
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }

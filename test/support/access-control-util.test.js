@@ -937,6 +937,14 @@ describe('Access Control Util', () => {
       };
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
 
+      // Create a mock organization that works with instanceof check
+      const mockOrgInstance = {
+        getId: () => 'org-123',
+        getImsOrgId: () => 'org-123',
+      };
+      // Make it pass instanceof Organization check
+      Object.setPrototypeOf(mockOrgInstance, Organization.prototype);
+
       // Set up context with x-product header
       const testContextWithHeader = {
         log: {
@@ -971,7 +979,7 @@ describe('Access Control Util', () => {
 
       const utilWithHeader = AccessControlUtil.fromContext(testContextWithHeader);
 
-      await expect(utilWithHeader.validateEntitlement(mockOrg, null, 'llmo'))
+      await expect(utilWithHeader.hasAccess(mockOrgInstance, '', 'llmo'))
         .to.be.rejectedWith('[Error] Unauthorized request');
     });
 
@@ -982,6 +990,14 @@ describe('Access Control Util', () => {
         getTier: () => 'paid',
       };
       mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      // Create a mock organization that works with instanceof check
+      const mockOrgInstance = {
+        getId: () => 'org-123',
+        getImsOrgId: () => 'org-123',
+      };
+      // Make it pass instanceof Organization check
+      Object.setPrototypeOf(mockOrgInstance, Organization.prototype);
 
       // Set up context with matching x-product header
       const testContextWithHeader = {
@@ -1017,7 +1033,7 @@ describe('Access Control Util', () => {
 
       const utilWithHeader = AccessControlUtil.fromContext(testContextWithHeader);
 
-      await expect(utilWithHeader.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+      await expect(utilWithHeader.hasAccess(mockOrgInstance, '', 'llmo')).to.not.be.rejected;
     });
   });
 
