@@ -159,7 +159,7 @@ describe('Brands Controller', () => {
       pathInfo: {
         headers: {
           authorization: 'Bearer token123',
-          'x-product': 'llmo',
+          'x-product': 'abcd',
         },
       },
       dataAccess: mockDataAccess,

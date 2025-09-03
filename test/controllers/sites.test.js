@@ -210,7 +210,7 @@ describe('Sites Controller', () => {
       },
       dataAccess: mockDataAccess,
       pathInfo: {
-        headers: { 'x-product': 'llmo' },
+        headers: { 'x-product': 'abcd' },
       },
       attributes: {
         authInfo: new AuthInfo()

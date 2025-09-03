@@ -80,7 +80,7 @@ describe('Sites Audits Controller', () => {
     contextMock = {
       dataAccess: dataAccessMock,
       pathInfo: {
-        headers: { 'x-product': 'llmo' },
+        headers: { 'x-product': 'abcd' },
       },
       attributes: {
         authInfo: new AuthInfo()
@@ -569,7 +569,7 @@ describe('Sites Audits Controller', () => {
         dataAccess: dataAccessMock,
         env: {},
         pathInfo: {
-          headers: { 'x-product': 'llmo' },
+          headers: { 'x-product': 'abcd' },
         },
         attributes: {
           authInfo: new AuthInfo()

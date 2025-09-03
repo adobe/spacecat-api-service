@@ -91,7 +91,8 @@ export default class AccessControlUtil {
 
   async validateEntitlement(org, site, productCode) {
     if (this.xProductHeader !== productCode) {
-      throw new Error('[Error] Invalid origin of request');
+      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
+      throw new Error('[Error] Unauthorized request');
     }
     // eslint-disable-next-line max-len
     const entitlement = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);

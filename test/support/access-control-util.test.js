@@ -972,7 +972,7 @@ describe('Access Control Util', () => {
       const utilWithHeader = AccessControlUtil.fromContext(testContextWithHeader);
 
       await expect(utilWithHeader.validateEntitlement(mockOrg, null, 'llmo'))
-        .to.be.rejectedWith('[Error] Invalid origin of request');
+        .to.be.rejectedWith('[Error] Unauthorized request');
     });
 
     it('should validate successfully when x-product header matches productCode', async () => {

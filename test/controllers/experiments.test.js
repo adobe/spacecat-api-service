@@ -153,7 +153,7 @@ describe('Experiments Controller', () => {
       },
       dataAccess: mockDataAccess,
       pathInfo: {
-        headers: { 'x-product': 'llmo' },
+        headers: { 'x-product': 'abcd' },
       },
       attributes: {
         authInfo: new AuthInfo()
@@ -255,7 +255,7 @@ describe('Experiments Controller', () => {
         },
         dataAccess: mockDataAccess,
         pathInfo: {
-          headers: { 'x-product': 'llmo' },
+          headers: { 'x-product': 'abcd' },
         },
         attributes: {
           authInfo: restrictedAuthInfo,

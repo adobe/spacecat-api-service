@@ -233,7 +233,7 @@ describe('Opportunities Controller', () => {
       dataAccess: mockOpportunityDataAccess,
       log: mockLogger,
       pathInfo: {
-        headers: { 'x-product': 'llmo' },
+        headers: { 'x-product': 'abcd' },
       },
       attributes: {
         authInfo: new AuthInfo()
@@ -656,7 +656,7 @@ describe('Opportunities Controller', () => {
       const restrictedContext = {
         dataAccess: mockOpportunityDataAccess,
         pathInfo: {
-          headers: { 'x-product': 'llmo' },
+          headers: { 'x-product': 'abcd' },
         },
         attributes: {
           authInfo: restrictedAuthInfo,
@@ -722,7 +722,7 @@ describe('Opportunities Controller', () => {
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
           pathInfo: {
-            headers: { 'x-product': 'llmo' },
+            headers: { 'x-product': 'abcd' },
           },
           attributes: {
             authInfo: restrictedAuthInfo,
@@ -790,7 +790,7 @@ describe('Opportunities Controller', () => {
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
           pathInfo: {
-            headers: { 'x-product': 'llmo' },
+            headers: { 'x-product': 'abcd' },
           },
           attributes: {
             authInfo: restrictedAuthInfo,
@@ -861,7 +861,7 @@ describe('Opportunities Controller', () => {
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
           pathInfo: {
-            headers: { 'x-product': 'llmo' },
+            headers: { 'x-product': 'abcd' },
           },
           attributes: {
             authInfo: restrictedAuthInfo,
@@ -937,7 +937,7 @@ describe('Opportunities Controller', () => {
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
           pathInfo: {
-            headers: { 'x-product': 'llmo' },
+            headers: { 'x-product': 'abcd' },
           },
           attributes: {
             authInfo: restrictedAuthInfo,
@@ -1011,7 +1011,7 @@ describe('Opportunities Controller', () => {
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
           pathInfo: {
-            headers: { 'x-product': 'llmo' },
+            headers: { 'x-product': 'abcd' },
           },
           attributes: {
             authInfo: restrictedAuthInfo,

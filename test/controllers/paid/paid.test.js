@@ -64,7 +64,7 @@ describe('PaidController', () => {
       const context = { params: { siteId: 'bad-id' } };
       const paidController = PaidController({
         dataAccess: mockDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContextAdmin,
       });
       const res = await paidController.getTopPaidPages(context);
@@ -76,7 +76,7 @@ describe('PaidController', () => {
       const context = { params: { siteId: SITE_ID } };
       const paidController = PaidController({
         dataAccess: mockDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContextAdmin,
       });
       const res = await paidController.getTopPaidPages(context);
@@ -89,7 +89,7 @@ describe('PaidController', () => {
       const context = { params: { siteId: SITE_ID } };
       const paidController = PaidController({
         dataAccess: mockDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContextAdmin,
       });
       const res = await paidController.getTopPaidPages(context);
@@ -104,7 +104,7 @@ describe('PaidController', () => {
       const context = { params: { siteId: SITE_ID } };
       const paidController = PaidController({
         dataAccess: mockDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContextAdmin,
       });
       const res = await paidController.getTopPaidPages(context);
@@ -119,7 +119,7 @@ describe('PaidController', () => {
       const context = { params: { siteId: SITE_ID } };
       const paidController = PaidController({
         dataAccess: mockDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContextAdmin,
       });
       const res = await paidController.getTopPaidPages(context);
@@ -146,7 +146,7 @@ describe('PaidController', () => {
       const context = { params: { siteId: SITE_ID } };
       const paidController = PaidController({
         dataAccess: mockDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContextAdmin,
       });
       const res = await paidController.getTopPaidPages(context);
@@ -166,7 +166,7 @@ describe('PaidController', () => {
 
       const paidController = PaidController({
         dataAccess: mockDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContextAdmin,
       });
 

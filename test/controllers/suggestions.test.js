@@ -1639,7 +1639,7 @@ describe('Suggestions Controller', () => {
       });
       suggestionsControllerWithIms = SuggestionsControllerWithIms({
         dataAccess: mockSuggestionDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
       }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
     });
@@ -1748,7 +1748,7 @@ describe('Suggestions Controller', () => {
       });
       const suggestionsControllerWithFailedIms = SuggestionsControllerWithFailedIms({
         dataAccess: mockSuggestionDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
       }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
       mockSuggestion.allByOpportunityId.resolves(

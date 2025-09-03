@@ -258,7 +258,7 @@ describe('Audits Controller', () => {
     const ctx = {
       dataAccess: mockDataAccess,
       pathInfo: {
-        headers: { 'x-product': 'llmo' },
+        headers: { 'x-product': 'abcd' },
       },
       ...authContextAdmin,
     };
