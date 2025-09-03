@@ -378,3 +378,38 @@ llmo-cdn-logs-filter:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-cdn-logs-bucket-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - llmo
+    summary: Update LLMO CDN bucket config configuration
+    description: |
+      Updates the CDN bucket config configuration for a specific site.
+    operationId: patchLlmoCdnBucketConfig
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cdnBucketConfig: 
+                $ref: './schemas.yaml#/LlmoCdnBucketConfig'
+    responses:
+      '200':
+        description: LLMO CDN bucket config updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCdnBucketConfig'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

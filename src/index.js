@@ -66,9 +66,15 @@ import DemoController from './controllers/demo.js';
 import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
+import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo.js';
 import McpController from './controllers/mcp.js';
 import buildRegistry from './mcp/registry.js';
+import OrganizationIdentityProvidersController from './controllers/organization-identity-providers.js';
+import UserActivitiesController from './controllers/user-activities.js';
+import SiteEnrollmentsController from './controllers/site-enrollments.js';
+import TrialUsersController from './controllers/trial-users.js';
+import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -124,8 +130,14 @@ async function run(request, context) {
     const consentBannerController = ConsentBannerController(context);
     const scrapeController = ScrapeController(context);
     const scrapeJobController = ScrapeJobController(context);
+    const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
+    const orgIdentityProvidersController = OrganizationIdentityProvidersController(context);
+    const userActivitiesController = UserActivitiesController(context);
+    const siteEnrollmentsController = SiteEnrollmentsController(context);
+    const trialUsersController = TrialUsersController(context);
+    const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
 
     /* ---------- build MCP registry & controller ---------- */
@@ -163,7 +175,13 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
+      orgIdentityProvidersController,
+      userActivitiesController,
+      siteEnrollmentsController,
+      trialUsersController,
+      entitlementsController,
       sandboxAuditController,
+      reportsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
