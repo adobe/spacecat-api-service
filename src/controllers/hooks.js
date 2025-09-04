@@ -165,7 +165,7 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
     }
 
     if (response.status === 404) {
-      log.info(`No hlx config found for ${owner}/${site}`); // log as error?
+      log.debug(`No hlx config found for ${owner}/${site}`);
       return null;
     }
 
@@ -183,7 +183,7 @@ async function getContentSource(hlxConfig, log) {
   const fstabResponse = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/fstab.yaml`);
 
   if (fstabResponse.status !== 200) {
-    log.info(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`); // log as error?
+    log.error(`Error fetching fstab.yaml for ${owner}/${repo}. Status: ${fstabResponse.status}`);
     return null;
   }
 
@@ -195,7 +195,7 @@ async function getContentSource(hlxConfig, log) {
     : null;
 
   if (!isValidUrl(url)) {
-    log.info(`No content source found for ${owner}/${repo} in fstab.yaml`); // log as error?
+    log.debug(`No content source found for ${owner}/${repo} in fstab.yaml`);
     return null;
   }
 

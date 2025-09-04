@@ -201,7 +201,7 @@ function OnboardCommand(context) {
 
         fileStream.on('finish', async () => {
           try {
-            client.files.upload({ // this should work without the constant no?
+            client.files.upload({
               channels: channelId,
               file: fs.createReadStream(tempFilePath),
               filename: 'spacecat_onboarding_report.csv',

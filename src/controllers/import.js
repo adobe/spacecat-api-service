@@ -278,7 +278,7 @@ function ImportController(context) {
    */
   async function getImportJobsByDateRange(requestContext) {
     const { startDate, endDate } = parseRequestContext(requestContext);
-    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}.`); // unsure
+    log.debug(`Fetching import jobs between startDate: ${startDate} and endDate: ${endDate}.`);
 
     try {
       validateAccessScopes([SCOPE.READ_ALL]);

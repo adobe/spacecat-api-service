@@ -218,7 +218,7 @@ function TrafficController(context, log, env) {
       // verifying file is reachable before returning
       const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
       if (verifiedSignedUrl != null) {
-        log.info(`Successfully verified file existence, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`); // keep?
+        log.debug(`Successfully verified file existence, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
         return found(
           verifiedSignedUrl,
         );

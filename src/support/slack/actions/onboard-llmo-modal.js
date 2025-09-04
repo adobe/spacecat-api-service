@@ -390,12 +390,14 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
     domainId: process.env.SHAREPOINT_DOMAIN_ID,
   }, { url: SHAREPOINT_URL, type: 'onedrive' });
 
+  log.debug(`Copying query-index to ${dataFolder}`);
   const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
   const queryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
 
   await folder.createFolder(dataFolder, '/');
   await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
 
+  log.debug('Publishing query-index to admin.hlx.page');
   await publishToAdminHlx('query-index', dataFolder, log);
 }
 
@@ -403,6 +405,7 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
 async function updateIndexConfig(dataFolder, lambdaCtx) {
   const { log } = lambdaCtx;
 
+  log.debug('Starting Git modification of helix query config');
   const octokit = new Octokit({
     auth: process.env.LLMO_ONBOARDING_GITHUB_TOKEN,
   });
@@ -435,8 +438,6 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
     content: Buffer.from(modifiedContent).toString('base64'),
     sha: file.sha,
   });
-
-  log.debug('Done with Git modification of helix query config');
 }
 
 async function createSiteAndOrganization(input, lambda, slackContext) {
@@ -530,7 +531,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       log.info(`Enabling agentic traffic audits for organization ${orgId} (first site in org)`);
       configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
     } else {
-      log.info(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
+      log.debug(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
     }
 
     // enable the cdn-logs-report audits for agentic traffic
@@ -542,7 +543,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     try {
       await configuration.save();
       await site.save();
-      log.info(`Successfully updated LLMO config for site ${siteId}`);
+      log.debug(`Successfully updated LLMO config for site ${siteId}`);
 
       // trigger the llmo-customer-analysis handler
       const sqsTriggerMesasage = {
@@ -581,6 +582,7 @@ export function onboardLLMOModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     try {
+      log.debug('Starting onboarding process...');
       const { view, user } = body;
       const { values } = view.state;
 

@@ -387,7 +387,7 @@ function ImportSupervisor(services, config) {
 
     await sqs.purgeQueue(`${importQueueUrlPrefix}${job.getImportQueueId()}`);
 
-    log.info(`Import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)} has been stopped successfully`); // keep?
+    log.info(`Import job with jobId: ${jobId} has been stopped successfully`);
   }
 
   return {

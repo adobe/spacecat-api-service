@@ -91,7 +91,7 @@ function ScrapeJobController(context) {
    */
   async function getScrapeJobsByDateRange(requestContext) {
     const { startDate, endDate } = parseRequestContext(requestContext);
-    log.debug(`Fetching scrape jobs between startDate: ${startDate} and endDate: ${endDate}.`); // unsure
+    log.debug(`Fetching scrape jobs between startDate: ${startDate} and endDate: ${endDate}.`);
 
     try {
       const jobs = await scrapeClient.getScrapeJobsByDateRange(startDate, endDate);

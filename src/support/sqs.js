@@ -50,7 +50,7 @@ export class SQS {
 
     try {
       const data = await this.sqsClient.send(msgCommand);
-      this.log.debug(`Success, message sent. MessageID:  ${data.MessageId}`); // sends a lot of messages ~125k last 7 days, should we completely remove this log?
+      this.log.debug(`Success, message sent. MessageID:  ${data.MessageId}`);
     } catch (e) {
       const { type, code, message: msg } = e;
       this.log.error(`Message sent failed. Type: ${type}, Code: ${code}, Message: ${msg}`);

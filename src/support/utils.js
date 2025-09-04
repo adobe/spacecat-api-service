@@ -753,13 +753,13 @@ export const onboardSingleSite = async (
     if (auditsEnabled.length > 0) {
       try {
         await latestConfiguration.save();
-        log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`); // keep?
+        log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
       }
     } else {
-      log.info(`All audits are already enabled for site ${siteID}`); // keep?
+      log.debug(`All audits are already enabled for site ${siteID}`);
     }
 
     reportLine.audits = auditTypes.join(', ');
