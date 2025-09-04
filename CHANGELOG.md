@@ -1,3 +1,10 @@
+# [1.175.0](https://github.com/adobe/spacecat-api-service/compare/v1.174.2...v1.175.0) (2025-09-04)
+
+
+### Features
+
+* Update demo profile to include forms opportunities ([#1210](https://github.com/adobe/spacecat-api-service/issues/1210)) ([ccc0f4d](https://github.com/adobe/spacecat-api-service/commit/ccc0f4dd398a79c71a6e0a3e35c779c81f85add6))
+
 ## [1.174.2](https://github.com/adobe/spacecat-api-service/compare/v1.174.1...v1.174.2) (2025-09-03)
 
 
