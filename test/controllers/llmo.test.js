@@ -529,6 +529,117 @@ describe('LlmoController', () => {
       );
     });
 
+    it('should handle empty string subType parameter', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add empty string subType
+      mockContext.params.subType = '';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      // Empty string should be treated as falsy and not added to URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle null subType parameter', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add null subType
+      mockContext.params.subType = null;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      // Null value should be treated as falsy and not added to URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should handle undefined subType parameter', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'test-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Ensure subType is undefined
+      delete mockContext.params.subType;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'test-data' });
+      // Undefined value should be treated as falsy and not added to URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should proxy data with subType parameter successfully', async () => {
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves({ data: 'subtype-data' }),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add subType to the context params
+      mockContext.params.subType = 'detailed';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: 'subtype-data' });
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/detailed/test-data.json',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
     it('should proxy data with sheetType parameter successfully', async () => {
       const mockResponse = {
         ok: true,
@@ -580,6 +691,38 @@ describe('LlmoController', () => {
 
       // Add sheetType to the context params
       mockContext.data.sheetType = 'analytics';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Network error');
+    });
+
+    it('should handle external API errors with subType parameter', async () => {
+      const mockResponse = {
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add subType to the context params
+      mockContext.params.subType = 'detailed';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('External API returned 404: Not Found');
+    });
+
+    it('should handle network errors with subType parameter', async () => {
+      const networkError = new Error('Network error');
+      tracingFetchStub.rejects(networkError);
+
+      // Add subType to the context params
+      mockContext.params.subType = 'detailed';
 
       const result = await controller.getLlmoSheetData(mockContext);
 

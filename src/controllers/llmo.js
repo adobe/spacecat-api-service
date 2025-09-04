@@ -78,12 +78,21 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO sheet data endpoint
   const getLlmoSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataSource, sheetType } = context.params;
+    const {
+      siteId, dataSource, sheetType, subType,
+    } = context.params;
     const { env } = context;
     try {
       log.info(`validating LLMO sheet data for siteId: ${siteId}, dataSource: ${dataSource}, sheetType: ${sheetType}`);
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
-      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+      let sheetURL = `${llmoConfig.dataFolder}/`;
+      if (sheetType) {
+        sheetURL += `${sheetType}/`;
+      }
+      if (subType) {
+        sheetURL += `${subType}/`;
+      }
+      sheetURL += `${dataSource}.json`;
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
