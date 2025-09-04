@@ -155,7 +155,6 @@ describe('preflight-config-modal', () => {
       expect(ackMock).to.have.been.calledOnce;
       expect(siteMock.setAuthoringType).to.have.been.calledWith('documentauthoring');
       expect(siteMock.setHlxConfig).to.have.been.calledWith({
-        hlxVersion: 5,
         rso: {
           ref: 'main',
           site: 'site',
