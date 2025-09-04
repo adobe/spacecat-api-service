@@ -1,3 +1,10 @@
+## [1.176.1](https://github.com/adobe/spacecat-api-service/compare/v1.176.0...v1.176.1) (2025-09-04)
+
+
+### Bug Fixes
+
+* added mystique pre-signed url return for reports ([#1216](https://github.com/adobe/spacecat-api-service/issues/1216)) ([463a4ce](https://github.com/adobe/spacecat-api-service/commit/463a4ce78fbd73e9eb8c62ad8b1f2a0455284705))
+
 # [1.176.0](https://github.com/adobe/spacecat-api-service/compare/v1.175.0...v1.176.0) (2025-09-04)
 
 
