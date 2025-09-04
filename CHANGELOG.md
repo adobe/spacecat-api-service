@@ -1,3 +1,38 @@
+## [1.176.1](https://github.com/adobe/spacecat-api-service/compare/v1.176.0...v1.176.1) (2025-09-04)
+
+
+### Bug Fixes
+
+* added mystique pre-signed url return for reports ([#1216](https://github.com/adobe/spacecat-api-service/issues/1216)) ([463a4ce](https://github.com/adobe/spacecat-api-service/commit/463a4ce78fbd73e9eb8c62ad8b1f2a0455284705))
+
+# [1.176.0](https://github.com/adobe/spacecat-api-service/compare/v1.175.0...v1.176.0) (2025-09-04)
+
+
+### Features
+
+* remove MCP server ([#1217](https://github.com/adobe/spacecat-api-service/issues/1217)) ([f5237d9](https://github.com/adobe/spacecat-api-service/commit/f5237d9ecfe0a2f4ab1ee88349999c4731e7616c))
+
+# [1.175.0](https://github.com/adobe/spacecat-api-service/compare/v1.174.2...v1.175.0) (2025-09-04)
+
+
+### Features
+
+* Update demo profile to include forms opportunities ([#1210](https://github.com/adobe/spacecat-api-service/issues/1210)) ([ccc0f4d](https://github.com/adobe/spacecat-api-service/commit/ccc0f4dd398a79c71a6e0a3e35c779c81f85add6))
+
+## [1.174.2](https://github.com/adobe/spacecat-api-service/compare/v1.174.1...v1.174.2) (2025-09-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-gpt-client to v1.6.0 ([#1212](https://github.com/adobe/spacecat-api-service/issues/1212)) ([032a0a8](https://github.com/adobe/spacecat-api-service/commit/032a0a8528aaee4eaa8e9ea2bceb494b6141476d))
+
+## [1.174.1](https://github.com/adobe/spacecat-api-service/compare/v1.174.0...v1.174.1) (2025-09-03)
+
+
+### Bug Fixes
+
+* add x-product header check in access control layer ([#1211](https://github.com/adobe/spacecat-api-service/issues/1211)) ([024631e](https://github.com/adobe/spacecat-api-service/commit/024631e3652096db983b55dbff3349ed8d26e5ff))
+
 # [1.174.0](https://github.com/adobe/spacecat-api-service/compare/v1.173.1...v1.174.0) (2025-09-02)
 
 
