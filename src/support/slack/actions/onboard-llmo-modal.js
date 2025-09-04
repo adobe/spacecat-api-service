@@ -29,6 +29,8 @@ const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
 const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 
+const IMS_PROVIDER = OrganizationIdentityProviderModel.PROVIDER_TYPES.IMS;
+
 // site isn't on spacecat yet
 async function fullOnboardingModal(body, client, respond, brandURL) {
   const { user } = body;
@@ -549,8 +551,9 @@ async function createOrganizationIdentityProvider(site, lambdaCtx) {
   const organization = await Organization.findById(organizationId);
   const organizationImsOrgId = organization.getImsOrgId();
 
-  // Check if an identity provider already exists for this organization
-  const existingIdp = await OrganizationIdentityProvider.findByOrganizationId(organizationId);
+  // Check if an IMS identity provider already exists for this organization
+  const existingIdps = await OrganizationIdentityProvider.findByOrganizationId(organizationId);
+  const existingIdp = existingIdps.find((idp) => idp.getProvider() === IMS_PROVIDER);
 
   if (existingIdp) {
     log.info(`Organization identity provider already exists for organization ${organizationId}, skipping creation`);
