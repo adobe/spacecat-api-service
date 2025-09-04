@@ -39,14 +39,14 @@ export async function retrieveMainContent(url, apiKey, apiUrl, log) {
 
   const content = responseData.results?.[0]?.content || '';
   if (!content) {
-    log.info(`Could not retrieve the main content of URL: ${url}`); //
+    log.error(`Could not retrieve the main content of URL: ${url}`);
     return null;
   }
 
   const dom = new JSDOM(content);
   const mainContent = dom.window.document.querySelector('main');
   if (!mainContent) {
-    log.info('No `<main>` element found in the parsed content.'); //
+    log.error('No `<main>` element found in the parsed content.');
     return null;
   }
 

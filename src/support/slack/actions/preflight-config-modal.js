@@ -141,20 +141,10 @@ export function preflightConfigModal(lambdaContext) {
         site.setDeliveryConfig(deliveryConfigFromPreview);
         configDetails = `:gear: *Delivery Config:* Program ${deliveryConfigFromPreview.programId}, Environment ${deliveryConfigFromPreview.environmentId}\n`
                        + `:link: *Preview URL:* ${previewUrl}`;
-
-        log.info(`Preflight audit enabled for site ${siteId} with delivery config:`, { // keep?
-          authoringType,
-          deliveryConfig: deliveryConfigFromPreview,
-        });
       } else if (helixConfigFromPreview) {
         site.setHlxConfig(helixConfigFromPreview);
         configDetails = `:gear: *Helix Config:* ${helixConfigFromPreview.rso.ref}--${helixConfigFromPreview.rso.site}--${helixConfigFromPreview.rso.owner}.${helixConfigFromPreview.rso.tld}\n`
                        + `:link: *Preview URL:* ${previewUrl}`;
-
-        log.info(`Preflight audit enabled for site ${siteId} with helix config:`, { // keep?
-          authoringType,
-          helixConfig: helixConfigFromPreview,
-        });
       }
 
       await site.save();

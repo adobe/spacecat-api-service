@@ -535,7 +535,6 @@ function ReportsController(ctx, log, env) {
             deleteS3Object(s3, s3ReportBucket, rawReportKey),
             deleteS3Object(s3, s3MystiqueBucket, mystiqueReportKey),
           ]);
-          log.info(`S3 files deleted for report ${reportId}: ${rawReportKey}, ${mystiqueReportKey}`); // keep?
         } catch (s3Error) {
           // Log S3 deletion error but continue with database deletion
           log.warn(`Failed to delete S3 files for report ${reportId}: ${s3Error.message}`);
@@ -544,8 +543,6 @@ function ReportsController(ctx, log, env) {
 
       // Delete the report from database
       await report.remove();
-
-      log.info(`Report ${reportId} deleted successfully for site ${siteId}`); // keep?
 
       return ok({
         message: 'Report deleted successfully',
@@ -624,7 +621,6 @@ function ReportsController(ctx, log, env) {
 
       try {
         await uploadS3Object(s3, s3MystiqueBucket, mystiqueReportKey, data);
-        log.info(`Enhanced report updated successfully for report ${reportId} at key: ${mystiqueReportKey}`); // keep?
       } catch (s3Error) {
         log.error(`Failed to upload enhanced report to S3 for report ${reportId}: ${s3Error.message}`);
         return internalServerError(`Failed to update report in S3: ${s3Error.message}`);

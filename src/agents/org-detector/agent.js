@@ -244,7 +244,7 @@ export default class OrgDetectorAgent {
       return 'tools';
     }
 
-    this.log.info('Agent reached to conclusion. Finishing the process'); //
+    this.log.info('Agent reached to conclusion. Finishing the process');
     return END;
   }
 

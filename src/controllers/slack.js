@@ -186,8 +186,6 @@ function SlackController(SlackApp) {
       return notFound('Slack channel not found for this organization.');
     }
 
-    log.info(`Inviting userId: ${userProfile.userId} to the Slack channel for IMS org ID: ${imsOrgId} (organizationId ${spaceCatOrg.getId()}).`); // unsure
-
     try {
       await elevatedClient.inviteUsersByEmail(orgSlackChannelId, [userProfile]);
     } catch (error) {

@@ -26,7 +26,7 @@ const SUPPORTED_STREAMS = {
 const PHRASES = ['backfill-llmo'];
 
 async function triggerBackfill(context, configuration, siteId, streamType, weeks = 4) {
-  const { log, sqs } = context;
+  const { sqs } = context;
   const auditType = SUPPORTED_STREAMS[streamType];
 
   /* c8 ignore next 3 */
@@ -49,7 +49,6 @@ async function triggerBackfill(context, configuration, siteId, streamType, weeks
     };
     // eslint-disable-next-line no-await-in-loop
     await sqs.sendMessage(configuration.getQueues().audits, message);
-    log.info(`Successfully triggered ${streamType} backfill ${auditType} with message: ${JSON.stringify(message)}`); // keep?
   }
 }
 

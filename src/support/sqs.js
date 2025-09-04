@@ -50,7 +50,7 @@ export class SQS {
 
     try {
       const data = await this.sqsClient.send(msgCommand);
-      this.log.info(`Success, message sent. MessageID:  ${data.MessageId}`); // keep right? - sends a lot of messages
+      this.log.info(`Success, message sent. MessageID:  ${data.MessageId}`); // keep right? - sends a lot of messages ~125k last 7 days
     } catch (e) {
       const { type, code, message: msg } = e;
       this.log.error(`Message sent failed. Type: ${type}, Code: ${code}, Message: ${msg}`);
@@ -88,7 +88,7 @@ export class SQS {
 
     try {
       await this.sqsClient.send(purgeQueueCommand);
-      this.log.info(`Success, queue purged. QueueUrl: ${queueUrl}`); // keep?
+      this.log.info(`Success, queue purged. QueueUrl: ${queueUrl}`);
     } catch (e) {
       const { type, code, message: msg } = e;
       this.log.error(`Queue purge failed. Type: ${type}, Code: ${code}, Message: ${msg}`);

@@ -148,7 +148,7 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
   const { hlxVersion, rso } = hlxConfig;
 
   if (hlxVersion < 5) {
-    log.info(`HLX version is ${hlxVersion}. Skipping fetching hlx config`); // unsure
+    log.info(`HLX version is ${hlxVersion}. Skipping fetching hlx config`);
     return null;
   }
 
@@ -161,12 +161,11 @@ async function fetchHlxConfig(hlxConfig, hlxAdminToken, log) {
     });
 
     if (response.status === 200) {
-      log.info(`HLX config found for ${owner}/${site}`); // remove?
       return response.json();
     }
 
     if (response.status === 404) {
-      log.info(`No hlx config found for ${owner}/${site}`);
+      log.info(`No hlx config found for ${owner}/${site}`); // log as error?
       return null;
     }
 
@@ -236,7 +235,6 @@ async function extractHlxConfig(domains, hlxVersion, hlxAdminToken, log) {
           hlxConfig.content = content;
         }
         hlxConfig.hlxVersion = 5;
-        log.info(`HLX config found for ${rso.owner}/${rso.site}: ${JSON.stringify(config)}`); // unsure
       } else {
         try {
           // eslint-disable-next-line no-await-in-loop
@@ -379,7 +377,7 @@ function HooksController(lambdaContext) {
           await site.save();
 
           const action = siteHasHlxConfig && hlxConfigChanged ? 'updated' : 'added';
-          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`); // unsure
+          log.info(`HLX config ${action} for existing site: *<${baseURL}|${baseURL}>*${getHlxConfigMessagePart(hlxConfig)}`); // if this is removed, nothing happens with action constant
         }
       }
       throw new InvalidSiteCandidate('Site candidate already exists in sites db', baseURL);
