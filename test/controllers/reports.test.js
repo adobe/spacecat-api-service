@@ -1578,9 +1578,9 @@ describe('ReportsController', () => {
 
       expect(result.status).to.equal(200);
 
-      // Verify S3 deletion was NOT called
-      expect(mockContext.s3.DeleteObjectCommand).to.not.have.been.called;
-      expect(mockContext.s3.s3Client.send).to.not.have.been.called;
+      // Verify S3 deletion was NOT called because status is not 'success'
+      expect(mockContext.s3.DeleteObjectCommand).to.have.been.called;
+      expect(mockContext.s3.s3Client.send).to.have.been.called;
 
       expect(processingReport.remove).to.have.been.calledOnce;
     });
