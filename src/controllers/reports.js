@@ -537,7 +537,7 @@ function ReportsController(ctx, log, env) {
 
       try {
         // Delete both S3 files
-        await Promise.all([
+        await Promise.allSettled([
           deleteS3Object(s3, s3ReportBucket, rawReportKey),
           deleteS3Object(s3, s3MystiqueBucket, mystiqueReportKey),
         ]);
