@@ -16,6 +16,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
+import { OrganizationIdentityProvider as OrganizationIdentityProviderModel } from '@adobe/spacecat-shared-data-access/src/models/organization-identity-provider/index.js';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
@@ -537,6 +538,38 @@ async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
   await newEnrollment.save();
 }
 
+async function createOrganizationIdentityProvider(site, lambdaCtx) {
+  const { dataAccess, log } = lambdaCtx;
+  const { OrganizationIdentityProvider, Organization } = dataAccess;
+
+  log.info('Starting IDP creation process.');
+
+  // Get the organization ID from the site
+  const organizationId = site.getOrganizationId();
+  const organization = await Organization.findById(organizationId);
+  const organizationImsOrgId = organization.getImsOrgId();
+
+  // Check if an identity provider already exists for this organization
+  const existingIdp = await OrganizationIdentityProvider.findByOrganizationId(organizationId);
+
+  if (existingIdp) {
+    log.info(`Organization identity provider already exists for organization ${organizationId}, skipping creation`);
+    return;
+  }
+
+  log.info('No existing IDP found, creating new.');
+
+  // Create a new identity provider for the organization
+  const newIdp = await OrganizationIdentityProvider.create({
+    organizationId,
+    provider: OrganizationIdentityProviderModel.PROVIDER_TYPES.IMS,
+    externalId: organizationImsOrgId,
+  });
+
+  await newIdp.save();
+  log.info(`Created new organization identity provider for organization ${organizationId}`);
+}
+
 export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess, sqs } = lambdaCtx;
   const { say } = slackCtx;
@@ -570,6 +603,9 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 
     // create entitlement
     await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx);
+
+    // create OrganizationIdentiyProvider
+    await createOrganizationIdentityProvider(site, lambdaCtx, slackCtx);
 
     // upload and publish the query index file
     await copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx);
