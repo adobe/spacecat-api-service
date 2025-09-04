@@ -1,3 +1,10 @@
+# [1.176.0](https://github.com/adobe/spacecat-api-service/compare/v1.175.0...v1.176.0) (2025-09-04)
+
+
+### Features
+
+* remove MCP server ([#1217](https://github.com/adobe/spacecat-api-service/issues/1217)) ([f5237d9](https://github.com/adobe/spacecat-api-service/commit/f5237d9ecfe0a2f4ab1ee88349999c4731e7616c))
+
 # [1.175.0](https://github.com/adobe/spacecat-api-service/compare/v1.174.2...v1.175.0) (2025-09-04)
 
 
