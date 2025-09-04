@@ -232,6 +232,9 @@ describe('Opportunities Controller', () => {
     mockContext = {
       dataAccess: mockOpportunityDataAccess,
       log: mockLogger,
+      pathInfo: {
+        headers: { 'x-product': 'abcd' },
+      },
       attributes: {
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -652,6 +655,9 @@ describe('Opportunities Controller', () => {
 
       const restrictedContext = {
         dataAccess: mockOpportunityDataAccess,
+        pathInfo: {
+          headers: { 'x-product': 'abcd' },
+        },
         attributes: {
           authInfo: restrictedAuthInfo,
         },
@@ -715,6 +721,9 @@ describe('Opportunities Controller', () => {
 
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
+          pathInfo: {
+            headers: { 'x-product': 'abcd' },
+          },
           attributes: {
             authInfo: restrictedAuthInfo,
           },
@@ -780,6 +789,9 @@ describe('Opportunities Controller', () => {
 
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
+          pathInfo: {
+            headers: { 'x-product': 'abcd' },
+          },
           attributes: {
             authInfo: restrictedAuthInfo,
           },
@@ -848,6 +860,9 @@ describe('Opportunities Controller', () => {
 
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
+          pathInfo: {
+            headers: { 'x-product': 'abcd' },
+          },
           attributes: {
             authInfo: restrictedAuthInfo,
           },
@@ -921,6 +936,9 @@ describe('Opportunities Controller', () => {
 
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
+          pathInfo: {
+            headers: { 'x-product': 'abcd' },
+          },
           attributes: {
             authInfo: restrictedAuthInfo,
           },
@@ -992,6 +1010,9 @@ describe('Opportunities Controller', () => {
 
         const restrictedContext = {
           dataAccess: mockOpportunityDataAccess,
+          pathInfo: {
+            headers: { 'x-product': 'abcd' },
+          },
           attributes: {
             authInfo: restrictedAuthInfo,
           },
