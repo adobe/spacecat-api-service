@@ -535,17 +535,12 @@ function ReportsController(ctx, log, env) {
       const rawReportKey = `${report.getRawStoragePath()}report.json`;
       const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
 
-      try {
-        // Delete both S3 files
-        await Promise.allSettled([
-          deleteS3Object(s3, s3ReportBucket, rawReportKey),
-          deleteS3Object(s3, s3MystiqueBucket, mystiqueReportKey),
-        ]);
-        log.info(`S3 files deleted for report ${reportId}: ${rawReportKey}, ${mystiqueReportKey}`);
-      } catch (s3Error) {
-        // Log S3 deletion error but continue with database deletion
-        log.warn(`Failed to delete S3 files for report ${reportId}: ${s3Error.message}`);
-      }
+      // Delete both S3 files
+      await Promise.allSettled([
+        deleteS3Object(s3, s3ReportBucket, rawReportKey),
+        deleteS3Object(s3, s3MystiqueBucket, mystiqueReportKey),
+      ]);
+      log.info(`S3 files deleted for report ${reportId}: ${rawReportKey}, ${mystiqueReportKey}`);
 
       // Delete the report from database
       await report.remove();
