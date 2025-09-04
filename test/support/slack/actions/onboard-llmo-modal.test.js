@@ -483,6 +483,34 @@ describe('onboard-llmo-modal', () => {
         expect(slackCtx.say).to.have.been.calledWith(':x: Could not find an IMS org with the ID *NULL_DETAILS_ORG_ID*.');
       }
     });
+
+    it('should handle SQS sendMessage failure through catch block', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Make SQS sendMessage throw an error
+      lambdaCtx.sqs.sendMessage.rejects(new Error('SQS service unavailable'));
+
+      // Execute the function
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      // Verify that SQS sendMessage was called but failed
+      expect(lambdaCtx.sqs.sendMessage).to.have.been.called;
+      expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Error saving LLMO config for site site123: SQS service unavailable'));
+    });
   });
 
   describe('onboardLLMOModal', () => {
@@ -587,6 +615,155 @@ describe('onboard-llmo-modal', () => {
         errors: {
           brand_name_input: 'There was an error processing the onboarding request.',
         },
+      });
+    });
+
+    it('should return validation error when IMS org ID is not provided', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: '' }, // Empty IMS org ID
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockAck).to.have.been.calledWith({
+        response_action: 'errors',
+        errors: {
+          brand_name_input: undefined,
+          ims_org_input: 'IMS Org ID is required',
+        },
+      });
+    });
+
+    it('should return validation error when brand name is not provided', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: '' }, // Empty brand name
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockAck).to.have.been.calledWith({
+        response_action: 'errors',
+        errors: {
+          brand_name_input: 'Brand name is required',
+          ims_org_input: undefined,
+        },
+      });
+    });
+
+    it('should log warning when private metadata parsing fails', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+            },
+          },
+          private_metadata: 'invalid json{', // Invalid JSON that will cause parsing to fail
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.warn).to.have.been.calledWith('Failed to parse private metadata:', sinon.match.instanceOf(Error));
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Starting onboarding process...');
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', {
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        brandURL: undefined, // Should be undefined when parsing fails
+        originalChannel: undefined,
+        originalThreadTs: undefined,
       });
     });
   });

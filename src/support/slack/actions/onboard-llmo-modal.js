@@ -557,7 +557,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
           auditType: 'llmo-customer-analysis',
         },
       };
-      sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
+      await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
 
       const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
