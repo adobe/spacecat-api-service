@@ -433,5 +433,103 @@ describe('onboard-llmo-modal', () => {
       // Verify that the site was not created (since we found an existing one)
       expect(lambdaCtx.dataAccess.Site.create).to.not.have.been.called;
     });
+
+    it('should handle createOrg error when IMS client throws an error', async function testCreateOrgImsClientError() {
+      this.timeout(10000);
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'INVALID_ORG_ID',
+        deliveryType: 'aem_edge',
+      };
+
+      // Create a mock site that already exists with a different org ID
+      const existingSite = createDefaultMockSite(sandbox);
+      existingSite.getOrganizationId.returns('old-org-123');
+      existingSite.setOrganizationId = sandbox.stub();
+
+      // Create mocks with the existing site
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, existingSite);
+      mockSiteModel.findByBaseURL.resolves(existingSite);
+
+      const mockOrganization = createDefaultMockOrganization(sandbox);
+      // The organization lookup should return null (org doesn't exist)
+      mockOrganization.findByImsOrgId.resolves(null);
+
+      // Mock IMS client to throw an error
+      const mockImsClient = createDefaultMockImsClient(sandbox);
+      mockImsClient.getImsOrganizationDetails.rejects(new Error('IMS org not found'));
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
+        mockSite: existingSite,
+        mockSiteModel,
+        mockOrganization,
+        mockImsClient,
+      });
+
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Execute the function and expect it to throw
+      try {
+        await onboardSite(input, lambdaCtx, slackCtx);
+        expect.fail('Expected onboardSite to throw an error');
+      } catch (error) {
+        // Verify that the error message was sent to Slack
+        expect(slackCtx.say).to.have.been.calledWith(':x: Could not find an IMS org with the ID *INVALID_ORG_ID*.');
+      }
+    });
+
+    it('should handle createOrg error when IMS org details are null', async function testCreateOrgNullDetails() {
+      this.timeout(10000);
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'NULL_DETAILS_ORG_ID',
+        deliveryType: 'aem_edge',
+      };
+
+      // Create a mock site that already exists with a different org ID
+      const existingSite = createDefaultMockSite(sandbox);
+      existingSite.getOrganizationId.returns('old-org-123');
+      existingSite.setOrganizationId = sandbox.stub();
+
+      // Create mocks with the existing site
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, existingSite);
+      mockSiteModel.findByBaseURL.resolves(existingSite);
+
+      const mockOrganization = createDefaultMockOrganization(sandbox);
+      // The organization lookup should return null (org doesn't exist)
+      mockOrganization.findByImsOrgId.resolves(null);
+
+      // Mock IMS client to return null details
+      const mockImsClient = createDefaultMockImsClient(sandbox);
+      mockImsClient.getImsOrganizationDetails.resolves(null);
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
+        mockSite: existingSite,
+        mockSiteModel,
+        mockOrganization,
+        mockImsClient,
+      });
+
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Execute the function and expect it to throw
+      try {
+        await onboardSite(input, lambdaCtx, slackCtx);
+        expect.fail('Expected onboardSite to throw an error');
+      } catch (error) {
+        // Verify that the error message was sent to Slack
+        expect(slackCtx.say).to.have.been.calledWith(':x: Could not find an IMS org with the ID *NULL_DETAILS_ORG_ID*.');
+      }
+    });
   });
 });
