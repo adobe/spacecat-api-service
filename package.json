@@ -89,7 +89,6 @@
     "@langchain/core": "0.3.72",
     "@langchain/langgraph": "0.4.6",
     "@langchain/openai": "0.6.9",
-    "@modelcontextprotocol/sdk": "1.17.4",
     "@octokit/rest": "22.0.0",
     "@slack/bolt": "4.4.0",
     "@slack/web-api": "7.10.0",
@@ -99,8 +98,8 @@
     "fuse.js": "7.1.0",
     "js-yaml": "4.1.0",
     "jsdom": "26.1.0",
-    "psl": "1.15.0",
     "slack-block-builder": "2.8.0",
+    "tldts": "7.0.12",
     "urijs": "1.19.11",
     "zod": "3.25.76"
   },
