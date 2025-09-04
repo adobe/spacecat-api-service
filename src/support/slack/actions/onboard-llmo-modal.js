@@ -308,7 +308,7 @@ export function startLLMOOnboarding(lambdaContext) {
 
       if (!site) {
         await fullOnboardingModal(body, client, respond, brandURL);
-        log.info(`User ${user.id} started full onboarding process for ${brandURL}.`); // unsure
+        log.debug(`User ${user.id} started full onboarding process for ${brandURL}.`);
         return;
       }
 
@@ -320,13 +320,13 @@ export function startLLMOOnboarding(lambdaContext) {
           text: `:cdbot-error: It looks like ${brandURL} is already configured for LLMO with brand ${brand}`,
           replace_original: true,
         });
-        log.info(`Aborted ${brandURL} onboarding: Already onboarded with brand ${brand}`); // necessary?
+        log.debug(`Aborted ${brandURL} onboarding: Already onboarded with brand ${brand}`);
         return;
       }
 
       await elmoOnboardingModal(body, client, respond, brandURL);
 
-      log.info(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`); // keep?
+      log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
       await respond({
@@ -357,7 +357,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
     ];
 
     for (const [index, endpoint] of endpoints.entries()) {
-      log.info(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`); // necessary?
+      log.debug(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
 
       // eslint-disable-next-line no-await-in-loop
       const response = await fetch(endpoint.url, { method: 'POST', headers });
@@ -366,7 +366,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
         throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
       }
 
-      log.info(`Excel report successfully published to ${endpoint.name}`); // necessary?
+      log.debug(`Excel report successfully published to ${endpoint.name}`);
 
       if (index === 0) {
         // eslint-disable-next-line no-await-in-loop,max-statements-per-line
@@ -390,22 +390,18 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
     domainId: process.env.SHAREPOINT_DOMAIN_ID,
   }, { url: SHAREPOINT_URL, type: 'onedrive' });
 
-  log.info(`Copying query-index to ${dataFolder}`); //
   const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
   const queryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
 
   await folder.createFolder(dataFolder, '/');
   await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
 
-  log.info('Publishing query-index to admin.hlx.page'); // necessary?
   await publishToAdminHlx('query-index', dataFolder, log);
 }
 
 // update https://github.com/adobe/project-elmo-ui-data/blob/main/helix-query.yaml
 async function updateIndexConfig(dataFolder, lambdaCtx) {
   const { log } = lambdaCtx;
-
-  log.info('Starting Git modification of helix query config'); // necessary?
 
   const octokit = new Octokit({
     auth: process.env.LLMO_ONBOARDING_GITHUB_TOKEN,
@@ -440,7 +436,7 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
     sha: file.sha,
   });
 
-  log.info('Done with Git modification of helix query config'); //
+  log.debug('Done with Git modification of helix query config');
 }
 
 async function createSiteAndOrganization(input, lambda, slackContext) {
@@ -531,10 +527,10 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     );
 
     if (!hasAgenticTrafficEnabled) {
-      log.info(`Enabling agentic traffic audits for organization ${orgId} (first site in org)`); //
+      log.info(`Enabling agentic traffic audits for organization ${orgId} (first site in org)`);
       configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
     } else {
-      log.info(`Agentic traffic audits already enabled for organization ${orgId}, skipping`); // necessary ?
+      log.info(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
     }
 
     // enable the cdn-logs-report audits for agentic traffic
@@ -546,7 +542,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     try {
       await configuration.save();
       await site.save();
-      log.info(`Successfully updated LLMO config for site ${siteId}`); //
+      log.info(`Successfully updated LLMO config for site ${siteId}`);
 
       // trigger the llmo-customer-analysis handler
       const sqsTriggerMesasage = {
@@ -585,8 +581,6 @@ export function onboardLLMOModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     try {
-      log.info('Starting onboarding process...'); //
-
       const { view, user } = body;
       const { values } = view.state;
 
@@ -653,7 +647,7 @@ export function onboardLLMOModal(lambdaContext) {
         brandName, baseURL: brandURL, imsOrgId, deliveryType,
       }, lambdaContext, slackContext);
 
-      log.info(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`); // keep?
+      log.debug(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);
     } catch (e) {
       log.error('Error handling onboard site modal:', e);
       await ack({
