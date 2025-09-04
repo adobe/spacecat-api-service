@@ -94,7 +94,7 @@ describe('LlmoOnboardCommand', () => {
       // Check for the section block with onboarding text
       const sectionBlock = message.blocks.find((block) => block.type === 'section');
       expect(sectionBlock).to.exist;
-      expect(sectionBlock.text.text).to.include('Site Onboarding');
+      expect(sectionBlock.text.text).to.include('LLMO Onboarding');
 
       // Check for the actions block with the button
       const actionsBlock = message.blocks.find((block) => block.type === 'actions');

@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* c8 ignore start */
-
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -100,5 +98,3 @@ function LlmoOnboardCommand(context) {
 }
 
 export default LlmoOnboardCommand;
-
-/* c8 ignore stop */
