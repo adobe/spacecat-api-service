@@ -19,7 +19,7 @@ import {
   hasText,
   isIsoDate, isNonEmptyObject, isObject, isValidUrl,
 } from '@adobe/spacecat-shared-utils';
-import psl from 'psl';
+import { getDomain as extractDomain } from 'tldts';
 import { ImportJob as ImportJobModel } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
 import ImportSupervisor from '../support/import-supervisor.js';
@@ -163,9 +163,7 @@ function ImportController(context) {
    * @return {string} the domain extracted from the URL.
    */
   function getDomain(inputUrl) {
-    const parsedUrl = new URL(inputUrl);
-    const parsedDomain = psl.parse(parsedUrl.hostname);
-    return parsedDomain.domain; // Extracts the full domain (e.g., example.co.uk)
+    return extractDomain(inputUrl); // Extracts the full domain (e.g., example.co.uk)
   }
 
   /**
