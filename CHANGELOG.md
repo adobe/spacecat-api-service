@@ -1,3 +1,10 @@
+## [1.176.2](https://github.com/adobe/spacecat-api-service/compare/v1.176.1...v1.176.2) (2025-09-04)
+
+
+### Bug Fixes
+
+* remove mcp / psl deps, punycode fix ([#1220](https://github.com/adobe/spacecat-api-service/issues/1220)) ([b4ab173](https://github.com/adobe/spacecat-api-service/commit/b4ab1739ab5ebe4feff32708790c675a1b865897))
+
 ## [1.176.1](https://github.com/adobe/spacecat-api-service/compare/v1.176.0...v1.176.1) (2025-09-04)
 
 
