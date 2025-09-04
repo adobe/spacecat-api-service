@@ -102,7 +102,6 @@ export default function getRouteHandlers(
   consentBannerController,
   scrapeController,
   scrapeJobController,
-  mcpController,
   paidController,
   trafficController,
   fixesController,
