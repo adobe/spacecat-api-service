@@ -176,6 +176,11 @@ describe('onboard-llmo-modal', () => {
     // Block all network requests during tests
     nock.disableNetConnect();
     sandbox = sinon.createSandbox();
+    // Mock setTimeout to resolve immediately
+    sandbox.stub(global, 'setTimeout').callsFake((fn) => {
+      fn();
+      return 1; // Return a fake timer ID
+    });
   });
 
   afterEach(() => {
@@ -186,8 +191,7 @@ describe('onboard-llmo-modal', () => {
   });
 
   describe('onboardSite', () => {
-    it('should successfully onboard a new site with all expected messages and function calls', async function testNewSiteOnboarding() {
-      this.timeout(10000); // Increase timeout to 10 seconds
+    it('should successfully onboard a new site with all expected messages and function calls', async () => {
       // Mock data
       const input = {
         baseURL: 'https://example.com',
@@ -208,7 +212,6 @@ describe('onboard-llmo-modal', () => {
       // Execute the function
       await onboardSite(input, lambdaCtx, slackCtx);
 
-      // Verify the expected say() messages
       expect(sayStub).to.have.been.calledWith(':gear: Test Brand onboarding started...');
       expect(sayStub).to.have.been.calledWith(sinon.match(':white_check_mark: *LLMO onboarding completed successfully!*'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':link: *Site:* https://example.com'));
@@ -216,8 +219,6 @@ describe('onboard-llmo-modal', () => {
       expect(sayStub).to.have.been.calledWith(sinon.match(':file_folder: *Data Folder:* example-com'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':label: *Brand:* Test Brand'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':identification_card: *IMS Org ID:* ABC123@AdobeOrg'));
-
-      // Verify key function calls
       expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(lambdaCtx.dataAccess.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com',
@@ -229,19 +230,13 @@ describe('onboard-llmo-modal', () => {
       expect(lambdaCtx.sqs.sendMessage).to.have.been.calledWith('audit-queue', {
         type: 'llmo-customer-analysis',
         siteId: 'site123',
-        auditContext: {
-          auditType: 'llmo-customer-analysis',
-        },
+        auditContext: { auditType: 'llmo-customer-analysis' },
       });
-
-      // Verify site config updates
       const siteConfig = mockSite.getConfig();
       expect(siteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
       expect(siteConfig.updateLlmoDataFolder).to.have.been.calledWith('example-com');
       expect(siteConfig.enableImport).to.have.been.calledWith('traffic-analysis');
       expect(siteConfig.enableImport).to.have.been.calledWith('llmo-prompts-ahrefs', { limit: 25 });
-
-      // Verify handler enabling
       const config = await lambdaCtx.dataAccess.Configuration.findLatest();
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence', mockSite);
@@ -250,8 +245,7 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
     });
 
-    it('should handle existing site with matching organization ID', async function testExistingSiteMatchingOrg() {
-      this.timeout(10000);
+    it('should handle existing site with matching organization ID', async () => {
       // Mock data
       const input = {
         baseURL: 'https://example.com',
@@ -285,24 +279,15 @@ describe('onboard-llmo-modal', () => {
       // Mock fetch for admin.hlx.page calls
       global.fetch = createDefaultMockFetch(sandbox);
 
-      // Execute the function
       await onboardSite(input, lambdaCtx, slackCtx);
 
-      // Verify that it found the existing site
       expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
-
-      // Verify that checkOrg was called (organization lookup)
       expect(lambdaCtx.dataAccess.Organization.findByImsOrgId).to.have.been.calledWith('ABC123@AdobeOrg');
-
-      // Verify that setOrganizationId was NOT called since orgs match
       expect(existingSite.setOrganizationId).to.not.have.been.called;
-
-      // Verify that the site was not created (since we found an existing one)
       expect(lambdaCtx.dataAccess.Site.create).to.not.have.been.called;
     });
 
-    it('should handle existing site with different organization ID and update it', async function testExistingSiteDifferentOrg() {
-      this.timeout(10000);
+    it('should handle existing site with different organization ID and update it', async () => {
       // Mock data
       const input = {
         baseURL: 'https://example.com',
@@ -337,27 +322,16 @@ describe('onboard-llmo-modal', () => {
       // Mock fetch for admin.hlx.page calls
       global.fetch = createDefaultMockFetch(sandbox);
 
-      // Execute the function
       await onboardSite(input, lambdaCtx, slackCtx);
 
-      // Verify that it found the existing site
       expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
-
-      // Verify that checkOrg was called (organization lookup)
       expect(lambdaCtx.dataAccess.Organization.findByImsOrgId).to.have.been.calledWith('ABC123@AdobeOrg');
-
-      // Verify that setOrganizationId WAS called to update the site's org
       expect(existingSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-
-      // Verify that the site was saved after updating the organization
       expect(existingSite.save).to.have.been.called;
-
-      // Verify that the site was not created (since we found an existing one)
       expect(lambdaCtx.dataAccess.Site.create).to.not.have.been.called;
     });
 
-    it('should handle existing site with non-existent organization and create new org', async function testExistingSiteCreateNewOrg() {
-      this.timeout(10000);
+    it('should handle existing site with non-existent organization and create new org', async () => {
       // Mock data
       const input = {
         baseURL: 'https://example.com',
@@ -403,39 +377,22 @@ describe('onboard-llmo-modal', () => {
       // Mock fetch for admin.hlx.page calls
       global.fetch = createDefaultMockFetch(sandbox);
 
-      // Execute the function
       await onboardSite(input, lambdaCtx, slackCtx);
 
-      // Verify that it found the existing site
       expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
-
-      // Verify that checkOrg was called (organization lookup)
       expect(lambdaCtx.dataAccess.Organization.findByImsOrgId).to.have.been.calledWith('ABC123@AdobeOrg');
-
-      // Verify that IMS client was called to get org details
       expect(lambdaCtx.imsClient.getImsOrganizationDetails).to.have.been.calledWith('ABC123@AdobeOrg');
-
-      // Verify that a new organization was created
       expect(lambdaCtx.dataAccess.Organization.create).to.have.been.calledWith({
         name: 'New Test Organization',
         imsOrgId: 'ABC123@AdobeOrg',
       });
-
-      // Verify that the new organization was saved
       expect(newOrg.save).to.have.been.called;
-
-      // Verify that setOrganizationId was called with the new org ID
       expect(existingSite.setOrganizationId).to.have.been.calledWith('new-org-789');
-
-      // Verify that the site was saved after updating the organization
       expect(existingSite.save).to.have.been.called;
-
-      // Verify that the site was not created (since we found an existing one)
       expect(lambdaCtx.dataAccess.Site.create).to.not.have.been.called;
     });
 
-    it('should handle createOrg error when IMS client throws an error', async function testCreateOrgImsClientError() {
-      this.timeout(10000);
+    it('should handle createOrg error when IMS client throws an error', async () => {
       // Mock data
       const input = {
         baseURL: 'https://example.com',
@@ -473,18 +430,15 @@ describe('onboard-llmo-modal', () => {
       // Mock fetch for admin.hlx.page calls
       global.fetch = createDefaultMockFetch(sandbox);
 
-      // Execute the function and expect it to throw
       try {
         await onboardSite(input, lambdaCtx, slackCtx);
         expect.fail('Expected onboardSite to throw an error');
       } catch (error) {
-        // Verify that the error message was sent to Slack
         expect(slackCtx.say).to.have.been.calledWith(':x: Could not find an IMS org with the ID *INVALID_ORG_ID*.');
       }
     });
 
-    it('should handle createOrg error when IMS org details are null', async function testCreateOrgNullDetails() {
-      this.timeout(10000);
+    it('should handle createOrg error when IMS org details are null', async () => {
       // Mock data
       const input = {
         baseURL: 'https://example.com',
@@ -522,14 +476,118 @@ describe('onboard-llmo-modal', () => {
       // Mock fetch for admin.hlx.page calls
       global.fetch = createDefaultMockFetch(sandbox);
 
-      // Execute the function and expect it to throw
       try {
         await onboardSite(input, lambdaCtx, slackCtx);
         expect.fail('Expected onboardSite to throw an error');
       } catch (error) {
-        // Verify that the error message was sent to Slack
         expect(slackCtx.say).to.have.been.calledWith(':x: Could not find an IMS org with the ID *NULL_DETAILS_ORG_ID*.');
       }
+    });
+  });
+
+  describe('onboardLLMOModal', () => {
+    it('should handle modal submission successfully and log expected messages', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Starting onboarding process...');
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', {
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        brandURL: 'https://example.com',
+        originalChannel: 'C1234567890',
+        originalThreadTs: '1234567890.123456',
+      });
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboard LLMO modal processed for user U1234567890, site https://example.com');
+      expect(mockAck).to.have.been.calledOnce;
+    });
+
+    it('should print error message if onboarding throws an error', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'this is not a valid URL',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {});
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.error).to.have.been.calledWith('Error handling onboard site modal:', sinon.match.instanceOf(Error));
+      expect(mockAck).to.have.been.calledWith({
+        response_action: 'errors',
+        errors: {
+          brand_name_input: 'There was an error processing the onboarding request.',
+        },
+      });
     });
   });
 });
