@@ -3901,3 +3901,92 @@ SandboxAuditResponse:
       description: Array of audit results
       items:
         $ref: '#/SandboxAuditResult'
+
+Report:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+      description: Unique identifier for the report
+    siteId:
+      $ref: '#/Id'
+      description: The site ID this report belongs to
+    reportType:
+      type: string
+      enum: [performance, accessibility, seo, security, conversion, cwv, optimization]
+      description: The type of report generated
+      example: 'performance'
+    status:
+      type: string
+      enum: [processing, success, failed]
+      description: Current status of the report
+      example: 'success'
+    reportPeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date for the report period
+          example: '2024-01-01'
+        endDate:
+          type: string
+          format: date
+          description: End date for the report period
+          example: '2024-01-31'
+      required: [startDate, endDate]
+    comparisonPeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date for comparison period
+          example: '2023-12-01'
+        endDate:
+          type: string
+          format: date
+          description: End date for comparison period
+          example: '2023-12-31'
+      required: [startDate, endDate]
+    storagePath:
+      type: string
+      description: Storage path for the report files
+      example: 'reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/'
+    createdAt:
+      $ref: '#/DateTime'
+      description: When the report was initially created
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the report was last updated
+    updatedBy:
+      type: string
+      description: User or system that last updated the report
+      example: 'user@adobe.com'
+    data:
+      type: object
+      description: Optional data containing presigned URLs for downloading reports (only present for successful reports)
+      properties:
+        rawPresignedUrl:
+          type: string
+          format: uri
+          description: Presigned URL for downloading the raw report data
+          example: 'https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=...'
+        rawPresignedUrlExpiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the raw report presigned URL
+          example: '2024-01-22T10:30:00Z'
+        mystiquePresignedUrl:
+          type: string
+          format: uri
+          description: Presigned URL for downloading the enhanced report with AI insights
+          example: 'https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=...'
+        mystiquePresignedUrlExpiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the enhanced report presigned URL
+          example: '2024-01-22T10:30:00Z'
+      additionalProperties: false
+  required: [id, siteId, reportType, status, reportPeriod, createdAt, updatedAt]
+  additionalProperties: false

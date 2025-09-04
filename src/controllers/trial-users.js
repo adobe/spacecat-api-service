@@ -27,9 +27,20 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { TrialUser as TrialUserModel } from '@adobe/spacecat-shared-data-access';
 
+import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
+/**
+ * Builds the email payload XML for trial user invitation.
+ * @param {string} emailAddress - Single email address.
+ * @returns {string} XML email payload.
+ */
+function buildEmailPayload(emailAddress) {
+  return `<sendTemplateEmailReq>
+    <toList>${emailAddress}</toList>
+</sendTemplateEmailReq>`;
+}
 /**
  * TrialUsers controller. Provides methods to read and create trial users.
  * @param {object} ctx - Context of the request.
@@ -90,6 +101,7 @@ function TrialUsersController(ctx) {
   const createTrialUserForEmailInvite = async (context) => {
     const { organizationId } = context.params;
     const { emailId } = context.data;
+    const { env } = context;
 
     if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
@@ -117,18 +129,41 @@ function TrialUsersController(ctx) {
       // Check if trial user already exists with this email
       const existingTrialUser = await TrialUser.findByEmailId(emailId);
       if (existingTrialUser) {
-        return createResponse({ message: 'Trial user with this email already exists' }, 409);
+        return createResponse({ message: `Trial user with this email already exists ${existingTrialUser.getId()}` }, 409);
       }
 
-      // Create new trial user invite
-      const trialUser = await TrialUser.create({
-        emailId,
-        organizationId,
-        status: TrialUserModel.STATUSES.INVITED,
-        metadata: { origin: TrialUserModel.STATUSES.INVITED },
+      env.IMS_CLIENT_ID = env.EMAIL_IMS_CLIENT_ID;
+      env.IMS_CLIENT_SECRET = env.EMAIL_IMS_CLIENT_SECRET;
+      env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
+      env.IMS_SCOPE = env.EMAIL_IMS_SCOPE;
+      const imsClient = ImsClient.createFrom(context);
+      const imsTokenPayload = await imsClient.getServiceAccessToken();
+      const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
+      const emailTemplateName = env.EMAIL_LLMO_TEMPLATE;
+      const emailPayload = buildEmailPayload(emailId);
+      // Send email using Adobe Post Office API
+      const emailSentResponse = await fetch(`${postOfficeEndpoint}/po-server/message?templateName=${emailTemplateName}&locale=en-us`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/xml',
+          Authorization: `IMS ${imsTokenPayload.access_token}`,
+          'Content-Type': 'application/xml',
+        },
+        body: emailPayload,
       });
 
-      return created(TrialUserDto.toJSON(trialUser));
+      // create user only when email is sent successfully
+      if (emailSentResponse.status === 200) {
+        const trialUser = await TrialUser.create({
+          emailId,
+          organizationId,
+          status: TrialUserModel.STATUSES.INVITED,
+          metadata: { origin: TrialUserModel.STATUSES.INVITED },
+        });
+        return created(TrialUserDto.toJSON(trialUser));
+      } else {
+        return badRequest('Some Error Occured while sending email to the user');
+      }
     } catch (e) {
       context.log.error(`Error creating trial user invite for organization ${organizationId}: ${e.message}`);
       return internalServerError(e.message);

@@ -26,6 +26,7 @@ const ANONYMOUS_ENDPOINTS = [
   /^POST \/hooks\/site-detection.+/,
 ];
 const SERVICE_CODE = 'dx_aem_perf';
+const X_PRODUCT_HEADER = 'x-product';
 
 function isAnonymous(endpoint) {
   return ANONYMOUS_ENDPOINTS.some((rgx) => rgx.test(endpoint));
@@ -42,7 +43,6 @@ export default class AccessControlUtil {
 
   constructor(context) {
     const { log, pathInfo, attributes } = context;
-
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
       log.info(`Anonymous endpoint, skipping authorization: ${sanitizePath(endpoint)}`);
@@ -60,6 +60,7 @@ export default class AccessControlUtil {
       this.SiteEnrollment = context.dataAccess.SiteEnrollment;
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
+      this.xProductHeader = pathInfo.headers[X_PRODUCT_HEADER];
     }
 
     // Always assign the log property
@@ -146,6 +147,11 @@ export default class AccessControlUtil {
   }
 
   async hasAccess(entity, subService = '', productCode = '') {
+    if (hasText(productCode) && this.xProductHeader !== productCode) {
+      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
+      throw new Error('[Error] Unauthorized request');
+    }
+
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }

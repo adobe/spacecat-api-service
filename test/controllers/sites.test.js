@@ -209,6 +209,9 @@ describe('Sites Controller', () => {
         DEFAULT_ORGANIZATION_ID: 'default',
       },
       dataAccess: mockDataAccess,
+      pathInfo: {
+        headers: { 'x-product': 'abcd' },
+      },
       attributes: {
         authInfo: new AuthInfo()
           .withType('jwt')

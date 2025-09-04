@@ -79,6 +79,9 @@ describe('Sites Audits Controller', () => {
 
     contextMock = {
       dataAccess: dataAccessMock,
+      pathInfo: {
+        headers: { 'x-product': 'abcd' },
+      },
       attributes: {
         authInfo: new AuthInfo()
           .withType('jwt')
@@ -565,6 +568,9 @@ describe('Sites Audits Controller', () => {
       const nonAdminContext = {
         dataAccess: dataAccessMock,
         env: {},
+        pathInfo: {
+          headers: { 'x-product': 'abcd' },
+        },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
