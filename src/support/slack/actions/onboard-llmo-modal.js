@@ -15,6 +15,7 @@
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
@@ -23,6 +24,9 @@ const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
 const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
+
+const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
+const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 
 // site isn't on spacecat yet
 async function fullOnboardingModal(body, client, respond, brandURL) {
@@ -499,8 +503,14 @@ async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
   // find if there are any entitlements for this site enabling LLMO
   const enrollments = await SiteEnrollment.allBySiteId(site.getId());
   const llmoEntitlements = (await Promise.all(enrollments.map(async (enrollment) => {
+    // find entitlement for this enrollment
     const entitlement = await Entitlement.findById(enrollment.getEntitlementId());
-    return entitlement.getProductCode() === 'LLMO' ? entitlement : null;
+    // check if the entitlement is for the same organization as the site
+    const entitlementOrgId = entitlement.getOrganizationId();
+    if (entitlementOrgId !== orgId) return null;
+    // check if the entitlement is for LLMO
+    const entitlementProductCode = entitlement.getProductCode();
+    return entitlementProductCode === LLMO_PRODUCT_CODE ? entitlement : null;
   }))).filter((x) => !!x);
 
   if (llmoEntitlements.length > 0) {
@@ -512,8 +522,8 @@ async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
   // create an entitlement
   const newEntitlement = await Entitlement.create({
     organizationId: orgId,
-    productCode: 'LLMO',
-    tier: 'FREE_TRIAL',
+    productCode: LLMO_PRODUCT_CODE,
+    tier: LLMO_TIER,
     quotas: { llmo_trial_prompts: 200 },
   });
   await newEntitlement.save();
