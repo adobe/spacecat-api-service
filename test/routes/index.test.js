@@ -125,11 +125,6 @@ describe('getRouteHandlers', () => {
     getScreenshots: sinon.stub(),
   };
 
-  const mockMcpController = {
-    handleRpc: sinon.stub(),
-    handleSseRequest: sinon.stub(),
-  };
-
   const mockScrapeController = {
     getFileByKey: sinon.stub(),
     listScrapedContentFiles: sinon.stub(),
@@ -250,7 +245,6 @@ describe('getRouteHandlers', () => {
       mockConsentBannerController,
       mockScrapeController,
       mockScrapeJobController,
-      mockMcpController,
       mockPaidController,
       mockTrafficController,
       mockFixesController,
