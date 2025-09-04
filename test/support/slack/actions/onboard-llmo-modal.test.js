@@ -25,6 +25,7 @@ describe('onboard-llmo-modal', () => {
   let sandbox;
   let onboardSite;
   let mockedModule;
+  let octokitMock;
 
   // Default mocks that can be reused across tests
   const createDefaultMockSite = (sinonSandbox) => ({
@@ -138,6 +139,19 @@ describe('onboard-llmo-modal', () => {
   });
 
   before(async () => {
+    // Create octokit mock
+    octokitMock = sinon.stub().returns({
+      repos: {
+        getContent: sinon.stub().resolves({
+          data: {
+            content: Buffer.from('test content').toString('base64'),
+            sha: 'test-sha-123',
+          },
+        }),
+        createOrUpdateFileContents: sinon.stub().resolves(),
+      },
+    });
+
     // Mock the ES modules that can't be stubbed directly
     mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
@@ -155,14 +169,7 @@ describe('onboard-llmo-modal', () => {
         }),
       },
       '@octokit/rest': {
-        Octokit: sinon.stub().returns({
-          repos: {
-            getContent: sinon.stub().resolves({
-              data: { content: Buffer.from('test content').toString('base64') },
-            }),
-            createOrUpdateFileContents: sinon.stub().resolves(),
-          },
-        }),
+        Octokit: octokitMock,
       },
       '../../../../src/utils/slack/base.js': {
         postErrorMessage: sinon.stub(),
@@ -243,6 +250,108 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
+
+      // Verify that octokit was called to update the helix query config
+      expect(octokitMock).to.have.been.called;
+      const octokitInstance = octokitMock.getCall(0).returnValue;
+      expect(octokitInstance.repos.getContent).to.have.been.calledWith({
+        owner: 'adobe',
+        repo: 'project-elmo-ui-data',
+        ref: 'main',
+        path: 'helix-query.yaml',
+      });
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledWith({
+        owner: 'adobe',
+        repo: 'project-elmo-ui-data',
+        ref: 'main',
+        path: 'helix-query.yaml',
+        message: 'Automation: Onboard example-com',
+        content: sinon.match.string,
+        sha: 'test-sha-123',
+      });
+    });
+
+    it('should not add new line to yaml if it already ends with a newline', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Create a new octokit mock for this specific test that returns content ending with newline
+      const testOctokitMock = sinon.stub().returns({
+        repos: {
+          getContent: sinon.stub().resolves({
+            data: {
+              content: Buffer.from('test content\n').toString('base64'), // Content ends with newline
+              sha: 'test-sha-123',
+            },
+          }),
+          createOrUpdateFileContents: sinon.stub().resolves(),
+        },
+      });
+
+      // Override the octokit mock for this test
+      const originalOctokitMock = octokitMock;
+      octokitMock = testOctokitMock;
+
+      // Re-mock the module with the new octokit mock
+      mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: {
+            toDynamoItem: sinon.stub().returns({}),
+          },
+        },
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves({
+            getDocument: sinon.stub().returns({
+              exists: sinon.stub().resolves(false),
+              createFolder: sinon.stub().resolves(),
+              copy: sinon.stub().resolves(),
+            }),
+          }),
+        },
+        '@octokit/rest': {
+          Octokit: testOctokitMock,
+        },
+        '../../../../src/utils/slack/base.js': {
+          postErrorMessage: sinon.stub(),
+        },
+      });
+
+      onboardSite = mockedModule.onboardSite;
+
+      // Execute the function
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      const octokitInstance = testOctokitMock.getCall(0).returnValue;
+      const createOrUpdateCall = octokitInstance.repos.createOrUpdateFileContents.getCall(0);
+      const contentArg = createOrUpdateCall.args[0].content;
+      const decodedContent = Buffer.from(contentArg, 'base64').toString('utf-8');
+
+      // The content should end with exactly one newline, not two
+      expect(decodedContent).to.match(/\n$/);
+      expect(decodedContent).to.not.match(/\n\n$/);
+
+      // Verify the specific content structure
+      expect(decodedContent).to.include('test content');
+      expect(decodedContent).to.include('example-com:');
+      expect(decodedContent).to.include('<<: *default');
+      expect(decodedContent).to.include('include:');
+      expect(decodedContent).to.include('- \'/example-com/**\'');
+      expect(decodedContent).to.include('target: /example-com/query-index.xlsx');
+
+      octokitMock = originalOctokitMock;
     });
 
     it('should handle existing site with matching organization ID', async () => {
@@ -630,6 +739,94 @@ describe('onboard-llmo-modal', () => {
         organizationId: 'new-org-789',
       });
     });
+
+    it('should log warning when HLX_ADMIN_TOKEN is not set', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Store original env var
+      const originalToken = process.env.HLX_ADMIN_TOKEN;
+      // Remove the token
+      delete process.env.HLX_ADMIN_TOKEN;
+
+      try {
+        // Execute the function
+        await onboardSite(input, lambdaCtx, slackCtx);
+
+        // Verify that warning was logged
+        expect(lambdaCtx.log.warn).to.have.been.calledWith('LLMO onboarding: HLX_ADMIN_TOKEN is not set');
+      } finally {
+        // Restore original env var
+        if (originalToken !== undefined) {
+          process.env.HLX_ADMIN_TOKEN = originalToken;
+        }
+      }
+    });
+
+    it('should handle fetch error when publishing to admin.hlx.page fails', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch to throw an error
+      global.fetch = sandbox.stub().rejects(new Error('Network error'));
+
+      // Execute the function
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      // Verify that error was logged
+      expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Failed to publish via admin.hlx.page: Network error'));
+    });
+
+    it('should handle non-ok response when publishing to admin.hlx.page', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch to return non-ok response
+      global.fetch = sandbox.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      });
+
+      // Execute the function
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      // Verify that error was logged
+      expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Failed to publish via admin.hlx.page: preview failed: 500 Internal Server Error'));
+    });
   });
 
   describe('onboardLLMOModal', () => {
@@ -697,11 +894,6 @@ describe('onboard-llmo-modal', () => {
               },
               ims_org_input: {
                 ims_org_id: { value: 'ABC123@AdobeOrg' },
-              },
-              delivery_type_input: {
-                delivery_type: {
-                  selected_option: { value: 'aem_edge' },
-                },
               },
             },
           },
@@ -883,6 +1075,181 @@ describe('onboard-llmo-modal', () => {
         brandURL: undefined, // Should be undefined when parsing fails
         originalChannel: undefined,
         originalThreadTs: undefined,
+      });
+    });
+  });
+
+  describe('startLLMOOnboarding', () => {
+    it('should call fullOnboardingModal when site is not found', async () => {
+      const mockBody = {
+        user: { id: 'user123' },
+        actions: [{ value: 'https://example.com' }],
+        trigger_id: 'trigger123',
+        channel: { id: 'channel123' },
+        message: { ts: 'message123' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+        views: {
+          open: sandbox.stub().resolves(),
+        },
+      };
+      const mockRespond = sandbox.stub();
+
+      // Mock Site.findByBaseURL to return null (site not found)
+      const mockSite = createDefaultMockSite(sandbox);
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
+      mockSiteModel.findByBaseURL.resolves(null);
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSiteModel });
+
+      const { startLLMOOnboarding } = mockedModule;
+      const handler = startLLMOOnboarding(lambdaCtx);
+
+      await handler({
+        ack: mockAck, body: mockBody, client: mockClient, respond: mockRespond,
+      });
+
+      expect(mockAck).to.have.been.called;
+      expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(lambdaCtx.log.info).to.have.been.calledWith('User user123 started full onboarding process for https://example.com.');
+    });
+
+    it('should show error message when site is found but already has brand configured', async () => {
+      const mockBody = {
+        user: { id: 'user123' },
+        actions: [{ value: 'https://example.com' }],
+        trigger_id: 'trigger123',
+        channel: { id: 'channel123' },
+        message: { ts: 'message123' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+        views: {
+          open: sandbox.stub().resolves(),
+        },
+      };
+      const mockRespond = sandbox.stub();
+
+      // Mock site with existing brand configuration
+      const mockSite = createDefaultMockSite(sandbox);
+      const mockConfig = {
+        getLlmoBrand: sandbox.stub().returns('Existing Brand'),
+      };
+      mockSite.getConfig.returns(mockConfig);
+
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
+      mockSiteModel.findByBaseURL.resolves(mockSite);
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSiteModel });
+
+      const { startLLMOOnboarding } = mockedModule;
+      const handler = startLLMOOnboarding(lambdaCtx);
+
+      await handler({
+        ack: mockAck, body: mockBody, client: mockClient, respond: mockRespond,
+      });
+
+      expect(mockAck).to.have.been.called;
+      expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(mockRespond).to.have.been.calledWith({
+        text: ':cdbot-error: It looks like https://example.com is already configured for LLMO with brand Existing Brand',
+        replace_original: true,
+      });
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Aborted https://example.com onboarding: Already onboarded with brand Existing Brand');
+    });
+
+    it('should call elmoOnboardingModal when site is found but no brand configured', async () => {
+      const mockBody = {
+        user: { id: 'user123' },
+        actions: [{ value: 'https://example.com' }],
+        trigger_id: 'trigger123',
+        channel: { id: 'channel123' },
+        message: { ts: 'message123' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+        views: {
+          open: sandbox.stub().resolves(),
+        },
+      };
+      const mockRespond = sandbox.stub();
+
+      // Mock site without brand configuration
+      const mockSite = createDefaultMockSite(sandbox);
+      const mockConfig = {
+        getLlmoBrand: sandbox.stub().returns(null), // No brand configured
+      };
+      mockSite.getConfig.returns(mockConfig);
+
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
+      mockSiteModel.findByBaseURL.resolves(mockSite);
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSiteModel });
+
+      const { startLLMOOnboarding } = mockedModule;
+      const handler = startLLMOOnboarding(lambdaCtx);
+
+      await handler({
+        ack: mockAck, body: mockBody, client: mockClient, respond: mockRespond,
+      });
+
+      expect(mockAck).to.have.been.called;
+      expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(lambdaCtx.log.info).to.have.been.calledWith('User user123 started LLMO onboarding process for https://example.com with existing site site123.');
+    });
+
+    it('should handle errors gracefully', async () => {
+      const mockBody = {
+        user: { id: 'user123' },
+        actions: [{ value: 'https://example.com' }],
+        trigger_id: 'trigger123',
+        channel: { id: 'channel123' },
+        message: { ts: 'message123' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+        views: {
+          open: sandbox.stub().resolves(),
+        },
+      };
+      const mockRespond = sandbox.stub();
+
+      // Mock Site.findByBaseURL to throw an error
+      const mockSite = createDefaultMockSite(sandbox);
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
+      mockSiteModel.findByBaseURL.rejects(new Error('Database error'));
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSiteModel });
+
+      const { startLLMOOnboarding } = mockedModule;
+      const handler = startLLMOOnboarding(lambdaCtx);
+
+      await handler({
+        ack: mockAck, body: mockBody, client: mockClient, respond: mockRespond,
+      });
+
+      expect(mockAck).to.have.been.called;
+      expect(lambdaCtx.log.error).to.have.been.calledWith('Error handling start onboarding:', sinon.match.instanceOf(Error));
+      expect(mockRespond).to.have.been.calledWith({
+        text: ':x: There was an error starting the onboarding process.',
+        replace_original: false,
       });
     });
   });

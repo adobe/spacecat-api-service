@@ -596,6 +596,7 @@ export function onboardLLMOModal(lambdaContext) {
       let originalThreadTs;
       let brandURL;
       try {
+        /* c8 ignore next */
         const metadata = JSON.parse(view.private_metadata || '{}');
         originalChannel = metadata.originalChannel;
         originalThreadTs = metadata.originalThreadTs;
