@@ -511,6 +511,125 @@ describe('onboard-llmo-modal', () => {
       expect(lambdaCtx.sqs.sendMessage).to.have.been.called;
       expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Error saving LLMO config for site site123: SQS service unavailable'));
     });
+
+    it('should log that agentic traffic audits are already enabled when organization has them', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Mock sites in organization to include one with agentic traffic already enabled
+      const existingSiteWithAgenticTraffic = createDefaultMockSite(sandbox);
+      existingSiteWithAgenticTraffic.getId.returns('existing-site-456');
+
+      // Mock the configuration to return that agentic traffic is already enabled for existing site
+      const mockConfiguration = createDefaultMockConfiguration(sandbox);
+      const configurationInstance = {
+        save: sandbox.stub().resolves(),
+        enableHandlerForSite: sandbox.stub(),
+        isHandlerEnabledForSite: sandbox.stub().callsFake((auditType, site) => {
+          if (auditType === 'cdn-analysis') {
+            // Return true for the existing site with agentic traffic enabled
+            return site.getId() === 'existing-site-456';
+          }
+          return false;
+        }),
+        getQueues: sandbox.stub().returns({ audits: 'audit-queue' }),
+      };
+      mockConfiguration.findLatest.resolves(configurationInstance);
+
+      // Mock allByOrganizationId to return sites including the one with agentic traffic enabled
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
+      mockSiteModel.allByOrganizationId = sandbox.stub()
+        .callsFake(() => Promise.resolve([existingSiteWithAgenticTraffic, mockSite]));
+
+      const lambdaCtxWithSites = createDefaultMockLambdaCtx(sandbox, {
+        mockSite,
+        mockConfiguration,
+        mockSiteModel,
+      });
+
+      // Execute the function
+      await onboardSite(input, lambdaCtxWithSites, slackCtx);
+
+      // Verify that the log message for already enabled agentic traffic audits is called
+      expect(lambdaCtxWithSites.log.info).to.have.been.calledWith(sinon.match('Agentic traffic audits already enabled for organization org123, skipping'));
+    });
+
+    it('should create new organization when no existing organization is found', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks - no existing site
+      const mockSite = createDefaultMockSite(sandbox);
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Mock organization lookup to return null (no existing org)
+      const mockOrganization = createDefaultMockOrganization(sandbox);
+      mockOrganization.findByImsOrgId.resolves(null);
+
+      // Mock the create method for new organization
+      const newOrg = {
+        getId: sandbox.stub().returns('new-org-789'),
+        save: sandbox.stub().resolves(),
+      };
+      mockOrganization.create = sandbox.stub().returns(newOrg);
+
+      // Mock IMS client to return org details
+      const mockImsClient = createDefaultMockImsClient(sandbox);
+      mockImsClient.getImsOrganizationDetails.resolves({
+        orgName: 'New Test Organization',
+      });
+
+      const lambdaCtxWithNewOrg = createDefaultMockLambdaCtx(sandbox, {
+        mockSite,
+        mockOrganization,
+        mockImsClient,
+      });
+
+      // Execute the function
+      await onboardSite(input, lambdaCtxWithNewOrg, slackCtx);
+
+      // Verify that organization lookup was called
+      expect(lambdaCtxWithNewOrg.dataAccess.Organization.findByImsOrgId).to.have.been.calledWith('ABC123@AdobeOrg');
+
+      // Verify that IMS client was called to get org details
+      expect(lambdaCtxWithNewOrg.imsClient.getImsOrganizationDetails).to.have.been.calledWith('ABC123@AdobeOrg');
+
+      // Verify that new organization was created
+      expect(lambdaCtxWithNewOrg.dataAccess.Organization.create).to.have.been.calledWith({
+        name: 'New Test Organization',
+        imsOrgId: 'ABC123@AdobeOrg',
+      });
+
+      // Verify that new organization was saved
+      expect(newOrg.save).to.have.been.called;
+
+      // Verify that site was created with the new organization ID
+      expect(lambdaCtxWithNewOrg.dataAccess.Site.create).to.have.been.calledWith({
+        baseURL: 'https://example.com',
+        deliveryType: 'aem_edge',
+        organizationId: 'new-org-789',
+      });
+    });
   });
 
   describe('onboardLLMOModal', () => {
