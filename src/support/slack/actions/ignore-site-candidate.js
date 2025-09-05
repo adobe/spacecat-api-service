@@ -22,13 +22,9 @@ export default function ignoreSiteCandidate(lambdaContext) {
       const { message = {}, user } = body;
       const { blocks } = message;
 
-      log.info(JSON.stringify(body));
-
       await ack(); // slack expects acknowledgement within 3s
 
       const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
-
-      log.info(`Site is ignored: ${baseURL}`);
 
       const siteCandidate = await SiteCandidate.findByBaseURL(baseURL);
 
@@ -42,8 +38,6 @@ export default function ignoreSiteCandidate(lambdaContext) {
         username: user.username,
         approved: false,
       });
-
-      log.info(`Responding site candidate ignore with: ${JSON.stringify(reply)}`);
 
       await respond(reply);
     } catch (e) {
