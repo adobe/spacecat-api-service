@@ -65,6 +65,7 @@ describe('Hooks Controller', () => {
         info: sinon.stub(),
         warn: sinon.stub(),
         error: sinon.stub(),
+        debug: sinon.stub(),
       },
       env: {
         HLX_ADMIN_TOKEN: 'hlx-admin-token',
@@ -578,7 +579,6 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.info).to.have.been.calledWith('HLX config found for some-owner/some-site');
       expect(resp).to.equal('CDN site candidate is successfully processed');
       const expectedMessage = getExpectedSlackMessage(
         'https://some-cdn-host.com',
@@ -625,7 +625,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.info).to.have.been.calledWith('No hlx config found for some-owner/some-site');
+      expect(context.log.debug).to.have.been.calledWith('No hlx config found for some-owner/some-site');
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
@@ -701,7 +701,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.info.getCall(3)).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Status: 404'));
+      expect(context.log.error).to.have.been.calledWith(sinon.match('Error fetching fstab.yaml for some-owner/some-site. Status: 404'));
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 
@@ -722,7 +722,7 @@ describe('Hooks Controller', () => {
 
       const resp = await (await hooksController.processCDNHook(context)).json();
 
-      expect(context.log.info.getCall(3)).to.have.been.calledWith(sinon.match('No content source found for some-owner/some-site in fstab.yaml'));
+      expect(context.log.debug).to.have.been.calledWith(sinon.match('No content source found for some-owner/some-site in fstab.yaml'));
       expect(resp).to.equal('CDN site candidate is successfully processed');
     });
 

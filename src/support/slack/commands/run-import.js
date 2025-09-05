@@ -367,7 +367,7 @@ function RunImportCommand(context) {
         const pageURL = extractedPageURL && supportsPageURLs && isValidUrl(extractedPageURL)
           ? extractedPageURL
           : undefined;
-        log.info(`Import run of type ${importType} for site ${baseURL} with input: `, { pageURL, startDate, endDate });
+
         await runImportForSite(
           importType,
           baseURL,

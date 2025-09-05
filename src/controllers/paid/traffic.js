@@ -100,12 +100,10 @@ function TrafficController(context, log, env) {
   async function tryGetCacheResult(siteId, query, noCache) {
     const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
     if (isTrue(noCache)) {
-      log.info(`Skipping cache check for file: ${cacheKey} because param noCache is: ${noCache}`);
       return { cachedResultUrl: null, cacheKey, outPrefix };
     }
     const maxAttempts = 1;
     if (await fileExists(s3, cacheKey, log, maxAttempts)) {
-      log.info(`Found cached result. Fetching signed URL for Athena result from S3: ${cacheKey}`);
       const ignoreNotFound = true;
       const cachedUrl = await getS3CachedResult(s3, cacheKey, log, ignoreNotFound);
       return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
@@ -117,8 +115,6 @@ function TrafficController(context, log, env) {
   async function fetchPaidTrafficData(dimensions, mapper) {
     /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
-    log.info(`Fetching paid traffic data for the request: ${requestId}`);
-
     const siteId = context.params?.siteId;
     const site = await Site.findById(siteId);
     if (!site) {
@@ -175,10 +171,8 @@ function TrafficController(context, log, env) {
 
     const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
-    log.info(`Processing query: ${description}`);
     // build query
     const query = getTrafficAnalysisQuery(quereyParams);
-    log.debug(`Fetching paid data with query: ${query}`);
 
     // first try to get from cache
     const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(
@@ -209,10 +203,8 @@ function TrafficController(context, log, env) {
     const resultLocation = `${ATHENA_TEMP_FOLDER}/${outPrefix}`;
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
-    log.info(`Fetching paid data directly from Athena table: ${tableName}`);
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
     const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
-    log.info(`Successfully fetched results of length ${response?.length}`);
 
     // add to cache
     let isCached = false;
@@ -226,7 +218,7 @@ function TrafficController(context, log, env) {
       // verifying file is reachable before returning
       const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
       if (verifiedSignedUrl != null) {
-        log.info(`Succesfully verified file existance, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
+        log.debug(`Successfully verified file existence, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
         return found(
           verifiedSignedUrl,
         );

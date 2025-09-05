@@ -589,8 +589,6 @@ function SitesController(ctx, log, env) {
 
       const projectedTrafficValue = pageViewsChange * cpc;
 
-      log.info(`Got RUM metrics for site ${siteId} current: ${current.length}`);
-
       return ok({
         pageViewsChange,
         ctrChange,

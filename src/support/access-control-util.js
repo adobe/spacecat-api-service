@@ -18,7 +18,6 @@ import {
 } from '@adobe/spacecat-shared-data-access';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { sanitizePath } from '../utils/route-utils.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -45,7 +44,6 @@ export default class AccessControlUtil {
     const { log, pathInfo, attributes } = context;
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
-      log.info(`Anonymous endpoint, skipping authorization: ${sanitizePath(endpoint)}`);
       const profile = { user_id: 'anonymous' };
       this.authInfo = new AuthInfo()
         .withAuthenticated(true)

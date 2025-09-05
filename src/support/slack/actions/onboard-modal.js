@@ -369,7 +369,7 @@ export function startOnboarding(lambdaContext) {
         },
       });
 
-      log.info(`User ${user.id} started onboarding process`);
+      log.debug(`User ${user.id} started onboarding process`);
     } catch (error) {
       log.error('Error handling start onboarding:', error);
       await respond({
@@ -542,7 +542,7 @@ ${deliveryConfigInfo}${previewConfigInfo}
         });
       }
 
-      log.info(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
+      log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
     } catch (error) {
       log.error('Error handling onboard site modal:', error);
       await ack({

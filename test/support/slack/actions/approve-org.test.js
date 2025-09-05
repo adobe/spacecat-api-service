@@ -90,7 +90,6 @@ describe('approveOrg', () => {
 
     // Assert
     expect(ackMock).to.have.been.calledOnce;
-    expect(context.log.info).to.have.been.called; // logging body or response
     expect(context.dataAccess.Organization.findByImsOrgId).to.have.been.calledWith('ABC@AdobeOrg');
     expect(context.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://spacecat.com');
     expect(site.setOrganizationId).to.have.been.calledWith(org.getId());
