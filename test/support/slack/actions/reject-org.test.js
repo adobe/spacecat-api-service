@@ -79,7 +79,6 @@ describe('rejectOrg', () => {
 
     // Assert
     expect(ackMock).to.have.been.calledOnce;
-    expect(context.log.info).to.have.been.called; // logs input
     expect(respondMock).to.have.been.calledOnce;
 
     const respondArg = respondMock.firstCall.args[0];

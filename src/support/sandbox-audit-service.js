@@ -157,7 +157,7 @@ export async function enforceRateLimit(site, auditTypes, ctx, log) {
 
   // Rate limiting disabled - allow all
   if (!Number.isFinite(rateLimitHours) || rateLimitHours <= 0) {
-    log.info('Rate limiting disabled (rateLimitHours is 0 or invalid), allowing all audits');
+    log.debug('Rate limiting disabled (rateLimitHours is 0 or invalid), allowing all audits');
     return { allowed: auditTypes, skipped: [] };
   }
 

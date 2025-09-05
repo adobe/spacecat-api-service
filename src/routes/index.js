@@ -71,7 +71,14 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} organizationIdentityProviderController - The organization identity
+ * provider controller.
+ * @param {Object} userActivityController - The user activity controller.
+ * @param {Object} siteEnrollmentController - The site enrollment controller.
+ * @param {Object} trialUserController - The trial user controller.
+ * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
+ * @param {Object} reportsController - The reports controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -95,12 +102,17 @@ export default function getRouteHandlers(
   consentBannerController,
   scrapeController,
   scrapeJobController,
-  mcpController,
   paidController,
   trafficController,
   fixesController,
   llmoController,
+  organizationIdentityProviderController,
+  userActivityController,
+  siteEnrollmentController,
+  trialUserController,
+  entitlementController,
   sandboxAuditController,
+  reportsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -212,8 +224,6 @@ export default function getRouteHandlers(
     'GET /consent-banner/:jobId': consentBannerController.getScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
-    'GET /mcp': mcpController.handleSseRequest,
-    'POST /mcp': mcpController.handleRpc,
 
     // Scrape Jobs
     'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
@@ -246,9 +256,26 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
+    'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
+
+    // Tier Specific Routes
+    'GET /organizations/:organizationId/organization-identity-provider': organizationIdentityProviderController.getByOrganizationID,
+    'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
+    'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
+    'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
+    'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
+    'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
+
+    // Reports
+    'POST /sites/:siteId/reports': reportsController.createReport,
+    'GET /sites/:siteId/reports': reportsController.getAllReportsBySiteId,
+    'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
+    'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
+    'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
   };
 
   // Initialization of static and dynamic routes

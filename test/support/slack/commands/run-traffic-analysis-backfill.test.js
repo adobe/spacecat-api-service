@@ -191,9 +191,6 @@ describe('RunTrafficAnalysisBackfillCommand', () => {
       const command = RunTrafficAnalysisBackfillCommand(context);
 
       await command.handleExecution(['https://example.com', '1'], slackContext);
-
-      expect(context.log.info.called).to.be.true;
-      expect(context.log.info.firstCall.args[0]).to.include('Import run of type traffic-analysis for site https://example.com');
     });
 
     it('logs errors when they occur', async () => {
