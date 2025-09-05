@@ -178,6 +178,7 @@ describe('LlmoController', () => {
       params: {
         siteId: 'test-site-id',
         dataSource: 'test-data',
+        configName: 'test-data',
         questionKey: 'test-question',
       },
       data: {
@@ -862,36 +863,6 @@ describe('LlmoController', () => {
       );
     });
 
-    it('should add query parameters with sheetType parameter', async () => {
-      const mockResponse = {
-        ok: true,
-        json: sinon.stub().resolves({ data: 'analytics-data' }),
-      };
-      tracingFetchStub.resolves(mockResponse);
-
-      // Add sheetType and query parameters to the context params
-      mockContext.params.sheetType = 'analytics';
-      mockContext.data.limit = '5';
-      mockContext.data.offset = '10';
-      mockContext.data.sheet = 'performance-sheet';
-
-      const result = await controller.getLlmoGlobalSheetData(mockContext);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.deep.equal({ data: 'analytics-data' });
-      expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/llmo-global/analytics/test-data.json?limit=5&offset=10&sheet=performance-sheet',
-        {
-          headers: {
-            Authorization: 'token test-api-key',
-            'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip',
-          },
-        },
-      );
-    });
-
     it('should handle empty string query parameters', async () => {
       const mockResponse = {
         ok: true,
@@ -950,65 +921,6 @@ describe('LlmoController', () => {
           },
         },
       );
-    });
-
-    it('should proxy data with sheetType parameter successfully', async () => {
-      const mockResponse = {
-        ok: true,
-        json: sinon.stub().resolves({ data: 'analytics-data' }),
-      };
-      tracingFetchStub.resolves(mockResponse);
-
-      // Add sheetType to the context params
-      mockContext.params.sheetType = 'analytics';
-
-      const result = await controller.getLlmoGlobalSheetData(mockContext);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.deep.equal({ data: 'analytics-data' });
-      expect(tracingFetchStub).to.have.been.calledWith(
-        'https://main--project-elmo-ui-data--adobe.aem.live/llmo-global/analytics/test-data.json',
-        {
-          headers: {
-            Authorization: 'token test-api-key',
-            'User-Agent': 'test-user-agent',
-            'Accept-Encoding': 'gzip',
-          },
-        },
-      );
-    });
-
-    it('should handle external API errors with sheetType parameter', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-      };
-      tracingFetchStub.resolves(mockResponse);
-
-      // Add sheetType to the context params
-      mockContext.params.sheetType = 'analytics';
-
-      const result = await controller.getLlmoGlobalSheetData(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('External API returned 404: Not Found');
-    });
-
-    it('should handle network errors with sheetType parameter', async () => {
-      const networkError = new Error('Network error');
-      tracingFetchStub.rejects(networkError);
-
-      // Add sheetType to the context params
-      mockContext.params.sheetType = 'analytics';
-
-      const result = await controller.getLlmoGlobalSheetData(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('Network error');
     });
 
     it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {

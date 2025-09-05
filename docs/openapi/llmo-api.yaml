@@ -81,7 +81,7 @@ llmo-sheet-data-with-type:
 llmo-global-sheet-data:
   parameters:
     - $ref: './parameters.yaml#/siteId'
-    - name: dataSource
+    - name: configName
       in: path
       required: true
       description: The data source identifier to fetch from the external endpoint
@@ -97,51 +97,6 @@ llmo-global-sheet-data:
       This endpoint proxies data from the external HLX API using the global 'llmo-global' folder,
       independent of the site's LLMO configuration dataFolder.
     operationId: getLlmoGlobalSheetData
-    responses:
-      '200':
-        description: LLMO global sheet data retrieved successfully
-        content:
-          application/json:
-            schema:
-              type: object
-              description: The data returned from the external LLMO endpoint
-              additionalProperties: true
-      '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - api_key: [ ]
-
-llmo-global-sheet-data-with-type:
-  parameters:
-    - $ref: './parameters.yaml#/siteId'
-    - name: sheetType
-      in: path
-      required: true
-      description: The sheet type identifier to fetch from the external endpoint
-      schema:
-        type: string
-        example: 'analytics'
-    - name: dataSource
-      in: path
-      required: true
-      description: The data source identifier to fetch from the external endpoint
-      schema:
-        type: string
-        example: 'questions'
-  get:
-    tags:
-      - llmo
-    summary: Get LLMO global sheet data with sheet type
-    description: |
-      Retrieves data from the external LLMO global data endpoint for a specific site with a specified sheet type.
-      This endpoint proxies data from the external HLX API using the global 'llmo-global' folder,
-      independent of the site's LLMO configuration dataFolder.
-      The data is fetched from the path: llmo-global/{sheetType}/{dataSource}.json
-    operationId: getLlmoGlobalSheetDataWithType
     responses:
       '200':
         description: LLMO global sheet data retrieved successfully

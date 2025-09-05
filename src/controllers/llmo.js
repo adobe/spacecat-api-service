@@ -130,15 +130,15 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO global sheet data endpoint
   const getLlmoGlobalSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataSource, sheetType } = context.params;
+    const { siteId, configName } = context.params;
     const { env } = context;
     try {
-      log.info(`validating LLMO global sheet data for siteId: ${siteId}, dataSource: ${dataSource}, sheetType: ${sheetType}`);
+      log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
       // Validate LLMO access but don't use the site-specific dataFolder
       await getSiteAndValidateLlmo(context);
 
       // Use 'llmo-global' folder
-      const sheetURL = sheetType ? `llmo-global/${sheetType}/${dataSource}.json` : `llmo-global/${dataSource}.json`;
+      const sheetURL = `llmo-global/${configName}.json`;
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
