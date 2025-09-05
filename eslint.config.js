@@ -10,15 +10,32 @@
  * governing permissions and limitations under the License.
  */
 
-module.exports = {
-  root: true,
-  extends: '@adobe/helix',
-  overrides: [
-    {
-      files: ['*.test.js', 'test/e2e/**/*'],
-      rules: {
-        'no-unused-expressions': 'off',
-      },
+import { defineConfig, globalIgnores } from '@eslint/config-helpers'
+import {recommended, source, test} from '@adobe/eslint-config-helix';
+
+export default defineConfig([
+  globalIgnores([
+    '.vscode/*',
+    '.idea/*',
+    'coverage/*',
+    'test/*/fixtures/*'
+  ]),
+  {
+    extends: [ recommended ],
+    plugins: {
+      import: recommended.plugins.import,
     },
-  ],
-};
+    rules: {
+      'no-unused-expressions': 'off',
+      'import/no-unresolved': ['error', { ignore: ['@octokit/rest'] }],
+    },
+  },
+  {
+    ...source,
+    files: [...source.files],
+  },
+  {
+    ...test,
+    files: [...test.files],
+  }
+]);
