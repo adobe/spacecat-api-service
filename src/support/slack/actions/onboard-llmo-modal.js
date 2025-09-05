@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* c8 ignore start */
-
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
@@ -668,7 +666,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
           auditType: 'llmo-customer-analysis',
         },
       };
-      sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
+      await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
 
       const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
@@ -706,6 +704,7 @@ export function onboardLLMOModal(lambdaContext) {
       let originalThreadTs;
       let brandURL;
       try {
+        /* c8 ignore next */
         const metadata = JSON.parse(view.private_metadata || '{}');
         originalChannel = metadata.originalChannel;
         originalThreadTs = metadata.originalThreadTs;
@@ -776,5 +775,3 @@ export function onboardLLMOModal(lambdaContext) {
     }
   };
 }
-
-/* c8 ignore stop */
