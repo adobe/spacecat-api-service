@@ -730,17 +730,16 @@ export const onboardSingleSite = async (
 
     // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
-    /* c8 ignore next 3 lines */
     if (resolvedUrl === null) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
       resolvedUrl = baseURL;
     }
-    const { pathname: baseUrlPathName } = new URL(baseURL);
+    const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
     log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
 
-    // Update the fetch configuration only if the pathname is different from the resolved URL
-    if (baseUrlPathName !== resolvedUrlPathName) {
+    // Update the fetch configuration only if the pathname/origin is different from the resolved URL
+    if (baseUrlPathName !== resolvedUrlPathName || baseUrlOrigin !== resolvedUrlOrigin) {
       siteConfig.updateFetchConfig({
         overrideBaseURL: resolvedUrlOrigin,
       });
