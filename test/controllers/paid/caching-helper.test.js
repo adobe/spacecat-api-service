@@ -88,7 +88,6 @@ describe('Paid TrafficController caching-helper', () => {
       mockS3.getSignedUrl.resolves('https://signed-url');
       const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
       expect(url).to.equal('https://signed-url');
-      expect(mockLog.info).to.have.been.calledWithMatch('Fetching cached result key');
     });
     it('returns null if error is NoSuchKey', async () => {
       mockS3.getSignedUrl.rejects(Object.assign(new Error('no such key'), { name: 'NoSuchKey' }));
@@ -99,7 +98,7 @@ describe('Paid TrafficController caching-helper', () => {
       mockS3.getSignedUrl.rejects(Object.assign(new Error('fail'), { name: 'OtherError' }));
       const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
       expect(url).to.be.null;
-      expect(mockLog.error).to.have.been.calledWithMatch('Unepected exception');
+      expect(mockLog.error).to.have.been.calledWithMatch('Unexpected exception');
     });
   });
 

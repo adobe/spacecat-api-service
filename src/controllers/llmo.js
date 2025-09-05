@@ -81,7 +81,6 @@ function LlmoController(ctx) {
     const { siteId, dataSource, sheetType } = context.params;
     const { env } = context;
     try {
-      log.info(`validating LLMO sheet data for siteId: ${siteId}, dataSource: ${dataSource}, sheetType: ${sheetType}`);
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 
@@ -116,7 +115,6 @@ function LlmoController(ctx) {
       // Get the response data
       const data = await response.json();
 
-      log.info(`Successfully proxied data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
       // Return the data and let the framework handle the compression
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),

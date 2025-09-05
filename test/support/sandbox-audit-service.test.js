@@ -86,7 +86,7 @@ describe('sandbox-audit-service helpers', () => {
   });
 
   describe('enforceRateLimit()', () => {
-    const logger = { info: sinon.stub(), error: sinon.stub() };
+    const logger = { info: sinon.stub(), error: sinon.stub(), debug: sinon.stub() };
     let ctx;
 
     beforeEach(() => {

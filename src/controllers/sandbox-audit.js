@@ -71,7 +71,6 @@ function SandboxAuditController(ctx) {
       }
 
       const configuration = await Configuration.findLatest();
-      log.info(`SandboxAudit: Triggering audit(s) for siteId ${siteId}, types: ${allowed.join(', ')}`);
 
       return triggerAudits(site, configuration, allowed, ctx, skipped);
     } catch (error) {

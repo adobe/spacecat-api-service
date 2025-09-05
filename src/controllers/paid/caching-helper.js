@@ -62,7 +62,6 @@ async function fileExists(s3, key, log, maxAttempts = 3, delayMs = 200) {
 
 async function getS3CachedResult(s3, key, log, ignoreNotFound = true) {
   try {
-    log.info(`Fetching cached result key: ${key}`);
     const { bucket, prefix } = parseS3Uri(key);
 
     const getCachedFile = new GetObjectCommand({ Bucket: bucket, Key: prefix });
@@ -78,7 +77,7 @@ async function getS3CachedResult(s3, key, log, ignoreNotFound = true) {
     if (err.name === 'NoSuchKey' && ignoreNotFound) {
       return null;
     }
-    log.error(`Unepected exception when trying to fetch cached results on key: ${key}. Ignoring error and continuing with normal query. Exception was ${err}`);
+    log.error(`Unexpected exception when trying to fetch cached results on key: ${key}. Ignoring error and continuing with normal query. Exception was ${err}`);
     return null;
   }
 }

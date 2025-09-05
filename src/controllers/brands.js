@@ -66,7 +66,6 @@ function BrandsController(ctx, log, env) {
   const getBrandsForOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
     try {
-      log.info(`Getting brands for organization: ${organizationId}`);
       if (!isValidUUID(organizationId)) {
         return badRequest('Organization ID required');
       }
@@ -84,7 +83,6 @@ function BrandsController(ctx, log, env) {
       const imsUserToken = getImsUserToken(context);
       const brandClient = BrandClient.createFrom(context);
       const brands = await brandClient.getBrandsForOrganization(imsOrgId, `Bearer ${imsUserToken}`);
-      log.info(`Found ${brands.length} brands for organization: ${organizationId}`);
       return ok(brands);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
@@ -123,7 +121,6 @@ function BrandsController(ctx, log, env) {
   const getBrandGuidelinesForSite = async (context) => {
     const siteId = context.params?.siteId;
     try {
-      log.info(`Getting brand guidelines for site: ${siteId}`);
       if (!isValidUUID(siteId)) {
         return badRequest('Site ID required');
       }
@@ -142,14 +139,12 @@ function BrandsController(ctx, log, env) {
         brandId,
         userId,
       };
-      log.info(`Brand ID mapping for site: ${siteId} is ${brandId}`);
       if (!hasText(brandId) || !hasText(userId)) {
         return notFound(`Brand config is missing, brandId or userId for site ID: ${siteId}`);
       }
       const organizationId = site.getOrganizationId();
       const organization = await Organization.findById(organizationId);
       const imsOrgId = organization?.getImsOrgId();
-      log.info(`IMS Org ID for site: ${siteId} is ${imsOrgId}`);
       const imsConfig = getImsConfig();
       const brandClient = BrandClient.createFrom(context);
       const brandGuidelines = await brandClient.getBrandGuidelines(
@@ -157,7 +152,6 @@ function BrandsController(ctx, log, env) {
         imsOrgId,
         imsConfig,
       );
-      log.info(`Found brand guidelines for site: ${siteId}`);
       return ok(brandGuidelines);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);

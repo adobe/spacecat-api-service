@@ -50,15 +50,11 @@ export default function approveSiteCandidate(lambdaContext) {
       } = body;
       const { blocks, ts: threadTs } = message;
 
-      log.info(JSON.stringify(body));
-
       await ack(); // slack expects acknowledgement within 3s
 
       const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
       const siteCandidate = await SiteCandidate.findByBaseURL(baseURL);
-
-      log.info(`Creating a new site: ${baseURL}`);
 
       const isFnF = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY;
 
@@ -105,8 +101,6 @@ export default function approveSiteCandidate(lambdaContext) {
         approved: true,
       });
 
-      log.info(`Responding site candidate approval with: ${JSON.stringify(reply)}`);
-
       await respond(reply);
 
       await announceSiteDiscovery(
@@ -122,8 +116,6 @@ export default function approveSiteCandidate(lambdaContext) {
           siteCandidate.getBaseURL().replace('https://', ''),
           siteCandidate.getHlxConfig()?.rso?.owner,
         );
-
-        log.info(`Detected org: ${JSON.stringify(org)}`);
 
         if (hasText(org?.name) && hasText(org?.imsOrgId)) {
           const { name, imsOrgId } = org;

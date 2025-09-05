@@ -35,7 +35,12 @@ describe('sqs', () => {
 
   beforeEach('setup', () => {
     context = {
-      log: console,
+      log: {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      },
       runtime: {
         region: AWS_REGION,
       },
@@ -80,7 +85,6 @@ describe('sqs', () => {
       code: 'InvalidParameterValue',
       message: 'invalid param',
     };
-    const errorSpy = sandbox.spy(context.log, 'error');
 
     nock('https://sqs.us-east-1.amazonaws.com')
       .post('/')
@@ -93,7 +97,7 @@ describe('sqs', () => {
     await expect(action({}, context)).to.be.rejectedWith(errorResponse.message);
 
     const errorMessage = `Message sent failed. Type: ${errorResponse.type}, Code: ${errorResponse.code}, Message: ${errorResponse.message}`;
-    expect(errorSpy).to.have.been.calledWith(errorMessage);
+    expect(context.log.error).to.have.been.calledWith(errorMessage);
   });
 
   it('purging queue fails', async () => {
@@ -102,7 +106,6 @@ describe('sqs', () => {
       code: 'InvalidParameterValue',
       message: 'invalid param',
     };
-    const errorSpy = sandbox.spy(context.log, 'error');
 
     nock('https://sqs.us-east-1.amazonaws.com')
       .post('/')
@@ -115,12 +118,10 @@ describe('sqs', () => {
     await expect(action({}, context)).to.be.rejectedWith(errorResponse.message);
 
     const errorMessage = `Queue purge failed. Type: ${errorResponse.type}, Code: ${errorResponse.code}, Message: ${errorResponse.message}`;
-    expect(errorSpy).to.have.been.calledWith(errorMessage);
+    expect(context.log.error).to.have.been.calledWith(errorMessage);
   });
 
   it('purging queue is successful', async () => {
-    const logSpy = sandbox.spy(context.log, 'info');
-
     nock('https://sqs.us-east-1.amazonaws.com')
       .post('/')
       .reply(200, {});
@@ -129,13 +130,12 @@ describe('sqs', () => {
       await ctx.sqs.purgeQueue(QUEUE_URL);
     }).with(sqsWrapper)({}, context);
 
-    expect(logSpy).to.have.been.calledWith(`Success, queue purged. QueueUrl: ${QUEUE_URL}`);
+    expect(context.log.debug).to.have.been.calledWith(`Success, queue purged. QueueUrl: ${QUEUE_URL}`);
   });
 
   it('initialize and use a new sqs if not initialized before', async () => {
     const messageId = 'message-id';
     const message = { key: 'value' };
-    const logSpy = sandbox.spy(context.log, 'info');
 
     nock('https://sqs.us-east-1.amazonaws.com')
       .post('/')
@@ -153,7 +153,7 @@ describe('sqs', () => {
       await ctx.sqs.sendMessage(QUEUE_URL, message);
     }).with(sqsWrapper)({}, context);
 
-    expect(logSpy).to.have.been.calledWith(`Success, message sent. MessageID:  ${messageId}`);
+    expect(context.log.debug).to.have.been.calledWith(`Success, message sent. MessageID:  ${messageId}`);
   });
 
   describe('Named queues', () => {
