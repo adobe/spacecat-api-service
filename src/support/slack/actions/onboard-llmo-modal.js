@@ -15,6 +15,8 @@
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
+import { OrganizationIdentityProvider as OrganizationIdentityProviderModel } from '@adobe/spacecat-shared-data-access/src/models/organization-identity-provider/index.js';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
@@ -23,6 +25,11 @@ const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
 const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
+
+const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
+const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+
+const IMS_PROVIDER = OrganizationIdentityProviderModel.PROVIDER_TYPES.IMS;
 
 // site isn't on spacecat yet
 async function fullOnboardingModal(body, client, respond, brandURL) {
@@ -378,8 +385,9 @@ async function publishToAdminHlx(filename, outputLocation, log) {
   }
 }
 
-async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
+async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
   const { log } = lambdaCtx;
+  const { say } = slackCtx;
 
   const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/Shared%20Documents/sites/elmo-ui-data';
 
@@ -392,18 +400,34 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
 
   log.debug(`Copying query-index to ${dataFolder}`);
   const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
-  const queryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
+  const templateQueryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
+  const newQueryIndex = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/query-index.xlsx`);
 
-  await folder.createFolder(dataFolder, '/');
-  await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
+  // TODO: Instead of patching .exists, add this method https://github.com/adobe/spacecat-helix-content-sdk/issues/190
+  const folderExists = await folder.exists();
+  if (!folderExists) {
+    await folder.createFolder(dataFolder, '/');
+  } else {
+    log.warn(`Warning: Folder ${dataFolder} already exists. Skipping creation.`);
+    await say(`Folder ${dataFolder} already exists. Skipping creation.`);
+  }
+
+  const queryIndexExists = await newQueryIndex.exists();
+  if (!queryIndexExists) {
+    await templateQueryIndex.copy(`/${dataFolder}/query-index.xlsx`);
+  } else {
+    log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
+    await say(`Query index in ${dataFolder} already exists. Skipping creation.`);
+  }
 
   log.debug('Publishing query-index to admin.hlx.page');
   await publishToAdminHlx('query-index', dataFolder, log);
 }
 
 // update https://github.com/adobe/project-elmo-ui-data/blob/main/helix-query.yaml
-async function updateIndexConfig(dataFolder, lambdaCtx) {
+async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
   const { log } = lambdaCtx;
+  const { say } = slackCtx;
 
   log.debug('Starting Git modification of helix query config');
   const octokit = new Octokit({
@@ -419,6 +443,12 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
     owner, repo, ref, path,
   });
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
+
+  if (content.includes(dataFolder)) {
+    log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
+    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
+    return;
+  }
 
   // add new config to end of file
   const modifiedContent = `${content}${content.endsWith('\n') ? '' : '\n'}
@@ -461,6 +491,83 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
   return site.getId();
 }
 
+async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
+  const { dataAccess, log } = lambdaCtx;
+  const { say } = slackCtx;
+  const { Entitlement, SiteEnrollment } = dataAccess;
+
+  const orgId = site.getOrganizationId();
+
+  // find if there are any entitlements for this site enabling LLMO
+  const enrollments = await SiteEnrollment.allBySiteId(site.getId());
+  const llmoEntitlements = (await Promise.all(enrollments.map(async (enrollment) => {
+    // find entitlement for this enrollment
+    const entitlement = await Entitlement.findById(enrollment.getEntitlementId());
+    // check if the entitlement is for the same organization as the site
+    const entitlementOrgId = entitlement.getOrganizationId();
+    if (entitlementOrgId !== orgId) return null;
+    // check if the entitlement is for LLMO
+    const entitlementProductCode = entitlement.getProductCode();
+    return entitlementProductCode === LLMO_PRODUCT_CODE ? entitlement : null;
+  }))).filter((x) => !!x);
+
+  if (llmoEntitlements.length > 0) {
+    await say(`Site ${site.getId()} is already entitled to LLMO. Skipping entitlement grant.`);
+    log.warn(`Site ${site.getId()} already entitled to LLMO. Skipping.`);
+    return;
+  }
+
+  // create an entitlement
+  const newEntitlement = await Entitlement.create({
+    organizationId: orgId,
+    productCode: LLMO_PRODUCT_CODE,
+    tier: LLMO_TIER,
+    quotas: { llmo_trial_prompts: 200 },
+  });
+  await newEntitlement.save();
+  const newEntitlementId = newEntitlement.getId();
+
+  // create enrollment
+  const newEnrollment = await SiteEnrollment.create({
+    entitlementId: newEntitlementId,
+    siteId: site.getId(),
+  });
+  await newEnrollment.save();
+}
+
+async function createOrganizationIdentityProvider(site, lambdaCtx) {
+  const { dataAccess, log } = lambdaCtx;
+  const { OrganizationIdentityProvider, Organization } = dataAccess;
+
+  log.info('Starting IDP creation process.');
+
+  // Get the organization ID from the site
+  const organizationId = site.getOrganizationId();
+  const organization = await Organization.findById(organizationId);
+  const organizationImsOrgId = organization.getImsOrgId();
+
+  // Check if an IMS identity provider already exists for this organization
+  const existingIdps = await OrganizationIdentityProvider.allByOrganizationId(organizationId);
+  const existingIdp = existingIdps.find((idp) => idp.getProvider() === IMS_PROVIDER);
+
+  if (existingIdp) {
+    log.info(`Organization identity provider already exists for organization ${organizationId}, skipping creation`);
+    return;
+  }
+
+  log.info('No existing IDP found, creating new.');
+
+  // Create a new identity provider for the organization
+  const newIdp = await OrganizationIdentityProvider.create({
+    organizationId,
+    provider: OrganizationIdentityProviderModel.PROVIDER_TYPES.IMS,
+    externalId: organizationImsOrgId,
+  });
+
+  await newIdp.save();
+  log.info(`Created new organization identity provider for organization ${organizationId}`);
+}
+
 export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess, sqs } = lambdaCtx;
   const { say } = slackCtx;
@@ -470,9 +577,11 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { hostname } = new URL(baseURL);
   const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
 
-  const { Site, Configuration } = dataAccess;
+  const {
+    Site, Configuration,
+  } = dataAccess;
 
-  say(`:gear: ${brandName} onboarding started...`);
+  await say(`:gear: ${brandName} onboarding started...`);
 
   try {
     // Find the site
@@ -490,11 +599,17 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
     }
 
+    // create entitlement
+    await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx);
+
+    // create OrganizationIdentiyProvider
+    await createOrganizationIdentityProvider(site, lambdaCtx, slackCtx);
+
     // upload and publish the query index file
-    await copyFilesToSharepoint(dataFolder, lambdaCtx);
+    await copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx);
 
     // update indexing config in helix
-    await updateIndexConfig(dataFolder, lambdaCtx);
+    await updateIndexConfig(dataFolder, lambdaCtx, slackCtx);
 
     const siteId = site.getId();
 
