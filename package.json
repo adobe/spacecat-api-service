@@ -101,7 +101,7 @@
     "slack-block-builder": "2.8.0",
     "tldts": "7.0.12",
     "urijs": "1.19.11",
-    "zod": "4.1.5"
+    "zod": "3.25.8"
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "2.0.9",
