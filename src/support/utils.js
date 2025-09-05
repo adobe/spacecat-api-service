@@ -729,7 +729,12 @@ export const onboardSingleSite = async (
     log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
 
     // Resolve canonical URL for the site from the base URL
-    const resolvedUrl = await resolveCanonicalUrl(baseURL);
+    let resolvedUrl = await resolveCanonicalUrl(baseURL);
+    /* c8 ignore next 3 lines */
+    if (resolvedUrl === null) {
+      log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+      resolvedUrl = baseURL;
+    }
     const { pathname: baseUrlPathName } = new URL(baseURL);
     log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
@@ -886,7 +891,6 @@ export const onboardSingleSite = async (
     });
     await sfnClient.send(startCommand);
   } catch (error) {
-    log.info(`Error in onboardSingleSite: ${error.message}`);
     log.error(error);
     reportLine.errors = error.message;
     reportLine.status = 'Failed';
