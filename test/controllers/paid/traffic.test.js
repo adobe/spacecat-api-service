@@ -578,7 +578,7 @@ describe('Paid TrafficController', async () => {
       // Should return 302 (redirect) because cache verification succeeded
       expect(res.status).to.equal(302);
       expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
-      expect(mockLog.info).to.have.been.calledWithMatch('Succesfully verified file existance');
+      expect(mockLog.debug).to.have.been.calledWithMatch('Successfully verified file existence');
     });
 
     // Systematic test for all endpoint functions to ensure coverage

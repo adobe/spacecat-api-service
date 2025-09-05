@@ -150,7 +150,7 @@ describe('SlackController', () => {
       const controller = SlackController(mockSlackApp);
       const response = await controller.handleEvent(context);
 
-      expect(logStub.info.calledWith('Ignoring retry event: 123')).to.be.true;
+      expect(logStub.debug.calledWith('Ignoring retry event: 123')).to.be.true;
       expect(response).to.be.an.instanceof(Response);
       expect(response.headers.get('x-error')).to.equal('ignored-event');
     });
