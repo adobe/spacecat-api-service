@@ -731,9 +731,8 @@ export const onboardSingleSite = async (
     // Resolve canonical URL for the site from the base URL
     const resolvedUrl = await resolveCanonicalUrl(baseURL);
     const { pathname: baseUrlPathName } = new URL(baseURL);
-    const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
-
     log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
+    const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
 
     // Update the fetch configuration only if the pathname is different from the resolved URL
     if (baseUrlPathName !== resolvedUrlPathName) {
@@ -887,6 +886,7 @@ export const onboardSingleSite = async (
     });
     await sfnClient.send(startCommand);
   } catch (error) {
+    log.info(`Error in onboardSingleSite: ${error.message}`);
     log.error(error);
     reportLine.errors = error.message;
     reportLine.status = 'Failed';
