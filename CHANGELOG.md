@@ -1,3 +1,17 @@
+## [1.176.4](https://github.com/adobe/spacecat-api-service/compare/v1.176.3...v1.176.4) (2025-09-05)
+
+
+### Bug Fixes
+
+* remove unnecessary logs to reduce Coralogix usage ([#1214](https://github.com/adobe/spacecat-api-service/issues/1214)) ([148e945](https://github.com/adobe/spacecat-api-service/commit/148e94546f437fdf4bc6f81749beeec65587a01e))
+
+## [1.176.3](https://github.com/adobe/spacecat-api-service/compare/v1.176.2...v1.176.3) (2025-09-05)
+
+
+### Bug Fixes
+
+* **deps:** update external major (major) ([#1080](https://github.com/adobe/spacecat-api-service/issues/1080)) ([2d91327](https://github.com/adobe/spacecat-api-service/commit/2d91327e0eb9d554420bee70c3f56b5b67620ff3))
+
 ## [1.176.2](https://github.com/adobe/spacecat-api-service/compare/v1.176.1...v1.176.2) (2025-09-04)
 
 

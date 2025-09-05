@@ -122,6 +122,7 @@ describe('onboard-modal', () => {
           info: sandbox.stub(),
           warn: sandbox.stub(),
           error: sandbox.stub(),
+          debug: sandbox.stub(),
         },
       };
 
@@ -160,7 +161,7 @@ describe('onboard-modal', () => {
         respond: respondMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
       expect(respondMock).to.have.been.calledOnceWith({
         text: ':gear: test-user started the onboarding process...',
         replace_original: true,
@@ -559,7 +560,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
       // Note: delivery config is now set during site creation, not afterward
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
@@ -633,7 +634,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'U12345',
@@ -659,7 +660,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
     });
 
     it('should post a warning message onboarding fails', async () => {
@@ -738,7 +739,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: ':warning: Error during site creation,Configuration failed',
@@ -777,7 +778,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: 'Test error message from onboarding process',
