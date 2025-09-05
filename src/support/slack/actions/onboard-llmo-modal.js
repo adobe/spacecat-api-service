@@ -552,7 +552,7 @@ async function createOrganizationIdentityProvider(site, lambdaCtx) {
   const organizationImsOrgId = organization.getImsOrgId();
 
   // Check if an IMS identity provider already exists for this organization
-  const existingIdps = await OrganizationIdentityProvider.findByOrganizationId(organizationId);
+  const existingIdps = await OrganizationIdentityProvider.allByOrganizationId(organizationId);
   const existingIdp = existingIdps.find((idp) => idp.getProvider() === IMS_PROVIDER);
 
   if (existingIdp) {
