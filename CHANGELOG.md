@@ -1,3 +1,87 @@
+## [1.176.10](https://github.com/adobe/spacecat-api-service/compare/v1.176.9...v1.176.10) (2025-09-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.61.2 ([#1229](https://github.com/adobe/spacecat-api-service/issues/1229)) ([c6f1267](https://github.com/adobe/spacecat-api-service/commit/c6f1267057becceeef76690352f6f5bf8c1fd91d))
+
+## [1.176.9](https://github.com/adobe/spacecat-api-service/compare/v1.176.8...v1.176.9) (2025-09-06)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1228](https://github.com/adobe/spacecat-api-service/issues/1228)) ([2116420](https://github.com/adobe/spacecat-api-service/commit/2116420fb6f38cfba9c49b8490576feaafd7ff2c))
+
+## [1.176.8](https://github.com/adobe/spacecat-api-service/compare/v1.176.7...v1.176.8) (2025-09-06)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1227](https://github.com/adobe/spacecat-api-service/issues/1227)) ([76c633f](https://github.com/adobe/spacecat-api-service/commit/76c633fce4fe33ef9f29171fdd06c866e7ec12f4))
+
+## [1.176.7](https://github.com/adobe/spacecat-api-service/compare/v1.176.6...v1.176.7) (2025-09-05)
+
+
+### Bug Fixes
+
+* onboard issues ([#1222](https://github.com/adobe/spacecat-api-service/issues/1222)) ([96f976f](https://github.com/adobe/spacecat-api-service/commit/96f976f361a93b90d1ace1a0f74520b21bc520fe))
+
+## [1.176.6](https://github.com/adobe/spacecat-api-service/compare/v1.176.5...v1.176.6) (2025-09-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-helix-content-sdk to v1.4.21 ([#1225](https://github.com/adobe/spacecat-api-service/issues/1225)) ([fe33c6c](https://github.com/adobe/spacecat-api-service/commit/fe33c6ceb9ff3ef1f73504e7407aa09a3217c374))
+
+## [1.176.5](https://github.com/adobe/spacecat-api-service/compare/v1.176.4...v1.176.5) (2025-09-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-helix-content-sdk to v1.4.20 ([#1223](https://github.com/adobe/spacecat-api-service/issues/1223)) ([c1e1824](https://github.com/adobe/spacecat-api-service/commit/c1e1824b01fa358675bb1da9ffca9f3840b8481e))
+
+## [1.176.4](https://github.com/adobe/spacecat-api-service/compare/v1.176.3...v1.176.4) (2025-09-05)
+
+
+### Bug Fixes
+
+* remove unnecessary logs to reduce Coralogix usage ([#1214](https://github.com/adobe/spacecat-api-service/issues/1214)) ([148e945](https://github.com/adobe/spacecat-api-service/commit/148e94546f437fdf4bc6f81749beeec65587a01e))
+
+## [1.176.3](https://github.com/adobe/spacecat-api-service/compare/v1.176.2...v1.176.3) (2025-09-05)
+
+
+### Bug Fixes
+
+* **deps:** update external major (major) ([#1080](https://github.com/adobe/spacecat-api-service/issues/1080)) ([2d91327](https://github.com/adobe/spacecat-api-service/commit/2d91327e0eb9d554420bee70c3f56b5b67620ff3))
+
+## [1.176.2](https://github.com/adobe/spacecat-api-service/compare/v1.176.1...v1.176.2) (2025-09-04)
+
+
+### Bug Fixes
+
+* remove mcp / psl deps, punycode fix ([#1220](https://github.com/adobe/spacecat-api-service/issues/1220)) ([b4ab173](https://github.com/adobe/spacecat-api-service/commit/b4ab1739ab5ebe4feff32708790c675a1b865897))
+
+## [1.176.1](https://github.com/adobe/spacecat-api-service/compare/v1.176.0...v1.176.1) (2025-09-04)
+
+
+### Bug Fixes
+
+* added mystique pre-signed url return for reports ([#1216](https://github.com/adobe/spacecat-api-service/issues/1216)) ([463a4ce](https://github.com/adobe/spacecat-api-service/commit/463a4ce78fbd73e9eb8c62ad8b1f2a0455284705))
+
+# [1.176.0](https://github.com/adobe/spacecat-api-service/compare/v1.175.0...v1.176.0) (2025-09-04)
+
+
+### Features
+
+* remove MCP server ([#1217](https://github.com/adobe/spacecat-api-service/issues/1217)) ([f5237d9](https://github.com/adobe/spacecat-api-service/commit/f5237d9ecfe0a2f4ab1ee88349999c4731e7616c))
+
+# [1.175.0](https://github.com/adobe/spacecat-api-service/compare/v1.174.2...v1.175.0) (2025-09-04)
+
+
+### Features
+
+* Update demo profile to include forms opportunities ([#1210](https://github.com/adobe/spacecat-api-service/issues/1210)) ([ccc0f4d](https://github.com/adobe/spacecat-api-service/commit/ccc0f4dd398a79c71a6e0a3e35c779c81f85add6))
+
 ## [1.174.2](https://github.com/adobe/spacecat-api-service/compare/v1.174.1...v1.174.2) (2025-09-03)
 
 

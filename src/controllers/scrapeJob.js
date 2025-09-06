@@ -167,8 +167,6 @@ function ScrapeJobController(context) {
       return badRequest('Base URL required');
     }
 
-    log.debug(`Fetching scrape jobs by baseURL: ${encodedBaseURL} and processingType: ${processingType}.`);
-
     let decodedBaseURL = null;
     try {
       decodedBaseURL = Buffer.from(encodedBaseURL, 'base64').toString('utf-8').trim();

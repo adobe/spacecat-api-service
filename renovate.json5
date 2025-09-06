@@ -16,6 +16,12 @@
         "eslint"
       ],
       "allowedVersions": "<9.0.0"
+    },
+    {
+      "matchPackageNames": [
+        "zod"
+      ],
+      "allowedVersions": "<4.0.0"
     }
   ]
 }

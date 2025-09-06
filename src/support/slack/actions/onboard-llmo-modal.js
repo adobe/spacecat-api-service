@@ -10,11 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-/* c8 ignore start */
-
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
+import { OrganizationIdentityProvider as OrganizationIdentityProviderModel } from '@adobe/spacecat-shared-data-access/src/models/organization-identity-provider/index.js';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
@@ -23,6 +23,11 @@ const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
 const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
+
+const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
+const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+
+const IMS_PROVIDER = OrganizationIdentityProviderModel.PROVIDER_TYPES.IMS;
 
 // site isn't on spacecat yet
 async function fullOnboardingModal(body, client, respond, brandURL) {
@@ -240,7 +245,6 @@ async function createOrg(imsOrgId, lambdaCtx, slackCtx) {
   let imsOrgDetails;
   try {
     imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgId);
-    log.info(`IMS Org Details: ${imsOrgDetails}`);
   } catch (error) {
     log.error(`Error retrieving IMS Org details: ${error.message}`);
     await say(`:x: Could not find an IMS org with the ID *${imsOrgId}*.`);
@@ -309,7 +313,7 @@ export function startLLMOOnboarding(lambdaContext) {
 
       if (!site) {
         await fullOnboardingModal(body, client, respond, brandURL);
-        log.info(`User ${user.id} started full onboarding process for ${brandURL}.`);
+        log.debug(`User ${user.id} started full onboarding process for ${brandURL}.`);
         return;
       }
 
@@ -321,13 +325,13 @@ export function startLLMOOnboarding(lambdaContext) {
           text: `:cdbot-error: It looks like ${brandURL} is already configured for LLMO with brand ${brand}`,
           replace_original: true,
         });
-        log.info(`Aborted ${brandURL} onboarding: Already onboarded with brand ${brand}`);
+        log.debug(`Aborted ${brandURL} onboarding: Already onboarded with brand ${brand}`);
         return;
       }
 
       await elmoOnboardingModal(body, client, respond, brandURL);
 
-      log.info(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
+      log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
       await respond({
@@ -358,7 +362,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
     ];
 
     for (const [index, endpoint] of endpoints.entries()) {
-      log.info(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
+      log.debug(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
 
       // eslint-disable-next-line no-await-in-loop
       const response = await fetch(endpoint.url, { method: 'POST', headers });
@@ -367,10 +371,9 @@ async function publishToAdminHlx(filename, outputLocation, log) {
         throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
       }
 
-      log.info(`Excel report successfully published to ${endpoint.name}`);
+      log.debug(`Excel report successfully published to ${endpoint.name}`);
 
       if (index === 0) {
-        log.info('Waiting 2 seconds before publishing to live...');
         // eslint-disable-next-line no-await-in-loop,max-statements-per-line
         await new Promise((resolve) => { setTimeout(resolve, 2000); });
       }
@@ -380,8 +383,9 @@ async function publishToAdminHlx(filename, outputLocation, log) {
   }
 }
 
-async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
+async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
   const { log } = lambdaCtx;
+  const { say } = slackCtx;
 
   const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/Shared%20Documents/sites/elmo-ui-data';
 
@@ -392,23 +396,38 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx) {
     domainId: process.env.SHAREPOINT_DOMAIN_ID,
   }, { url: SHAREPOINT_URL, type: 'onedrive' });
 
-  log.info(`Copying query-index to ${dataFolder}`);
+  log.debug(`Copying query-index to ${dataFolder}`);
   const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
-  const queryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
+  const templateQueryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
+  const newQueryIndex = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/query-index.xlsx`);
 
-  await folder.createFolder(dataFolder, '/');
-  await queryIndex.copy(`/${dataFolder}/query-index.xlsx`);
+  // TODO: Instead of patching .exists, add this method https://github.com/adobe/spacecat-helix-content-sdk/issues/190
+  const folderExists = await folder.exists();
+  if (!folderExists) {
+    await folder.createFolder(dataFolder, '/');
+  } else {
+    log.warn(`Warning: Folder ${dataFolder} already exists. Skipping creation.`);
+    await say(`Folder ${dataFolder} already exists. Skipping creation.`);
+  }
 
-  log.info('Publishing query-index to admin.hlx.page');
+  const queryIndexExists = await newQueryIndex.exists();
+  if (!queryIndexExists) {
+    await templateQueryIndex.copy(`/${dataFolder}/query-index.xlsx`);
+  } else {
+    log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
+    await say(`Query index in ${dataFolder} already exists. Skipping creation.`);
+  }
+
+  log.debug('Publishing query-index to admin.hlx.page');
   await publishToAdminHlx('query-index', dataFolder, log);
 }
 
 // update https://github.com/adobe/project-elmo-ui-data/blob/main/helix-query.yaml
-async function updateIndexConfig(dataFolder, lambdaCtx) {
+async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
   const { log } = lambdaCtx;
+  const { say } = slackCtx;
 
-  log.info('Starting Git modification of helix query config');
-
+  log.debug('Starting Git modification of helix query config');
   const octokit = new Octokit({
     auth: process.env.LLMO_ONBOARDING_GITHUB_TOKEN,
   });
@@ -422,6 +441,12 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
     owner, repo, ref, path,
   });
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
+
+  if (content.includes(dataFolder)) {
+    log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
+    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
+    return;
+  }
 
   // add new config to end of file
   const modifiedContent = `${content}${content.endsWith('\n') ? '' : '\n'}
@@ -441,8 +466,6 @@ async function updateIndexConfig(dataFolder, lambdaCtx) {
     content: Buffer.from(modifiedContent).toString('base64'),
     sha: file.sha,
   });
-
-  log.info('Done with Git modification of helix query config');
 }
 
 async function createSiteAndOrganization(input, lambda, slackContext) {
@@ -466,6 +489,83 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
   return site.getId();
 }
 
+async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
+  const { dataAccess, log } = lambdaCtx;
+  const { say } = slackCtx;
+  const { Entitlement, SiteEnrollment } = dataAccess;
+
+  const orgId = site.getOrganizationId();
+
+  // find if there are any entitlements for this site enabling LLMO
+  const enrollments = await SiteEnrollment.allBySiteId(site.getId());
+  const llmoEntitlements = (await Promise.all(enrollments.map(async (enrollment) => {
+    // find entitlement for this enrollment
+    const entitlement = await Entitlement.findById(enrollment.getEntitlementId());
+    // check if the entitlement is for the same organization as the site
+    const entitlementOrgId = entitlement.getOrganizationId();
+    if (entitlementOrgId !== orgId) return null;
+    // check if the entitlement is for LLMO
+    const entitlementProductCode = entitlement.getProductCode();
+    return entitlementProductCode === LLMO_PRODUCT_CODE ? entitlement : null;
+  }))).filter((x) => !!x);
+
+  if (llmoEntitlements.length > 0) {
+    await say(`Site ${site.getId()} is already entitled to LLMO. Skipping entitlement grant.`);
+    log.warn(`Site ${site.getId()} already entitled to LLMO. Skipping.`);
+    return;
+  }
+
+  // create an entitlement
+  const newEntitlement = await Entitlement.create({
+    organizationId: orgId,
+    productCode: LLMO_PRODUCT_CODE,
+    tier: LLMO_TIER,
+    quotas: { llmo_trial_prompts: 200 },
+  });
+  await newEntitlement.save();
+  const newEntitlementId = newEntitlement.getId();
+
+  // create enrollment
+  const newEnrollment = await SiteEnrollment.create({
+    entitlementId: newEntitlementId,
+    siteId: site.getId(),
+  });
+  await newEnrollment.save();
+}
+
+async function createOrganizationIdentityProvider(site, lambdaCtx) {
+  const { dataAccess, log } = lambdaCtx;
+  const { OrganizationIdentityProvider, Organization } = dataAccess;
+
+  log.info('Starting IDP creation process.');
+
+  // Get the organization ID from the site
+  const organizationId = site.getOrganizationId();
+  const organization = await Organization.findById(organizationId);
+  const organizationImsOrgId = organization.getImsOrgId();
+
+  // Check if an IMS identity provider already exists for this organization
+  const existingIdps = await OrganizationIdentityProvider.allByOrganizationId(organizationId);
+  const existingIdp = existingIdps.find((idp) => idp.getProvider() === IMS_PROVIDER);
+
+  if (existingIdp) {
+    log.info(`Organization identity provider already exists for organization ${organizationId}, skipping creation`);
+    return;
+  }
+
+  log.info('No existing IDP found, creating new.');
+
+  // Create a new identity provider for the organization
+  const newIdp = await OrganizationIdentityProvider.create({
+    organizationId,
+    provider: OrganizationIdentityProviderModel.PROVIDER_TYPES.IMS,
+    externalId: organizationImsOrgId,
+  });
+
+  await newIdp.save();
+  log.info(`Created new organization identity provider for organization ${organizationId}`);
+}
+
 export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, dataAccess, sqs } = lambdaCtx;
   const { say } = slackCtx;
@@ -475,9 +575,11 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { hostname } = new URL(baseURL);
   const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
 
-  const { Site, Configuration } = dataAccess;
+  const {
+    Site, Configuration,
+  } = dataAccess;
 
-  say(`:gear: ${brandName} onboarding started...`);
+  await say(`:gear: ${brandName} onboarding started...`);
 
   try {
     // Find the site
@@ -495,14 +597,19 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
     }
 
+    // create entitlement
+    await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx);
+
+    // create OrganizationIdentiyProvider
+    await createOrganizationIdentityProvider(site, lambdaCtx, slackCtx);
+
     // upload and publish the query index file
-    await copyFilesToSharepoint(dataFolder, lambdaCtx);
+    await copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx);
 
     // update indexing config in helix
-    await updateIndexConfig(dataFolder, lambdaCtx);
+    await updateIndexConfig(dataFolder, lambdaCtx, slackCtx);
 
     const siteId = site.getId();
-    log.info(`Found site ${baseURL} with ID: ${siteId}`);
 
     // Get current site config
     const siteConfig = site.getConfig();
@@ -537,7 +644,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       log.info(`Enabling agentic traffic audits for organization ${orgId} (first site in org)`);
       configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
     } else {
-      log.info(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
+      log.debug(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
     }
 
     // enable the cdn-logs-report audits for agentic traffic
@@ -549,7 +656,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     try {
       await configuration.save();
       await site.save();
-      log.info(`Successfully updated LLMO config for site ${siteId}`);
+      log.debug(`Successfully updated LLMO config for site ${siteId}`);
 
       // trigger the llmo-customer-analysis handler
       const sqsTriggerMesasage = {
@@ -559,7 +666,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
           auditType: 'llmo-customer-analysis',
         },
       };
-      sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
+      await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
 
       const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
@@ -588,8 +695,7 @@ export function onboardLLMOModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     try {
-      log.info('Starting onboarding process...');
-
+      log.debug('Starting onboarding process...');
       const { view, user } = body;
       const { values } = view.state;
 
@@ -598,6 +704,7 @@ export function onboardLLMOModal(lambdaContext) {
       let originalThreadTs;
       let brandURL;
       try {
+        /* c8 ignore next */
         const metadata = JSON.parse(view.private_metadata || '{}');
         originalChannel = metadata.originalChannel;
         originalThreadTs = metadata.originalThreadTs;
@@ -656,7 +763,7 @@ export function onboardLLMOModal(lambdaContext) {
         brandName, baseURL: brandURL, imsOrgId, deliveryType,
       }, lambdaContext, slackContext);
 
-      log.info(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);
+      log.debug(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);
     } catch (e) {
       log.error('Error handling onboard site modal:', e);
       await ack({
@@ -668,5 +775,3 @@ export function onboardLLMOModal(lambdaContext) {
     }
   };
 }
-
-/* c8 ignore stop */

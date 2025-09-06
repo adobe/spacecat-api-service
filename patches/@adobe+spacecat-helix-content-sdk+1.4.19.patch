@@ -1,0 +1,23 @@
+diff --git a/node_modules/@adobe/spacecat-helix-content-sdk/src/sharepoint/sharepoint.docx.js b/node_modules/@adobe/spacecat-helix-content-sdk/src/sharepoint/sharepoint.docx.js
+index 96d8a73..87238a0 100644
+--- a/node_modules/@adobe/spacecat-helix-content-sdk/src/sharepoint/sharepoint.docx.js
++++ b/node_modules/@adobe/spacecat-helix-content-sdk/src/sharepoint/sharepoint.docx.js
+@@ -131,6 +131,18 @@ export class SharepointDocx extends DocumentInterface {
+     return `${this.#baseUri}${path}`;
+   }
+ 
++  async exists() {
++    try {
++      const file = await this.#client.api(this.getFullPath(this.#path)).get();
++      return true; // File exists
++    } catch (err) {
++      if (err.statusCode === 404) {
++        return false; // File not found
++      }
++      throw err; // Other errors
++    }
++  }
++
+   async copy(destination) {
+     const { name: newName, path: destinationPath } = parseFilePath(destination);
+     const parent = await this.#client.api(this.getFullPath(destinationPath)).get();

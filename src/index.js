@@ -68,8 +68,6 @@ import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo.js';
-import McpController from './controllers/mcp.js';
-import buildRegistry from './mcp/registry.js';
 import OrganizationIdentityProvidersController from './controllers/organization-identity-providers.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
@@ -140,15 +138,6 @@ async function run(request, context) {
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
 
-    /* ---------- build MCP registry & controller ---------- */
-    const mcpRegistry = buildRegistry({
-      auditsController,
-      sitesController,
-      scrapeController,
-      context,
-    });
-    const mcpController = McpController(context, mcpRegistry);
-
     const routeHandlers = getRouteHandlers(
       auditsController,
       configurationController,
@@ -170,7 +159,6 @@ async function run(request, context) {
       consentBannerController,
       scrapeController,
       scrapeJobController,
-      mcpController,
       paidController,
       trafficController,
       fixesController,
@@ -201,7 +189,6 @@ async function run(request, context) {
       return await handler(context);
     } else {
       const notFoundMessage = `no such route /${route}`;
-      log.info(notFoundMessage);
       return notFound(notFoundMessage);
     }
   } catch (e) {

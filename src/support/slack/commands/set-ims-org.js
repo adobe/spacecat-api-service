@@ -82,7 +82,6 @@ function SetSiteOrganizationCommand(context) {
         let imsOrgDetails;
         try {
           imsOrgDetails = await imsClient.getImsOrganizationDetails(userImsOrgId);
-          log.info(`IMS Org Details: ${imsOrgDetails}`);
         } catch (error) {
           log.error(`Error retrieving IMS Org details: ${error.message}`);
           await say(`:x: Could not find an IMS org with the ID *${userImsOrgId}*.`);

@@ -125,11 +125,6 @@ describe('getRouteHandlers', () => {
     getScreenshots: sinon.stub(),
   };
 
-  const mockMcpController = {
-    handleRpc: sinon.stub(),
-    handleSseRequest: sinon.stub(),
-  };
-
   const mockScrapeController = {
     getFileByKey: sinon.stub(),
     listScrapedContentFiles: sinon.stub(),
@@ -250,7 +245,6 @@ describe('getRouteHandlers', () => {
       mockConsentBannerController,
       mockScrapeController,
       mockScrapeJobController,
-      mockMcpController,
       mockPaidController,
       mockTrafficController,
       mockFixesController,
@@ -286,8 +280,6 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
-      'GET /mcp',
-      'POST /mcp',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -304,8 +296,6 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
-    expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
-    expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
 
     expect(dynamicRoutes).to.have.all.keys(
