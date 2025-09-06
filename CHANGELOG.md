@@ -1,3 +1,10 @@
+## [1.176.11](https://github.com/adobe/spacecat-api-service/compare/v1.176.10...v1.176.11) (2025-09-06)
+
+
+### Bug Fixes
+
+* adding variationName to auto fix sqs message ([#1128](https://github.com/adobe/spacecat-api-service/issues/1128)) ([ab7c837](https://github.com/adobe/spacecat-api-service/commit/ab7c837aaa1f92a3c7583cd60c19fe7565ce3085))
+
 ## [1.176.10](https://github.com/adobe/spacecat-api-service/compare/v1.176.9...v1.176.10) (2025-09-06)
 
 
