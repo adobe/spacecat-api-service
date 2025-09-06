@@ -174,6 +174,10 @@ describe('getRouteHandlers', () => {
     removeFix: () => null,
   };
 
+  const mockApplyFixesController = {
+    applyFixes: () => null,
+  };
+
   const mockConsentBannerController = {
     getScreenshots: () => null,
     takeScreenshots: () => null,
@@ -223,6 +227,7 @@ describe('getRouteHandlers', () => {
       mockPaidController,
       mockTrafficController,
       mockFixesController,
+      mockApplyFixesController,
       mockLlmoController,
       mockSandboxAuditController,
     );
@@ -336,7 +341,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes',
-      'POST /sites/:siteId/opportunities/:opportunityId/fixes/accessibility',
+      'POST /sites/:siteId/opportunities/:opportunityId/apply-fixes',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
