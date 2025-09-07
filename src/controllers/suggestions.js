@@ -29,6 +29,7 @@ import { ValidationError, Suggestion as SuggestionModel, Site as SiteModel } fro
 import { SuggestionDto } from '../dto/suggestion.js';
 import { sendAutofixMessage, getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { FixDto } from '../dto/fix.js';
 
 /**
  * Suggestions controller.
@@ -608,6 +609,57 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(response, 207);
   };
 
+  const getSuggestionFixes = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+    const suggestionId = context.params?.suggestionId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
+      return notFound('Suggestion not found');
+    }
+
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Suggestion not found');
+    }
+
+    // Get the fix entity associated with this suggestion
+    const fixEntityId = suggestion.getFixEntityId();
+    if (!fixEntityId) {
+      return ok([]);
+    }
+
+    const { FixEntity } = dataAccess;
+    const fixEntity = await FixEntity.findById(fixEntityId);
+    if (!fixEntity) {
+      return ok([]);
+    }
+
+    return ok([FixDto.toJSON(fixEntity)]);
+  };
+
   const removeSuggestion = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
@@ -660,6 +712,7 @@ function SuggestionsController(ctx, sqs, env) {
     getAllForOpportunity,
     getByID,
     getByStatus,
+    getSuggestionFixes,
     patchSuggestion,
     patchSuggestionsStatus,
     removeSuggestion,

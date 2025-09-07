@@ -106,6 +106,7 @@ describe('getRouteHandlers', () => {
     getAllForOpportunity: sinon.stub(),
     getByStatus: sinon.stub(),
     getByID: sinon.stub(),
+    getSuggestionFixes: sinon.stub(),
     createSuggestions: sinon.stub(),
     patchSuggestion: sinon.stub(),
     patchSuggestionsStatus: sinon.stub(),
@@ -326,6 +327,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
@@ -440,6 +442,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'status']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId'].handler).to.equal(mockSuggestionsController.getByID);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'suggestionId']);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes'].handler).to.equal(mockSuggestionsController.getSuggestionFixes);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'suggestionId']);
     expect(dynamicRoutes['POST /sites/:siteId/opportunities/:opportunityId/suggestions'].handler).to.equal(mockSuggestionsController.createSuggestions);
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId'].handler).to.equal(mockSuggestionsController.patchSuggestion);
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'suggestionId']);
