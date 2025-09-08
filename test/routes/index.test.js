@@ -176,6 +176,7 @@ describe('getRouteHandlers', () => {
 
   const mockLlmoController = {
     getLlmoSheetData: () => null,
+    getLlmoGlobalSheetData: () => null,
     getLlmoConfig: () => null,
     getLlmoQuestions: () => null,
     addLlmoQuestion: () => null,
@@ -424,6 +425,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
       'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config',
+      'GET /sites/:siteId/llmo/global-sheet-data/:configName',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -556,5 +558,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].handler).to.equal(mockLlmoController.patchLlmoCdnBucketConfig);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].handler).to.equal(mockLlmoController.getLlmoGlobalSheetData);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].paramNames).to.deep.equal(['siteId', 'configName']);
   });
 });
