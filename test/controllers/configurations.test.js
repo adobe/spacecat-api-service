@@ -237,301 +237,130 @@ describe('Configurations Controller', () => {
     expect(error).to.have.property('message', 'Configuration version required to be an integer');
   });
 
-  describe('Sandbox Configuration Methods', () => {
-    let mockCurrentConfig;
-    let mockNewConfig;
+  describe('updateSandboxConfig', () => {
+    let mockConfig;
 
     beforeEach(() => {
-      // Reset admin access for sandbox configuration tests
+      // Reset to admin access for all sandbox config tests
       context.attributes.authInfo.withProfile({ is_admin: true });
-      mockCurrentConfig = {
-        getJobs: sandbox.stub().returns([]),
-        getHandlers: sandbox.stub().returns({}),
-        getQueues: sandbox.stub().returns({}),
-        getSlackRoles: sandbox.stub().returns({}),
+
+      // Create a config object with the required method
+      mockConfig = {
+        updateSandboxAuditConfigs: sandbox.stub().resolves({}),
       };
 
-      mockNewConfig = {
-        getVersion: sandbox.stub().returns('2'),
-        getJobs: sandbox.stub().returns([]),
-        getHandlers: sandbox.stub().returns({}),
-        getQueues: sandbox.stub().returns({}),
-        getSlackRoles: sandbox.stub().returns({}),
-      };
+      // Override the global mocks for this test suite
+      mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(mockConfig);
+      mockDataAccess.Configuration.save = sandbox.stub().resolves();
 
-      mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(mockCurrentConfig);
-      mockDataAccess.Configuration.create = sandbox.stub().resolves(mockNewConfig);
+      // Recreate controller with updated context
+      configurationsController = ConfigurationsController(context);
     });
 
-    describe('updateSandboxConfig', () => {
-      it('should update sandbox configurations successfully', async () => {
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              cwv: { expire: '10' },
-              'meta-tags': { expire: '15' },
-            },
-          },
-        };
+    it('should return forbidden for non-admin users', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
 
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const response = await result.json();
-
-        expect(result.status).to.equal(200);
-        expect(response).to.have.property('message', 'Sandbox configurations updated successfully');
-        expect(response).to.have.property('updatedConfigs');
-        expect(response.updatedConfigs).to.deep.equal({
-          cwv: { expire: '10' },
-          'meta-tags': { expire: '15' },
-        });
-        expect(response).to.have.property('totalUpdated', 2);
-        expect(response).to.have.property('newVersion', '2');
-        expect(mockDataAccess.Configuration.create).to.have.been.calledWith({
-          jobs: [],
-          handlers: {
-            cwv: { sandbox: { expire: '10' } },
-            'meta-tags': { sandbox: { expire: '15' } },
-          },
-          queues: {},
-          slackRoles: {},
-        });
+      const result = await configurationsController.updateSandboxConfig({
+        data: { sandboxConfigs: { cwv: { expire: '10' } } },
       });
+      const error = await result.json();
 
-      it('should return bad request when sandboxConfigs is missing', async () => {
-        const requestContext = {
-          data: {},
-        };
+      expect(result.status).to.equal(403);
+      expect(error.message).to.include('Only admins can update sandbox configurations');
+    });
 
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const error = await result.json();
+    it('should return bad request when context.data is undefined', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
 
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('sandboxConfigs object is required');
+      const result = await configurationsController.updateSandboxConfig({});
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('sandboxConfigs object is required');
+    });
+
+    it('should return bad request when sandboxConfigs is missing', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+
+      const result = await configurationsController.updateSandboxConfig({
+        data: {},
       });
+      const error = await result.json();
 
-      it('should return bad request when context.data is undefined', async () => {
-        const requestContext = {};
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('sandboxConfigs object is required');
+    });
 
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const error = await result.json();
+    it('should return bad request when sandboxConfigs is not an object', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
 
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('sandboxConfigs object is required');
+      const result = await configurationsController.updateSandboxConfig({
+        data: { sandboxConfigs: 'invalid' },
       });
+      const error = await result.json();
 
-      it('should return bad request when sandboxConfigs is not an object', async () => {
-        const requestContext = {
-          data: {
-            sandboxConfigs: 'invalid',
-          },
-        };
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('sandboxConfigs object is required');
+    });
 
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const error = await result.json();
+    it('should return not found when configuration does not exist', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+      mockDataAccess.Configuration.findLatest.resolves(null);
 
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('sandboxConfigs object is required');
+      const result = await configurationsController.updateSandboxConfig({
+        data: { sandboxConfigs: { cwv: { expire: '10' } } },
       });
+      const error = await result.json();
 
-      it('should return forbidden for non-admin users', async () => {
-        context.attributes.authInfo.withProfile({ is_admin: false });
+      expect(result.status).to.equal(404);
+      expect(error.message).to.include('Configuration not found');
+    });
 
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              cwv: { expire: '10' },
-            },
-          },
-        };
+    it('should update sandbox configurations successfully', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+      const sandboxConfigs = {
+        cwv: { expire: '10' },
+        'meta-tags': { expire: '15' },
+      };
 
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const error = await result.json();
-
-        expect(result.status).to.equal(403);
-        expect(error.message).to.include('Only admins can update sandbox configurations');
+      const result = await configurationsController.updateSandboxConfig({
+        data: { sandboxConfigs },
       });
+      const response = await result.json();
 
-      it('should return not found when configuration does not exist', async () => {
-        mockDataAccess.Configuration.findLatest.resolves(null);
+      expect(result.status).to.equal(200);
+      expect(response).to.have.property('message', 'Sandbox configurations updated successfully');
+      expect(response).to.have.property('updatedConfigs');
+      expect(response.updatedConfigs).to.deep.equal(sandboxConfigs);
+      expect(response).to.have.property('totalUpdated', 2);
+      expect(mockConfig.updateSandboxAuditConfigs).to.have.been.calledWith(sandboxConfigs);
+      expect(mockDataAccess.Configuration.save).to.have.been.called;
+    });
 
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              cwv: { expire: '10' },
-            },
-          },
-        };
+    it('should handle errors during configuration update', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+      mockConfig.updateSandboxAuditConfigs.rejects(new Error('Update failed'));
 
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const error = await result.json();
-
-        expect(result.status).to.equal(404);
-        expect(error.message).to.include('Configuration not found');
+      const result = await configurationsController.updateSandboxConfig({
+        data: { sandboxConfigs: { cwv: { expire: '10' } } },
       });
+      const error = await result.json();
 
-      it('should return bad request when Configuration.create throws an error', async () => {
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              cwv: { expire: '10' },
-            },
-          },
-        };
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('Error updating sandbox configuration: Update failed');
+    });
 
-        mockDataAccess.Configuration.create.throws(new Error('Create failed'));
+    it('should handle errors during configuration save', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+      mockDataAccess.Configuration.save.rejects(new Error('Save failed'));
 
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const error = await result.json();
-
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('Error updating sandbox configuration: Create failed');
+      const result = await configurationsController.updateSandboxConfig({
+        data: { sandboxConfigs: { cwv: { expire: '10' } } },
       });
+      const error = await result.json();
 
-      it('should handle when getHandlers returns null', async () => {
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              cwv: { expire: '10' },
-            },
-          },
-        };
-
-        // Mock getHandlers to return null to test the || {} fallback
-        mockCurrentConfig.getHandlers.returns(null);
-
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const response = await result.json();
-
-        expect(result.status).to.equal(200);
-        expect(response).to.have.property('message', 'Sandbox configurations updated successfully');
-        expect(mockDataAccess.Configuration.create).to.have.been.calledWith({
-          jobs: [],
-          handlers: {
-            cwv: { sandbox: { expire: '10' } },
-          },
-          queues: {},
-          slackRoles: {},
-        });
-      });
-
-      it('should handle when audit type does not exist in handlers', async () => {
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              newAuditType: { enabled: true },
-            },
-          },
-        };
-
-        // Mock getHandlers to return handlers without the new audit type
-        mockCurrentConfig.getHandlers.returns({
-          cwv: { sandbox: { expire: '5' } },
-        });
-
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const response = await result.json();
-
-        expect(result.status).to.equal(200);
-        expect(response).to.have.property('message', 'Sandbox configurations updated successfully');
-        expect(mockDataAccess.Configuration.create).to.have.been.calledWith({
-          jobs: [],
-          handlers: {
-            cwv: { sandbox: { expire: '5' } },
-            newAuditType: { sandbox: { enabled: true } },
-          },
-          queues: {},
-          slackRoles: {},
-        });
-      });
-
-      it('should handle when audit type exists but has no sandbox property', async () => {
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              lhs: { timeout: '30' },
-            },
-          },
-        };
-
-        // Mock getHandlers to return handlers with audit type but no sandbox property
-        mockCurrentConfig.getHandlers.returns({
-          cwv: { sandbox: { expire: '5' } },
-          lhs: { enabled: true }, // No sandbox property
-        });
-
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const response = await result.json();
-
-        expect(result.status).to.equal(200);
-        expect(response).to.have.property('message', 'Sandbox configurations updated successfully');
-        expect(mockDataAccess.Configuration.create).to.have.been.calledWith({
-          jobs: [],
-          handlers: {
-            cwv: { sandbox: { expire: '5' } },
-            lhs: { enabled: true, sandbox: { timeout: '30' } },
-          },
-          queues: {},
-          slackRoles: {},
-        });
-      });
-
-      it('should handle when getHandlers returns undefined', async () => {
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              cwv: { expire: '10' },
-            },
-          },
-        };
-
-        // Mock getHandlers to return undefined to test the || {} fallback
-        mockCurrentConfig.getHandlers.returns(undefined);
-
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const response = await result.json();
-
-        expect(result.status).to.equal(200);
-        expect(response).to.have.property('message', 'Sandbox configurations updated successfully');
-        expect(mockDataAccess.Configuration.create).to.have.been.calledWith({
-          jobs: [],
-          handlers: {
-            cwv: { sandbox: { expire: '10' } },
-          },
-          queues: {},
-          slackRoles: {},
-        });
-      });
-
-      it('should handle when audit type does not exist in current handlers', async () => {
-        const requestContext = {
-          data: {
-            sandboxConfigs: {
-              newAuditType: { timeout: '15' },
-            },
-          },
-        };
-
-        // Mock getHandlers to return handlers without the new audit type
-        mockCurrentConfig.getHandlers.returns({
-          cwv: { sandbox: { expire: '5' } },
-          // newAuditType doesn't exist, so lines 120-122 will be executed
-        });
-
-        const result = await configurationsController.updateSandboxConfig(requestContext);
-        const response = await result.json();
-
-        expect(result.status).to.equal(200);
-        expect(response).to.have.property('message', 'Sandbox configurations updated successfully');
-        expect(mockDataAccess.Configuration.create).to.have.been.calledWith({
-          jobs: [],
-          handlers: {
-            cwv: { sandbox: { expire: '5' } },
-            newAuditType: { sandbox: { timeout: '15' } }, // New audit type created
-          },
-          queues: {},
-          slackRoles: {},
-        });
-      });
+      expect(result.status).to.equal(400);
+      expect(error.message).to.include('Error updating sandbox configuration: Save failed');
     });
   });
 });

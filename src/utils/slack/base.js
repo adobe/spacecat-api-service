@@ -302,7 +302,6 @@ const fetchFile = async (file, token) => {
   const response = await fetch(fileUrl, {
     headers: { Authorization: `Bearer ${token}` },
     responseType: 'arraybuffer',
-    validateStatus: (status) => status < 500,
   });
 
   const responseData = await response.arrayBuffer();
