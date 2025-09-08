@@ -1,3 +1,10 @@
+# [1.177.0](https://github.com/adobe/spacecat-api-service/compare/v1.176.13...v1.177.0) (2025-09-08)
+
+
+### Features
+
+* Llmo endpoint to fetch global files ([#1234](https://github.com/adobe/spacecat-api-service/issues/1234)) ([ad4d6a3](https://github.com/adobe/spacecat-api-service/commit/ad4d6a36b5b663605494a14de41d3c8d28ea2bd5))
+
 ## [1.176.13](https://github.com/adobe/spacecat-api-service/compare/v1.176.12...v1.176.13) (2025-09-08)
 
 
