@@ -257,7 +257,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
-    'GET /sites/:siteId/llmo/global-sheet-data/:dataSource': llmoController.getLlmoGlobalSheetData,
+    'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
 
     // Tier Specific Routes
     'GET /organizations/:organizationId/organization-identity-provider': organizationIdentityProviderController.getByOrganizationID,
