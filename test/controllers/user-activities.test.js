@@ -40,6 +40,8 @@ describe('User Activity Controller', () => {
     getEmailId: () => 'test@example.com',
     getStatus: () => 'INVITED',
     setStatus: sandbox.stub(),
+    setFirstName: sandbox.stub(),
+    setLastName: sandbox.stub(),
     setLastSeenAt: sandbox.stub(),
     save: sandbox.stub().resolves(),
   };
@@ -722,6 +724,8 @@ describe('User Activity Controller', () => {
           getEmailId: () => 'test@example.com',
           getStatus: sandbox.stub(),
           setStatus: sandbox.stub(),
+          setFirstName: sandbox.stub(),
+          setLastName: sandbox.stub(),
           setLastSeenAt: sandbox.stub(),
           save: sandbox.stub().resolves(),
         };
@@ -960,6 +964,196 @@ describe('User Activity Controller', () => {
         const result2 = await userActivityController.createTrialUserActivity(context);
         expect(result2.status).to.equal(201);
         expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should set first and last name when user transitions from INVITED to REGISTERED', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({
+                trial_email: 'test@example.com',
+                first_name: 'John',
+                last_name: 'Doe',
+              })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith('John');
+        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith('Doe');
+        expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should not set first and last name when user is already REGISTERED', async () => {
+        mockTrialUserWithStatus.getStatus.returns('REGISTERED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({
+                trial_email: 'test@example.com',
+                first_name: 'John',
+                last_name: 'Doe',
+              })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+        expect(mockTrialUserWithStatus.setFirstName).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.setLastName).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.setStatus).to.not.have.been.called;
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should set first and last name to undefined when profile is missing them during INVITED to REGISTERED transition', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({
+                trial_email: 'test@example.com',
+                // Missing first_name and last_name
+              })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith(undefined);
+        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith(undefined);
+        expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should set first and last name to undefined when profile has no name fields during INVITED to REGISTERED transition', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({
+                trial_email: 'test@example.com',
+                // No first_name or last_name fields
+              })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith(undefined);
+        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith(undefined);
+        expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should set first and last name with partial data during INVITED to REGISTERED transition', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({
+                trial_email: 'test@example.com',
+                first_name: 'John',
+                // Missing last_name
+              })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith('John');
+        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith(undefined);
+        expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
+        expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
+        expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
+      });
+
+      it('should set first and last name only when both are present during INVITED to REGISTERED transition', async () => {
+        mockTrialUserWithStatus.getStatus.returns('INVITED');
+
+        const context = {
+          params: { siteId },
+          data: { type: 'SIGN_IN', productCode: 'LLMO' },
+          dataAccess: mockDataAccess,
+          log: { error: sinon.stub() },
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withProfile({
+                trial_email: 'test@example.com',
+                first_name: 'John',
+                last_name: 'Doe',
+              })
+              .withAuthenticated(true),
+          },
+        };
+
+        mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithStatus);
+
+        const result = await userActivityController.createTrialUserActivity(context);
+
+        expect(result.status).to.equal(201);
+        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith('John');
+        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith('Doe');
+        expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
         expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
         expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
       });
