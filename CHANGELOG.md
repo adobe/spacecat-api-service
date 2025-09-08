@@ -1,3 +1,11 @@
+## [1.176.13](https://github.com/adobe/spacecat-api-service/compare/v1.176.12...v1.176.13) (2025-09-08)
+
+
+### Bug Fixes
+
+* add first name and last name in first login ([#1233](https://github.com/adobe/spacecat-api-service/issues/1233)) ([09bf0e7](https://github.com/adobe/spacecat-api-service/commit/09bf0e7676db7d05c00ca17fd02d4e48aa6ded16))
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.61.3 ([#1232](https://github.com/adobe/spacecat-api-service/issues/1232)) ([966e53e](https://github.com/adobe/spacecat-api-service/commit/966e53e1c0d2eddc57aa8154c64c513e128a8084))
+
 ## [1.176.12](https://github.com/adobe/spacecat-api-service/compare/v1.176.11...v1.176.12) (2025-09-07)
 
 
