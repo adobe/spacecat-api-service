@@ -244,14 +244,14 @@ describe('Configurations Controller', () => {
       // Reset to admin access for all sandbox config tests
       context.attributes.authInfo.withProfile({ is_admin: true });
 
-      // Create a config object with the required method
+      // Create a config object with the required methods
       mockConfig = {
-        updateSandboxAuditConfigs: sandbox.stub().resolves({}),
+        updateSandboxAuditConfig: sandbox.stub(),
+        save: sandbox.stub().resolves(mockConfig),
       };
 
       // Override the global mocks for this test suite
       mockDataAccess.Configuration.findLatest = sandbox.stub().resolves(mockConfig);
-      mockDataAccess.Configuration.save = sandbox.stub().resolves();
 
       // Recreate controller with updated context
       configurationsController = ConfigurationsController(context);
@@ -323,6 +323,9 @@ describe('Configurations Controller', () => {
         'meta-tags': { expire: '15' },
       };
 
+      // Ensure the mock save method resolves successfully
+      mockConfig.save = sandbox.stub().resolves();
+
       const result = await configurationsController.updateSandboxConfig({
         data: { sandboxConfigs },
       });
@@ -333,13 +336,14 @@ describe('Configurations Controller', () => {
       expect(response).to.have.property('updatedConfigs');
       expect(response.updatedConfigs).to.deep.equal(sandboxConfigs);
       expect(response).to.have.property('totalUpdated', 2);
-      expect(mockConfig.updateSandboxAuditConfigs).to.have.been.calledWith(sandboxConfigs);
-      expect(mockDataAccess.Configuration.save).to.have.been.called;
+      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('cwv', { expire: '10' });
+      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('meta-tags', { expire: '15' });
+      expect(mockConfig.save).to.have.been.called;
     });
 
     it('should handle errors during configuration update', async () => {
       context.attributes.authInfo.withProfile({ is_admin: true });
-      mockConfig.updateSandboxAuditConfigs.rejects(new Error('Update failed'));
+      mockConfig.save.rejects(new Error('Update failed'));
 
       const result = await configurationsController.updateSandboxConfig({
         data: { sandboxConfigs: { cwv: { expire: '10' } } },
@@ -352,7 +356,7 @@ describe('Configurations Controller', () => {
 
     it('should handle errors during configuration save', async () => {
       context.attributes.authInfo.withProfile({ is_admin: true });
-      mockDataAccess.Configuration.save.rejects(new Error('Save failed'));
+      mockConfig.save.rejects(new Error('Save failed'));
 
       const result = await configurationsController.updateSandboxConfig({
         data: { sandboxConfigs: { cwv: { expire: '10' } } },

@@ -111,10 +111,13 @@ function ConfigurationController(ctx) {
         return notFound('Configuration not found');
       }
 
-      // Update sandbox configurations
-      const updatedConfig = await config.updateSandboxAuditConfigs(sandboxConfigs);
+      // Update sandbox configurations for each audit type
+      Object.keys(sandboxConfigs).forEach((auditType) => {
+        config.updateSandboxAuditConfig(auditType, sandboxConfigs[auditType]);
+      });
+
       // Save the updated configuration
-      await Configuration.save(updatedConfig);
+      await config.save();
 
       return ok({
         message: 'Sandbox configurations updated successfully',
