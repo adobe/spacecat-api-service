@@ -38,6 +38,8 @@ describe('Configurations Controller', () => {
       getHandlers: () => {},
       getQueues: () => ({ reports: 'sqs://some-reports-queue' }),
       getSlackRoles: () => {},
+      getEnabledSandboxAudits: () => [],
+      getSandboxAuditConfig: () => null,
     },
     {
       getVersion: () => 2,
@@ -81,6 +83,12 @@ describe('Configurations Controller', () => {
           'S03CR0FDC2V',
         ],
       }),
+      getEnabledSandboxAudits: () => ['cwv', 'meta-tags'],
+      getSandboxAuditConfig: (auditType) => {
+        if (auditType === 'cwv') return { expire: '10' };
+        if (auditType === 'meta-tags') return { expire: '15' };
+        return null;
+      },
     },
   ];
 
