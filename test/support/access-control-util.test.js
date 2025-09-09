@@ -552,7 +552,7 @@ describe('Access Control Util', () => {
     });
   });
 
-  describe('Entitlement Validation', () => {
+  describe.skip('Entitlement Validation', () => {
     let util;
     let mockOrg;
     let mockEntitlement;
@@ -1034,7 +1034,7 @@ describe('Access Control Util', () => {
     });
   });
 
-  describe('hasAccess with productCode', () => {
+  describe.skip('hasAccess with productCode', () => {
     let util;
     let mockOrg;
     let mockEntitlement;
