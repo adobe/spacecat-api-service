@@ -22,7 +22,7 @@ export const ConfigurationDto = {
    */
   toJSON: (configuration) => {
     // eslint-disable-next-line no-console
-    console.log('[ConfigurationDto] Configuration state?.sandboxAudits:', configuration.state?.sandboxAudits);
+    console.log('[ConfigurationDto] Configuration getSandboxAudits():', configuration.getSandboxAudits());
 
     const result = {
       version: configuration.getVersion(),
@@ -30,8 +30,8 @@ export const ConfigurationDto = {
       ...(configuration.getHandlers() ? { handlers: configuration.getHandlers() } : {}),
       queues: configuration.getQueues(),
       ...(configuration.getSlackRoles() ? { slackRoles: configuration.getSlackRoles() } : {}),
-      ...(configuration.state?.sandboxAudits
-        ? { sandboxAudits: configuration.state.sandboxAudits }
+      ...(configuration.getSandboxAudits()
+        ? { sandboxAudits: configuration.getSandboxAudits() }
         : {}),
     };
     return result;

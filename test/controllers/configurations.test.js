@@ -40,6 +40,8 @@ describe('Configurations Controller', () => {
       getSlackRoles: () => {},
       getEnabledSandboxAudits: () => [],
       getSandboxAuditConfig: () => null,
+      getSandboxAudits: () => null,
+      setSandboxAudits: () => {},
     },
     {
       getVersion: () => 2,
@@ -89,6 +91,13 @@ describe('Configurations Controller', () => {
         if (auditType === 'meta-tags') return { expire: '15' };
         return null;
       },
+      getSandboxAudits: () => ({
+        enabledAudits: {
+          cwv: { expire: '10' },
+          'meta-tags': { expire: '15' },
+        },
+      }),
+      setSandboxAudits: () => {},
       state: {
         sandboxAudits: {
           enabledAudits: {
@@ -264,6 +273,8 @@ describe('Configurations Controller', () => {
       mockConfig = {
         state: {},
         updateSandboxAuditConfig: sandbox.stub(),
+        getSandboxAudits: sandbox.stub().returns({ enabledAudits: {} }),
+        setSandboxAudits: sandbox.stub(),
         save: sandbox.stub().resolves(mockConfig),
       };
 
@@ -384,15 +395,17 @@ describe('Configurations Controller', () => {
       expect(error.message).to.include('Error updating sandbox configuration: Save failed');
     });
 
-    it('should handle configuration with undefined state', async () => {
+    it('should handle configuration with null sandbox audits', async () => {
       context.attributes.authInfo.withProfile({ is_admin: true });
 
-      // Create a config without state property to test our fix
-      const configWithoutState = {
+      // Create a config with null sandbox audits to test our fix
+      const configWithNullSandboxAudits = {
         updateSandboxAuditConfig: sandbox.stub(),
+        getSandboxAudits: sandbox.stub().returns(null),
+        setSandboxAudits: sandbox.stub(),
         save: sandbox.stub().resolves(),
       };
-      mockDataAccess.Configuration.findLatest.resolves(configWithoutState);
+      mockDataAccess.Configuration.findLatest.resolves(configWithNullSandboxAudits);
       configurationsController = ConfigurationsController(context);
 
       const result = await configurationsController.updateSandboxConfig({
@@ -400,11 +413,10 @@ describe('Configurations Controller', () => {
       });
       const response = await result.json();
 
-      // Should initialize state and succeed
+      // Should succeed with null sandbox audits
       expect(result.status).to.equal(200);
-      expect(configWithoutState.state).to.deep.equal({});
-      expect(configWithoutState.updateSandboxAuditConfig).to.have.been.calledWith('cwv', { expire: '10' });
-      expect(configWithoutState.save).to.have.been.called;
+      expect(configWithNullSandboxAudits.updateSandboxAuditConfig).to.have.been.calledWith('cwv', { expire: '10' });
+      expect(configWithNullSandboxAudits.save).to.have.been.called;
       expect(response.message).to.equal('Sandbox configurations updated successfully');
     });
   });
