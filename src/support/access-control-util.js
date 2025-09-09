@@ -99,6 +99,15 @@ export default class AccessControlUtil {
     if (site) {
       const siteEnrollments = await this.SiteEnrollment.allBySiteId(site.getId());
       this.log.info(`Site enrollments: ${JSON.stringify(siteEnrollments)}`);
+      this.log.info(`Entitlement provided: ${site.getId()}`);
+      this.log.info(`Entitlement ID: ${entitlement.getId()}`);
+      // print the enrollement object by get mthids
+      siteEnrollments.forEach((se) => {
+        this.log.info(`chekc Enrollment ID: ${se.getId()}`);
+        this.log.info(`Enrollment Entitlement ID: ${se.getEntitlementId()}`);
+        this.log.info(`check if enrollment entitlement id is the same as the entitlement id: ${se.getEntitlementId() === entitlement.getId()}`);
+      });
+
       // eslint-disable-next-line max-len
       const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement.getId());
       if (!validSiteEnrollment) {
