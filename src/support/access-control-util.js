@@ -16,8 +16,8 @@ import {
   Entitlement as EntitlementModel,
   OrganizationIdentityProvider as OrganizationIdentityProviderModel,
 } from '@adobe/spacecat-shared-data-access';
-
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import TierClient from './tier-client.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -59,6 +59,7 @@ export default class AccessControlUtil {
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
       this.xProductHeader = pathInfo.headers[X_PRODUCT_HEADER];
+      this.context = context;
     }
 
     // Always assign the log property
@@ -88,21 +89,20 @@ export default class AccessControlUtil {
   }
 
   async validateEntitlement(org, site, productCode) {
-    // eslint-disable-next-line max-len
-    const entitlement = await this.Entitlement.findByOrganizationIdAndProductCode(org.getId(), productCode);
-    if (!isNonEmptyObject(entitlement)) {
+    // Use tier client to validate entitlement
+    const siteId = site ? site.getId() : null;
+    const tierClient = new TierClient(this.context, org.getId(), siteId, productCode);
+    const entitlementResult = await tierClient.checkValidEntitlement();
+    if (!isNonEmptyObject(entitlementResult)) {
       throw new Error('Missing entitlement for organization');
     }
-    if (!hasText(entitlement.getTier())) {
-      throw new Error(`[Error] Entitlement tier is not set for ${productCode}`);
-    }
-    if (site) {
-      const siteEnrollments = await this.SiteEnrollment.allBySiteId(site.getId());
-      // eslint-disable-next-line max-len
-      const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement.getId());
-      if (!validSiteEnrollment) {
-        throw new Error('[Error] Valid site enrollment not found');
-      }
+
+    const { entitlement } = entitlementResult;
+    const { siteEnrollment } = entitlementResult;
+
+    // Only require site enrollment if site is provided
+    if (site && !isNonEmptyObject(siteEnrollment)) {
+      throw new Error('[Error] Valid site enrollment not found');
     }
 
     if (entitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
