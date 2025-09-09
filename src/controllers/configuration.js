@@ -111,6 +111,11 @@ function ConfigurationController(ctx) {
         return notFound('Configuration not found');
       }
 
+      // Ensure state exists before updating
+      if (!config.state) {
+        config.state = {};
+      }
+
       // Update sandbox configurations for each audit type
       Object.keys(sandboxConfigs).forEach((auditType) => {
         config.updateSandboxAuditConfig(auditType, sandboxConfigs[auditType]);

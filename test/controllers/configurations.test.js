@@ -244,8 +244,9 @@ describe('Configurations Controller', () => {
       // Reset to admin access for all sandbox config tests
       context.attributes.authInfo.withProfile({ is_admin: true });
 
-      // Create a config object with the required methods
+      // Create a config object with the required methods and state
       mockConfig = {
+        state: {},
         updateSandboxAuditConfig: sandbox.stub(),
         save: sandbox.stub().resolves(mockConfig),
       };
@@ -365,6 +366,30 @@ describe('Configurations Controller', () => {
 
       expect(result.status).to.equal(400);
       expect(error.message).to.include('Error updating sandbox configuration: Save failed');
+    });
+
+    it('should handle configuration with undefined state', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+
+      // Create a config without state property to test our fix
+      const configWithoutState = {
+        updateSandboxAuditConfig: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(configWithoutState);
+      configurationsController = ConfigurationsController(context);
+
+      const result = await configurationsController.updateSandboxConfig({
+        data: { sandboxConfigs: { cwv: { expire: '10' } } },
+      });
+      const response = await result.json();
+
+      // Should initialize state and succeed
+      expect(result.status).to.equal(200);
+      expect(configWithoutState.state).to.deep.equal({});
+      expect(configWithoutState.updateSandboxAuditConfig).to.have.been.calledWith('cwv', { expire: '10' });
+      expect(configWithoutState.save).to.have.been.called;
+      expect(response.message).to.equal('Sandbox configurations updated successfully');
     });
   });
 });
