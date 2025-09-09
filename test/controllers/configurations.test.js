@@ -89,6 +89,14 @@ describe('Configurations Controller', () => {
         if (auditType === 'meta-tags') return { expire: '15' };
         return null;
       },
+      state: {
+        sandboxAudits: {
+          enabledAudits: {
+            cwv: { expire: '10' },
+            'meta-tags': { expire: '15' },
+          },
+        },
+      },
     },
   ];
 

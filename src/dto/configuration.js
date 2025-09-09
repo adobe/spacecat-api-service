@@ -20,19 +20,20 @@ export const ConfigurationDto = {
    * @returns {{
    * }}
    */
-  toJSON: (configuration) => ({
-    version: configuration.getVersion(),
-    jobs: configuration.getJobs(),
-    ...(configuration.getHandlers() ? { handlers: configuration.getHandlers() } : {}),
-    queues: configuration.getQueues(),
-    ...(configuration.getSlackRoles() ? { slackRoles: configuration.getSlackRoles() } : {}),
-    ...(configuration.getEnabledSandboxAudits && configuration.getEnabledSandboxAudits().length > 0
-      ? {
-        sandboxAudits: configuration.getEnabledSandboxAudits().reduce((acc, auditType) => {
-          acc[auditType] = configuration.getSandboxAuditConfig(auditType);
-          return acc;
-        }, {}),
-      }
-      : {}),
-  }),
+  toJSON: (configuration) => {
+    // eslint-disable-next-line no-console
+    console.log('[ConfigurationDto] Configuration state?.sandboxAudits:', configuration.state?.sandboxAudits);
+
+    const result = {
+      version: configuration.getVersion(),
+      jobs: configuration.getJobs(),
+      ...(configuration.getHandlers() ? { handlers: configuration.getHandlers() } : {}),
+      queues: configuration.getQueues(),
+      ...(configuration.getSlackRoles() ? { slackRoles: configuration.getSlackRoles() } : {}),
+      ...(configuration.state?.sandboxAudits
+        ? { sandboxAudits: configuration.state.sandboxAudits }
+        : {}),
+    };
+    return result;
+  },
 };

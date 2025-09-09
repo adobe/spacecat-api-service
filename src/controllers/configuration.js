@@ -85,7 +85,16 @@ function ConfigurationController(ctx) {
     if (!configuration) {
       return notFound('Configuration not found');
     }
-    return ok(ConfigurationDto.toJSON(configuration));
+    // eslint-disable-next-line no-console
+    console.log('[getLatest] Configuration version:', configuration.getVersion());
+    // eslint-disable-next-line no-console
+    console.log('[getLatest] Configuration state:', configuration.state);
+    // eslint-disable-next-line no-console
+    console.log('[getLatest] Configuration state.sandboxAudits:', configuration.state?.sandboxAudits);
+    const result = ConfigurationDto.toJSON(configuration);
+    // eslint-disable-next-line no-console
+    console.log('[getLatest] DTO result includes sandboxAudits:', !!result.sandboxAudits);
+    return ok(result);
   };
 
   /**
@@ -118,11 +127,17 @@ function ConfigurationController(ctx) {
 
       // Update sandbox configurations for each audit type
       Object.keys(sandboxConfigs).forEach((auditType) => {
+        // eslint-disable-next-line no-console
+        console.log(`Updating sandbox config for audit type: ${auditType}`, sandboxConfigs[auditType]);
         config.updateSandboxAuditConfig(auditType, sandboxConfigs[auditType]);
       });
 
       // Save the updated configuration
+      // eslint-disable-next-line no-console
+      console.log('Saving updated configuration with sandbox audits:', config.state?.sandboxAudits);
       await config.save();
+      // eslint-disable-next-line no-console
+      console.log('[updateSandboxConfig] Configuration saved successfully');
 
       return ok({
         message: 'Sandbox configurations updated successfully',
