@@ -1465,6 +1465,34 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Opportunity ID required');
     });
 
+    it('auto-fix suggestions status returns bad request if variations is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]], variations: 'not an array' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'variations must be an array');
+    });
+
+    it('auto-fix suggestions status returns bad request if action is empty', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]], action: '' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'action cannot be empty');
+    });
+
     it('auto-fix suggestions status returns bad request if no data is passed', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: {
