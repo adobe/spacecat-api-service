@@ -98,6 +98,7 @@ export default class AccessControlUtil {
     }
     if (site) {
       const siteEnrollments = await this.SiteEnrollment.allBySiteId(site.getId());
+      this.log.info(`Site enrollments: ${JSON.stringify(siteEnrollments)}`);
       // eslint-disable-next-line max-len
       const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement.getId());
       if (!validSiteEnrollment) {
