@@ -325,8 +325,7 @@ export function startLLMOOnboarding(lambdaContext) {
           text: `:cdbot-error: It looks like ${brandURL} is already configured for LLMO with brand ${brand}`,
           replace_original: true,
         });
-        log.debug(`Aborted ${brandURL} onboarding: Already onboarded with brand ${brand}`);
-        return;
+        log.debug(`Already onboarded but continuing ${brandURL} onboarding to make sure entitlement is created`);
       }
 
       await elmoOnboardingModal(body, client, respond, brandURL);

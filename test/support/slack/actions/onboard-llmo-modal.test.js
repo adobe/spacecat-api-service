@@ -1665,7 +1665,7 @@ example-com:
         text: ':cdbot-error: It looks like https://example.com is already configured for LLMO with brand Existing Brand',
         replace_original: true,
       });
-      expect(lambdaCtx.log.debug).to.have.been.calledWith('Aborted https://example.com onboarding: Already onboarded with brand Existing Brand');
+      expect(lambdaCtx.log.debug).to.have.been.calledWith('Already onboarded but continuing https://example.com onboarding to make sure entitlement is created');
     });
 
     it('should call elmoOnboardingModal when site is found but no brand configured', async () => {
