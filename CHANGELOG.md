@@ -1,3 +1,10 @@
+## [1.177.3](https://github.com/adobe/spacecat-api-service/compare/v1.177.2...v1.177.3) (2025-09-10)
+
+
+### Bug Fixes
+
+* updating lorem-ipsum check name in preflight ([#1237](https://github.com/adobe/spacecat-api-service/issues/1237)) ([c957382](https://github.com/adobe/spacecat-api-service/commit/c957382475df8e3201172edf548b954935ecc2b2))
+
 ## [1.177.2](https://github.com/adobe/spacecat-api-service/compare/v1.177.1...v1.177.2) (2025-09-10)
 
 
