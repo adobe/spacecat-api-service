@@ -1,3 +1,10 @@
+## [1.177.6](https://github.com/adobe/spacecat-api-service/compare/v1.177.5...v1.177.6) (2025-09-11)
+
+
+### Bug Fixes
+
+* fixing trial user create ([#1243](https://github.com/adobe/spacecat-api-service/issues/1243)) ([f3e1d4d](https://github.com/adobe/spacecat-api-service/commit/f3e1d4d1b7d9eb5bf9b7baaeb3119e87ff3bffa9))
+
 ## [1.177.5](https://github.com/adobe/spacecat-api-service/compare/v1.177.4...v1.177.5) (2025-09-11)
 
 
