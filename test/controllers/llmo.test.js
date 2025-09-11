@@ -557,6 +557,316 @@ describe('LlmoController', () => {
       );
     });
 
+    it('should filter data with sheet type when filter parameters are provided', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', name: 'John',
+          },
+          {
+            id: 2, status: 'inactive', category: 'basic', name: 'Jane',
+          },
+          {
+            id: 3, status: 'active', category: 'premium', name: 'Bob',
+          },
+          {
+            id: 4, status: 'active', category: 'basic', name: 'Alice',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add filter parameters
+      mockContext.data.filter_status = 'active';
+      mockContext.data.filter_category = 'premium';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should only return items matching both filters
+      expect(responseBody[':type']).to.equal('sheet');
+      expect(responseBody.data).to.have.length(2);
+      expect(responseBody.data).to.deep.equal([
+        {
+          id: 1, status: 'active', category: 'premium', name: 'John',
+        },
+        {
+          id: 3, status: 'active', category: 'premium', name: 'Bob',
+        },
+      ]);
+    });
+
+    it('should filter data with multi-sheet type when filter parameters are provided', async () => {
+      const mockResponseData = {
+        ':type': 'multi-sheet',
+        sheet1: {
+          data: [
+            { id: 1, status: 'active', category: 'premium' },
+            { id: 2, status: 'inactive', category: 'basic' },
+            { id: 3, status: 'active', category: 'premium' },
+          ],
+        },
+        sheet2: {
+          data: [
+            { id: 4, status: 'active', category: 'basic' },
+            { id: 5, status: 'active', category: 'premium' },
+            { id: 6, status: 'inactive', category: 'premium' },
+          ],
+        },
+        metadata: {
+          totalSheets: 2,
+        },
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add filter parameters
+      mockContext.data.filter_status = 'active';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should filter data in all sheets
+      expect(responseBody[':type']).to.equal('multi-sheet');
+      expect(responseBody.sheet1.data).to.have.length(2);
+      expect(responseBody.sheet1.data).to.deep.equal([
+        { id: 1, status: 'active', category: 'premium' },
+        { id: 3, status: 'active', category: 'premium' },
+      ]);
+      expect(responseBody.sheet2.data).to.have.length(2);
+      expect(responseBody.sheet2.data).to.deep.equal([
+        { id: 4, status: 'active', category: 'basic' },
+        { id: 5, status: 'active', category: 'premium' },
+      ]);
+      // Metadata should remain unchanged
+      expect(responseBody.metadata).to.deep.equal({ totalSheets: 2 });
+    });
+
+    it('should perform case-insensitive filtering', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, name: 'JOHN', status: 'Active' },
+          { id: 2, name: 'jane', status: 'INACTIVE' },
+          { id: 3, name: 'Bob', status: 'active' },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add filter with different case
+      mockContext.data.filter_status = 'ACTIVE';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should match both 'Active' and 'active' due to case-insensitive matching
+      expect(responseBody.data).to.have.length(2);
+      expect(responseBody.data).to.deep.equal([
+        { id: 1, name: 'JOHN', status: 'Active' },
+        { id: 3, name: 'Bob', status: 'active' },
+      ]);
+    });
+
+    it('should handle multiple filters with AND logic', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', region: 'US',
+          },
+          {
+            id: 2, status: 'active', category: 'basic', region: 'US',
+          },
+          {
+            id: 3, status: 'active', category: 'premium', region: 'EU',
+          },
+          {
+            id: 4, status: 'inactive', category: 'premium', region: 'US',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add multiple filter parameters
+      mockContext.data.filter_status = 'active';
+      mockContext.data.filter_category = 'premium';
+      mockContext.data.filter_region = 'US';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should only return item matching ALL filters
+      expect(responseBody.data).to.have.length(1);
+      expect(responseBody.data).to.deep.equal([
+        {
+          id: 1, status: 'active', category: 'premium', region: 'US',
+        },
+      ]);
+    });
+
+    it('should return empty array when no items match filters', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, status: 'active', category: 'basic' },
+          { id: 2, status: 'inactive', category: 'premium' },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add filter that won't match any items
+      mockContext.data.filter_status = 'pending';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return empty data array
+      expect(responseBody[':type']).to.equal('sheet');
+      expect(responseBody.data).to.have.length(0);
+      expect(responseBody.data).to.deep.equal([]);
+    });
+
+    it('should handle filtering when attribute value is null or undefined', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, status: 'active', category: null },
+          { id: 2, status: 'active', category: undefined },
+          { id: 3, status: 'active', category: 'premium' },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Filter by category
+      mockContext.data.filter_category = 'premium';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should only return items with non-null/undefined matching values
+      expect(responseBody.data).to.have.length(1);
+      expect(responseBody.data).to.deep.equal([
+        { id: 3, status: 'active', category: 'premium' },
+      ]);
+    });
+
+    it('should not apply filters when no filter parameters are provided (backwards compatibility)', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, status: 'active', category: 'premium' },
+          { id: 2, status: 'inactive', category: 'basic' },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Ensure no filter parameters are set
+      delete mockContext.data.filter_status;
+      delete mockContext.data.filter_category;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return all data unchanged
+      expect(responseBody).to.deep.equal(mockResponseData);
+    });
+
+    it('should handle filtering with non-filter parameters present', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, status: 'active', category: 'premium' },
+          { id: 2, status: 'inactive', category: 'basic' },
+          { id: 3, status: 'active', category: 'basic' },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Mix filter and non-filter parameters
+      mockContext.data.limit = '10';
+      mockContext.data.offset = '0';
+      mockContext.data.sheet = 'test-sheet';
+      mockContext.data.filter_status = 'active';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should only apply filter parameters, ignoring others
+      expect(responseBody.data).to.have.length(2);
+      expect(responseBody.data).to.deep.equal([
+        { id: 1, status: 'active', category: 'premium' },
+        { id: 3, status: 'active', category: 'basic' },
+      ]);
+
+      // Should still pass non-filter parameters to the API URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10&offset=0&sheet=test-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
     it('should handle external API errors with sheetType parameter', async () => {
       const mockResponse = {
         ok: false,

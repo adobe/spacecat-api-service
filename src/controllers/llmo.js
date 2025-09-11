@@ -80,6 +80,46 @@ function LlmoController(ctx) {
     const { log } = context;
     const { siteId, dataSource, sheetType } = context.params;
     const { env } = context;
+
+    // Extract filter parameters from request data
+    const extractFilters = (requestData) => {
+      const filters = {};
+      Object.keys(requestData).forEach((key) => {
+        if (key.startsWith('filter_')) {
+          const attributeName = key.substring(7); // Remove 'filter_' prefix
+          filters[attributeName] = requestData[key];
+        }
+      });
+      return filters;
+    };
+
+    // Apply filters to data arrays with case-insensitive exact matching
+    const applyFilters = (rawData, filters) => {
+      const data = { ...rawData };
+      const filterArray = (array) => {
+        const filteredArray = array.filter((item) => {
+          const itemMatchesFilter = Object.entries(filters).every(([attr, value]) => {
+            const itemValue = item[attr];
+            if (itemValue == null) return false;
+            return String(itemValue).toLowerCase() === String(value).toLowerCase();
+          });
+          return itemMatchesFilter;
+        });
+        return filteredArray;
+      };
+
+      if (data[':type'] === 'sheet' && data.data) {
+        data.data = filterArray(data.data);
+      } else if (data[':type'] === 'multi-sheet') {
+        Object.keys(data).forEach((key) => {
+          if (key !== ':type' && data[key]?.data) {
+            data[key].data = filterArray(data[key].data);
+          }
+        });
+      }
+      return data;
+    };
+
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
@@ -113,7 +153,13 @@ function LlmoController(ctx) {
       }
 
       // Get the response data
-      const data = await response.json();
+      let data = await response.json();
+
+      // Extract and apply filters if any are provided
+      const filters = extractFilters(context.data);
+      if (Object.keys(filters).length > 0) {
+        data = applyFilters(data, filters);
+      }
 
       // Return the data and let the framework handle the compression
       return ok(data, {
