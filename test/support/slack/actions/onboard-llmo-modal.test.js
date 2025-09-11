@@ -1620,7 +1620,7 @@ example-com:
       expect(lambdaCtx.log.debug).to.have.been.calledWith('User user123 started full onboarding process for https://example.com.');
     });
 
-    it('should show show reonboarding message when site is found but already has brand configured', async () => {
+    it('should show reonboarding message when site is found but already has brand configured', async () => {
       const mockBody = {
         user: { id: 'user123' },
         actions: [{ value: 'https://example.com' }],
@@ -1661,10 +1661,6 @@ example-com:
 
       expect(mockAck).to.have.been.called;
       expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
-      expect(mockRespond).to.have.been.calledWith({
-        text: ':update-progress: Brand Existing Brand of https://example.com already onboarded; initiating reonboarding process',
-        replace_original: true,
-      });
       expect(lambdaCtx.log.debug).to.have.been.calledWith('Brand Existing Brand of https://example.com already onboarded; initiating reonboarding process');
     });
 

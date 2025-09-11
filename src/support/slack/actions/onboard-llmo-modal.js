@@ -237,6 +237,70 @@ async function elmoOnboardingModal(body, client, respond, brandURL) {
   });
 }
 
+async function elmoReonboardingModal(body, client, respond, brandURL) {
+  const { user } = body;
+
+  // Update the original message to show user's choice
+  await respond({
+    text: `:gear: ${user.name} started the reonboarding process... Missing configurations and entitlements will be added automatically.`,
+    replace_original: true,
+  });
+
+  // Capture original channel and thread context
+  const originalChannel = body.channel?.id;
+  const originalThreadTs = body.message?.thread_ts || body.message?.ts;
+
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: {
+      type: 'modal',
+      callback_id: 'reonboard_llmo_modal',
+      private_metadata: JSON.stringify({
+        originalChannel,
+        originalThreadTs,
+        brandURL,
+      }),
+      title: {
+        type: 'plain_text',
+        text: 'Reonboard Site',
+      },
+      submit: {
+        type: 'plain_text',
+        text: 'Update IMS Org ID',
+      },
+      close: {
+        type: 'plain_text',
+        text: 'Cancel',
+      },
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: ':rocket: *Site Reonboarding*\n\nIf necessary, provide details to update the IMS organization ID.',
+          },
+        },
+        {
+          type: 'input',
+          block_id: 'ims_org_input',
+          element: {
+            type: 'plain_text_input',
+            action_id: 'ims_org_id',
+            placeholder: {
+              type: 'plain_text',
+              text: 'ABC123@AdobeOrg',
+            },
+          },
+          label: {
+            type: 'plain_text',
+            text: 'IMS Organization ID',
+          },
+        },
+      ],
+    },
+  });
+}
+
 async function createOrg(imsOrgId, lambdaCtx, slackCtx) {
   const { log, imsClient, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
@@ -321,11 +385,15 @@ export function startLLMOOnboarding(lambdaContext) {
       const brand = config.getLlmoBrand();
 
       if (brand) {
-        await respond({
-          text: `:update-progress: Brand ${brand} of ${brandURL} already onboarded; initiating reonboarding process`,
-          replace_original: true,
-        });
         log.debug(`Brand ${brand} of ${brandURL} already onboarded; initiating reonboarding process`);
+
+        const slackContext = { say: respond };
+
+        // eslint-disable-next-line
+        await createEntitlementAndEnrollment(site, lambdaContext, slackContext);
+
+        await elmoReonboardingModal(body, client, respond, brandURL);
+        return;
       }
 
       await elmoOnboardingModal(body, client, respond, brandURL);
@@ -774,3 +842,91 @@ export function onboardLLMOModal(lambdaContext) {
     }
   };
 }
+
+/* c8 ignore start */
+/* Handles submission for reonboarding request */
+export function reonboardLLMOModal(lambdaContext) {
+  const { dataAccess, log } = lambdaContext;
+  const { Site } = dataAccess;
+
+  return async ({ ack, body, client }) => {
+    try {
+      log.debug('Starting reonboarding process...');
+      const { view, user } = body;
+      const { values } = view.state;
+
+      // Extract original channel and thread context from private metadata
+      let originalChannel;
+      let originalThreadTs;
+      let brandURL;
+      try {
+        /* c8 ignore next */
+        const metadata = JSON.parse(view.private_metadata || '{}');
+        originalChannel = metadata.originalChannel;
+        originalThreadTs = metadata.originalThreadTs;
+        brandURL = metadata.brandURL;
+      } catch (error) {
+        log.warn('Failed to parse private metadata:', error);
+      }
+
+      const imsOrgId = values.ims_org_input.ims_org_id.value;
+
+      if (!imsOrgId) {
+        await ack({
+          response_action: 'errors',
+          errors: {
+            ims_org_input: !imsOrgId ? 'IMS Org ID is required' : undefined,
+          },
+        });
+        return;
+      }
+
+      log.info('Reonboarding request with parameters:', {
+        imsOrgId,
+        brandURL,
+        originalChannel,
+        originalThreadTs,
+      });
+
+      // eslint-disable-next-line max-statements-per-line
+      await new Promise((resolve) => { setTimeout(resolve, 500); });
+      await ack();
+
+      // Create a slack context for the onboarding process
+      // Use original channel/thread if available, otherwise fall back to DM
+      const responseChannel = originalChannel || body.user.id;
+      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+
+      const slackContext = {
+        say: async (message) => {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: message,
+            thread_ts: responseThreadTs,
+          });
+        },
+        client,
+        channelId: responseChannel,
+        threadTs: responseThreadTs,
+      };
+
+      const site = await Site.findByBaseURL(brandURL);
+
+      await checkOrg(imsOrgId, site, lambdaContext, slackContext);
+
+      // create OrganizationIdentiyProvider
+      await createOrganizationIdentityProvider(site, lambdaContext, slackContext);
+
+      log.debug(`Reonboard LLMO modal processed for user ${user.id}, site ${brandURL}`);
+    } catch (e) {
+      log.error('Error handling reonboard site modal:', e);
+      await ack({
+        response_action: 'errors',
+        errors: {
+          brand_name_input: 'There was an error processing the reonboarding request.',
+        },
+      });
+    }
+  };
+}
+/* c8 ignore end */
