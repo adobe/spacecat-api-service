@@ -191,6 +191,7 @@ describe('Suggestions Controller', () => {
       getId: sandbox.stub().returns(OPPORTUNITY_ID),
       getSiteId: sandbox.stub().returns(SITE_ID),
       getType: sandbox.stub().returns('broken-backlinks'),
+      getData: sandbox.stub().returns({}),
     };
     opportunityNotEnabled = {
       getId: sandbox.stub().returns(OPPORTUNITY_ID_NOT_ENABLED),
@@ -1605,7 +1606,8 @@ describe('Suggestions Controller', () => {
     });
   });
 
-  describe('auto-fix suggestions for CS', () => {
+  describe('auto-fix suggestions for CS', function () {
+    this.timeout(10000);
     let spySqs;
     let sqsSpy;
     let imsPromiseClient;

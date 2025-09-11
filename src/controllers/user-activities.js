@@ -56,7 +56,7 @@ function UserActivitiesController(ctx) {
    * @param {object} trialUser - The trial user object.
    * @returns {Promise<void>}
    */
-  const handleUserActivityUpdates = async (trialUser) => {
+  const handleUserActivityUpdates = async (trialUser, profile) => {
     // Update lastSeenAt to current timestamp for any activity
     const now = new Date().toISOString();
     trialUser.setLastSeenAt(now);
@@ -64,6 +64,8 @@ function UserActivitiesController(ctx) {
     // Handle status transition if user is INVITED
     if (trialUser.getStatus() === TrialUserModel.STATUSES.INVITED) {
       trialUser.setStatus(TrialUserModel.STATUSES.REGISTERED);
+      trialUser.setFirstName(profile.first_name || '-');
+      trialUser.setLastName(profile.last_name || '-');
     }
 
     await trialUser.save();
@@ -184,7 +186,7 @@ function UserActivitiesController(ctx) {
       const entitlementId = entitlements[0].getId();
 
       // Handle user status transition and lastSeenAt updates
-      await handleUserActivityUpdates(trialUser);
+      await handleUserActivityUpdates(trialUser, authInfo?.getProfile());
 
       // Create user activity using prepared payload
       const userActivity = await TrialUserActivity.create({

@@ -125,6 +125,61 @@ function LlmoController(ctx) {
     }
   };
 
+  // Handles requests to the LLMO global sheet data endpoint
+  const getLlmoGlobalSheetData = async (context) => {
+    const { log } = context;
+    const { siteId, configName } = context.params;
+    const { env } = context;
+    try {
+      log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
+      // Validate LLMO access but don't use the site-specific dataFolder
+      await getSiteAndValidateLlmo(context);
+
+      // Use 'llmo-global' folder
+      const sheetURL = `llmo-global/${configName}.json`;
+
+      // Add limit, offset and sheet query params to the url
+      const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+      const { limit, offset, sheet } = context.data;
+      if (limit) {
+        url.searchParams.set('limit', limit);
+      }
+      if (offset) {
+        url.searchParams.set('offset', offset);
+      }
+      // allow fetching a specific sheet from the sheet data source
+      if (sheet) {
+        url.searchParams.set('sheet', sheet);
+      }
+
+      // Fetch data from the external endpoint using the global llmo-global folder
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+          'User-Agent': SPACECAT_USER_AGENT,
+          'Accept-Encoding': 'gzip',
+        },
+      });
+
+      if (!response.ok) {
+        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the response data
+      const data = await response.json();
+
+      log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
+      // Return the data and let the framework handle the compression
+      return ok(data, {
+        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
+      });
+    } catch (error) {
+      log.error(`Error proxying global data for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   // Handles requests to the LLMO config endpoint
   const getLlmoConfig = async (context) => {
     const { log } = context;
@@ -394,6 +449,7 @@ function LlmoController(ctx) {
 
   return {
     getLlmoSheetData,
+    getLlmoGlobalSheetData,
     getLlmoConfig,
     getLlmoQuestions,
     addLlmoQuestion,
