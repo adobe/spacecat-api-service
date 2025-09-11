@@ -59,33 +59,27 @@ function ConfigurationController(ctx) {
           return `Configuration for audit type "${auditType}" must be an object or null`;
         }
 
-        const validConfigKeys = ['disabled', 'threshold', 'timeout', 'retries', 'customParams'];
-        const invalidKeys = Object.keys(auditConfig)
-          .filter((key) => !validConfigKeys.includes(key));
-
-        if (invalidKeys.length > 0) {
-          return `Invalid configuration keys for "${auditType}": ${invalidKeys.join(', ')}. Allowed keys: ${validConfigKeys.join(', ')}`;
+        // Validate required fields
+        if (auditConfig.enabled === undefined) {
+          return `"enabled" field is required for audit type "${auditType}"`;
         }
 
-        // Validate specific config values
-        if (auditConfig.disabled !== undefined && typeof auditConfig.disabled !== 'boolean') {
-          return `"disabled" for audit type "${auditType}" must be a boolean`;
+        if (typeof auditConfig.enabled !== 'boolean') {
+          return `"enabled" for audit type "${auditType}" must be a boolean`;
         }
 
-        if (auditConfig.threshold !== undefined && (typeof auditConfig.threshold !== 'number' || auditConfig.threshold < 0 || auditConfig.threshold > 100)) {
-          return `"threshold" for audit type "${auditType}" must be a number between 0 and 100`;
+        if (auditConfig.expire === undefined) {
+          return `"expire" field is required for audit type "${auditType}"`;
         }
 
-        if (auditConfig.timeout !== undefined && (typeof auditConfig.timeout !== 'number' || auditConfig.timeout < 1000 || auditConfig.timeout > 300000)) {
-          return `"timeout" for audit type "${auditType}" must be a number between 1000 and 300000 milliseconds`;
+        // Accept both string and number for expire field
+        if (typeof auditConfig.expire !== 'string' && typeof auditConfig.expire !== 'number') {
+          return `"expire" for audit type "${auditType}" must be a string or number`;
         }
 
-        if (auditConfig.retries !== undefined && (typeof auditConfig.retries !== 'number' || auditConfig.retries < 0 || auditConfig.retries > 10)) {
-          return `"retries" for audit type "${auditType}" must be a number between 0 and 10`;
-        }
-
-        if (auditConfig.customParams !== undefined && (typeof auditConfig.customParams !== 'object' || auditConfig.customParams === null)) {
-          return `"customParams" for audit type "${auditType}" must be an object`;
+        // If expire is a number, ensure it's non-negative
+        if (typeof auditConfig.expire === 'number' && auditConfig.expire < 0) {
+          return `"expire" for audit type "${auditType}" must be a non-negative number`;
         }
       }
     }
