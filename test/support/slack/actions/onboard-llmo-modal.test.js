@@ -1620,7 +1620,7 @@ example-com:
       expect(lambdaCtx.log.debug).to.have.been.calledWith('User user123 started full onboarding process for https://example.com.');
     });
 
-    it('should show error message when site is found but already has brand configured', async () => {
+    it('should show show reonboarding message when site is found but already has brand configured', async () => {
       const mockBody = {
         user: { id: 'user123' },
         actions: [{ value: 'https://example.com' }],
@@ -1662,10 +1662,10 @@ example-com:
       expect(mockAck).to.have.been.called;
       expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockRespond).to.have.been.calledWith({
-        text: ':cdbot-error: It looks like https://example.com is already configured for LLMO with brand Existing Brand',
+        text: ':update-progress: Brand Existing Brand of https://example.com already onboarded; initiating reonboarding process',
         replace_original: true,
       });
-      expect(lambdaCtx.log.debug).to.have.been.calledWith('Aborted https://example.com onboarding: Already onboarded with brand Existing Brand');
+      expect(lambdaCtx.log.debug).to.have.been.calledWith('Brand Existing Brand of https://example.com already onboarded; initiating reonboarding process');
     });
 
     it('should call elmoOnboardingModal when site is found but no brand configured', async () => {

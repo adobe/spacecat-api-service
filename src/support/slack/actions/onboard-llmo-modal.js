@@ -322,11 +322,10 @@ export function startLLMOOnboarding(lambdaContext) {
 
       if (brand) {
         await respond({
-          text: `:cdbot-error: It looks like ${brandURL} is already configured for LLMO with brand ${brand}`,
+          text: `:update-progress: Brand ${brand} of ${brandURL} already onboarded; initiating reonboarding process`,
           replace_original: true,
         });
-        log.debug(`Aborted ${brandURL} onboarding: Already onboarded with brand ${brand}`);
-        return;
+        log.debug(`Brand ${brand} of ${brandURL} already onboarded; initiating reonboarding process`);
       }
 
       await elmoOnboardingModal(body, client, respond, brandURL);
