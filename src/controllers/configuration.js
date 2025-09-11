@@ -28,14 +28,82 @@ function ConfigurationController(ctx) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess } = ctx;
+  const { dataAccess, log } = ctx;
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
   const { Configuration } = dataAccess;
-
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Validates sandbox configuration structure and values.
+   * @param {Object} sandboxConfigs - Configuration object to validate.
+   * @returns {string|null} Error message if validation fails, null if valid.
+   */
+  const validateSandboxConfigs = (sandboxConfigs) => {
+    if (!sandboxConfigs || typeof sandboxConfigs !== 'object') {
+      return 'sandboxConfigs object is required';
+    }
+
+    for (const [auditType, auditConfig] of Object.entries(sandboxConfigs)) {
+      // Validate audit type name
+      if (!/^[a-zA-Z0-9-_]+$/.test(auditType)) {
+        return `Invalid audit type "${auditType}": must contain only letters, numbers, hyphens, and underscores`;
+      }
+
+      // Allow null to remove configuration
+      if (auditConfig !== null) {
+        // Validate configuration structure
+        if (typeof auditConfig !== 'object') {
+          return `Configuration for audit type "${auditType}" must be an object or null`;
+        }
+
+        const validConfigKeys = ['disabled', 'threshold', 'timeout', 'retries', 'customParams'];
+        const invalidKeys = Object.keys(auditConfig)
+          .filter((key) => !validConfigKeys.includes(key));
+
+        if (invalidKeys.length > 0) {
+          return `Invalid configuration keys for "${auditType}": ${invalidKeys.join(', ')}. Allowed keys: ${validConfigKeys.join(', ')}`;
+        }
+
+        // Validate specific config values
+        if (auditConfig.disabled !== undefined && typeof auditConfig.disabled !== 'boolean') {
+          return `"disabled" for audit type "${auditType}" must be a boolean`;
+        }
+
+        if (auditConfig.threshold !== undefined && (typeof auditConfig.threshold !== 'number' || auditConfig.threshold < 0 || auditConfig.threshold > 100)) {
+          return `"threshold" for audit type "${auditType}" must be a number between 0 and 100`;
+        }
+
+        if (auditConfig.timeout !== undefined && (typeof auditConfig.timeout !== 'number' || auditConfig.timeout < 1000 || auditConfig.timeout > 300000)) {
+          return `"timeout" for audit type "${auditType}" must be a number between 1000 and 300000 milliseconds`;
+        }
+
+        if (auditConfig.retries !== undefined && (typeof auditConfig.retries !== 'number' || auditConfig.retries < 0 || auditConfig.retries > 10)) {
+          return `"retries" for audit type "${auditType}" must be a number between 0 and 10`;
+        }
+
+        if (auditConfig.customParams !== undefined && (typeof auditConfig.customParams !== 'object' || auditConfig.customParams === null)) {
+          return `"customParams" for audit type "${auditType}" must be an object`;
+        }
+      }
+    }
+
+    return null; // Valid
+  };
+
+  /**
+   * Applies sandbox configuration updates to the configuration model.
+   * @param {Object} config - Configuration model instance.
+   * @param {Object} sandboxConfigs - Sandbox configurations to apply.
+   */
+  const applySandboxConfigUpdates = (config, sandboxConfigs) => {
+    Object.entries(sandboxConfigs).forEach(([auditType, auditConfig]) => {
+      log?.info(`Updating sandbox config for audit type: ${auditType}`, { auditConfig });
+      config.updateSandboxAuditConfig(auditType, auditConfig);
+    });
+  };
 
   /**
    * Retrieves all configurations (all versions).
@@ -85,19 +153,17 @@ function ConfigurationController(ctx) {
     if (!configuration) {
       return notFound('Configuration not found');
     }
-    // eslint-disable-next-line no-console
-    console.log('[getLatest] Configuration version:', configuration.getVersion());
-    // eslint-disable-next-line no-console
-    console.log('[getLatest] Configuration getSandboxAudits():', configuration.getSandboxAudits());
-    const result = ConfigurationDto.toJSON(configuration);
-    // eslint-disable-next-line no-console
-    console.log('[getLatest] DTO result includes sandboxAudits:', !!result.sandboxAudits);
-    return ok(result);
+
+    log?.info('Retrieved latest configuration', {
+      version: configuration.getVersion(),
+      hasSandboxAudits: configuration.hasSandboxAudits(),
+    });
+
+    return ok(ConfigurationDto.toJSON(configuration));
   };
 
   /**
    * Updates sandbox configuration for audit types.
-   * This endpoint allows admins to update sandbox audit configurations.
    * @param {UniversalContext} context - Context of the request.
    * @return {Promise<Response>} Update result response.
    */
@@ -108,30 +174,30 @@ function ConfigurationController(ctx) {
 
     const { sandboxConfigs } = context.data || {};
 
-    if (!sandboxConfigs || typeof sandboxConfigs !== 'object') {
-      return badRequest('sandboxConfigs object is required');
+    const validationError = validateSandboxConfigs(sandboxConfigs);
+    if (validationError) {
+      return badRequest(validationError);
     }
 
     try {
-      // Load latest configuration
       const config = await Configuration.findLatest();
       if (!config) {
         return notFound('Configuration not found');
       }
 
-      // Update sandbox configurations for each audit type
-      Object.keys(sandboxConfigs).forEach((auditType) => {
-        // eslint-disable-next-line no-console
-        console.log(`Updating sandbox config for audit type: ${auditType}`, sandboxConfigs[auditType]);
-        config.updateSandboxAuditConfig(auditType, sandboxConfigs[auditType]);
+      applySandboxConfigUpdates(config, sandboxConfigs);
+
+      log?.info('Saving updated configuration', {
+        sandboxAuditsCount: Object.keys(config.getSandboxAudits() || {}).length,
+        updatedTypes: Object.keys(sandboxConfigs),
       });
 
-      // Save the updated configuration
-      // eslint-disable-next-line no-console
-      console.log('Saving updated configuration with sandbox audits:', config.getSandboxAudits());
       await config.save();
-      // eslint-disable-next-line no-console
-      console.log('[updateSandboxConfig] Configuration saved successfully');
+
+      log?.info('Sandbox configurations updated successfully', {
+        updatedConfigs: Object.keys(sandboxConfigs),
+        totalUpdated: Object.keys(sandboxConfigs).length,
+      });
 
       return ok({
         message: 'Sandbox configurations updated successfully',
@@ -139,6 +205,11 @@ function ConfigurationController(ctx) {
         totalUpdated: Object.keys(sandboxConfigs).length,
       });
     } catch (error) {
+      log?.error('Error updating sandbox configuration', {
+        error: error.message,
+        configCount: Object.keys(sandboxConfigs).length,
+        auditTypes: Object.keys(sandboxConfigs),
+      });
       return badRequest(`Error updating sandbox configuration: ${error.message}`);
     }
   };
