@@ -79,25 +79,30 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Opportunity ID required');
     }
 
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('User does not belong to the organization');
-    }
-
-    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
-    // Check if the opportunity belongs to the site
-    if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
-        return notFound('Opportunity not found');
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
       }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not belong to the organization');
+      }
+
+      const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+      // Check if the opportunity belongs to the site
+      if (suggestionEntities.length > 0) {
+        const oppty = await suggestionEntities[0].getOpportunity();
+        if (!oppty || oppty.getSiteId() !== siteId) {
+          return notFound('Opportunity not found');
+        }
+      }
+      const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+      return ok(suggestions);
+    } catch (error) {
+      context.log.error(`Error fetching suggestions for opportunity ${opptyId}:`, error);
+      return internalServerError('Failed to fetch suggestions');
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
-    return ok(suggestions);
   };
 
   /**
