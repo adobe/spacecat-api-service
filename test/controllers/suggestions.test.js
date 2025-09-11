@@ -471,6 +471,23 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Site not found');
   });
 
+  it('gets all suggestions for an opportunity returns internal server error when database operation fails', async () => {
+    const dbError = new Error('Database connection failed');
+    mockSuggestionDataAccess.Suggestion.allByOpportunityId.rejects(dbError);
+
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+
+    expect(response.status).to.equal(500);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Failed to fetch suggestions');
+  });
+
   it('gets all suggestions for an opportunity by status', async () => {
     const response = await suggestionsController.getByStatus({
       params: {
