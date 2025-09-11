@@ -559,6 +559,7 @@ describe('Access Control Util', () => {
     let mockTrialUser;
     let mockIdentityProvider;
     let mockSiteEnrollment;
+    let mockAuthInfo;
 
     beforeEach(() => {
       // Mock the constant calls directly
@@ -600,6 +601,21 @@ describe('Access Control Util', () => {
         allBySiteId: sinon.stub(),
       };
 
+      mockAuthInfo = {
+        getType: () => 'jwt',
+        isAdmin: () => false,
+        getScopes: () => [],
+        hasOrganization: () => true,
+        hasScope: () => true,
+        getProfile: sinon.stub().returns({
+          trial_email: 'trial@example.com',
+          provider: 'GOOGLE',
+          email: 'user@example.com',
+          first_name: 'John',
+          last_name: 'Doe',
+        }),
+      };
+
       const testContext = {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
@@ -608,20 +624,7 @@ describe('Access Control Util', () => {
           headers: { 'x-product': 'llmo' },
         },
         attributes: {
-          authInfo: {
-            getType: () => 'jwt',
-            isAdmin: () => false,
-            getScopes: () => [],
-            hasOrganization: () => true,
-            hasScope: () => true,
-            getProfile: () => ({
-              trial_email: 'trial@example.com',
-              provider: 'GOOGLE',
-              email: 'user@example.com',
-              first_name: 'John',
-              last_name: 'Doe',
-            }),
-          },
+          authInfo: mockAuthInfo,
         },
         dataAccess: {
           Entitlement: mockEntitlement,
@@ -810,6 +813,162 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: 'John',
         lastName: 'Doe',
+        provider: 'GOOGLE',
+        organizationId: 'org-123',
+        status: 'registered',
+        externalUserId: 'user@example.com',
+        lastSeenAt: sinon.match.string,
+      });
+    });
+
+    it('should create trial user with fallback values when profile has null first_name and last_name', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      const identityProviders = [];
+      mockIdentityProvider.allByOrganizationId.resolves(identityProviders);
+      mockTrialUser.create.resolves({ id: 'new-trial-user' });
+      mockIdentityProvider.create.resolves({ provider: 'GOOGLE' });
+
+      // Mock profile with null values
+      const mockProfile = {
+        trial_email: 'trial@example.com',
+        first_name: null,
+        last_name: null,
+        provider: 'GOOGLE',
+        email: 'user@example.com',
+      };
+      mockAuthInfo.getProfile.returns(mockProfile);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.have.been.calledWith({
+        emailId: 'trial@example.com',
+        firstName: '-',
+        lastName: '-',
+        provider: 'GOOGLE',
+        organizationId: 'org-123',
+        status: 'registered',
+        externalUserId: 'user@example.com',
+        lastSeenAt: sinon.match.string,
+      });
+    });
+
+    it('should create trial user with fallback values when profile has undefined first_name and last_name', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      const identityProviders = [];
+      mockIdentityProvider.allByOrganizationId.resolves(identityProviders);
+      mockTrialUser.create.resolves({ id: 'new-trial-user' });
+      mockIdentityProvider.create.resolves({ provider: 'GOOGLE' });
+
+      // Mock profile with undefined values
+      const mockProfile = {
+        trial_email: 'trial@example.com',
+        first_name: undefined,
+        last_name: undefined,
+        provider: 'GOOGLE',
+        email: 'user@example.com',
+      };
+      mockAuthInfo.getProfile.returns(mockProfile);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.have.been.calledWith({
+        emailId: 'trial@example.com',
+        firstName: '-',
+        lastName: '-',
+        provider: 'GOOGLE',
+        organizationId: 'org-123',
+        status: 'registered',
+        externalUserId: 'user@example.com',
+        lastSeenAt: sinon.match.string,
+      });
+    });
+
+    it('should create trial user with fallback values when profile has empty string first_name and last_name', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      const identityProviders = [];
+      mockIdentityProvider.allByOrganizationId.resolves(identityProviders);
+      mockTrialUser.create.resolves({ id: 'new-trial-user' });
+      mockIdentityProvider.create.resolves({ provider: 'GOOGLE' });
+
+      // Mock profile with empty string values
+      const mockProfile = {
+        trial_email: 'trial@example.com',
+        first_name: '',
+        last_name: '',
+        provider: 'GOOGLE',
+        email: 'user@example.com',
+      };
+      mockAuthInfo.getProfile.returns(mockProfile);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.have.been.calledWith({
+        emailId: 'trial@example.com',
+        firstName: '-',
+        lastName: '-',
+        provider: 'GOOGLE',
+        organizationId: 'org-123',
+        status: 'registered',
+        externalUserId: 'user@example.com',
+        lastSeenAt: sinon.match.string,
+      });
+    });
+
+    it('should create trial user with mixed fallback values when profile has partial data', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      const identityProviders = [];
+      mockIdentityProvider.allByOrganizationId.resolves(identityProviders);
+      mockTrialUser.create.resolves({ id: 'new-trial-user' });
+      mockIdentityProvider.create.resolves({ provider: 'GOOGLE' });
+
+      // Mock profile with mixed data - valid first_name, null last_name
+      const mockProfile = {
+        trial_email: 'trial@example.com',
+        first_name: 'John',
+        last_name: null,
+        provider: 'GOOGLE',
+        email: 'user@example.com',
+      };
+      mockAuthInfo.getProfile.returns(mockProfile);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.have.been.calledWith({
+        emailId: 'trial@example.com',
+        firstName: 'John',
+        lastName: '-',
         provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
