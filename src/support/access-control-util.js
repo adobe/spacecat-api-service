@@ -132,8 +132,8 @@ export default class AccessControlUtil {
       if (!trialUser) {
         await this.TrialUser.create({
           emailId: profile.trial_email,
-          firstName: profile.first_name,
-          lastName: profile.last_name,
+          firstName: profile.first_name || '-',
+          lastName: profile.last_name || '-',
           provider: providerId.provider,
           organizationId: org.getId(),
           status: TrialUserModel.STATUSES.REGISTERED,

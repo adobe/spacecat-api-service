@@ -64,8 +64,8 @@ function UserActivitiesController(ctx) {
     // Handle status transition if user is INVITED
     if (trialUser.getStatus() === TrialUserModel.STATUSES.INVITED) {
       trialUser.setStatus(TrialUserModel.STATUSES.REGISTERED);
-      trialUser.setFirstName(profile.first_name);
-      trialUser.setLastName(profile.last_name);
+      trialUser.setFirstName(profile.first_name || '-');
+      trialUser.setLastName(profile.last_name || '-');
     }
 
     await trialUser.save();
