@@ -93,6 +93,18 @@ function LlmoController(ctx) {
       return filters;
     };
 
+    // Extract exclude parameters from request data
+    const extractExcludes = (requestData) => {
+      const excludes = [];
+      Object.keys(requestData).forEach((key) => {
+        if (key.startsWith('exclude_')) {
+          const attributeName = key.substring(8); // Remove 'exclude_' prefix
+          excludes.push(attributeName);
+        }
+      });
+      return excludes;
+    };
+
     // Apply filters to data arrays with case-insensitive exact matching
     const applyFilters = (rawData, filters) => {
       const data = { ...rawData };
@@ -114,6 +126,29 @@ function LlmoController(ctx) {
         Object.keys(data).forEach((key) => {
           if (key !== ':type' && data[key]?.data) {
             data[key].data = filterArray(data[key].data);
+          }
+        });
+      }
+      return data;
+    };
+
+    // Apply exclusions to data arrays to remove specified attributes
+    const applyExclusions = (rawData, excludes) => {
+      const data = { ...rawData };
+      const excludeFromArray = (array) => array.map((item) => {
+        const filteredItem = { ...item };
+        excludes.forEach((attr) => {
+          delete filteredItem[attr];
+        });
+        return filteredItem;
+      });
+
+      if (data[':type'] === 'sheet' && data.data) {
+        data.data = excludeFromArray(data.data);
+      } else if (data[':type'] === 'multi-sheet') {
+        Object.keys(data).forEach((key) => {
+          if (key !== ':type' && data[key]?.data) {
+            data[key].data = excludeFromArray(data[key].data);
           }
         });
       }
@@ -159,6 +194,12 @@ function LlmoController(ctx) {
       const filters = extractFilters(context.data);
       if (Object.keys(filters).length > 0) {
         data = applyFilters(data, filters);
+      }
+
+      // Extract and apply exclusions if any are provided
+      const excludes = extractExcludes(context.data);
+      if (excludes.length > 0) {
+        data = applyExclusions(data, excludes);
       }
 
       // Return the data and let the framework handle the compression

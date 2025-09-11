@@ -867,6 +867,360 @@ describe('LlmoController', () => {
       );
     });
 
+    it('should exclude attributes from data with sheet type when exclude parameters are provided', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', name: 'John', description: 'User description', metadata: { created: '2023-01-01' },
+          },
+          {
+            id: 2, status: 'inactive', category: 'basic', name: 'Jane', description: 'Another description', metadata: { created: '2023-01-02' },
+          },
+          {
+            id: 3, status: 'active', category: 'premium', name: 'Bob', description: 'Third description', metadata: { created: '2023-01-03' },
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add exclude parameters
+      mockContext.data.exclude_description = 'true';
+      mockContext.data.exclude_metadata = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should exclude description and metadata attributes
+      expect(responseBody[':type']).to.equal('sheet');
+      expect(responseBody.data).to.have.length(3);
+      expect(responseBody.data).to.deep.equal([
+        {
+          id: 1, status: 'active', category: 'premium', name: 'John',
+        },
+        {
+          id: 2, status: 'inactive', category: 'basic', name: 'Jane',
+        },
+        {
+          id: 3, status: 'active', category: 'premium', name: 'Bob',
+        },
+      ]);
+    });
+
+    it('should exclude attributes from data with multi-sheet type when exclude parameters are provided', async () => {
+      const mockResponseData = {
+        ':type': 'multi-sheet',
+        sheet1: {
+          data: [
+            {
+              id: 1, status: 'active', category: 'premium', description: 'User 1', metadata: { type: 'user' },
+            },
+            {
+              id: 2, status: 'inactive', category: 'basic', description: 'User 2', metadata: { type: 'admin' },
+            },
+          ],
+        },
+        sheet2: {
+          data: [
+            {
+              id: 3, status: 'active', category: 'basic', description: 'User 3', metadata: { type: 'guest' },
+            },
+            {
+              id: 4, status: 'active', category: 'premium', description: 'User 4', metadata: { type: 'user' },
+            },
+          ],
+        },
+        metadata: {
+          totalSheets: 2,
+        },
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add exclude parameters
+      mockContext.data.exclude_description = 'true';
+      mockContext.data.exclude_metadata = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should exclude attributes from all sheets
+      expect(responseBody[':type']).to.equal('multi-sheet');
+      expect(responseBody.sheet1.data).to.have.length(2);
+      expect(responseBody.sheet1.data).to.deep.equal([
+        { id: 1, status: 'active', category: 'premium' },
+        { id: 2, status: 'inactive', category: 'basic' },
+      ]);
+      expect(responseBody.sheet2.data).to.have.length(2);
+      expect(responseBody.sheet2.data).to.deep.equal([
+        { id: 3, status: 'active', category: 'basic' },
+        { id: 4, status: 'active', category: 'premium' },
+      ]);
+      // Metadata should remain unchanged
+      expect(responseBody.metadata).to.deep.equal({ totalSheets: 2 });
+    });
+
+    it('should exclude single attribute from data when single exclude parameter is provided', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, name: 'John', email: 'john@example.com', password: 'secret123',
+          },
+          {
+            id: 2, name: 'Jane', email: 'jane@example.com', password: 'secret456',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Exclude only password attribute
+      mockContext.data.exclude_password = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should exclude only password attribute
+      expect(responseBody.data).to.deep.equal([
+        { id: 1, name: 'John', email: 'john@example.com' },
+        { id: 2, name: 'Jane', email: 'jane@example.com' },
+      ]);
+    });
+
+    it('should apply both filters and exclusions when both are provided', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', name: 'John', description: 'User 1', metadata: { role: 'admin' },
+          },
+          {
+            id: 2, status: 'inactive', category: 'basic', name: 'Jane', description: 'User 2', metadata: { role: 'user' },
+          },
+          {
+            id: 3, status: 'active', category: 'premium', name: 'Bob', description: 'User 3', metadata: { role: 'user' },
+          },
+          {
+            id: 4, status: 'active', category: 'basic', name: 'Alice', description: 'User 4', metadata: { role: 'admin' },
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Apply both filters and exclusions
+      mockContext.data.filter_status = 'active';
+      mockContext.data.filter_category = 'premium';
+      mockContext.data.exclude_description = 'true';
+      mockContext.data.exclude_metadata = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should first filter (only active premium users), then exclude attributes
+      expect(responseBody.data).to.have.length(2);
+      expect(responseBody.data).to.deep.equal([
+        {
+          id: 1, status: 'active', category: 'premium', name: 'John',
+        },
+        {
+          id: 3, status: 'active', category: 'premium', name: 'Bob',
+        },
+      ]);
+    });
+
+    it('should handle exclude with non-exclude parameters present', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, name: 'John', email: 'john@example.com', password: 'secret123', metadata: { created: '2023-01-01' },
+          },
+          {
+            id: 2, name: 'Jane', email: 'jane@example.com', password: 'secret456', metadata: { created: '2023-01-02' },
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Mix exclude and non-exclude parameters
+      mockContext.data.limit = '10';
+      mockContext.data.offset = '0';
+      mockContext.data.sheet = 'test-sheet';
+      mockContext.data.exclude_password = 'true';
+      mockContext.data.exclude_metadata = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should only apply exclude parameters, ignoring others for exclusion
+      expect(responseBody.data).to.deep.equal([
+        { id: 1, name: 'John', email: 'john@example.com' },
+        { id: 2, name: 'Jane', email: 'jane@example.com' },
+      ]);
+
+      // Should still pass non-exclude parameters to the API URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10&offset=0&sheet=test-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should not apply exclusions when no exclude parameters are provided (backwards compatibility)', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, name: 'John', email: 'john@example.com', password: 'secret123',
+          },
+          {
+            id: 2, name: 'Jane', email: 'jane@example.com', password: 'secret456',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Ensure no exclude parameters are set
+      delete mockContext.data.exclude_password;
+      delete mockContext.data.exclude_email;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return all data unchanged
+      expect(responseBody).to.deep.equal(mockResponseData);
+    });
+
+    it('should handle exclusions when attribute does not exist in data', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, name: 'John', email: 'john@example.com' },
+          { id: 2, name: 'Jane', email: 'jane@example.com' },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Try to exclude attributes that don't exist
+      mockContext.data.exclude_password = 'true';
+      mockContext.data.exclude_metadata = 'true';
+      mockContext.data.exclude_nonexistent = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return data unchanged since attributes don't exist
+      expect(responseBody.data).to.deep.equal([
+        { id: 1, name: 'John', email: 'john@example.com' },
+        { id: 2, name: 'Jane', email: 'jane@example.com' },
+      ]);
+    });
+
+    it('should handle empty data array with exclude parameters', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.data.exclude_password = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return empty array unchanged
+      expect(responseBody[':type']).to.equal('sheet');
+      expect(responseBody.data).to.have.length(0);
+      expect(responseBody.data).to.deep.equal([]);
+    });
+
+    it('should handle data without :type property with exclude parameters', async () => {
+      const mockResponseData = {
+        someProperty: 'value',
+        data: [
+          {
+            id: 1, name: 'John', password: 'secret123',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.data.exclude_password = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return data unchanged since it doesn't match expected format
+      expect(responseBody).to.deep.equal(mockResponseData);
+    });
+
     it('should handle external API errors with sheetType parameter', async () => {
       const mockResponse = {
         ok: false,
