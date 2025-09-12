@@ -1299,6 +1299,7 @@ describe('LlmoController', () => {
         },
         include: {
           name: 'firstName',
+          status: 'status',
           category: 'category',
         },
         groupBy: ['category'],
@@ -1316,15 +1317,15 @@ describe('LlmoController', () => {
       expect(premiumGroup).to.exist;
       expect(premiumGroup.records).to.have.length(2);
       expect(premiumGroup.records).to.deep.include.members([
-        { firstName: 'John' },
-        { firstName: 'Bob' },
+        { firstName: 'John', status: 'active' },
+        { firstName: 'Bob', status: 'active' },
       ]);
 
       const basicGroup = responseBody.data.find((group) => group.category === 'basic');
       expect(basicGroup).to.exist;
       expect(basicGroup.records).to.have.length(1);
       expect(basicGroup.records[0]).to.deep.equal({
-        firstName: 'Alice',
+        firstName: 'Alice', status: 'active',
       });
     });
 
