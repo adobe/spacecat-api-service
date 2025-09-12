@@ -129,7 +129,7 @@ function LlmoController(ctx) {
   // with query capabilities (filtering, exclusions, grouping)
   const queryLlmoSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataSource } = context.params;
+    const { siteId, dataSource, sheetType } = context.params;
     const { env } = context;
 
     // Extract and validate request body structure
@@ -137,7 +137,6 @@ function LlmoController(ctx) {
       filters = {},
       exclude = [],
       groupBy = [],
-      sheetType,
     } = context.data || {};
 
     // Validate request body structure

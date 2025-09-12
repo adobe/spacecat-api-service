@@ -1911,8 +1911,8 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(mockResponse);
 
       // Add sheetType to the context params
+      mockContext.params.sheetType = 'analytics';
       mockContext.data = {
-        sheetType: 'analytics',
         filters: { status: 'active' },
       };
 

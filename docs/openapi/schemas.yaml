@@ -3571,6 +3571,25 @@ LlmoConfig:
       $ref: '#/LlmoCdnBucketConfig'
   additionalProperties: false
 
+LlmoSheetDataQuery:
+  type: object
+  description: Query parameters for LLMO sheet data
+  properties:
+    filters:
+      description: Filters to apply to the data
+      type: object
+    exclude:
+      description: Fields to exclude from the data
+      type: array
+      items:
+        type: string
+    groupBy:
+      description: Fields to group the data by
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
 # New schemas for entitlements, trial users, and site enrollments APIs
 Entitlement:
   type: object
