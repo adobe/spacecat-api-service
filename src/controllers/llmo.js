@@ -80,49 +80,83 @@ function LlmoController(ctx) {
     const { log } = context;
     const { siteId, dataSource, sheetType } = context.params;
     const { env } = context;
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 
-    // Extract filter parameters from request data
-    const extractFilters = (requestData) => {
-      const filters = {};
-      Object.keys(requestData).forEach((key) => {
-        if (key.startsWith('filter_')) {
-          const attributeName = key.substring(7); // Remove 'filter_' prefix
-          filters[attributeName] = requestData[key];
-        }
-      });
-      return filters;
-    };
+      // Add limit, offset and sheet query params to the url
+      const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+      const { limit, offset, sheet } = context.data;
+      if (limit) {
+        url.searchParams.set('limit', limit);
+      }
+      if (offset) {
+        url.searchParams.set('offset', offset);
+      }
+      // allow fetching a specific sheet from the sheet data source
+      if (sheet) {
+        url.searchParams.set('sheet', sheet);
+      }
 
-    // Extract exclude parameters from request data
-    const extractExcludes = (requestData) => {
-      const excludes = [];
-      Object.keys(requestData).forEach((key) => {
-        if (key.startsWith('exclude_')) {
-          const attributeName = key.substring(8); // Remove 'exclude_' prefix
-          excludes.push(attributeName);
-        }
+      // Fetch data from the external endpoint using the dataFolder from config
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+          'User-Agent': SPACECAT_USER_AGENT,
+          'Accept-Encoding': 'gzip',
+        },
       });
-      return excludes;
-    };
 
-    // Extract group parameters from request data
-    const extractGroup = (requestData) => {
-      const groups = [];
-      Object.keys(requestData).forEach((key) => {
-        if (key.startsWith('group_')) {
-          const attributeName = key.substring(6); // Remove 'group_' prefix
-          groups.push(attributeName);
-        }
+      if (!response.ok) {
+        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the response data
+      const data = await response.json();
+
+      // Return the data and let the framework handle the compression
+      return ok(data, {
+        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
-      return groups;
-    };
+    } catch (error) {
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  // Handles POST requests to the LLMO sheet data endpoint
+  // with query capabilities (filtering, exclusions, grouping)
+  const queryLlmoSheetData = async (context) => {
+    const { log } = context;
+    const { siteId, dataSource } = context.params;
+    const { env } = context;
+
+    // Extract and validate request body structure
+    const {
+      filters = {},
+      exclude = [],
+      groupBy = [],
+      sheetType,
+    } = context.data || {};
+
+    // Validate request body structure
+    if (filters && typeof filters !== 'object') {
+      return badRequest('filters must be an object');
+    }
+    if (exclude && !Array.isArray(exclude)) {
+      return badRequest('exclude must be an array');
+    }
+    if (groupBy && !Array.isArray(groupBy)) {
+      return badRequest('groupBy must be an array');
+    }
 
     // Apply filters to data arrays with case-insensitive exact matching
-    const applyFilters = (rawData, filters) => {
+    const applyFilters = (rawData, filterFields) => {
       const data = { ...rawData };
       const filterArray = (array) => {
         const filteredArray = array.filter((item) => {
-          const itemMatchesFilter = Object.entries(filters).every(([attr, value]) => {
+          const itemMatchesFilter = Object.entries(filterFields).every(([attr, value]) => {
             const itemValue = item[attr];
             if (itemValue == null) return false;
             return String(itemValue).toLowerCase() === String(value).toLowerCase();
@@ -145,11 +179,11 @@ function LlmoController(ctx) {
     };
 
     // Apply exclusions to data arrays to remove specified attributes
-    const applyExclusions = (rawData, excludes) => {
+    const applyExclusions = (rawData, excludeFields) => {
       const data = { ...rawData };
       const excludeFromArray = (array) => array.map((item) => {
         const filteredItem = { ...item };
-        excludes.forEach((attr) => {
+        excludeFields.forEach((attr) => {
           delete filteredItem[attr];
         });
         return filteredItem;
@@ -168,7 +202,7 @@ function LlmoController(ctx) {
     };
 
     // Apply groups to data arrays to group by specified attributes
-    const applyGroups = (rawData, groups) => {
+    const applyGroups = (rawData, groupByFields) => {
       const data = { ...rawData };
 
       const groupArray = (array) => {
@@ -177,18 +211,18 @@ function LlmoController(ctx) {
 
         array.forEach((item) => {
           // Create a key from the grouping attributes
-          const groupKey = groups.map((attr) => `${attr}:${item[attr] ?? 'null'}`).join('|');
+          const groupKey = groupByFields.map((attr) => `${attr}:${item[attr] ?? 'null'}`).join('|');
 
           // Extract grouping attributes (ensure they're always present)
           const groupingAttributes = {};
-          groups.forEach((attr) => {
+          groupByFields.forEach((attr) => {
             // Use null instead of undefined for JSON serialization
             groupingAttributes[attr] = item[attr] ?? null;
           });
 
           // Create record without grouping attributes
           const record = { ...item };
-          groups.forEach((attr) => {
+          groupByFields.forEach((attr) => {
             delete record[attr];
           });
 
@@ -226,17 +260,11 @@ function LlmoController(ctx) {
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
-      const { limit, offset, sheet } = context.data;
-      if (limit) {
-        url.searchParams.set('limit', limit);
-      }
-      if (offset) {
-        url.searchParams.set('offset', offset);
-      }
-      // allow fetching a specific sheet from the sheet data source
-      if (sheet) {
-        url.searchParams.set('sheet', sheet);
-      }
+
+      // This endpoint does not support limit as it needs to go through
+      // all records to apply filters, exclusions and grouping
+      const FIXED_LLMO_LIMIT = 1000000;
+      url.searchParams.set('limit', FIXED_LLMO_LIMIT);
 
       // Fetch data from the external endpoint using the dataFolder from config
       const response = await fetch(url.toString(), {
@@ -255,22 +283,19 @@ function LlmoController(ctx) {
       // Get the response data
       let data = await response.json();
 
-      // Extract and apply filters if any are provided
-      const filters = extractFilters(context.data);
+      // Apply filters if any are provided
       if (Object.keys(filters).length > 0) {
         data = applyFilters(data, filters);
       }
 
-      // Extract and apply exclusions if any are provided
-      const excludes = extractExcludes(context.data);
-      if (excludes.length > 0) {
-        data = applyExclusions(data, excludes);
+      // Apply exclusions if any are provided
+      if (exclude.length > 0) {
+        data = applyExclusions(data, exclude);
       }
 
-      // Extract and apply groups if any are provided
-      const groups = extractGroup(context.data);
-      if (groups.length > 0) {
-        data = applyGroups(data, groups);
+      // Apply grouping if any are provided
+      if (groupBy.length > 0) {
+        data = applyGroups(data, groupBy);
       }
 
       // Return the data and let the framework handle the compression
@@ -576,6 +601,7 @@ function LlmoController(ctx) {
 
   return {
     getLlmoSheetData,
+    queryLlmoSheetData,
     getLlmoGlobalSheetData,
     getLlmoConfig,
     getLlmoQuestions,
