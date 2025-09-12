@@ -311,14 +311,14 @@ function LlmoController(ctx) {
       // Get the response data
       let data = await response.json();
 
-      // Apply filters if any are provided
-      if (Object.keys(filters).length > 0) {
-        data = applyFilters(data, filters);
-      }
-
       // Apply inclusions if any are provided
       if (Object.keys(include).length > 0) {
         data = applyInclusions(data, include);
+      }
+
+      // Apply filters if any are provided
+      if (Object.keys(filters).length > 0) {
+        data = applyFilters(data, filters);
       }
 
       // Apply exclusions if any are provided
