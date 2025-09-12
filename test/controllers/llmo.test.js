@@ -1256,10 +1256,76 @@ describe('LlmoController', () => {
       responseBody = await result.json();
       expect(responseBody.message).to.equal('groupBy must be an array');
 
-      // Test invalid limit
+      // Test invalid groupBy
       mockContext.data = {
-        limit: -1,
+        include: 'invalid',
       };
+
+      result = await controller.queryLlmoSheetData(mockContext);
+      expect(result.status).to.equal(400);
+      responseBody = await result.json();
+      expect(responseBody.message).to.equal('include must be an object');
+    });
+
+    it('should handle POST request with inclusions successfully', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', name: 'John', password: 'secret1', metadata: { role: 'admin' },
+          },
+          {
+            id: 2, status: 'inactive', category: 'basic', name: 'Jane', password: 'secret2', metadata: { role: 'user' },
+          },
+          {
+            id: 3, status: 'active', category: 'premium', name: 'Bob', password: 'secret3', metadata: { role: 'user' },
+          },
+          {
+            id: 4, status: 'active', category: 'basic', name: 'Alice', password: 'secret4', metadata: { role: 'admin' },
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Apply filters, exclusions, and grouping
+      mockContext.data = {
+        filters: {
+          status: 'active',
+        },
+        include: {
+          name: 'firstName',
+          category: 'category',
+        },
+        groupBy: ['category'],
+      };
+
+      const result = await controller.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should first filter (only active users), then exclude attributes, then group by category
+      expect(responseBody.data).to.have.length(2);
+
+      const premiumGroup = responseBody.data.find((group) => group.category === 'premium');
+      expect(premiumGroup).to.exist;
+      expect(premiumGroup.records).to.have.length(2);
+      expect(premiumGroup.records).to.deep.include.members([
+        { firstName: 'John' },
+        { firstName: 'Bob' },
+      ]);
+
+      const basicGroup = responseBody.data.find((group) => group.category === 'basic');
+      expect(basicGroup).to.exist;
+      expect(basicGroup.records).to.have.length(1);
+      expect(basicGroup.records[0]).to.deep.equal({
+        firstName: 'Alice',
+      });
     });
 
     it('should handle combined filters, exclusions, and grouping', async () => {
@@ -1386,6 +1452,11 @@ describe('LlmoController', () => {
       mockContext.data = {
         filters: {
           status: 'active',
+        },
+        include: {
+          id: 'id',
+          status: 'status',
+          category: 'category',
         },
       };
 

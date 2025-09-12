@@ -135,6 +135,7 @@ function LlmoController(ctx) {
     // Extract and validate request body structure
     const {
       filters = {},
+      include = {},
       exclude = [],
       groupBy = [],
     } = context.data || {};
@@ -149,7 +150,9 @@ function LlmoController(ctx) {
     if (groupBy && !Array.isArray(groupBy)) {
       return badRequest('groupBy must be an array');
     }
-
+    if (include && typeof include !== 'object') {
+      return badRequest('include must be an object');
+    }
     // Apply filters to data arrays with case-insensitive exact matching
     const applyFilters = (rawData, filterFields) => {
       const data = { ...rawData };
@@ -171,6 +174,32 @@ function LlmoController(ctx) {
         Object.keys(data).forEach((key) => {
           if (key !== ':type' && data[key]?.data) {
             data[key].data = filterArray(data[key].data);
+          }
+        });
+      }
+      return data;
+    };
+
+    // Apply inclusions to data arrays to remove specified attributes
+    const applyInclusions = (rawData, includeFields) => {
+      const data = { ...rawData };
+      const includeFromArray = (rawArray) => {
+        const includeResult = rawArray.map((item) => {
+          const newItem = {};
+          Object.entries(includeFields).forEach(([attr, alias]) => {
+            newItem[alias] = item[attr];
+          });
+          return newItem;
+        });
+        return includeResult;
+      };
+
+      if (data[':type'] === 'sheet' && data.data) {
+        data.data = includeFromArray(data.data);
+      } else if (data[':type'] === 'multi-sheet') {
+        Object.keys(data).forEach((key) => {
+          if (key !== ':type' && data[key]?.data) {
+            data[key].data = includeFromArray(data[key].data);
           }
         });
       }
@@ -285,6 +314,11 @@ function LlmoController(ctx) {
       // Apply filters if any are provided
       if (Object.keys(filters).length > 0) {
         data = applyFilters(data, filters);
+      }
+
+      // Apply inclusions if any are provided
+      if (Object.keys(include).length > 0) {
+        data = applyInclusions(data, include);
       }
 
       // Apply exclusions if any are provided

@@ -3578,6 +3578,10 @@ LlmoSheetDataQuery:
     filters:
       description: Filters to apply to the data
       type: object
+    include:
+      description: Fields to include from the data
+      type: object
+      additionalProperties: true
     exclude:
       description: Fields to exclude from the data
       type: array
