@@ -105,6 +105,18 @@ function LlmoController(ctx) {
       return excludes;
     };
 
+    // Extract group parameters from request data
+    const extractGroup = (requestData) => {
+      const groups = [];
+      Object.keys(requestData).forEach((key) => {
+        if (key.startsWith('group_')) {
+          const attributeName = key.substring(6); // Remove 'group_' prefix
+          groups.push(attributeName);
+        }
+      });
+      return groups;
+    };
+
     // Apply filters to data arrays with case-insensitive exact matching
     const applyFilters = (rawData, filters) => {
       const data = { ...rawData };
@@ -155,6 +167,59 @@ function LlmoController(ctx) {
       return data;
     };
 
+    // Apply groups to data arrays to group by specified attributes
+    const applyGroups = (rawData, groups) => {
+      const data = { ...rawData };
+
+      const groupArray = (array) => {
+        // Create a map to group items by the combination of grouping attributes
+        const groupMap = new Map();
+
+        array.forEach((item) => {
+          // Create a key from the grouping attributes
+          const groupKey = groups.map((attr) => `${attr}:${item[attr] ?? 'null'}`).join('|');
+
+          // Extract grouping attributes (ensure they're always present)
+          const groupingAttributes = {};
+          groups.forEach((attr) => {
+            // Use null instead of undefined for JSON serialization
+            groupingAttributes[attr] = item[attr] ?? null;
+          });
+
+          // Create record without grouping attributes
+          const record = { ...item };
+          groups.forEach((attr) => {
+            delete record[attr];
+          });
+
+          // Add to group
+          if (!groupMap.has(groupKey)) {
+            groupMap.set(groupKey, {
+              ...groupingAttributes,
+              records: [],
+            });
+          }
+
+          groupMap.get(groupKey).records.push(record);
+        });
+
+        // Convert map to array
+        return Array.from(groupMap.values());
+      };
+
+      if (data[':type'] === 'sheet' && data.data) {
+        data.data = groupArray(data.data);
+      } else if (data[':type'] === 'multi-sheet') {
+        Object.keys(data).forEach((key) => {
+          if (key !== ':type' && data[key]?.data) {
+            data[key].data = groupArray(data[key].data);
+          }
+        });
+      }
+
+      return data;
+    };
+
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
@@ -200,6 +265,12 @@ function LlmoController(ctx) {
       const excludes = extractExcludes(context.data);
       if (excludes.length > 0) {
         data = applyExclusions(data, excludes);
+      }
+
+      // Extract and apply groups if any are provided
+      const groups = extractGroup(context.data);
+      if (groups.length > 0) {
+        data = applyGroups(data, groups);
       }
 
       // Return the data and let the framework handle the compression

@@ -1221,6 +1221,498 @@ describe('LlmoController', () => {
       expect(responseBody).to.deep.equal(mockResponseData);
     });
 
+    it('should group data with sheet type when group parameters are provided', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', name: 'John', price: 100,
+          },
+          {
+            id: 2, status: 'inactive', category: 'basic', name: 'Jane', price: 50,
+          },
+          {
+            id: 3, status: 'active', category: 'premium', name: 'Bob', price: 150,
+          },
+          {
+            id: 4, status: 'active', category: 'basic', name: 'Alice', price: 75,
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add group parameters
+      mockContext.data.group_status = 'true';
+      mockContext.data.group_category = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should group by status and category
+      expect(responseBody[':type']).to.equal('sheet');
+      expect(responseBody.data).to.have.length(3);
+
+      // Find each group and verify structure
+      const activeBasicGroup = responseBody.data.find((g) => g.status === 'active' && g.category === 'basic');
+      expect(activeBasicGroup).to.exist;
+      expect(activeBasicGroup.records).to.have.length(1);
+      expect(activeBasicGroup.records[0]).to.deep.equal({
+        id: 4, name: 'Alice', price: 75,
+      });
+
+      const activePremiumGroup = responseBody.data.find((g) => g.status === 'active' && g.category === 'premium');
+      expect(activePremiumGroup).to.exist;
+      expect(activePremiumGroup.records).to.have.length(2);
+      expect(activePremiumGroup.records).to.deep.include.members([
+        { id: 1, name: 'John', price: 100 },
+        { id: 3, name: 'Bob', price: 150 },
+      ]);
+
+      const inactiveBasicGroup = responseBody.data.find((g) => g.status === 'inactive' && g.category === 'basic');
+      expect(inactiveBasicGroup).to.exist;
+      expect(inactiveBasicGroup.records).to.have.length(1);
+      expect(inactiveBasicGroup.records[0]).to.deep.equal({
+        id: 2, name: 'Jane', price: 50,
+      });
+    });
+
+    it('should group data with multi-sheet type when group parameters are provided', async () => {
+      const mockResponseData = {
+        ':type': 'multi-sheet',
+        sheet1: {
+          data: [
+            {
+              id: 1, status: 'active', category: 'premium', name: 'John',
+            },
+            {
+              id: 2, status: 'inactive', category: 'basic', name: 'Jane',
+            },
+            {
+              id: 3, status: 'active', category: 'premium', name: 'Bob',
+            },
+          ],
+        },
+        sheet2: {
+          data: [
+            {
+              id: 4, status: 'active', category: 'basic', name: 'Alice',
+            },
+            {
+              id: 5, status: 'active', category: 'premium', name: 'Charlie',
+            },
+            {
+              id: 6, status: 'inactive', category: 'premium', name: 'David',
+            },
+          ],
+        },
+        metadata: {
+          totalSheets: 2,
+        },
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Add group parameters
+      mockContext.data.group_status = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should group data in all sheets
+      expect(responseBody[':type']).to.equal('multi-sheet');
+
+      // Check sheet1 grouping
+      expect(responseBody.sheet1.data).to.have.length(2);
+      const sheet1ActiveGroup = responseBody.sheet1.data.find((group) => group.status === 'active');
+      expect(sheet1ActiveGroup).to.exist;
+      expect(sheet1ActiveGroup.records).to.have.length(2);
+      expect(sheet1ActiveGroup.records).to.deep.include.members([
+        { id: 1, category: 'premium', name: 'John' },
+        { id: 3, category: 'premium', name: 'Bob' },
+      ]);
+
+      const sheet1InactiveGroup = responseBody.sheet1.data.find((group) => group.status === 'inactive');
+      expect(sheet1InactiveGroup).to.exist;
+      expect(sheet1InactiveGroup.records).to.have.length(1);
+      expect(sheet1InactiveGroup.records[0]).to.deep.equal({
+        id: 2, category: 'basic', name: 'Jane',
+      });
+
+      // Check sheet2 grouping
+      expect(responseBody.sheet2.data).to.have.length(2);
+      const sheet2ActiveGroup = responseBody.sheet2.data.find((group) => group.status === 'active');
+      expect(sheet2ActiveGroup).to.exist;
+      expect(sheet2ActiveGroup.records).to.have.length(2);
+      expect(sheet2ActiveGroup.records).to.deep.include.members([
+        { id: 4, category: 'basic', name: 'Alice' },
+        { id: 5, category: 'premium', name: 'Charlie' },
+      ]);
+
+      const sheet2InactiveGroup = responseBody.sheet2.data.find((group) => group.status === 'inactive');
+      expect(sheet2InactiveGroup).to.exist;
+      expect(sheet2InactiveGroup.records).to.have.length(1);
+      expect(sheet2InactiveGroup.records[0]).to.deep.equal({
+        id: 6, category: 'premium', name: 'David',
+      });
+
+      // Metadata should remain unchanged
+      expect(responseBody.metadata).to.deep.equal({ totalSheets: 2 });
+    });
+
+    it('should group data by single attribute when single group parameter is provided', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', name: 'John', email: 'john@example.com',
+          },
+          {
+            id: 2, status: 'inactive', name: 'Jane', email: 'jane@example.com',
+          },
+          {
+            id: 3, status: 'active', name: 'Bob', email: 'bob@example.com',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Group by status only
+      mockContext.data.group_status = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should group by status only
+      expect(responseBody.data).to.have.length(2);
+
+      const activeGroup = responseBody.data.find((group) => group.status === 'active');
+      expect(activeGroup).to.exist;
+      expect(activeGroup.records).to.have.length(2);
+      expect(activeGroup.records).to.deep.include.members([
+        { id: 1, name: 'John', email: 'john@example.com' },
+        { id: 3, name: 'Bob', email: 'bob@example.com' },
+      ]);
+
+      const inactiveGroup = responseBody.data.find((group) => group.status === 'inactive');
+      expect(inactiveGroup).to.exist;
+      expect(inactiveGroup.records).to.have.length(1);
+      expect(inactiveGroup.records[0]).to.deep.equal({
+        id: 2, name: 'Jane', email: 'jane@example.com',
+      });
+    });
+
+    it('should handle grouping when attribute values are null or undefined', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: null, name: 'John',
+          },
+          {
+            id: 2, status: 'active', category: undefined, name: 'Jane',
+          },
+          {
+            id: 3, status: 'active', category: 'premium', name: 'Bob',
+          },
+          {
+            id: 4, status: 'active', category: null, name: 'Alice',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Group by category (which has null/undefined values)
+      mockContext.data.group_category = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should group null and undefined values together
+      expect(responseBody.data).to.have.length(2);
+
+      const nullGroup = responseBody.data.find((group) => group.category === null);
+      expect(nullGroup).to.exist;
+      expect(nullGroup.records).to.have.length(3);
+      expect(nullGroup.records).to.deep.include.members([
+        { id: 1, status: 'active', name: 'John' },
+        { id: 2, status: 'active', name: 'Jane' },
+        { id: 4, status: 'active', name: 'Alice' },
+      ]);
+
+      const premiumGroup = responseBody.data.find((group) => group.category === 'premium');
+      expect(premiumGroup).to.exist;
+      expect(premiumGroup.records).to.have.length(1);
+      expect(premiumGroup.records[0]).to.deep.equal({
+        id: 3, status: 'active', name: 'Bob',
+      });
+    });
+
+    it('should apply filters, exclusions, and grouping together when all are provided', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', name: 'John', password: 'secret1', metadata: { role: 'admin' },
+          },
+          {
+            id: 2, status: 'inactive', category: 'basic', name: 'Jane', password: 'secret2', metadata: { role: 'user' },
+          },
+          {
+            id: 3, status: 'active', category: 'premium', name: 'Bob', password: 'secret3', metadata: { role: 'user' },
+          },
+          {
+            id: 4, status: 'active', category: 'basic', name: 'Alice', password: 'secret4', metadata: { role: 'admin' },
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Apply filters, exclusions, and grouping
+      mockContext.data.filter_status = 'active';
+      mockContext.data.exclude_password = 'true';
+      mockContext.data.exclude_metadata = 'true';
+      mockContext.data.group_category = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should first filter (only active users), then exclude attributes, then group by category
+      expect(responseBody.data).to.have.length(2);
+
+      const premiumGroup = responseBody.data.find((group) => group.category === 'premium');
+      expect(premiumGroup).to.exist;
+      expect(premiumGroup.records).to.have.length(2);
+      expect(premiumGroup.records).to.deep.include.members([
+        { id: 1, status: 'active', name: 'John' },
+        { id: 3, status: 'active', name: 'Bob' },
+      ]);
+
+      const basicGroup = responseBody.data.find((group) => group.category === 'basic');
+      expect(basicGroup).to.exist;
+      expect(basicGroup.records).to.have.length(1);
+      expect(basicGroup.records[0]).to.deep.equal({
+        id: 4, status: 'active', name: 'Alice',
+      });
+    });
+
+    it('should handle grouping with non-group parameters present', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', name: 'John',
+          },
+          {
+            id: 2, status: 'active', category: 'basic', name: 'Jane',
+          },
+          {
+            id: 3, status: 'inactive', category: 'premium', name: 'Bob',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Mix group and non-group parameters
+      mockContext.data.limit = '10';
+      mockContext.data.offset = '0';
+      mockContext.data.sheet = 'test-sheet';
+      mockContext.data.group_status = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should only apply group parameters for grouping, ignoring others
+      expect(responseBody.data).to.have.length(2);
+
+      const activeGroup = responseBody.data.find((group) => group.status === 'active');
+      expect(activeGroup).to.exist;
+      expect(activeGroup.records).to.have.length(2);
+      expect(activeGroup.records).to.deep.include.members([
+        { id: 1, category: 'premium', name: 'John' },
+        { id: 2, category: 'basic', name: 'Jane' },
+      ]);
+
+      const inactiveGroup = responseBody.data.find((group) => group.status === 'inactive');
+      expect(inactiveGroup).to.exist;
+      expect(inactiveGroup.records).to.have.length(1);
+      expect(inactiveGroup.records[0]).to.deep.equal({
+        id: 3, category: 'premium', name: 'Bob',
+      });
+
+      // Should still pass non-group parameters to the API URL
+      expect(tracingFetchStub).to.have.been.calledWith(
+        'https://main--project-elmo-ui-data--adobe.aem.live/test-folder/test-data.json?limit=10&offset=0&sheet=test-sheet',
+        {
+          headers: {
+            Authorization: 'token test-api-key',
+            'User-Agent': 'test-user-agent',
+            'Accept-Encoding': 'gzip',
+          },
+        },
+      );
+    });
+
+    it('should not apply grouping when no group parameters are provided (backwards compatibility)', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', category: 'premium', name: 'John',
+          },
+          {
+            id: 2, status: 'inactive', category: 'basic', name: 'Jane',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Ensure no group parameters are set
+      delete mockContext.data.group_status;
+      delete mockContext.data.group_category;
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return all data unchanged
+      expect(responseBody).to.deep.equal(mockResponseData);
+    });
+
+    it('should handle empty data array with group parameters', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.data.group_status = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return empty array unchanged
+      expect(responseBody[':type']).to.equal('sheet');
+      expect(responseBody.data).to.have.length(0);
+      expect(responseBody.data).to.deep.equal([]);
+    });
+
+    it('should handle grouping when attribute does not exist in data', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, name: 'John', email: 'john@example.com' },
+          { id: 2, name: 'Jane', email: 'jane@example.com' },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      // Try to group by attributes that don't exist
+      mockContext.data.group_status = 'true';
+      mockContext.data.group_category = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should group items with null values for missing attributes
+      expect(responseBody.data).to.have.length(1);
+      expect(responseBody.data[0]).to.deep.equal({
+        status: null,
+        category: null,
+        records: [
+          { id: 1, name: 'John', email: 'john@example.com' },
+          { id: 2, name: 'Jane', email: 'jane@example.com' },
+        ],
+      });
+    });
+
+    it('should handle data without :type property with group parameters', async () => {
+      const mockResponseData = {
+        someProperty: 'value',
+        data: [
+          {
+            id: 1, name: 'John', status: 'active',
+          },
+        ],
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.data.group_status = 'true';
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return data unchanged since it doesn't match expected format
+      expect(responseBody).to.deep.equal(mockResponseData);
+    });
+
     it('should handle external API errors with sheetType parameter', async () => {
       const mockResponse = {
         ok: false,
