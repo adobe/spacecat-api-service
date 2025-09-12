@@ -132,6 +132,9 @@ function LlmoController(ctx) {
     const { siteId, dataSource, sheetType } = context.params;
     const { env } = context;
 
+    // Start timing for the entire method
+    const methodStartTime = Date.now();
+
     // Extract and validate request body structure
     const {
       filters = {},
@@ -187,7 +190,10 @@ function LlmoController(ctx) {
         const includeResult = rawArray.map((item) => {
           const newItem = {};
           Object.entries(includeFields).forEach(([attr, alias]) => {
-            newItem[alias] = item[attr];
+            const value = item[attr];
+            if (value) {
+              newItem[alias] = item[attr];
+            }
           });
           return newItem;
         });
@@ -294,7 +300,12 @@ function LlmoController(ctx) {
       const FIXED_LLMO_LIMIT = 1000000;
       url.searchParams.set('limit', FIXED_LLMO_LIMIT);
 
+      // Log setup completion time
+      const setupTime = Date.now();
+      log.info(`LLMO query setup completed - elapsed: ${setupTime - methodStartTime}ms`);
+
       // Fetch data from the external endpoint using the dataFolder from config
+      const fetchStartTime = Date.now();
       const response = await fetch(url.toString(), {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
@@ -310,33 +321,62 @@ function LlmoController(ctx) {
 
       // Get the response data
       let data = await response.json();
+      const fetchEndTime = Date.now();
+      const fetchDuration = fetchEndTime - fetchStartTime;
+      log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
 
       // Apply inclusions if any are provided
+      let inclusionDuration = 0;
       if (Object.keys(include).length > 0) {
+        const inclusionStartTime = Date.now();
         data = applyInclusions(data, include);
+        const inclusionEndTime = Date.now();
+        inclusionDuration = inclusionEndTime - inclusionStartTime;
+        log.info(`Inclusion processing completed - elapsed: ${inclusionEndTime - methodStartTime}ms, duration: ${inclusionDuration}ms`);
       }
 
       // Apply filters if any are provided
+      let filterDuration = 0;
       if (Object.keys(filters).length > 0) {
+        const filterStartTime = Date.now();
         data = applyFilters(data, filters);
+        const filterEndTime = Date.now();
+        filterDuration = filterEndTime - filterStartTime;
+        log.info(`Filtering completed - elapsed: ${filterEndTime - methodStartTime}ms, duration: ${filterDuration}ms`);
       }
 
       // Apply exclusions if any are provided
+      let exclusionDuration = 0;
       if (exclude.length > 0) {
+        const exclusionStartTime = Date.now();
         data = applyExclusions(data, exclude);
+        const exclusionEndTime = Date.now();
+        exclusionDuration = exclusionEndTime - exclusionStartTime;
+        log.info(`Exclusion processing completed - elapsed: ${exclusionEndTime - methodStartTime}ms, duration: ${exclusionDuration}ms`);
       }
 
       // Apply grouping if any are provided
+      let groupingDuration = 0;
       if (groupBy.length > 0) {
+        const groupingStartTime = Date.now();
         data = applyGroups(data, groupBy);
+        const groupingEndTime = Date.now();
+        groupingDuration = groupingEndTime - groupingStartTime;
+        log.info(`Grouping completed - elapsed: ${groupingEndTime - methodStartTime}ms, duration: ${groupingDuration}ms`);
       }
+
+      // Log final completion time with summary
+      const methodEndTime = Date.now();
+      const totalDuration = methodEndTime - methodStartTime;
+      log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms)`);
 
       // Return the data and let the framework handle the compression
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
-      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      const errorTime = Date.now();
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
       return badRequest(error.message);
     }
   };
