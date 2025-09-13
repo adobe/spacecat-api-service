@@ -65,6 +65,23 @@ export const sendAuditMessage = async (
   data: auditData,
 });
 
+/**
+ * Sends a report message.
+ *
+ * @param {Object} sqs - The SQS service object.
+ * @param {string} queueUrl - The SQS queue URL.
+ * @param {string} type - The type of audit.
+ * @param {Object} auditContext - The audit context object.
+ * @param {string} siteId - The site ID to audit.
+ * @returns {Promise} A promise representing the message sending operation.
+ */
+export const sendReportMessage = async (
+  sqs,
+  queueUrl,
+  type,
+  reportContext,
+) => sqs.sendMessage(queueUrl, { type, reportContext });
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const sendExperimentationCandidatesMessage = async (
@@ -219,6 +236,30 @@ export const triggerAuditForSite = async (
   },
   site.getId(),
   auditData,
+);
+
+/**
+ * Triggers reporting for a site.
+ * @param {Site} site - The site to report.
+ * @param {string} auditType - The type of report.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @return {Promise} - A promise representing the audit trigger operation.
+ */
+export const triggerReportForSite = async (
+  reportType,
+  slackContext,
+  lambdaContext,
+) => sendReportMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.REPORT_JOBS_QUEUE_URL,
+  reportType,
+  {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
 );
 
 // todo: prototype - untested
