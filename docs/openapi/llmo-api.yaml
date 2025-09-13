@@ -33,6 +33,39 @@ llmo-sheet-data:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Query LLMO sheet data with filters, exclusions, and grouping
+    description: |
+      Retrieves and processes data from the external LLMO data endpoint for a specific site with advanced querying capabilities.
+      This endpoint allows filtering data with case-insensitive exact matching, excluding specific fields from the response,
+      and grouping data by specified attributes. The endpoint fetches all available data (up to 1M records) to apply
+      the query operations effectively.
+    operationId: queryLlmoSheetData
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetDataQuery'
+    responses:
+      '200':
+        description: LLMO sheet data queried and processed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The processed data returned from the external LLMO endpoint after applying filters, exclusions, and grouping
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 
 llmo-sheet-data-with-type:
   parameters:
@@ -68,6 +101,40 @@ llmo-sheet-data-with-type:
             schema:
               type: object
               description: The data returned from the external LLMO endpoint
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Query LLMO sheet data with sheet type using filters, exclusions, and grouping
+    description: |
+      Retrieves and processes data from the external LLMO data endpoint for a specific site with a specified sheet type
+      and advanced querying capabilities. This endpoint allows filtering data with case-insensitive exact matching,
+      excluding specific fields from the response, and grouping data by specified attributes.
+      The data is fetched from the path: {dataFolder}/{sheetType}/{dataSource}.json
+      The endpoint fetches all available data (up to 1M records) to apply the query operations effectively.
+    operationId: queryLlmoSheetDataWithType
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetDataQuery'
+    responses:
+      '200':
+        description: LLMO sheet data queried and processed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The processed data returned from the external LLMO endpoint after applying filters, exclusions, and grouping
               additionalProperties: true
       '400':
         $ref: './responses.yaml#/400'

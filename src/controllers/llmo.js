@@ -125,6 +125,262 @@ function LlmoController(ctx) {
     }
   };
 
+  // Handles POST requests to the LLMO sheet data endpoint
+  // with query capabilities (filtering, exclusions, grouping)
+  const queryLlmoSheetData = async (context) => {
+    const { log } = context;
+    const { siteId, dataSource, sheetType } = context.params;
+    const { env } = context;
+
+    // Start timing for the entire method
+    const methodStartTime = Date.now();
+
+    // Extract and validate request body structure
+    const {
+      filters = {},
+      include = {},
+      exclude = [],
+      groupBy = [],
+    } = context.data || {};
+
+    // Validate request body structure
+    if (filters && typeof filters !== 'object') {
+      return badRequest('filters must be an object');
+    }
+    if (exclude && !Array.isArray(exclude)) {
+      return badRequest('exclude must be an array');
+    }
+    if (groupBy && !Array.isArray(groupBy)) {
+      return badRequest('groupBy must be an array');
+    }
+    if (include && typeof include !== 'object') {
+      return badRequest('include must be an object');
+    }
+    // Apply filters to data arrays with case-insensitive exact matching
+    const applyFilters = (rawData, filterFields) => {
+      const data = { ...rawData };
+      const filterArray = (array) => {
+        const filteredArray = array.filter((item) => {
+          const itemMatchesFilter = Object.entries(filterFields).every(([attr, value]) => {
+            const itemValue = item[attr];
+            if (itemValue == null) return false;
+            return String(itemValue).toLowerCase() === String(value).toLowerCase();
+          });
+          return itemMatchesFilter;
+        });
+        return filteredArray;
+      };
+
+      if (data[':type'] === 'sheet' && data.data) {
+        data.data = filterArray(data.data);
+      } else if (data[':type'] === 'multi-sheet') {
+        Object.keys(data).forEach((key) => {
+          if (key !== ':type' && data[key]?.data) {
+            data[key].data = filterArray(data[key].data);
+          }
+        });
+      }
+      return data;
+    };
+
+    // Apply inclusions to data arrays to remove specified attributes
+    const applyInclusions = (rawData, includeFields) => {
+      const data = { ...rawData };
+      const includeFromArray = (rawArray) => {
+        const includeResult = rawArray.map((item) => {
+          const newItem = {};
+          Object.entries(includeFields).forEach(([attr, alias]) => {
+            const value = item[attr];
+            if (value) {
+              newItem[alias] = item[attr];
+            }
+          });
+          return newItem;
+        });
+        return includeResult;
+      };
+
+      if (data[':type'] === 'sheet' && data.data) {
+        data.data = includeFromArray(data.data);
+      } else if (data[':type'] === 'multi-sheet') {
+        Object.keys(data).forEach((key) => {
+          if (key !== ':type' && data[key]?.data) {
+            data[key].data = includeFromArray(data[key].data);
+          }
+        });
+      }
+      return data;
+    };
+
+    // Apply exclusions to data arrays to remove specified attributes
+    const applyExclusions = (rawData, excludeFields) => {
+      const data = { ...rawData };
+      const excludeFromArray = (array) => array.map((item) => {
+        const filteredItem = { ...item };
+        excludeFields.forEach((attr) => {
+          delete filteredItem[attr];
+        });
+        return filteredItem;
+      });
+
+      if (data[':type'] === 'sheet' && data.data) {
+        data.data = excludeFromArray(data.data);
+      } else if (data[':type'] === 'multi-sheet') {
+        Object.keys(data).forEach((key) => {
+          if (key !== ':type' && data[key]?.data) {
+            data[key].data = excludeFromArray(data[key].data);
+          }
+        });
+      }
+      return data;
+    };
+
+    // Apply groups to data arrays to group by specified attributes
+    const applyGroups = (rawData, groupByFields) => {
+      const data = { ...rawData };
+
+      const groupArray = (array) => {
+        // Create a map to group items by the combination of grouping attributes
+        const groupMap = new Map();
+
+        array.forEach((item) => {
+          // Create a key from the grouping attributes
+          const groupKey = groupByFields.map((attr) => `${attr}:${item[attr] ?? 'null'}`).join('|');
+
+          // Extract grouping attributes (ensure they're always present)
+          const groupingAttributes = {};
+          groupByFields.forEach((attr) => {
+            // Use null instead of undefined for JSON serialization
+            groupingAttributes[attr] = item[attr] ?? null;
+          });
+
+          // Create record without grouping attributes
+          const record = { ...item };
+          groupByFields.forEach((attr) => {
+            delete record[attr];
+          });
+
+          // Add to group
+          if (!groupMap.has(groupKey)) {
+            groupMap.set(groupKey, {
+              ...groupingAttributes,
+              records: [],
+            });
+          }
+
+          groupMap.get(groupKey).records.push(record);
+        });
+
+        // Convert map to array
+        return Array.from(groupMap.values());
+      };
+
+      if (data[':type'] === 'sheet' && data.data) {
+        data.data = groupArray(data.data);
+      } else if (data[':type'] === 'multi-sheet') {
+        Object.keys(data).forEach((key) => {
+          if (key !== ':type' && data[key]?.data) {
+            data[key].data = groupArray(data[key].data);
+          }
+        });
+      }
+
+      return data;
+    };
+
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+
+      // Add limit, offset and sheet query params to the url
+      const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+
+      // This endpoint does not support limit as it needs to go through
+      // all records to apply filters, exclusions and grouping
+      const FIXED_LLMO_LIMIT = 1000000;
+      url.searchParams.set('limit', FIXED_LLMO_LIMIT);
+
+      // Log setup completion time
+      const setupTime = Date.now();
+      log.info(`LLMO query setup completed - elapsed: ${setupTime - methodStartTime}ms`);
+
+      // Fetch data from the external endpoint using the dataFolder from config
+      const fetchStartTime = Date.now();
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+          'User-Agent': SPACECAT_USER_AGENT,
+          'Accept-Encoding': 'gzip',
+        },
+      });
+
+      if (!response.ok) {
+        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the response data
+      let data = await response.json();
+      const fetchEndTime = Date.now();
+      const fetchDuration = fetchEndTime - fetchStartTime;
+      log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
+
+      // Apply inclusions if any are provided
+      let inclusionDuration = 0;
+      if (Object.keys(include).length > 0) {
+        const inclusionStartTime = Date.now();
+        data = applyInclusions(data, include);
+        const inclusionEndTime = Date.now();
+        inclusionDuration = inclusionEndTime - inclusionStartTime;
+        log.info(`Inclusion processing completed - elapsed: ${inclusionEndTime - methodStartTime}ms, duration: ${inclusionDuration}ms`);
+      }
+
+      // Apply filters if any are provided
+      let filterDuration = 0;
+      if (Object.keys(filters).length > 0) {
+        const filterStartTime = Date.now();
+        data = applyFilters(data, filters);
+        const filterEndTime = Date.now();
+        filterDuration = filterEndTime - filterStartTime;
+        log.info(`Filtering completed - elapsed: ${filterEndTime - methodStartTime}ms, duration: ${filterDuration}ms`);
+      }
+
+      // Apply exclusions if any are provided
+      let exclusionDuration = 0;
+      if (exclude.length > 0) {
+        const exclusionStartTime = Date.now();
+        data = applyExclusions(data, exclude);
+        const exclusionEndTime = Date.now();
+        exclusionDuration = exclusionEndTime - exclusionStartTime;
+        log.info(`Exclusion processing completed - elapsed: ${exclusionEndTime - methodStartTime}ms, duration: ${exclusionDuration}ms`);
+      }
+
+      // Apply grouping if any are provided
+      let groupingDuration = 0;
+      if (groupBy.length > 0) {
+        const groupingStartTime = Date.now();
+        data = applyGroups(data, groupBy);
+        const groupingEndTime = Date.now();
+        groupingDuration = groupingEndTime - groupingStartTime;
+        log.info(`Grouping completed - elapsed: ${groupingEndTime - methodStartTime}ms, duration: ${groupingDuration}ms`);
+      }
+
+      // Log final completion time with summary
+      const methodEndTime = Date.now();
+      const totalDuration = methodEndTime - methodStartTime;
+      log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms)`);
+
+      // Return the data and let the framework handle the compression
+      return ok(data, {
+        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
+      });
+    } catch (error) {
+      const errorTime = Date.now();
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
+      return badRequest(error.message);
+    }
+  };
+
   // Handles requests to the LLMO global sheet data endpoint
   const getLlmoGlobalSheetData = async (context) => {
     const { log } = context;
@@ -418,6 +674,7 @@ function LlmoController(ctx) {
 
   return {
     getLlmoSheetData,
+    queryLlmoSheetData,
     getLlmoGlobalSheetData,
     getLlmoConfig,
     getLlmoQuestions,
