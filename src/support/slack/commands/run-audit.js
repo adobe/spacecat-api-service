@@ -37,6 +37,7 @@ const ALL_AUDITS = [
   'llm-error-pages',
   'experimentation-opportunities',
   'meta-tags',
+  'soft-404s',
   'structured-data',
   'forms-opportunities',
   'alt-text',
