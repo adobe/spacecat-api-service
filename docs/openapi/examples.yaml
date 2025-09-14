@@ -234,6 +234,42 @@ meta-tags-audit:
             issueDetails: "Title tag is missing"
             seoImpact: "High"
       finalUrl: "www.bulk.com/uk/"
+prerender-audit:
+  summary: Example for a prerender audit
+  value:
+    id: '123e4567-e89b-12d3-a456-426614174001'
+    siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
+    auditedAt: "2025-01-03T10:14:41.798Z"
+    expiresAt: "2025-07-03T10:14:41.798Z"
+    deliveryType: 'aem_edge'
+    fullAuditRef: "https://example.com/prerender-audit"
+    auditResult:
+      status: "OPPORTUNITIES_FOUND"
+      summary: "Analyzed 15 URLs, found 3 with significant client-side rendering"
+      totalUrlsChecked: 15
+      successfulComparisons: 15
+      urlsNeedingPrerender: 3
+      averageSimilarity: 0.85
+      results:
+        - url: "https://example.com/products"
+          needsPrerender: true
+          contentGainRatio: 2.3
+          initialWords: 50
+          finalWords: 115
+          recommendation: "Content increased 2.3x after JS execution (50 → 115 words) - consider implementing prerendering"
+        - url: "https://example.com/services"
+          needsPrerender: true
+          contentGainRatio: 1.8
+          initialWords: 80
+          finalWords: 144
+          recommendation: "Content increased 1.8x after JS execution (80 → 144 words) - consider implementing prerendering"
+        - url: "https://example.com/about"
+          needsPrerender: false
+          contentGainRatio: 1.1
+          initialWords: 120
+          finalWords: 132
+          recommendation: "No significant client-side content increase detected (gain ratio: 1.1)"
+      finalUrl: "https://example.com/"
 analytics-site-integration-aa-tags:
   summary: Example for an integration with Adobe Analytics via Adobe Tags
   value:
