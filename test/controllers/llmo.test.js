@@ -2093,7 +2093,7 @@ describe('LlmoController', () => {
       };
       tracingFetchStub.resolves(mockResponse);
 
-      mockContext.params.dataSource = 'brandpresence-w';
+      mockContext.params.dataSource = 'brandpresence-all-w00';
       const result = await controller.queryLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(200);

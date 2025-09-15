@@ -24,7 +24,7 @@
 export const LLMO_SHEET_MAPPINGS = [{
   name: 'Brand Presence',
   type: 'multi-sheet',
-  pattern: 'brandpresence-w',
+  pattern: 'brandpresence-all-w',
   mappings: {
     all: {
       Question: 'Prompt',
