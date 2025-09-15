@@ -34,26 +34,44 @@ describe('Site Enrollment Controller', () => {
     getName: () => 'Test Site',
   };
 
+  const enrollmentId = '456e4567-e89b-12d3-a456-426614174001';
+  const anotherEnrollmentId = '456e4567-e89b-12d3-a456-426614174002';
+
   const mockSiteEnrollments = [
     {
-      getId: () => 'enrollment-1',
+      getId: () => enrollmentId,
       getSiteId: () => siteId,
       getEntitlementId: () => 'ent1',
       getStatus: () => 'ACTIVE',
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedBy: () => 'user1@example.com',
+      getConfig: () => ({ dataFolder: 'test-data', brand: 'Test Brand' }),
     },
     {
-      getId: () => 'enrollment-2',
+      getId: () => anotherEnrollmentId,
       getSiteId: () => siteId,
       getEntitlementId: () => 'ent2',
       getStatus: () => 'PENDING',
       getCreatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedAt: () => '2023-01-01T00:00:00Z',
       getUpdatedBy: () => 'user2@example.com',
+      getConfig: () => ({}),
     },
   ];
+
+  const mockSiteEnrollment = {
+    getId: () => enrollmentId,
+    getSiteId: () => siteId,
+    getEntitlementId: () => 'ent1',
+    getStatus: () => 'ACTIVE',
+    getCreatedAt: () => '2023-01-01T00:00:00Z',
+    getUpdatedAt: () => '2023-01-01T00:00:00Z',
+    getUpdatedBy: () => 'user1@example.com',
+    getConfig: sandbox.stub().returns({ dataFolder: 'test-data', brand: 'Test Brand' }),
+    setConfig: sandbox.stub(),
+    save: sandbox.stub().resolves(),
+  };
 
   const mockDataAccess = {
     Site: {
@@ -61,6 +79,7 @@ describe('Site Enrollment Controller', () => {
     },
     SiteEnrollment: {
       allBySiteId: sandbox.stub().resolves(mockSiteEnrollments),
+      findById: sandbox.stub().resolves(mockSiteEnrollment),
     },
   };
 
@@ -94,6 +113,12 @@ describe('Site Enrollment Controller', () => {
     // Reset stubs
     mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
     mockDataAccess.SiteEnrollment.allBySiteId = sandbox.stub().resolves(mockSiteEnrollments);
+    mockDataAccess.SiteEnrollment.findById = sandbox.stub().resolves(mockSiteEnrollment);
+
+    // Reset mock site enrollment stubs
+    mockSiteEnrollment.getConfig = sandbox.stub().returns({ dataFolder: 'test-data', brand: 'Test Brand' });
+    mockSiteEnrollment.setConfig = sandbox.stub();
+    mockSiteEnrollment.save = sandbox.stub().resolves();
 
     // Store reference to the mock instance for test manipulation
     mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
@@ -283,6 +308,369 @@ describe('Site Enrollment Controller', () => {
 
       // Verify that log.error was called
       expect(context.log.error).to.have.been.calledWith(`Error getting site enrollments for site ${siteId}: ${siteError.message}`);
+    });
+  });
+
+  describe('getConfigByEnrollmentID', () => {
+    const createContext = (overrides = {}) => ({
+      params: { siteId, enrollmentId },
+      dataAccess: mockDataAccess,
+      log: { error: sinon.stub() },
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+      ...overrides,
+    });
+
+    it('should return site enrollment config for valid IDs', async () => {
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({ dataFolder: 'test-data', brand: 'Test Brand' });
+    });
+
+    it('should return empty config when site enrollment has no config', async () => {
+      mockSiteEnrollment.getConfig.returns({});
+
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({});
+    });
+
+    it('should return empty config when site enrollment getConfig returns null', async () => {
+      mockSiteEnrollment.getConfig.returns(null);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({});
+    });
+
+    it('should return empty config when site enrollment getConfig returns undefined', async () => {
+      mockSiteEnrollment.getConfig.returns(undefined);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({});
+    });
+
+    it('should return bad request for invalid site UUID', async () => {
+      const context = createContext({ params: { siteId: 'invalid-uuid', enrollmentId } });
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Site ID required');
+    });
+
+    it('should return bad request for invalid enrollment UUID', async () => {
+      const context = createContext({ params: { siteId, enrollmentId: 'invalid-uuid' } });
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Enrollment ID required');
+    });
+
+    it('should return not found for non-existent site', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Site not found');
+    });
+
+    it('should return not found for non-existent site enrollment', async () => {
+      mockDataAccess.SiteEnrollment.findById.resolves(null);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Site enrollment not found');
+    });
+
+    it('should return not found when site enrollment belongs to different site', async () => {
+      const differentSiteEnrollment = {
+        ...mockSiteEnrollment,
+        getSiteId: () => 'different-site-id',
+      };
+      mockDataAccess.SiteEnrollment.findById.resolves(differentSiteEnrollment);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Site enrollment not found for this site');
+    });
+
+    it('should return forbidden when user lacks access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Access denied to this site');
+    });
+
+    it('should return internal server error when database operation fails', async () => {
+      const dbError = new Error('Database connection failed');
+      mockDataAccess.SiteEnrollment.findById.rejects(dbError);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.getConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Database connection failed');
+
+      expect(context.log.error).to.have.been.calledWith(`Error getting site enrollment config for siteEnrollment ${enrollmentId}: ${dbError.message}`);
+    });
+  });
+
+  describe('updateConfigByEnrollmentID', () => {
+    const createContext = (config = { dataFolder: 'updated-data', brand: 'Updated Brand' }, overrides = {}) => ({
+      params: { siteId, enrollmentId },
+      data: config,
+      dataAccess: mockDataAccess,
+      log: { error: sinon.stub() },
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withProfile({ is_admin: true })
+          .withAuthenticated(true),
+      },
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockSiteEnrollment.getConfig.returns({ dataFolder: 'updated-data', brand: 'Updated Brand' });
+    });
+
+    it('should update site enrollment config successfully', async () => {
+      const newConfig = { dataFolder: 'updated-data', brand: 'Updated Brand' };
+      const context = createContext(newConfig);
+
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal(newConfig);
+
+      expect(mockSiteEnrollment.setConfig).to.have.been.calledWith(newConfig);
+      expect(mockSiteEnrollment.save).to.have.been.called;
+    });
+
+    it('should handle empty config object', async () => {
+      const emptyConfig = {};
+      const context = createContext(emptyConfig);
+      mockSiteEnrollment.getConfig.returns({});
+
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({});
+
+      expect(mockSiteEnrollment.setConfig).to.have.been.calledWith({});
+      expect(mockSiteEnrollment.save).to.have.been.called;
+    });
+
+    it('should handle null config', async () => {
+      const context = createContext(null);
+      mockSiteEnrollment.getConfig.returns({});
+
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({});
+
+      expect(mockSiteEnrollment.setConfig).to.have.been.calledWith({});
+      expect(mockSiteEnrollment.save).to.have.been.called;
+    });
+
+    it('should handle when getConfig returns null after update', async () => {
+      const newConfig = { dataFolder: 'updated-data', brand: 'Updated Brand' };
+      const context = createContext(newConfig);
+      mockSiteEnrollment.getConfig.returns(null);
+
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({});
+
+      expect(mockSiteEnrollment.setConfig).to.have.been.calledWith(newConfig);
+      expect(mockSiteEnrollment.save).to.have.been.called;
+    });
+
+    it('should handle when getConfig returns undefined after update', async () => {
+      const newConfig = { dataFolder: 'updated-data', brand: 'Updated Brand' };
+      const context = createContext(newConfig);
+      mockSiteEnrollment.getConfig.returns(undefined);
+
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal({});
+
+      expect(mockSiteEnrollment.setConfig).to.have.been.calledWith(newConfig);
+      expect(mockSiteEnrollment.save).to.have.been.called;
+    });
+
+    it('should return bad request for invalid site UUID', async () => {
+      const context = createContext({}, { params: { siteId: 'invalid-uuid', enrollmentId } });
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Site ID required');
+    });
+
+    it('should return bad request for invalid enrollment UUID', async () => {
+      const context = createContext({}, { params: { siteId, enrollmentId: 'invalid-uuid' } });
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Enrollment ID required');
+    });
+
+    it('should return bad request for invalid config format - not an object', async () => {
+      const context = createContext('not-an-object');
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Config must be an object with string key-value pairs');
+    });
+
+    it('should return bad request for config with non-string keys', async () => {
+      const invalidConfig = { 123: 'value' }; // numeric key
+      const context = createContext(invalidConfig);
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Config must be an object with string key-value pairs');
+    });
+
+    it('should return bad request for config with non-string values', async () => {
+      const invalidConfig = { key: 123 }; // numeric value
+      const context = createContext(invalidConfig);
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Config must be an object with string key-value pairs');
+    });
+
+    it('should return bad request for config with nested objects', async () => {
+      const invalidConfig = { key: { nested: 'value' } };
+      const context = createContext(invalidConfig);
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Config must be an object with string key-value pairs');
+    });
+
+    it('should return not found for non-existent site', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Site not found');
+    });
+
+    it('should return not found for non-existent site enrollment', async () => {
+      mockDataAccess.SiteEnrollment.findById.resolves(null);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Site enrollment not found');
+    });
+
+    it('should return not found when site enrollment belongs to different site', async () => {
+      const differentSiteEnrollment = {
+        ...mockSiteEnrollment,
+        getSiteId: () => 'different-site-id',
+      };
+      mockDataAccess.SiteEnrollment.findById.resolves(differentSiteEnrollment);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Site enrollment not found for this site');
+    });
+
+    it('should return forbidden when user lacks access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Access denied to this site');
+    });
+
+    it('should return internal server error when save operation fails', async () => {
+      const saveError = new Error('Save operation failed');
+      mockSiteEnrollment.save.rejects(saveError);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Save operation failed');
+
+      expect(context.log.error).to.have.been.calledWith(`Error updating site enrollment config for siteEnrollment ${enrollmentId}: ${saveError.message}`);
+    });
+
+    it('should return internal server error when database lookup fails', async () => {
+      const dbError = new Error('Database lookup failed');
+      mockDataAccess.SiteEnrollment.findById.rejects(dbError);
+
+      const context = createContext();
+      const result = await siteEnrollmentController.updateConfigByEnrollmentID(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Database lookup failed');
+
+      expect(context.log.error).to.have.been.calledWith(`Error updating site enrollment config for siteEnrollment ${enrollmentId}: ${dbError.message}`);
     });
   });
 });

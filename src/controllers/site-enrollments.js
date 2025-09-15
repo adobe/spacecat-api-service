@@ -20,6 +20,7 @@ import {
 import {
   isNonEmptyObject,
   isValidUUID,
+  isObject,
 } from '@adobe/spacecat-shared-utils';
 
 import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
@@ -46,6 +47,25 @@ function SiteEnrollmentsController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
+   * Validates config object to ensure it contains only string key-value pairs.
+   * @param {any} config - The config object to validate.
+   * @returns {boolean} True if valid, false otherwise.
+   */
+  const validateConfig = (config) => {
+    if (!config) return true; // Allow null/undefined config
+    if (!isObject(config)) return false;
+
+    // Check that all keys and values are strings
+    // Also ensure keys are not numeric (even if converted to strings)
+    return Object.entries(config).every(([key, value]) => {
+      // Check if the key is a string and not a numeric string
+      const isValidKey = typeof key === 'string' && !/^\d+$/.test(key);
+      const isValidValue = typeof value === 'string';
+      return isValidKey && isValidValue;
+    });
+  };
+
+  /**
    * Gets site enrollments by site ID.
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Array of site enrollments response.
@@ -70,7 +90,7 @@ function SiteEnrollmentsController(ctx) {
 
       const siteEnrollments = await SiteEnrollment.allBySiteId(siteId);
       const enrollments = siteEnrollments.map(
-        (enrollment) => SiteEnrollmentDto.toJSON(enrollment),
+        (siteEnrollment) => SiteEnrollmentDto.toJSON(siteEnrollment),
       );
       return ok(enrollments);
     } catch (e) {
@@ -79,8 +99,111 @@ function SiteEnrollmentsController(ctx) {
     }
   };
 
+  /**
+   * Gets configuration for a specific site enrollment.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Site enrollment config response.
+   */
+  const getConfigByEnrollmentID = async (context) => {
+    const { siteId, enrollmentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(enrollmentId)) {
+      return badRequest('Enrollment ID required');
+    }
+
+    try {
+      // Check if user has access to the site
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Access denied to this site');
+      }
+
+      // Find the specific site enrollment
+      const siteEnrollment = await SiteEnrollment.findById(enrollmentId);
+      if (!siteEnrollment) {
+        return notFound('Site enrollment not found');
+      }
+
+      // Verify the site enrollment belongs to the specified site
+      if (siteEnrollment.getSiteId() !== siteId) {
+        return notFound('Site enrollment not found for this site');
+      }
+
+      const config = siteEnrollment.getConfig() || {};
+      return ok(config);
+    } catch (e) {
+      context.log.error(`Error getting site enrollment config for siteEnrollment ${enrollmentId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
+  /**
+   * Updates configuration for a specific site enrollment.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Updated site enrollment config response.
+   */
+  const updateConfigByEnrollmentID = async (context) => {
+    const { siteId, enrollmentId } = context.params;
+    const { data: config } = context;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(enrollmentId)) {
+      return badRequest('Enrollment ID required');
+    }
+
+    if (!validateConfig(config)) {
+      return badRequest('Config must be an object with string key-value pairs');
+    }
+
+    try {
+      // Check if user has access to the site
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Access denied to this site');
+      }
+
+      // Find the specific site enrollment
+      const siteEnrollment = await SiteEnrollment.findById(enrollmentId);
+      if (!siteEnrollment) {
+        return notFound('Site enrollment not found');
+      }
+
+      // Verify the site enrollment belongs to the specified site
+      if (siteEnrollment.getSiteId() !== siteId) {
+        return notFound('Site enrollment not found for this site');
+      }
+
+      // Update the config
+      siteEnrollment.setConfig(config || {});
+      await siteEnrollment.save();
+
+      const updatedConfig = siteEnrollment.getConfig() || {};
+      return ok(updatedConfig);
+    } catch (e) {
+      context.log.error(`Error updating site enrollment config for siteEnrollment ${enrollmentId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getBySiteID,
+    getConfigByEnrollmentID,
+    updateConfigByEnrollmentID,
   };
 }
 

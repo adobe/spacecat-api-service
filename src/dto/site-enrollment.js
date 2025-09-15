@@ -23,7 +23,8 @@ export const SiteEnrollmentDto = {
    *   entitlementId: string,
    *   createdAt: string,
    *   updatedAt: string,
-   *   updatedBy: string
+   *   updatedBy: string,
+   *   config: Record<string, string>
    * }}
    */
   toJSON: (siteEnrollment) => ({
@@ -33,5 +34,6 @@ export const SiteEnrollmentDto = {
     createdAt: siteEnrollment.getCreatedAt(),
     updatedAt: siteEnrollment.getUpdatedAt(),
     updatedBy: siteEnrollment.getUpdatedBy(),
+    config: siteEnrollment.getConfig(),
   }),
 };

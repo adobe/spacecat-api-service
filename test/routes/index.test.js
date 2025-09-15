@@ -336,6 +336,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'GET /sites/:siteId/site-enrollments',
+      'GET /sites/:siteId/site-enrollments/:enrollmentId/config',
+      'PUT /sites/:siteId/site-enrollments/:enrollmentId/config',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'DELETE /tools/api-keys/:id',
