@@ -310,7 +310,9 @@ function LlmoController(ctx) {
       });
 
       Object.keys(data).forEach((key) => {
+        log.info(`Checking if the are mappings for key: ${key}`);
         if (key !== ':type' && data[key]?.data && mappingConfig.mappings?.[key]) {
+          log.info(`Found mappings for key: ${key}, mappings ${JSON.stringify(mappingConfig.mappings[key])}`);
           const mappings = mappingConfig.mappings[key];
           data[key].data = mapArray(data[key].data, mappings);
         }
@@ -370,6 +372,7 @@ function LlmoController(ctx) {
       log.info(`Looking for mapping for dataSource: ${dataSource} mappings ${JSON.stringify(LLMO_SHEET_MAPPINGS)}`);
       const mapping = LLMO_SHEET_MAPPINGS.find((m) => dataSource.toLowerCase().includes(m.pattern));
       if (mapping) {
+        log.info(`Found mapping for dataSource: ${dataSource} mapping ${JSON.stringify(mapping)}`);
         const mappingStartTime = Date.now();
         data = applyMappings(data, mapping);
         const mappingEndTime = Date.now();
