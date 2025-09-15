@@ -3642,6 +3642,11 @@ SiteEnrollment:
     updatedBy:
       description: Who last updated the site enrollment
       $ref: '#/Id'
+    config:
+      description: Configuration object with dynamic string key-value pairs for the site enrollment
+      type: object
+      additionalProperties:
+        type: string
   example:
     id: "123e4567-e89b-12d3-a456-426614174000"
     siteId: "987fcdeb-51a2-43d7-9876-543210987654"
@@ -3649,6 +3654,9 @@ SiteEnrollment:
     createdAt: "2024-01-15T10:30:00Z"
     updatedAt: "2024-01-15T10:30:00Z"
     updatedBy: "system"
+    config:
+      dataFolder: "example-site-data"
+      brand: "Example Brand"
 
 TrialUser:
   type: object

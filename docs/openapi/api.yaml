@@ -178,6 +178,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
+  /sites/{siteId}/site-enrollments/{enrollmentId}/config:
+    $ref: './site-enrollments-api.yaml#/site-enrollment-config'
   /sites/{siteId}/user-activities:
     $ref: './user-activities-api.yaml#/paths/~1sites~1{siteId}~1user-activities'
   /sites/{siteId}/key-events:
