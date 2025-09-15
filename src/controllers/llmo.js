@@ -21,6 +21,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../support/access-control-util.js';
+import { LLMO_SHEET_MAPPINGS } from '../utils/llmo-mappings.js';
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
@@ -139,7 +140,7 @@ function LlmoController(ctx) {
     const {
       sheets = [],
       filters = {},
-      include = {},
+      include = [],
       exclude = [],
       groupBy = [],
     } = context.data || {};
@@ -158,8 +159,8 @@ function LlmoController(ctx) {
     if (groupBy && !Array.isArray(groupBy)) {
       return badRequest('groupBy must be an array');
     }
-    if (include && typeof include !== 'object') {
-      return badRequest('include must be an object');
+    if (include && !Array.isArray(include)) {
+      return badRequest('include must be an array');
     }
     // Apply filters to data arrays with case-insensitive exact matching
     const applyFilters = (rawData, filterFields) => {
@@ -194,10 +195,10 @@ function LlmoController(ctx) {
       const includeFromArray = (rawArray) => {
         const includeResult = rawArray.map((item) => {
           const newItem = {};
-          Object.entries(includeFields).forEach(([attr, alias]) => {
-            const value = item[attr];
+          includeFields.forEach((fieldName) => {
+            const value = item[fieldName];
             if (value) {
-              newItem[alias] = item[attr];
+              newItem[fieldName] = item[fieldName];
             }
           });
           return newItem;
@@ -293,6 +294,31 @@ function LlmoController(ctx) {
       return data;
     };
 
+    // Apply mappings to data arrays to transform field names and values
+    const applyMappings = (rawData, mappingConfig) => {
+      const data = { ...rawData };
+
+      const mapArray = (array, mappings) => array.map((item) => {
+        const mappedItem = { ...item };
+
+        Object.entries(mappings).forEach(([originalField, newField]) => {
+          mappedItem[newField] = item[originalField];
+          delete mappedItem[originalField];
+        });
+
+        return mappedItem;
+      });
+
+      Object.keys(data).forEach((key) => {
+        if (key !== ':type' && data[key]?.data && mappingConfig.mappings?.[key]) {
+          const mappings = mappingConfig.mappings[key];
+          data[key].data = mapArray(data[key].data, mappings);
+        }
+      });
+
+      return data;
+    };
+
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
@@ -339,6 +365,17 @@ function LlmoController(ctx) {
         });
       }
 
+      // Apply mappings using external configuration
+      let mappingDuration = 0;
+      const mapping = LLMO_SHEET_MAPPINGS.find((m) => dataSource.toLowerCase().includes(m.pattern));
+      if (mapping) {
+        const mappingStartTime = Date.now();
+        data = applyMappings(data, mapping);
+        const mappingEndTime = Date.now();
+        mappingDuration = mappingEndTime - mappingStartTime;
+        log.info(`Mapping completed - elapsed: ${mappingEndTime - methodStartTime}ms, duration: ${mappingDuration}ms`);
+      }
+
       // Apply inclusions if any are provided
       let inclusionDuration = 0;
       if (Object.keys(include).length > 0) {
@@ -382,7 +419,7 @@ function LlmoController(ctx) {
       // Log final completion time with summary
       const methodEndTime = Date.now();
       const totalDuration = methodEndTime - methodStartTime;
-      log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms)`);
+      log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
 
       // Return the data and let the framework handle the compression
       return ok(data, {

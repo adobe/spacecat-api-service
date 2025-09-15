@@ -3584,7 +3584,7 @@ LlmoSheetDataQuery:
       type: object
     include:
       description: Fields to include from the data
-      type: object
+      type: array
       additionalProperties: true
     exclude:
       description: Fields to exclude from the data

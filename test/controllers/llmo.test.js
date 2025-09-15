@@ -1274,7 +1274,7 @@ describe('LlmoController', () => {
       result = await controller.queryLlmoSheetData(mockContext);
       expect(result.status).to.equal(400);
       responseBody = await result.json();
-      expect(responseBody.message).to.equal('include must be an object');
+      expect(responseBody.message).to.equal('include must be an array');
     });
 
     it('should handle POST request with inclusions successfully', async () => {
@@ -1307,11 +1307,7 @@ describe('LlmoController', () => {
         filters: {
           status: 'active',
         },
-        include: {
-          name: 'firstName',
-          status: 'status',
-          category: 'category',
-        },
+        include: ['name', 'status', 'category'],
         groupBy: ['category'],
       };
 
@@ -1327,15 +1323,15 @@ describe('LlmoController', () => {
       expect(premiumGroup).to.exist;
       expect(premiumGroup.records).to.have.length(2);
       expect(premiumGroup.records).to.deep.include.members([
-        { firstName: 'John', status: 'active' },
-        { firstName: 'Bob', status: 'active' },
+        { name: 'John', status: 'active' },
+        { name: 'Bob', status: 'active' },
       ]);
 
       const basicGroup = responseBody.data.find((group) => group.category === 'basic');
       expect(basicGroup).to.exist;
       expect(basicGroup.records).to.have.length(1);
       expect(basicGroup.records[0]).to.deep.equal({
-        firstName: 'Alice', status: 'active',
+        name: 'Alice', status: 'active',
       });
     });
 
@@ -1464,11 +1460,7 @@ describe('LlmoController', () => {
         filters: {
           status: 'active',
         },
-        include: {
-          id: 'id',
-          status: 'status',
-          category: 'category',
-        },
+        include: ['id', 'status', 'category'],
       };
 
       const result = await controller.queryLlmoSheetData(mockContext);
@@ -2076,6 +2068,51 @@ describe('LlmoController', () => {
           },
         },
       );
+    });
+
+    it('should handle brand presence mappings', async () => {
+      const mockResponseData = {
+        ':type': 'multi-sheet',
+        all: {
+          data: [
+            {
+              Question: 'p1',
+              Topic: 'c1',
+              Keyword: 't1',
+              'Sources Contain Brand Domain': 'c1',
+              'Answer Contains Brand Name': 'm1',
+              Url: 'u1',
+            },
+          ],
+        },
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.params.dataSource = 'brandpresence-w';
+      const result = await controller.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({
+        ':type': 'multi-sheet',
+        all: {
+          data: [
+            {
+              Prompt: 'p1',
+              Category: 'c1',
+              Topics: 't1',
+              Citations: 'c1',
+              Mentions: 'm1',
+              URL: 'u1',
+            },
+          ],
+        },
+      });
     });
 
     it('should handle external API errors', async () => {
