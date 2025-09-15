@@ -489,33 +489,32 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
   return site.getId();
 }
 
-async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
+/**
+ * Ensures an organization has an LLMO entitlement, creating one if it doesn't exist.
+ * @param {Object} site - The site object
+ * @param {Object} lambdaCtx - Lambda context containing dataAccess and log
+ * @param {Object} slackCtx - Slack context containing say function
+ * @returns {Promise<Object>} The entitlement object (existing or newly created)
+ */
+async function ensureOrganizationEntitlement(site, lambdaCtx, slackCtx) {
   const { dataAccess, log } = lambdaCtx;
   const { say } = slackCtx;
-  const { Entitlement, SiteEnrollment } = dataAccess;
+  const { Entitlement } = dataAccess;
 
   const orgId = site.getOrganizationId();
 
-  // find if there are any entitlements for this site enabling LLMO
-  const enrollments = await SiteEnrollment.allBySiteId(site.getId());
-  const llmoEntitlements = (await Promise.all(enrollments.map(async (enrollment) => {
-    // find entitlement for this enrollment
-    const entitlement = await Entitlement.findById(enrollment.getEntitlementId());
-    // check if the entitlement is for the same organization as the site
-    const entitlementOrgId = entitlement.getOrganizationId();
-    if (entitlementOrgId !== orgId) return null;
-    // check if the entitlement is for LLMO
-    const entitlementProductCode = entitlement.getProductCode();
-    return entitlementProductCode === LLMO_PRODUCT_CODE ? entitlement : null;
-  }))).filter((x) => !!x);
+  // Check if organization already has an LLMO entitlement
+  const existingEntitlement = await Entitlement.findByOrganizationIdAndProductCode(
+    orgId,
+    LLMO_PRODUCT_CODE,
+  );
 
-  if (llmoEntitlements.length > 0) {
-    await say(`Site ${site.getId()} is already entitled to LLMO. Skipping entitlement grant.`);
-    log.warn(`Site ${site.getId()} already entitled to LLMO. Skipping.`);
-    return;
+  if (existingEntitlement) {
+    log.info(`Organization ${orgId} already has LLMO entitlement ${existingEntitlement.getId()}`);
+    return existingEntitlement;
   }
 
-  // create an entitlement
+  // Create new entitlement for the organization
   const newEntitlement = await Entitlement.create({
     organizationId: orgId,
     productCode: LLMO_PRODUCT_CODE,
@@ -523,14 +522,82 @@ async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
     quotas: { llmo_trial_prompts: 200 },
   });
   await newEntitlement.save();
-  const newEntitlementId = newEntitlement.getId();
 
-  // create enrollment
+  log.info(`Created new LLMO entitlement ${newEntitlement.getId()} for organization ${orgId}`);
+  await say(`Created LLMO entitlement for organization ${orgId}`);
+
+  return newEntitlement;
+}
+
+/**
+ * Ensures a site has an enrollment for the given entitlement, creating one if it doesn't exist.
+ * @param {Object} site - The site object
+ * @param {Object} entitlement - The entitlement object to enroll the site in
+ * @param {Object} lambdaCtx - Lambda context containing dataAccess and log
+ * @param {Object} slackCtx - Slack context containing say function
+ * @returns {Promise<Object>} The enrollment object (existing or newly created)
+ */
+async function ensureSiteEnrollment(site, entitlement, lambdaCtx, slackCtx) {
+  const { dataAccess, log } = lambdaCtx;
+  const { say } = slackCtx;
+  const { SiteEnrollment } = dataAccess;
+
+  const siteId = site.getId();
+  const entitlementId = entitlement.getId();
+
+  // Check if site is already enrolled in this entitlement
+  const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
+  const existingEnrollment = existingEnrollments.find(
+    (enrollment) => enrollment.getEntitlementId() === entitlementId,
+  );
+
+  if (existingEnrollment) {
+    log.info(`Site ${siteId} already enrolled in entitlement ${entitlementId}`);
+    return existingEnrollment;
+  }
+
+  // Create new enrollment for the site
   const newEnrollment = await SiteEnrollment.create({
-    entitlementId: newEntitlementId,
-    siteId: site.getId(),
+    entitlementId,
+    siteId,
   });
   await newEnrollment.save();
+
+  log.info(`Created new enrollment ${newEnrollment.getId()} for site ${siteId} in entitlement ${entitlementId}`);
+  await say(`Enrolled site ${siteId} in LLMO entitlement`);
+
+  return newEnrollment;
+}
+
+/**
+ * Creates or ensures both entitlement and enrollment for LLMO.
+ * Organizations can have entitlements without site enrollments, and sites can be enrolled
+ * in existing entitlements from their organization.
+ * @param {Object} site - The site object
+ * @param {Object} lambdaCtx - Lambda context containing dataAccess and log
+ * @param {Object} slackCtx - Slack context containing say function
+ * @returns {Promise<{entitlement: Object, enrollment: Object}>}
+ * The entitlement and enrollment objects
+ */
+async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
+  const { log } = lambdaCtx;
+  const { say } = slackCtx;
+
+  try {
+    // Step 1: Ensure organization has an LLMO entitlement
+    const entitlement = await ensureOrganizationEntitlement(site, lambdaCtx, slackCtx);
+
+    // Step 2: Ensure site is enrolled in the entitlement
+    const enrollment = await ensureSiteEnrollment(site, entitlement, lambdaCtx, slackCtx);
+
+    log.info(`Successfully ensured LLMO access for site ${site.getId()} via entitlement ${entitlement.getId()}`);
+
+    return { entitlement, enrollment };
+  } catch (error) {
+    log.error(`Failed to create entitlement and enrollment for site ${site.getId()}: ${error.message}`);
+    await say(`❌ Failed to set up LLMO access for site ${site.getId()}: ${error.message}`);
+    throw error;
+  }
 }
 
 async function createOrganizationIdentityProvider(site, lambdaCtx) {

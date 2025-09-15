@@ -78,12 +78,14 @@ describe('onboard-llmo-modal', () => {
       getProductCode: sinonSandbox.stub().returns('LLMO'),
       getOrganizationId: sinonSandbox.stub().returns('org123'),
     }),
+    findByOrganizationIdAndProductCode: sinonSandbox.stub().resolves(null),
   });
 
   const createDefaultMockSiteEnrollment = (sinonSandbox) => ({
     allBySiteId: sinonSandbox.stub().resolves([]),
     create: sinonSandbox.stub().returns({
       save: sinonSandbox.stub().resolves(),
+      getId: sinonSandbox.stub().returns('enrollment123'),
     }),
   });
 
@@ -881,18 +883,16 @@ describe('onboard-llmo-modal', () => {
 
       // Mock existing LLMO entitlement
       const existingEntitlement = {
+        getId: sandbox.stub().returns('existing-entitlement-123'),
         getProductCode: sandbox.stub().returns('LLMO'),
         getOrganizationId: sandbox.stub().returns('org123'),
       };
-      const existingEnrollment = {
-        getEntitlementId: sandbox.stub().returns('existing-entitlement-123'),
-      };
 
       const mockEntitlement = createDefaultMockEntitlement(sandbox);
-      mockEntitlement.findById.resolves(existingEntitlement);
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(existingEntitlement);
 
       const mockSiteEnrollment = createDefaultMockSiteEnrollment(sandbox);
-      mockSiteEnrollment.allBySiteId.resolves([existingEnrollment]);
+      mockSiteEnrollment.allBySiteId.resolves([]); // No existing enrollments for this site
 
       const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
         mockSite,
@@ -903,11 +903,12 @@ describe('onboard-llmo-modal', () => {
       // Execute the function
       await onboardSite(input, lambdaCtx, slackCtx);
 
-      // Verify that entitlement creation was skipped
+      // Verify that entitlement creation was skipped but enrollment was still created
       expect(lambdaCtx.dataAccess.Entitlement.create).to.not.have.been.called;
-      expect(lambdaCtx.dataAccess.SiteEnrollment.create).to.not.have.been.called;
-      expect(slackCtx.say).to.have.been.calledWith('Site site123 is already entitled to LLMO. Skipping entitlement grant.');
-      expect(lambdaCtx.log.warn).to.have.been.calledWith('Site site123 already entitled to LLMO. Skipping.');
+      expect(lambdaCtx.dataAccess.SiteEnrollment.create).to.have.been.calledWith({
+        entitlementId: 'existing-entitlement-123',
+        siteId: 'site123',
+      });
     });
 
     it('should skip organization identity provider creation when it already exists', async () => {
@@ -1227,20 +1228,13 @@ example-com:
       // Mock fetch for admin.hlx.page calls
       global.fetch = createDefaultMockFetch(sandbox);
 
-      // Mock existing entitlement with different organization ID
-      const existingEntitlement = {
-        getProductCode: sandbox.stub().returns('LLMO'),
-        getOrganizationId: sandbox.stub().returns('different-org-456'), // Different from site's org ID
-      };
-      const existingEnrollment = {
-        getEntitlementId: sandbox.stub().returns('existing-entitlement-123'),
-      };
-
+      // Mock no existing entitlement for this organization (will create new one)
       const mockEntitlement = createDefaultMockEntitlement(sandbox);
-      mockEntitlement.findById.resolves(existingEntitlement);
+      // Return null to indicate no existing entitlement for this org/product combination
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(null);
 
       const mockSiteEnrollment = createDefaultMockSiteEnrollment(sandbox);
-      mockSiteEnrollment.allBySiteId.resolves([existingEnrollment]);
+      mockSiteEnrollment.allBySiteId.resolves([]);
 
       const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
         mockSite,
@@ -1263,11 +1257,8 @@ example-com:
         siteId: 'site123',
       });
 
-      // Verify that the existing entitlement was checked
-      expect(lambdaCtx.dataAccess.Entitlement.findById).to.have.been.calledWith('existing-entitlement-123');
-
-      // Verify that the skip message was not sent (since new entitlement was created)
-      expect(slackCtx.say).to.not.have.been.calledWith('Site site123 is already entitled to LLMO. Skipping entitlement grant.');
+      // Verify that the organization entitlement was checked
+      expect(lambdaCtx.dataAccess.Entitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org123', 'LLMO');
     });
 
     it('should create new entitlement when site has entitlement with wrong product code', async () => {
@@ -1286,20 +1277,13 @@ example-com:
       // Mock fetch for admin.hlx.page calls
       global.fetch = createDefaultMockFetch(sandbox);
 
-      // Mock existing entitlement with wrong product code
-      const existingEntitlement = {
-        getProductCode: sandbox.stub().returns('ASO'), // Wrong product code (not LLMO)
-        getOrganizationId: sandbox.stub().returns('org123'), // Same org ID as site
-      };
-      const existingEnrollment = {
-        getEntitlementId: sandbox.stub().returns('existing-entitlement-123'),
-      };
-
+      // Mock no existing LLMO entitlement for this organization (will create new one)
       const mockEntitlement = createDefaultMockEntitlement(sandbox);
-      mockEntitlement.findById.resolves(existingEntitlement);
+      // Return null to indicate no existing LLMO entitlement for this org
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(null);
 
       const mockSiteEnrollment = createDefaultMockSiteEnrollment(sandbox);
-      mockSiteEnrollment.allBySiteId.resolves([existingEnrollment]);
+      mockSiteEnrollment.allBySiteId.resolves([]);
 
       const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
         mockSite,
@@ -1322,11 +1306,157 @@ example-com:
         siteId: 'site123',
       });
 
-      // Verify that the existing entitlement was checked
-      expect(lambdaCtx.dataAccess.Entitlement.findById).to.have.been.calledWith('existing-entitlement-123');
+      // Verify that the organization entitlement was checked
+      expect(lambdaCtx.dataAccess.Entitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org123', 'LLMO');
+    });
 
-      // Verify that the skip message was not sent (since new entitlement was created)
-      expect(slackCtx.say).to.not.have.been.calledWith('Site site123 is already entitled to LLMO. Skipping entitlement grant.');
+    it('should skip enrollment creation when site is already enrolled in the entitlement', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Mock existing LLMO entitlement
+      const existingEntitlement = {
+        getId: sandbox.stub().returns('existing-entitlement-456'),
+        getProductCode: sandbox.stub().returns('LLMO'),
+        getOrganizationId: sandbox.stub().returns('org123'),
+      };
+
+      const mockEntitlement = createDefaultMockEntitlement(sandbox);
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(existingEntitlement);
+
+      // Mock existing enrollment for the site in this entitlement
+      const existingEnrollment = {
+        getId: sandbox.stub().returns('existing-enrollment-789'),
+        getEntitlementId: sandbox.stub().returns('existing-entitlement-456'),
+        getSiteId: sandbox.stub().returns('site123'),
+      };
+
+      const mockSiteEnrollment = createDefaultMockSiteEnrollment(sandbox);
+      mockSiteEnrollment.allBySiteId.resolves([existingEnrollment]); // Site already enrolled
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
+        mockSite,
+        mockEntitlement,
+        mockSiteEnrollment,
+      });
+
+      // Execute the function
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      // Verify that no new entitlement was created (existing one was used)
+      expect(lambdaCtx.dataAccess.Entitlement.create).to.not.have.been.called;
+
+      // Verify that no new enrollment was created (existing one was used)
+      expect(lambdaCtx.dataAccess.SiteEnrollment.create).to.not.have.been.called;
+
+      // Verify that the existing entitlement was found
+      expect(lambdaCtx.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.have.been.calledWith('org123', 'LLMO');
+
+      // Verify that existing enrollments were checked
+      expect(lambdaCtx.dataAccess.SiteEnrollment.allBySiteId).to.have.been.calledWith('site123');
+
+      // Verify that log message was recorded for existing enrollment
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Site site123 already enrolled in entitlement existing-entitlement-456');
+    });
+
+    it('should handle entitlement creation error and show proper error message', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Mock entitlement creation to throw an error
+      const mockEntitlement = createDefaultMockEntitlement(sandbox);
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(null); // No existing entitlement
+      const entitlementError = new Error('Failed to create entitlement');
+      mockEntitlement.create.throws(entitlementError);
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
+        mockSite,
+        mockEntitlement,
+      });
+
+      // Execute the function - it should handle the error gracefully
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      // Verify that the error was logged
+      expect(lambdaCtx.log.error).to.have.been.calledWith('Error in LLMO onboarding:', entitlementError);
+
+      // Verify that the error message was posted to Slack
+      expect(slackCtx.say).to.have.been.calledWith(
+        sinon.match.string, // The postErrorMessage function formats the error message
+      );
+    });
+
+    it('should handle enrollment creation error and show proper error message', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Mock entitlement creation to succeed but enrollment creation to fail
+      const mockEntitlement = createDefaultMockEntitlement(sandbox);
+      mockEntitlement.findByOrganizationIdAndProductCode.resolves(null); // No existing entitlement
+      const createdEntitlement = {
+        getId: sandbox.stub().returns('entitlement123'),
+        save: sandbox.stub().resolves(),
+      };
+      mockEntitlement.create.returns(createdEntitlement);
+
+      const mockSiteEnrollment = createDefaultMockSiteEnrollment(sandbox);
+      mockSiteEnrollment.allBySiteId.resolves([]); // No existing enrollments
+      const enrollmentError = new Error('Failed to create enrollment');
+      mockSiteEnrollment.create.throws(enrollmentError);
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
+        mockSite,
+        mockEntitlement,
+        mockSiteEnrollment,
+      });
+
+      // Execute the function - it should handle the error gracefully
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      // Verify that the error was logged
+      expect(lambdaCtx.log.error).to.have.been.calledWith('Error in LLMO onboarding:', enrollmentError);
+
+      // Verify that the error message was posted to Slack
+      expect(slackCtx.say).to.have.been.calledWith(
+        sinon.match.string, // The postErrorMessage function formats the error message
+      );
     });
   });
 
