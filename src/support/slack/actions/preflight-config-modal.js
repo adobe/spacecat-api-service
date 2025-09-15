@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { isValidHelixPreviewUrl } from '@adobe/spacecat-shared-utils';
 import { extractDeliveryConfigFromPreviewUrl } from './onboard-modal.js';
 
 /**
@@ -18,24 +19,20 @@ import { extractDeliveryConfigFromPreviewUrl } from './onboard-modal.js';
  * @returns {Object|null} - The helix config object or null if invalid
  */
 function extractHelixConfigFromPreviewUrl(previewUrl) {
-  const url = new URL(previewUrl);
-  const domain = url.hostname;
-
-  // Parse helix RSO from domain using the same regex as hooks.js
-  const regex = /^([\w-]+)--([\w-]+)--([\w-]+)\.(hlx\.live|aem\.live)$/;
-  const match = domain.match(regex);
-
-  if (!match) {
+  if (!isValidHelixPreviewUrl(previewUrl)) {
     return null;
   }
+  const url = new URL(previewUrl);
+  const domain = url.hostname;
+  const [host, hlx, top] = domain.split('.');
+  const [ref, site, owner] = host.split('--');
 
   return {
-    hlxVersion: 5,
     rso: {
-      ref: match[1],
-      site: match[2],
-      owner: match[3],
-      tld: match[4],
+      ref,
+      site,
+      owner,
+      tld: `${hlx}.${top}`,
     },
   };
 }
