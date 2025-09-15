@@ -137,6 +137,7 @@ function LlmoController(ctx) {
 
     // Extract and validate request body structure
     const {
+      sheets = [],
       filters = {},
       include = {},
       exclude = [],
@@ -144,6 +145,10 @@ function LlmoController(ctx) {
     } = context.data || {};
 
     // Validate request body structure
+    if (sheets && !Array.isArray(sheets)) {
+      return badRequest('sheets must be an array');
+    }
+
     if (filters && typeof filters !== 'object') {
       return badRequest('filters must be an object');
     }
@@ -324,6 +329,15 @@ function LlmoController(ctx) {
       const fetchEndTime = Date.now();
       const fetchDuration = fetchEndTime - fetchStartTime;
       log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
+
+      // Keep only the required sheets
+      if (sheets.length > 0 && (data[':type'] === 'multi-sheet')) {
+        Object.keys(data).filter((key) => !key.startsWith(':')).forEach((key) => {
+          if (sheets.indexOf(key) === -1) {
+            delete data[key];
+          }
+        });
+      }
 
       // Apply inclusions if any are provided
       let inclusionDuration = 0;

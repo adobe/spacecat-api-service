@@ -1236,6 +1236,16 @@ describe('LlmoController', () => {
       let responseBody = await result.json();
       expect(responseBody.message).to.equal('filters must be an object');
 
+      // Test invalid sheets
+      mockContext.data = {
+        sheets: 'invalid',
+      };
+
+      result = await controller.queryLlmoSheetData(mockContext);
+      expect(result.status).to.equal(400);
+      responseBody = await result.json();
+      expect(responseBody.message).to.equal('sheets must be an array');
+
       // Test invalid exclude
       mockContext.data = {
         exclude: 'invalid',
@@ -1973,6 +1983,71 @@ describe('LlmoController', () => {
 
       // Should return data unchanged since it doesn't match expected format
       expect(responseBody).to.deep.equal(mockResponseData);
+    });
+
+    it('should filter sheets when sheets parameter is provided for multi-sheet data', async () => {
+      const mockResponseData = {
+        ':type': 'multi-sheet',
+        sheet1: {
+          data: [
+            {
+              id: 1, name: 'John', status: 'active',
+            },
+            {
+              id: 2, name: 'Jane', status: 'inactive',
+            },
+          ],
+        },
+        sheet2: {
+          data: [
+            {
+              id: 3, name: 'Bob', status: 'active',
+            },
+          ],
+        },
+        sheet3: {
+          data: [
+            {
+              id: 4, name: 'Alice', status: 'pending',
+            },
+          ],
+        },
+      };
+
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.data = {
+        sheets: ['sheet1', 'sheet3'],
+      };
+
+      const result = await controller.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should only include sheet1 and sheet3, excluding sheet2
+      expect(responseBody[':type']).to.equal('multi-sheet');
+      expect(responseBody.sheet1).to.exist;
+      expect(responseBody.sheet3).to.exist;
+      expect(responseBody.sheet2).to.not.exist;
+
+      expect(responseBody.sheet1.data).to.deep.equal([
+        {
+          id: 1, name: 'John', status: 'active',
+        },
+        {
+          id: 2, name: 'Jane', status: 'inactive',
+        },
+      ]);
+      expect(responseBody.sheet3.data).to.deep.equal([
+        {
+          id: 4, name: 'Alice', status: 'pending',
+        },
+      ]);
     });
 
     it('should handle sheetType parameter in URL construction', async () => {

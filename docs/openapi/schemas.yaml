@@ -3575,6 +3575,10 @@ LlmoSheetDataQuery:
   type: object
   description: Query parameters for LLMO sheet data
   properties:
+    sheets:
+      description: Sheets to include from the data
+      type: object
+      additionalProperties: true
     filters:
       description: Filters to apply to the data
       type: object
