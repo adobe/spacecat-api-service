@@ -367,7 +367,7 @@ function LlmoController(ctx) {
 
       // Apply mappings using external configuration
       let mappingDuration = 0;
-      log.info('Looking for mapping for dataSource: ', dataSource, 'mappings: ', LLMO_SHEET_MAPPINGS);
+      log.info(`Looking for mapping for dataSource: ${dataSource} mappings ${JSON.stringify(LLMO_SHEET_MAPPINGS)}`);
       const mapping = LLMO_SHEET_MAPPINGS.find((m) => dataSource.toLowerCase().includes(m.pattern));
       if (mapping) {
         const mappingStartTime = Date.now();
