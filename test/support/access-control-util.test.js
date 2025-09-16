@@ -19,6 +19,7 @@ import {
   TrialUser as TrialUserModel,
   OrganizationIdentityProvider as OrganizationIdentityProviderModel,
 } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -560,6 +561,7 @@ describe('Access Control Util', () => {
     let mockIdentityProvider;
     let mockSiteEnrollment;
     let mockAuthInfo;
+    let mockTierClient;
 
     beforeEach(() => {
       // Mock the constant calls directly
@@ -582,6 +584,7 @@ describe('Access Control Util', () => {
         getId: () => 'org-123',
         getImsOrgId: () => 'org-123',
       };
+      Object.setPrototypeOf(mockOrg, Organization.prototype);
 
       mockEntitlement = {
         findByOrganizationIdAndProductCode: sinon.stub(),
@@ -601,6 +604,13 @@ describe('Access Control Util', () => {
         allBySiteId: sinon.stub(),
       };
 
+      // Mock TierClient
+      mockTierClient = {
+        checkValidEntitlement: sinon.stub(),
+      };
+      sandbox.stub(TierClient, 'createForOrg').returns(mockTierClient);
+      sandbox.stub(TierClient, 'createForSite').resolves(mockTierClient);
+
       mockAuthInfo = {
         getType: () => 'jwt',
         isAdmin: () => false,
@@ -609,7 +619,6 @@ describe('Access Control Util', () => {
         hasScope: () => true,
         getProfile: sinon.stub().returns({
           trial_email: 'trial@example.com',
-          provider: 'GOOGLE',
           email: 'user@example.com',
           first_name: 'John',
           last_name: 'Doe',
@@ -643,13 +652,13 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
     });
 
     it('should throw error when entitlement is missing for organization', async () => {
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves([]);
+      mockTierClient.checkValidEntitlement.resolves({});
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo'))
         .to.be.rejectedWith('Missing entitlement for organization');
@@ -661,7 +670,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'other_product',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       // The production code doesn't validate product code mismatch, so this should pass
       await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
@@ -673,7 +682,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => undefined,
       }; // missing tier
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo'))
         .to.be.rejectedWith('[Error] Entitlement tier is not set for llmo');
@@ -685,23 +694,17 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      const siteEnrollment = {
+        getId: () => 'site-enrollment-123',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement, siteEnrollment });
 
       const mockSite = {
         getId: () => 'site-123',
       };
-
-      const mockSiteEnrollments = [
-        {
-          getEntitlementId: () => 'entitlement-123',
-        },
-      ];
-
-      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+      Object.setPrototypeOf(mockSite, Site.prototype);
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo')).to.not.be.rejected;
-
-      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
     });
 
     it('should throw error when site is enrolled for different product code', async () => {
@@ -710,24 +713,16 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      // TierClient returns no site enrollment for different product
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       const mockSite = {
         getId: () => 'site-123',
       };
-
-      const mockSiteEnrollments = [
-        {
-          getEntitlementId: () => 'different-entitlement-id',
-        },
-      ];
-
-      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+      Object.setPrototypeOf(mockSite, Site.prototype);
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
-        .to.be.rejectedWith('[Error] Valid site enrollment not found');
-
-      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+        .to.be.rejectedWith('Missing enrollment for site');
     });
 
     it('should proceed when site has no entitlement (null)', async () => {
@@ -736,20 +731,16 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      // TierClient returns no site enrollment
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       const mockSite = {
         getId: () => 'site-123',
       };
-
-      const mockSiteEnrollments = [];
-
-      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+      Object.setPrototypeOf(mockSite, Site.prototype);
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
-        .to.be.rejectedWith('[Error] Valid site enrollment not found');
-
-      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+        .to.be.rejectedWith('Missing enrollment for site');
     });
 
     it('should proceed when site has no entitlement (undefined)', async () => {
@@ -758,20 +749,16 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      // TierClient returns no site enrollment
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       const mockSite = {
         getId: () => 'site-123',
       };
-
-      const mockSiteEnrollments = [];
-
-      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+      Object.setPrototypeOf(mockSite, Site.prototype);
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
-        .to.be.rejectedWith('[Error] Valid site enrollment not found');
-
-      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+        .to.be.rejectedWith('Missing enrollment for site');
     });
 
     it('should not call site enrollment validation when site is not provided', async () => {
@@ -780,7 +767,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
 
@@ -793,7 +780,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'free_trial',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       mockTrialUser.findByEmailId.resolves(null);
 
@@ -813,7 +800,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: 'John',
         lastName: 'Doe',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -827,7 +813,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'free_trial',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       mockTrialUser.findByEmailId.resolves(null);
 
@@ -841,7 +827,6 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         first_name: null,
         last_name: null,
-        provider: 'GOOGLE',
         email: 'user@example.com',
       };
       mockAuthInfo.getProfile.returns(mockProfile);
@@ -852,7 +837,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: '-',
         lastName: '-',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -866,7 +850,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'free_trial',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       mockTrialUser.findByEmailId.resolves(null);
 
@@ -880,7 +864,6 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         first_name: undefined,
         last_name: undefined,
-        provider: 'GOOGLE',
         email: 'user@example.com',
       };
       mockAuthInfo.getProfile.returns(mockProfile);
@@ -891,7 +874,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: '-',
         lastName: '-',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -905,7 +887,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'free_trial',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       mockTrialUser.findByEmailId.resolves(null);
 
@@ -919,7 +901,6 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         first_name: '',
         last_name: '',
-        provider: 'GOOGLE',
         email: 'user@example.com',
       };
       mockAuthInfo.getProfile.returns(mockProfile);
@@ -930,7 +911,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: '-',
         lastName: '-',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -944,7 +924,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'free_trial',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       mockTrialUser.findByEmailId.resolves(null);
 
@@ -958,7 +938,6 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         first_name: 'John',
         last_name: null,
-        provider: 'GOOGLE',
         email: 'user@example.com',
       };
       mockAuthInfo.getProfile.returns(mockProfile);
@@ -969,7 +948,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: 'John',
         lastName: '-',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -983,7 +961,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'free_trial',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       mockTrialUser.findByEmailId.resolves({ id: 'existing-user' });
 
@@ -997,101 +975,13 @@ describe('Access Control Util', () => {
       expect(mockTrialUser.create).to.not.have.been.called;
     });
 
-    it('should throw error when IDP provider is not supported for free trial', async () => {
-      const entitlement = {
-        getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
-      };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
-
-      mockTrialUser.findByEmailId.resolves(null);
-
-      // Test with unsupported provider
-      const testContext = {
-        log: {
-          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
-        },
-        pathInfo: {
-          headers: { 'x-product': 'llmo' },
-        },
-        attributes: {
-          authInfo: {
-            getType: () => 'jwt',
-            isAdmin: () => false,
-            getScopes: () => [],
-            hasOrganization: () => true,
-            hasScope: () => true,
-            getProfile: () => ({
-              trial_email: 'trial@example.com',
-              provider: 'unsupported_provider',
-              email: 'user@example.com',
-            }),
-          },
-        },
-        dataAccess: {
-          Entitlement: mockEntitlement,
-          TrialUser: mockTrialUser,
-          OrganizationIdentityProvider: mockIdentityProvider,
-          SiteEnrollment: mockSiteEnrollment,
-        },
-      };
-
-      const testUtil = AccessControlUtil.fromContext(testContext);
-
-      await expect(testUtil.validateEntitlement(mockOrg, null, 'llmo'))
-        .to.be.rejectedWith('[Error] IDP not supported');
-    });
-
-    it('should create identity provider when it does not exist for supported provider', async () => {
-      const entitlement = {
-        getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
-      };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
-
-      mockTrialUser.findByEmailId.resolves(null);
-
-      // No existing identity provider for this organization
-      mockIdentityProvider.allByOrganizationId.resolves([]);
-
-      // Mock the create method to return a new identity provider
-      const newIdentityProvider = { provider: 'GOOGLE' };
-      mockIdentityProvider.create.resolves(newIdentityProvider);
-
-      // Mock the trial user create method
-      mockTrialUser.create.resolves({ id: 'new-trial-user' });
-
-      await util.validateEntitlement(mockOrg, null, 'llmo');
-
-      // Verify that create was called with the correct parameters
-      expect(mockIdentityProvider.create).to.have.been.calledWith({
-        organizationId: 'org-123',
-        provider: 'GOOGLE',
-        externalId: 'GOOGLE',
-      });
-
-      // Verify that trial user was created with the new identity provider
-      expect(mockTrialUser.create).to.have.been.calledWith({
-        emailId: 'trial@example.com',
-        firstName: 'John',
-        lastName: 'Doe',
-        provider: 'GOOGLE',
-        organizationId: 'org-123',
-        status: 'registered',
-        externalUserId: 'user@example.com',
-        lastSeenAt: sinon.match.string,
-      });
-    });
-
     it('should throw error when x-product header does not match productCode', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       // Create a mock organization that works with instanceof check
       const mockOrgInstance = {
@@ -1118,7 +1008,6 @@ describe('Access Control Util', () => {
             hasScope: () => true,
             getProfile: () => ({
               trial_email: 'trial@example.com',
-              provider: 'GOOGLE',
               email: 'user@example.com',
               first_name: 'John',
               last_name: 'Doe',
@@ -1145,7 +1034,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       // Create a mock organization that works with instanceof check
       const mockOrgInstance = {
@@ -1172,7 +1061,6 @@ describe('Access Control Util', () => {
             hasScope: () => true,
             getProfile: () => ({
               trial_email: 'trial@example.com',
-              provider: 'GOOGLE',
               email: 'user@example.com',
               first_name: 'John',
               last_name: 'Doe',
@@ -1200,6 +1088,7 @@ describe('Access Control Util', () => {
     let mockTrialUser;
     let mockIdentityProvider;
     let mockSiteEnrollment;
+    let mockTierClient;
 
     beforeEach(() => {
       mockOrg = {
@@ -1224,6 +1113,13 @@ describe('Access Control Util', () => {
         allBySiteId: sinon.stub(),
       };
 
+      // Mock TierClient
+      mockTierClient = {
+        checkValidEntitlement: sinon.stub(),
+      };
+      sandbox.stub(TierClient, 'createForOrg').returns(mockTierClient);
+      sandbox.stub(TierClient, 'createForSite').resolves(mockTierClient);
+
       const testContext = {
         log: {
           info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
@@ -1240,7 +1136,6 @@ describe('Access Control Util', () => {
             hasScope: () => true,
             getProfile: () => ({
               trial_email: 'trial@example.com',
-              provider: 'GOOGLE',
               email: 'user@example.com',
             }),
           },
@@ -1268,7 +1163,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       // Mock site enrollment to return empty array (no site entitlement)
       mockSiteEnrollment.allBySiteId.resolves([]);
@@ -1276,8 +1171,7 @@ describe('Access Control Util', () => {
       const result = await util.hasAccess(site, '', 'llmo');
       expect(result).to.be.false;
 
-      expect(mockEntitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
-      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+      expect(mockTierClient.checkValidEntitlement).to.have.been.called;
     });
 
     it('should not call validateEntitlement when productCode is empty', async () => {
@@ -1288,7 +1182,7 @@ describe('Access Control Util', () => {
 
       const result = await util.hasAccess(site, '', '');
 
-      expect(mockEntitlement.findByOrganizationIdAndProductCode).to.not.have.been.called;
+      expect(mockTierClient.checkValidEntitlement).to.not.have.been.called;
       expect(result).to.be.true;
     });
 
@@ -1299,7 +1193,7 @@ describe('Access Control Util', () => {
       };
       Object.setPrototypeOf(site, Site.prototype);
 
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves([]);
+      mockTierClient.checkValidEntitlement.resolves({});
 
       const result = await util.hasAccess(site, '', 'llmo');
       expect(result).to.be.false;
@@ -1317,21 +1211,15 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
-
-      const mockSiteEnrollments = [
-        {
-          getEntitlementId: () => 'entitlement-123',
-        },
-      ];
-
-      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+      const siteEnrollment = {
+        getId: () => 'site-enrollment-123',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement, siteEnrollment });
 
       const result = await util.hasAccess(site, '', 'llmo');
 
       expect(result).to.be.true;
-      expect(mockEntitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
-      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+      expect(mockTierClient.checkValidEntitlement).to.have.been.called;
     });
 
     it('should throw error when site enrollment validation fails in hasAccess', async () => {
@@ -1346,7 +1234,7 @@ describe('Access Control Util', () => {
         getProductCode: () => 'llmo',
         getTier: () => 'paid',
       };
-      mockEntitlement.findByOrganizationIdAndProductCode.resolves(entitlement);
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       const mockSiteEnrollments = [
         {
@@ -1359,8 +1247,7 @@ describe('Access Control Util', () => {
       const result = await util.hasAccess(site, '', 'llmo');
       expect(result).to.be.false;
 
-      expect(mockEntitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('org-123', 'llmo');
-      expect(mockSiteEnrollment.allBySiteId).to.have.been.calledWith('site-123');
+      expect(mockTierClient.checkValidEntitlement).to.have.been.called;
     });
   });
 
