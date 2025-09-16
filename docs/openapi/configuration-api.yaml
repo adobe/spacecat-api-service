@@ -46,3 +46,94 @@ configuration:
         $ref: './responses.yaml#/404-configuration-not-found-with-version'
       '500':
         $ref: './responses.yaml#/500'
+sandbox-configuration:
+  patch:
+    tags:
+      - configuration
+      - sandbox
+    summary: Update sandbox audit configurations
+    description: |
+      Updates the configuration settings for sandbox audit types. This endpoint allows
+      administrators to enable/disable specific audit types for sandbox sites and set
+      their expiration times. Only the audit types provided in the request will be updated.
+    operationId: updateSandboxConfiguration
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SandboxConfigurationRequest'
+          examples:
+            update-multiple:
+              summary: Update multiple audit types
+              value:
+                sandboxConfigs:
+                  "meta-tags":
+                    cooldownHours: "3"
+                    enabled: true
+                  "alt-text":
+                    cooldownHours: "6"
+                    enabled: false
+            enable-single:
+              summary: Enable a single audit type
+              value:
+                sandboxConfigs:
+                  "meta-tags":
+                    cooldownHours: "3"
+                    enabled: true
+    responses:
+      '200':
+        description: Sandbox configurations updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SandboxConfigurationResponse'
+            examples:
+              success:
+                summary: Successful update of multiple configurations
+                value:
+                  message: "Sandbox configurations updated successfully"
+                  updatedConfigs:
+                    "meta-tags":
+                      cooldownHours: "3"
+                      enabled: true
+                    "alt-text":
+                      cooldownHours: "6"
+                      enabled: false
+                  totalUpdated: 2
+      '400':
+        description: Bad request - invalid configuration data
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "sandboxConfigs object is required"
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Forbidden - admin access required
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Only admins can update sandbox configurations"
+      '404':
+        description: Configuration not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Configuration not found"
+      '500':
+        $ref: './responses.yaml#/500'

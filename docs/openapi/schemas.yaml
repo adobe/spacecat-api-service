@@ -1143,6 +1143,9 @@ Configuration:
           type: string
           format: url
           description: The SQS queue name for report jobs
+    sandboxAudits:
+      $ref: '#/SandboxAuditsConfig'
+      description: Configuration settings for sandbox audit types including expiration times and enabled status
 Job:
   type: object
   properties:
@@ -3508,6 +3511,67 @@ LlmoConfig:
   additionalProperties: false
 
 # Sandbox Audit API Schemas
+SandboxAuditConfig:
+  type: object
+  description: Configuration for a single sandbox audit type
+  required:
+    - cooldownHours
+    - enabled
+  properties:
+    cooldownHours:
+      type: string
+      description: Hours to wait before allowing the next audit of this type on sandbox sites
+      example: "3"
+    enabled:
+      type: boolean
+      description: Whether this audit type is enabled for sandbox sites
+      example: true
+  additionalProperties: false
+
+SandboxAuditsConfig:
+  type: object
+  description: Configuration mapping for all sandbox audit types
+  additionalProperties:
+    $ref: '#/SandboxAuditConfig'
+  example:
+    "meta-tags":
+      cooldownHours: "3"
+      enabled: true
+    "alt-text":
+      cooldownHours: "6" 
+      enabled: false
+
+SandboxConfigurationRequest:
+  type: object
+  description: Request payload for updating sandbox configuration
+  required:
+    - sandboxConfigs
+  properties:
+    sandboxConfigs:
+      $ref: '#/SandboxAuditsConfig'
+      description: Sandbox audit configurations to update
+  additionalProperties: false
+
+SandboxConfigurationResponse:
+  type: object
+  description: Response for sandbox configuration update operation
+  required:
+    - message
+    - updatedConfigs
+    - totalUpdated
+  properties:
+    message:
+      type: string
+      description: Human-readable confirmation message
+      example: "Sandbox configurations updated successfully"
+    updatedConfigs:
+      $ref: '#/SandboxAuditsConfig'
+      description: The configurations that were updated
+    totalUpdated:
+      type: integer
+      description: Number of audit types that were updated
+      example: 2
+
 SandboxAuditType:
   type: string
   description: Supported audit types for sandbox environments

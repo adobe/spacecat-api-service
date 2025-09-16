@@ -88,14 +88,14 @@ describe('Configurations Controller', () => {
       }),
       getEnabledSandboxAudits: () => ['cwv', 'meta-tags'],
       getSandboxAuditConfig: (auditType) => {
-        if (auditType === 'cwv') return { expire: '10' };
-        if (auditType === 'meta-tags') return { expire: '15' };
+        if (auditType === 'cwv') return { cooldownHours: '10' };
+        if (auditType === 'meta-tags') return { cooldownHours: '15' };
         return null;
       },
       getSandboxAudits: () => ({
         enabledAudits: {
-          cwv: { expire: '10' },
-          'meta-tags': { expire: '15' },
+          cwv: { cooldownHours: '10' },
+          'meta-tags': { cooldownHours: '15' },
         },
       }),
       setSandboxAudits: () => {},
@@ -103,8 +103,8 @@ describe('Configurations Controller', () => {
       state: {
         sandboxAudits: {
           enabledAudits: {
-            cwv: { expire: '10' },
-            'meta-tags': { expire: '15' },
+            cwv: { cooldownHours: '10' },
+            'meta-tags': { cooldownHours: '15' },
           },
         },
       },
@@ -296,7 +296,7 @@ describe('Configurations Controller', () => {
       context.attributes.authInfo.withProfile({ is_admin: false });
 
       const result = await configurationsController.updateSandboxConfig({
-        data: { sandboxConfigs: { cwv: { expire: '10' } } },
+        data: { sandboxConfigs: { cwv: { cooldownHours: '10' } } },
       });
       const error = await result.json();
 
@@ -343,7 +343,7 @@ describe('Configurations Controller', () => {
       mockDataAccess.Configuration.findLatest.resolves(null);
 
       const result = await configurationsController.updateSandboxConfig({
-        data: { sandboxConfigs: { cwv: { enabled: true, expire: '5' } } },
+        data: { sandboxConfigs: { cwv: { enabled: true, cooldownHours: '5' } } },
       });
       const error = await result.json();
 
@@ -354,8 +354,8 @@ describe('Configurations Controller', () => {
     it('should update sandbox configurations successfully', async () => {
       context.attributes.authInfo.withProfile({ is_admin: true });
       const sandboxConfigs = {
-        cwv: { enabled: true, expire: '5' },
-        'meta-tags': { enabled: false, expire: '10' },
+        cwv: { enabled: true, cooldownHours: '5' },
+        'meta-tags': { enabled: false, cooldownHours: '10' },
       };
 
       // Ensure the mock save method resolves successfully
@@ -371,8 +371,8 @@ describe('Configurations Controller', () => {
       expect(response).to.have.property('updatedConfigs');
       expect(response.updatedConfigs).to.deep.equal(sandboxConfigs);
       expect(response).to.have.property('totalUpdated', 2);
-      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('cwv', { enabled: true, expire: '5' });
-      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('meta-tags', { enabled: false, expire: '10' });
+      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('cwv', { enabled: true, cooldownHours: '5' });
+      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('meta-tags', { enabled: false, cooldownHours: '10' });
       expect(mockConfig.save).to.have.been.called;
     });
 
@@ -381,7 +381,7 @@ describe('Configurations Controller', () => {
       mockConfig.save.rejects(new Error('Update failed'));
 
       const result = await configurationsController.updateSandboxConfig({
-        data: { sandboxConfigs: { cwv: { enabled: true, expire: '5' } } },
+        data: { sandboxConfigs: { cwv: { enabled: true, cooldownHours: '5' } } },
       });
       const error = await result.json();
 
@@ -394,7 +394,7 @@ describe('Configurations Controller', () => {
       mockConfig.save.rejects(new Error('Save failed'));
 
       const result = await configurationsController.updateSandboxConfig({
-        data: { sandboxConfigs: { cwv: { enabled: true, expire: '5' } } },
+        data: { sandboxConfigs: { cwv: { enabled: true, cooldownHours: '5' } } },
       });
       const error = await result.json();
 
@@ -417,13 +417,13 @@ describe('Configurations Controller', () => {
       configurationsController = ConfigurationsController(context);
 
       const result = await configurationsController.updateSandboxConfig({
-        data: { sandboxConfigs: { cwv: { enabled: true, expire: '5' } } },
+        data: { sandboxConfigs: { cwv: { enabled: true, cooldownHours: '5' } } },
       });
       const response = await result.json();
 
       // Should succeed with null sandbox audits
       expect(result.status).to.equal(200);
-      expect(configWithNullSandboxAudits.updateSandboxAuditConfig).to.have.been.calledWith('cwv', { enabled: true, expire: '5' });
+      expect(configWithNullSandboxAudits.updateSandboxAuditConfig).to.have.been.calledWith('cwv', { enabled: true, cooldownHours: '5' });
       expect(configWithNullSandboxAudits.save).to.have.been.called;
       expect(response.message).to.equal('Sandbox configurations updated successfully');
     });
@@ -433,11 +433,11 @@ describe('Configurations Controller', () => {
         data: {
           sandboxConfigs: {
             'alt-text': {
-              expire: '3',
+              cooldownHours: '3',
               enabled: true,
             },
             'meta-tags': {
-              expire: '1',
+              cooldownHours: '1',
               enabled: true,
             },
           },
@@ -445,8 +445,8 @@ describe('Configurations Controller', () => {
       });
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('alt-text', { expire: '3', enabled: true });
-      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('meta-tags', { expire: '1', enabled: true });
+      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('alt-text', { cooldownHours: '3', enabled: true });
+      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('meta-tags', { cooldownHours: '1', enabled: true });
     });
   });
 });
