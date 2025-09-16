@@ -22,6 +22,11 @@ import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
+/**
+ * List of available checks.
+ * Should not be changed as it would break existing clients.
+ * @type {string}
+ */
 export const AUDIT_CANONICAL = 'canonical';
 export const AUDIT_LINKS = 'links';
 export const AUDIT_METATAGS = 'metatags';
