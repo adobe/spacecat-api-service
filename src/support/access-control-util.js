@@ -14,7 +14,6 @@ import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
 import {
   Site, Organization, TrialUser as TrialUserModel,
   Entitlement as EntitlementModel,
-  OrganizationIdentityProvider as OrganizationIdentityProviderModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
@@ -117,32 +116,11 @@ export default class AccessControlUtil {
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
-      // First check if the profile provider is one of the supported provider types
-      const supportedProviders = Object.values(OrganizationIdentityProviderModel.PROVIDER_TYPES);
-      if (!supportedProviders.includes(profile.provider)) {
-        throw new Error('[Error] IDP not supported');
-      }
-
-      // Check if the organization already has an identity provider for this provider
-      const identityProviders = await this.IdentityProvider.allByOrganizationId(org.getId());
-      let providerId = identityProviders.find((idp) => idp.getProvider() === profile.provider);
-
-      // If no identity provider exists for this provider, create one
-      if (!providerId) {
-        providerId = await this.IdentityProvider.create({
-          organizationId: org.getId(),
-          provider: profile.provider,
-          // TODO: it should IDP subject/identifier not sure at the moment
-          externalId: profile.provider,
-        });
-      }
-
       if (!trialUser) {
         await this.TrialUser.create({
           emailId: profile.trial_email,
           firstName: profile.first_name || '-',
           lastName: profile.last_name || '-',
-          provider: providerId.provider,
           organizationId: org.getId(),
           status: TrialUserModel.STATUSES.REGISTERED,
           externalUserId: profile.email,

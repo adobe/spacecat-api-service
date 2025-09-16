@@ -619,7 +619,6 @@ describe('Access Control Util', () => {
         hasScope: () => true,
         getProfile: sinon.stub().returns({
           trial_email: 'trial@example.com',
-          provider: 'GOOGLE',
           email: 'user@example.com',
           first_name: 'John',
           last_name: 'Doe',
@@ -801,7 +800,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: 'John',
         lastName: 'Doe',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -829,7 +827,6 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         first_name: null,
         last_name: null,
-        provider: 'GOOGLE',
         email: 'user@example.com',
       };
       mockAuthInfo.getProfile.returns(mockProfile);
@@ -840,7 +837,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: '-',
         lastName: '-',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -868,7 +864,6 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         first_name: undefined,
         last_name: undefined,
-        provider: 'GOOGLE',
         email: 'user@example.com',
       };
       mockAuthInfo.getProfile.returns(mockProfile);
@@ -879,7 +874,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: '-',
         lastName: '-',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -907,7 +901,6 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         first_name: '',
         last_name: '',
-        provider: 'GOOGLE',
         email: 'user@example.com',
       };
       mockAuthInfo.getProfile.returns(mockProfile);
@@ -918,7 +911,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: '-',
         lastName: '-',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -946,7 +938,6 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         first_name: 'John',
         last_name: null,
-        provider: 'GOOGLE',
         email: 'user@example.com',
       };
       mockAuthInfo.getProfile.returns(mockProfile);
@@ -957,7 +948,6 @@ describe('Access Control Util', () => {
         emailId: 'trial@example.com',
         firstName: 'John',
         lastName: '-',
-        provider: 'GOOGLE',
         organizationId: 'org-123',
         status: 'registered',
         externalUserId: 'user@example.com',
@@ -983,94 +973,6 @@ describe('Access Control Util', () => {
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
       expect(mockTrialUser.create).to.not.have.been.called;
-    });
-
-    it('should throw error when IDP provider is not supported for free trial', async () => {
-      const entitlement = {
-        getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
-      };
-      mockTierClient.checkValidEntitlement.resolves({ entitlement });
-
-      mockTrialUser.findByEmailId.resolves(null);
-
-      // Test with unsupported provider
-      const testContext = {
-        log: {
-          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
-        },
-        pathInfo: {
-          headers: { 'x-product': 'llmo' },
-        },
-        attributes: {
-          authInfo: {
-            getType: () => 'jwt',
-            isAdmin: () => false,
-            getScopes: () => [],
-            hasOrganization: () => true,
-            hasScope: () => true,
-            getProfile: () => ({
-              trial_email: 'trial@example.com',
-              provider: 'unsupported_provider',
-              email: 'user@example.com',
-            }),
-          },
-        },
-        dataAccess: {
-          Entitlement: mockEntitlement,
-          TrialUser: mockTrialUser,
-          OrganizationIdentityProvider: mockIdentityProvider,
-          SiteEnrollment: mockSiteEnrollment,
-        },
-      };
-
-      const testUtil = AccessControlUtil.fromContext(testContext);
-
-      await expect(testUtil.validateEntitlement(mockOrg, null, 'llmo'))
-        .to.be.rejectedWith('[Error] IDP not supported');
-    });
-
-    it('should create identity provider when it does not exist for supported provider', async () => {
-      const entitlement = {
-        getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
-      };
-      mockTierClient.checkValidEntitlement.resolves({ entitlement });
-
-      mockTrialUser.findByEmailId.resolves(null);
-
-      // No existing identity provider for this organization
-      mockIdentityProvider.allByOrganizationId.resolves([]);
-
-      // Mock the create method to return a new identity provider
-      const newIdentityProvider = { provider: 'GOOGLE' };
-      mockIdentityProvider.create.resolves(newIdentityProvider);
-
-      // Mock the trial user create method
-      mockTrialUser.create.resolves({ id: 'new-trial-user' });
-
-      await util.validateEntitlement(mockOrg, null, 'llmo');
-
-      // Verify that create was called with the correct parameters
-      expect(mockIdentityProvider.create).to.have.been.calledWith({
-        organizationId: 'org-123',
-        provider: 'GOOGLE',
-        externalId: 'GOOGLE',
-      });
-
-      // Verify that trial user was created with the new identity provider
-      expect(mockTrialUser.create).to.have.been.calledWith({
-        emailId: 'trial@example.com',
-        firstName: 'John',
-        lastName: 'Doe',
-        provider: 'GOOGLE',
-        organizationId: 'org-123',
-        status: 'registered',
-        externalUserId: 'user@example.com',
-        lastSeenAt: sinon.match.string,
-      });
     });
 
     it('should throw error when x-product header does not match productCode', async () => {
@@ -1106,7 +1008,6 @@ describe('Access Control Util', () => {
             hasScope: () => true,
             getProfile: () => ({
               trial_email: 'trial@example.com',
-              provider: 'GOOGLE',
               email: 'user@example.com',
               first_name: 'John',
               last_name: 'Doe',
@@ -1160,7 +1061,6 @@ describe('Access Control Util', () => {
             hasScope: () => true,
             getProfile: () => ({
               trial_email: 'trial@example.com',
-              provider: 'GOOGLE',
               email: 'user@example.com',
               first_name: 'John',
               last_name: 'Doe',
@@ -1236,7 +1136,6 @@ describe('Access Control Util', () => {
             hasScope: () => true,
             getProfile: () => ({
               trial_email: 'trial@example.com',
-              provider: 'GOOGLE',
               email: 'user@example.com',
             }),
           },
