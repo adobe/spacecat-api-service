@@ -24,6 +24,7 @@ describe('LlmoOnboardCommand', () => {
   let command;
   let mockContext;
   let mockLog;
+  let mockDataAccess;
   let slackContext;
 
   beforeEach(() => {
@@ -33,9 +34,17 @@ describe('LlmoOnboardCommand', () => {
       error: sinon.stub(),
     };
 
+    // Create mock data access
+    mockDataAccess = {
+      Site: {
+        findByBaseURL: sinon.stub(),
+      },
+    };
+
     // Create mock context
     mockContext = {
       log: mockLog,
+      dataAccess: mockDataAccess,
     };
 
     // Create slack context
@@ -82,7 +91,10 @@ describe('LlmoOnboardCommand', () => {
       );
     });
 
-    it('should show onboarding button for valid site URL', async () => {
+    it('should show onboarding button for new site URL', async () => {
+      // Mock Site.findByBaseURL to return null (site doesn't exist)
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+
       await command.handleExecution(['https://example.com'], slackContext);
 
       expect(slackContext.say).to.have.been.calledOnce;
@@ -92,6 +104,92 @@ describe('LlmoOnboardCommand', () => {
       expect(message).to.have.property('thread_ts', '1234567890.123456');
 
       // Check for the section block with onboarding text
+      const sectionBlock = message.blocks.find((block) => block.type === 'section');
+      expect(sectionBlock).to.exist;
+      expect(sectionBlock.text.text).to.include('LLMO Onboarding');
+
+      // Check for the actions block with the button
+      const actionsBlock = message.blocks.find((block) => block.type === 'actions');
+      expect(actionsBlock).to.exist;
+      expect(actionsBlock.elements).to.have.length(1);
+
+      const button = actionsBlock.elements[0];
+      expect(button.type).to.equal('button');
+      expect(button.text.text).to.equal('Start Onboarding');
+      expect(button.action_id).to.equal('start_llmo_onboarding');
+      expect(button.value).to.equal('https://example.com');
+      expect(button.style).to.equal('primary');
+    });
+
+    it('should show reonboarding options for existing site with LLMO brand', async () => {
+      // Mock existing site with LLMO brand
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getOrganizationId: sinon.stub().returns('org123'),
+        getConfig: sinon.stub().returns({
+          getLlmoBrand: sinon.stub().returns('Test Brand'),
+        }),
+      };
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      await command.handleExecution(['https://example.com'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledOnce;
+      const message = slackContext.say.getCall(0).args[0];
+
+      expect(message).to.have.property('blocks');
+      expect(message).to.have.property('thread_ts', '1234567890.123456');
+
+      // Check for the section block with reonboarding text
+      const sectionBlock = message.blocks.find((block) => block.type === 'section');
+      expect(sectionBlock).to.exist;
+      expect(sectionBlock.text.text).to.include('Site Already Onboarded');
+      expect(sectionBlock.text.text).to.include('Test Brand');
+
+      // Check for the actions block with two buttons
+      const actionsBlock = message.blocks.find((block) => block.type === 'actions');
+      expect(actionsBlock).to.exist;
+      expect(actionsBlock.elements).to.have.length(2);
+
+      const addEntitlementsButton = actionsBlock.elements[0];
+      expect(addEntitlementsButton.type).to.equal('button');
+      expect(addEntitlementsButton.text.text).to.equal('Add Entitlements');
+      expect(addEntitlementsButton.action_id).to.equal('add_entitlements_action');
+      expect(addEntitlementsButton.style).to.equal('primary');
+
+      const updateOrgButton = actionsBlock.elements[1];
+      expect(updateOrgButton.type).to.equal('button');
+      expect(updateOrgButton.text.text).to.equal('Update IMS Org');
+      expect(updateOrgButton.action_id).to.equal('update_org_action');
+
+      // Check that button values contain the necessary metadata
+      const addEntitlementsValue = JSON.parse(addEntitlementsButton.value);
+      expect(addEntitlementsValue.brandURL).to.equal('https://example.com');
+      expect(addEntitlementsValue.siteId).to.equal('site123');
+      expect(addEntitlementsValue.existingBrand).to.equal('Test Brand');
+
+      const updateOrgValue = JSON.parse(updateOrgButton.value);
+      expect(updateOrgValue.brandURL).to.equal('https://example.com');
+      expect(updateOrgValue.siteId).to.equal('site123');
+      expect(updateOrgValue.currentOrgId).to.equal('org123');
+    });
+
+    it('should show onboarding button for existing site without LLMO brand', async () => {
+      // Mock existing site without LLMO brand
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          getLlmoBrand: sinon.stub().returns(null),
+        }),
+      };
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      await command.handleExecution(['https://example.com'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledOnce;
+      const message = slackContext.say.getCall(0).args[0];
+
+      // Check for the section block with onboarding text for existing site
       const sectionBlock = message.blocks.find((block) => block.type === 'section');
       expect(sectionBlock).to.exist;
       expect(sectionBlock.text.text).to.include('LLMO Onboarding');
