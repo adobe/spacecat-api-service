@@ -67,7 +67,7 @@ import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
-import LlmoController from './controllers/llmo.js';
+import LlmoController from './controllers/llmo/llmo.js';
 import OrganizationIdentityProvidersController from './controllers/organization-identity-providers.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';

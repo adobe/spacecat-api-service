@@ -20,8 +20,8 @@ import {
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import AccessControlUtil from '../support/access-control-util.js';
-import { LLMO_SHEET_MAPPINGS } from '../utils/llmo-mappings.js';
+import AccessControlUtil from '../../support/access-control-util.js';
+import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 

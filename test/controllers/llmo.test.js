@@ -218,7 +218,7 @@ describe('LlmoController', () => {
     tracingFetchStub = sinon.stub();
 
     // Mock the controller with the tracingFetch stub
-    const LlmoController = await esmock('../../src/controllers/llmo.js', {
+    const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: 'test-user-agent',
         tracingFetch: tracingFetchStub,
@@ -652,7 +652,7 @@ describe('LlmoController', () => {
 
     it('should throw error when access is denied', async () => {
       // Create a new controller instance with a mock that denies access
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: 'test-user-agent',
           tracingFetch: tracingFetchStub,
@@ -986,7 +986,7 @@ describe('LlmoController', () => {
 
     it('should throw error when access is denied', async () => {
       // Create a new controller instance with a mock that denies access
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: 'test-user-agent',
           tracingFetch: tracingFetchStub,
@@ -2151,7 +2151,7 @@ describe('LlmoController', () => {
 
     it('should handle access denied errors', async () => {
       // Create a new controller instance with a mock that denies access
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
         '@adobe/spacecat-shared-utils': {
           SPACECAT_USER_AGENT: 'test-user-agent',
           tracingFetch: tracingFetchStub,
