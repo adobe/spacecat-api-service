@@ -181,26 +181,28 @@ describe('onboard-llmo-modal', () => {
     });
 
     // Create TierClient mock with a stable reference that can be reset
+    const mockClientInstance = {
+      createEntitlement: sinon.stub().resolves({
+        entitlement: {
+          getId: () => 'entitlement123',
+          getOrganizationId: () => 'org123',
+          getProductCode: () => 'LLMO',
+          getTier: () => 'FREE_TRIAL',
+        },
+        siteEnrollment: {
+          getId: () => 'enrollment123',
+          getSiteId: () => 'site123',
+          getEntitlementId: () => 'entitlement123',
+        },
+      }),
+    };
+
     tierClientMock = {
-      createForSite: sinon.stub().callsFake(() => ({
-        createEntitlement: sinon.stub().resolves({
-          entitlement: {
-            getId: () => 'entitlement123',
-            getOrganizationId: () => 'org123',
-            getProductCode: () => 'LLMO',
-            getTier: () => 'FREE_TRIAL',
-          },
-          siteEnrollment: {
-            getId: () => 'enrollment123',
-            getSiteId: () => 'site123',
-            getEntitlementId: () => 'entitlement123',
-          },
-        }),
-      })),
+      createForSite: sinon.stub().resolves(mockClientInstance),
     };
 
     // Store the mock instance for easier access in tests
-    mockTierClient = tierClientMock.createForSite();
+    mockTierClient = mockClientInstance;
 
     // Mock the ES modules that can't be stubbed directly
     mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
@@ -261,13 +263,16 @@ describe('onboard-llmo-modal', () => {
       },
     });
 
-    // Configure the createForSite mock to return a fresh instance
-    tierClientMock.createForSite.callsFake(() => ({
+    // Create a fresh mock client instance for each test
+    const freshMockClientInstance = {
       createEntitlement: freshCreateEntitlementStub,
-    }));
+    };
+
+    // Configure the createForSite mock to return a fresh instance
+    tierClientMock.createForSite.resolves(freshMockClientInstance);
 
     // Update mockTierClient reference for easy access in tests
-    mockTierClient = tierClientMock.createForSite();
+    mockTierClient = freshMockClientInstance;
   });
 
   afterEach(() => {
@@ -899,7 +904,6 @@ describe('onboard-llmo-modal', () => {
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
-      expect(slackCtx.say).to.have.been.calledWith('✅ LLMO entitlement and enrollment ready');
     });
 
     it('should skip organization identity provider creation when it already exists', async () => {
@@ -1636,21 +1640,25 @@ example-com:
     it('should successfully add entitlements for a site', async () => {
       const mockBody = {
         user: { id: 'user123', name: 'Test User' },
-        actions: [{
-          value: JSON.stringify({
+        view: {
+          id: 'view123',
+          private_metadata: JSON.stringify({
             brandURL: 'https://example.com',
             siteId: 'site123',
             existingBrand: 'Test Brand',
+            originalChannel: 'channel123',
+            originalThreadTs: 'thread123',
           }),
-        }],
-        channel: { id: 'channel123' },
-        message: { ts: 'thread123' },
+        },
       };
 
       const mockAck = sandbox.stub();
       const mockClient = {
         chat: {
           postMessage: sandbox.stub(),
+        },
+        views: {
+          update: sandbox.stub().resolves(),
         },
       };
 
@@ -1666,37 +1674,33 @@ example-com:
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
       expect(mockAck).to.have.been.called;
-      expect(mockClient.chat.postMessage).to.have.been.calledWith({
-        channel: 'channel123',
-        text: ':gear: Test User is adding missing entitlements for *https://example.com*...',
-        thread_ts: 'thread123',
-      });
-      expect(mockClient.chat.postMessage).to.have.been.calledWith({
-        channel: 'channel123',
-        text: ':white_check_mark: Successfully ensured LLMO entitlements for *https://example.com* (brand: *Test Brand*)',
-        thread_ts: 'thread123',
-      });
+
+      // Check that the function completed successfully by verifying the debug log
       expect(lambdaCtx.log.debug).to.have.been.calledWith('Added entitlements for site site123 (https://example.com) for user user123');
     });
 
     it('should handle errors during entitlement addition', async () => {
       const mockBody = {
         user: { id: 'user123', name: 'Test User' },
-        actions: [{
-          value: JSON.stringify({
+        view: {
+          id: 'view123',
+          private_metadata: JSON.stringify({
             brandURL: 'https://example.com',
             siteId: 'site123',
             existingBrand: 'Test Brand',
+            originalChannel: 'channel123',
+            originalThreadTs: 'thread123',
           }),
-        }],
-        channel: { id: 'channel123' },
-        message: { ts: 'thread123' },
+        },
       };
 
       const mockAck = sandbox.stub();
       const mockClient = {
         chat: {
           postMessage: sandbox.stub(),
+        },
+        views: {
+          update: sandbox.stub().resolves(),
         },
       };
 
@@ -1712,31 +1716,30 @@ example-com:
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
       expect(lambdaCtx.log.error).to.have.been.calledWith('Error adding entitlements:', sinon.match.instanceOf(Error));
-      expect(mockClient.chat.postMessage).to.have.been.calledWith({
-        channel: 'channel123',
-        text: ':x: Failed to add entitlements: Database error',
-        thread_ts: 'thread123',
-      });
     });
 
     it('should handle site not found', async () => {
       const mockBody = {
         user: { id: 'user123', name: 'Test User' },
-        actions: [{
-          value: JSON.stringify({
+        view: {
+          id: 'view123',
+          private_metadata: JSON.stringify({
             brandURL: 'https://example.com',
             siteId: 'site123',
             existingBrand: 'Test Brand',
+            originalChannel: 'channel123',
+            originalThreadTs: 'thread123',
           }),
-        }],
-        channel: { id: 'channel123' },
-        message: { ts: 'thread123' },
+        },
       };
 
       const mockAck = sandbox.stub();
       const mockClient = {
         chat: {
           postMessage: sandbox.stub(),
+        },
+        views: {
+          update: sandbox.stub().resolves(),
         },
       };
 
@@ -1751,6 +1754,8 @@ example-com:
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
       expect(mockAck).to.have.been.called;
+
+      // Check that a chat message was posted for site not found
       expect(mockClient.chat.postMessage).to.have.been.calledWith({
         channel: 'channel123',
         text: ':x: Site not found. Please try again.',
@@ -1763,16 +1768,17 @@ example-com:
     it('should successfully update organization modal', async () => {
       const mockBody = {
         user: { id: 'user123' },
-        actions: [{
-          value: JSON.stringify({
+        view: {
+          id: 'view123',
+          private_metadata: JSON.stringify({
             brandURL: 'https://example.com',
             siteId: 'site123',
             existingBrand: 'Test Brand',
+            currentOrgId: 'org123',
+            originalChannel: 'channel123',
+            originalThreadTs: 'message123',
           }),
-        }],
-        channel: { id: 'channel123' },
-        message: { ts: 'message123' },
-        view: { id: 'view123' },
+        },
       };
 
       const mockAck = sandbox.stub();
@@ -1782,7 +1788,16 @@ example-com:
         },
       };
 
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+      // Mock organization with IMS org ID
+      const mockOrganizationInstance = {
+        getImsOrgId: sandbox.stub().returns('CURRENT123@AdobeOrg'),
+      };
+
+      const mockOrganization = {
+        findById: sandbox.stub().withArgs('org123').resolves(mockOrganizationInstance),
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockOrganization });
 
       const { updateOrgAction } = mockedModule;
       const handler = updateOrgAction(lambdaCtx);
@@ -1791,22 +1806,173 @@ example-com:
 
       expect(mockAck).to.have.been.called;
       expect(mockClient.views.update).to.have.been.called;
+
+      // Check that the modal was updated with the current IMS org ID as placeholder
+      const updateCall = mockClient.views.update.getCall(0);
+      const modalBlocks = updateCall.args[0].view.blocks;
+      const inputBlock = modalBlocks.find((block) => block.type === 'input');
+      expect(inputBlock.element.placeholder.text).to.equal('CURRENT123@AdobeOrg');
+
       expect(lambdaCtx.log.debug).to.have.been.calledWith('User user123 started org update process for site site123 (https://example.com)');
+    });
+
+    it('should use default placeholder when organization is not found', async () => {
+      const mockBody = {
+        user: { id: 'user123' },
+        view: {
+          id: 'view123',
+          private_metadata: JSON.stringify({
+            brandURL: 'https://example.com',
+            siteId: 'site123',
+            existingBrand: 'Test Brand',
+            currentOrgId: 'org123',
+            originalChannel: 'channel123',
+            originalThreadTs: 'message123',
+          }),
+        },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        views: {
+          update: sandbox.stub().resolves(),
+        },
+      };
+
+      // Mock organization lookup to return null (not found)
+      const mockOrganization = {
+        findById: sandbox.stub().withArgs('org123').resolves(null),
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockOrganization });
+
+      const { updateOrgAction } = mockedModule;
+      const handler = updateOrgAction(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockAck).to.have.been.called;
+      expect(mockClient.views.update).to.have.been.called;
+
+      // Check that the modal was updated with the default placeholder
+      const updateCall = mockClient.views.update.getCall(0);
+      const modalBlocks = updateCall.args[0].view.blocks;
+      const inputBlock = modalBlocks.find((block) => block.type === 'input');
+      expect(inputBlock.element.placeholder.text).to.equal('ABC123@AdobeOrg');
+
+      // When organization is not found, no warning is logged (it's a normal case)
+      expect(lambdaCtx.log.warn).to.not.have.been.called;
+    });
+
+    it('should use default placeholder when organization lookup throws error', async () => {
+      const mockBody = {
+        user: { id: 'user123' },
+        view: {
+          id: 'view123',
+          private_metadata: JSON.stringify({
+            brandURL: 'https://example.com',
+            siteId: 'site123',
+            existingBrand: 'Test Brand',
+            currentOrgId: 'org123',
+            originalChannel: 'channel123',
+            originalThreadTs: 'message123',
+          }),
+        },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        views: {
+          update: sandbox.stub().resolves(),
+        },
+      };
+
+      // Mock organization lookup to throw an error
+      const mockOrganization = {
+        findById: sandbox.stub().withArgs('org123').rejects(new Error('Database error')),
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockOrganization });
+
+      const { updateOrgAction } = mockedModule;
+      const handler = updateOrgAction(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockAck).to.have.been.called;
+      expect(mockClient.views.update).to.have.been.called;
+
+      // Check that the modal was updated with the default placeholder
+      const updateCall = mockClient.views.update.getCall(0);
+      const modalBlocks = updateCall.args[0].view.blocks;
+      const inputBlock = modalBlocks.find((block) => block.type === 'input');
+      expect(inputBlock.element.placeholder.text).to.equal('ABC123@AdobeOrg');
+
+      expect(lambdaCtx.log.warn).to.have.been.calledWith('Could not fetch current IMS org ID for organization org123: Database error');
+    });
+
+    it('should use default placeholder when organization has no IMS org ID', async () => {
+      const mockBody = {
+        user: { id: 'user123' },
+        view: {
+          id: 'view123',
+          private_metadata: JSON.stringify({
+            brandURL: 'https://example.com',
+            siteId: 'site123',
+            existingBrand: 'Test Brand',
+            currentOrgId: 'org123',
+            originalChannel: 'channel123',
+            originalThreadTs: 'message123',
+          }),
+        },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        views: {
+          update: sandbox.stub().resolves(),
+        },
+      };
+
+      // Mock organization with no IMS org ID
+      const mockOrganizationInstance = {
+        getImsOrgId: sandbox.stub().returns(null),
+      };
+
+      const mockOrganization = {
+        findById: sandbox.stub().withArgs('org123').resolves(mockOrganizationInstance),
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockOrganization });
+
+      const { updateOrgAction } = mockedModule;
+      const handler = updateOrgAction(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockAck).to.have.been.called;
+      expect(mockClient.views.update).to.have.been.called;
+
+      // Check that the modal was updated with the default placeholder
+      const updateCall = mockClient.views.update.getCall(0);
+      const modalBlocks = updateCall.args[0].view.blocks;
+      const inputBlock = modalBlocks.find((block) => block.type === 'input');
+      expect(inputBlock.element.placeholder.text).to.equal('ABC123@AdobeOrg');
     });
 
     it('should handle errors during modal update', async () => {
       const mockBody = {
         user: { id: 'user123' },
-        actions: [{
-          value: JSON.stringify({
+        view: {
+          id: 'view123',
+          private_metadata: JSON.stringify({
             brandURL: 'https://example.com',
             siteId: 'site123',
             existingBrand: 'Test Brand',
+            originalChannel: 'channel123',
+            originalThreadTs: 'message123',
           }),
-        }],
-        channel: { id: 'channel123' },
-        message: { ts: 'message123' },
-        view: { id: 'view123' },
+        },
       };
 
       const mockAck = sandbox.stub();
@@ -1868,11 +2034,6 @@ example-com:
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
       expect(mockAck).to.have.been.called;
-      expect(mockClient.chat.postMessage).to.have.been.calledWith({
-        channel: 'channel123',
-        text: ':gear: Updating organization and applying entitlements for *https://example.com*...',
-        thread_ts: 'thread123',
-      });
       expect(mockClient.chat.postMessage).to.have.been.calledWith({
         channel: 'channel123',
         text: ':white_check_mark: Successfully updated organization and applied LLMO entitlements for *https://example.com* (brand: *Test Brand*)',
@@ -2025,9 +2186,10 @@ example-com:
       mockSite.getOrganizationId.returns('org123');
 
       // Override the tierClientMock to fail
-      tierClientMock.createForSite.callsFake(() => ({
+      const failingMockClientInstance = {
         createEntitlement: sandbox.stub().rejects(new Error('Tier client error')),
-      }));
+      };
+      tierClientMock.createForSite.resolves(failingMockClientInstance);
 
       const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
       const slackCtx = {
