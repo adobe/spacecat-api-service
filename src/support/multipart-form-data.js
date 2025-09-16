@@ -92,8 +92,14 @@ export function isMultipartFormData(headers) {
  */
 export function multipartFormData(func) {
   return async (request, context) => {
+    const { log = console } = context;
     // Only act on requests which use the multipart/form-data Content-Type
     const { pathInfo: { headers } } = context;
+
+    const contentType = headers['content-type'] || headers['Content-Type'];
+    log.info('[MultipartFormData] contentType', contentType);
+    log.info('[MultipartFormData] isMultipartFormData', isMultipartFormData(headers));
+    log.info('[MultipartFormData] !isObject(context.multipartFormData)', !isObject(context.multipartFormData));
     if (isMultipartFormData(headers) && !isObject(context.multipartFormData)) {
       const {
         MULTIPART_FORM_FILE_COUNT_LIMIT = 5,
@@ -108,7 +114,6 @@ export function multipartFormData(func) {
           MULTIPART_FORM_MAX_FILE_SIZE_MB,
         );
       } catch (e) {
-        const { log = console } = context;
         const message = `Error parsing request body: ${e.message}`;
         log.error(message, e);
         return new Response('', {
