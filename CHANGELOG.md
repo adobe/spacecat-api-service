@@ -1,3 +1,10 @@
+## [1.177.11](https://github.com/adobe/spacecat-api-service/compare/v1.177.10...v1.177.11) (2025-09-16)
+
+
+### Bug Fixes
+
+* **deps:** update dependency jsdom to v27 ([#1251](https://github.com/adobe/spacecat-api-service/issues/1251)) ([ec2d0fd](https://github.com/adobe/spacecat-api-service/commit/ec2d0fdafe07c2ffd2aa5c9b3d139a6b43e9f5d9))
+
 ## [1.177.10](https://github.com/adobe/spacecat-api-service/compare/v1.177.9...v1.177.10) (2025-09-15)
 
 
