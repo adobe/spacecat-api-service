@@ -21,9 +21,6 @@ export const ConfigurationDto = {
    * }}
    */
   toJSON: (configuration) => {
-    // eslint-disable-next-line no-console
-    console.log('[ConfigurationDto] Configuration getSandboxAudits():', configuration.getSandboxAudits());
-
     const result = {
       version: configuration.getVersion(),
       jobs: configuration.getJobs(),

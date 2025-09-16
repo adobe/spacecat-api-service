@@ -28,7 +28,7 @@ function ConfigurationController(ctx) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess, log } = ctx;
+  const { dataAccess } = ctx;
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -37,64 +37,12 @@ function ConfigurationController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Validates sandbox configuration structure and values.
-   * @param {Object} sandboxConfigs - Configuration object to validate.
-   * @returns {string|null} Error message if validation fails, null if valid.
-   */
-  const validateSandboxConfigs = (sandboxConfigs) => {
-    if (!sandboxConfigs || typeof sandboxConfigs !== 'object') {
-      return 'sandboxConfigs object is required';
-    }
-
-    for (const [auditType, auditConfig] of Object.entries(sandboxConfigs)) {
-      // Validate audit type name
-      if (!/^[a-zA-Z0-9-_]+$/.test(auditType)) {
-        return `Invalid audit type "${auditType}": must contain only letters, numbers, hyphens, and underscores`;
-      }
-
-      // Allow null to remove configuration
-      if (auditConfig !== null) {
-        // Validate configuration structure
-        if (typeof auditConfig !== 'object') {
-          return `Configuration for audit type "${auditType}" must be an object or null`;
-        }
-
-        // Validate required fields
-        if (auditConfig.enabled === undefined) {
-          return `"enabled" field is required for audit type "${auditType}"`;
-        }
-
-        if (typeof auditConfig.enabled !== 'boolean') {
-          return `"enabled" for audit type "${auditType}" must be a boolean`;
-        }
-
-        if (auditConfig.expire === undefined) {
-          return `"expire" field is required for audit type "${auditType}"`;
-        }
-
-        // Accept both string and number for expire field
-        if (typeof auditConfig.expire !== 'string' && typeof auditConfig.expire !== 'number') {
-          return `"expire" for audit type "${auditType}" must be a string or number`;
-        }
-
-        // If expire is a number, ensure it's non-negative
-        if (typeof auditConfig.expire === 'number' && auditConfig.expire < 0) {
-          return `"expire" for audit type "${auditType}" must be a non-negative number`;
-        }
-      }
-    }
-
-    return null; // Valid
-  };
-
-  /**
    * Applies sandbox configuration updates to the configuration model.
    * @param {Object} config - Configuration model instance.
    * @param {Object} sandboxConfigs - Sandbox configurations to apply.
    */
   const applySandboxConfigUpdates = (config, sandboxConfigs) => {
     Object.entries(sandboxConfigs).forEach(([auditType, auditConfig]) => {
-      log?.info(`Updating sandbox config for audit type: ${auditType}`, { auditConfig });
       config.updateSandboxAuditConfig(auditType, auditConfig);
     });
   };
@@ -147,12 +95,6 @@ function ConfigurationController(ctx) {
     if (!configuration) {
       return notFound('Configuration not found');
     }
-
-    log?.info('Retrieved latest configuration', {
-      version: configuration.getVersion(),
-      hasSandboxAudits: configuration.hasSandboxAudits(),
-    });
-
     return ok(ConfigurationDto.toJSON(configuration));
   };
 
@@ -168,9 +110,8 @@ function ConfigurationController(ctx) {
 
     const { sandboxConfigs } = context.data || {};
 
-    const validationError = validateSandboxConfigs(sandboxConfigs);
-    if (validationError) {
-      return badRequest(validationError);
+    if (!sandboxConfigs || typeof sandboxConfigs !== 'object') {
+      return badRequest('sandboxConfigs object is required');
     }
 
     try {
@@ -180,18 +121,7 @@ function ConfigurationController(ctx) {
       }
 
       applySandboxConfigUpdates(config, sandboxConfigs);
-
-      log?.info('Saving updated configuration', {
-        sandboxAuditsCount: Object.keys(config.getSandboxAudits() || {}).length,
-        updatedTypes: Object.keys(sandboxConfigs),
-      });
-
       await config.save();
-
-      log?.info('Sandbox configurations updated successfully', {
-        updatedConfigs: Object.keys(sandboxConfigs),
-        totalUpdated: Object.keys(sandboxConfigs).length,
-      });
 
       return ok({
         message: 'Sandbox configurations updated successfully',
@@ -199,11 +129,6 @@ function ConfigurationController(ctx) {
         totalUpdated: Object.keys(sandboxConfigs).length,
       });
     } catch (error) {
-      log?.error('Error updating sandbox configuration', {
-        error: error.message,
-        configCount: Object.keys(sandboxConfigs).length,
-        auditTypes: Object.keys(sandboxConfigs),
-      });
       return badRequest(`Error updating sandbox configuration: ${error.message}`);
     }
   };

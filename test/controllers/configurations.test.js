@@ -428,149 +428,25 @@ describe('Configurations Controller', () => {
       expect(response.message).to.equal('Sandbox configurations updated successfully');
     });
 
-    // Validation tests for the extracted validateSandboxConfigs function
-    describe('validation', () => {
-      it('should validate audit type names with invalid characters', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { 'invalid@type': { expire: '10' } } },
-        });
-        const error = await result.json();
-
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('Invalid audit type "invalid@type"');
-      });
-
-      it('should accept null configurations for removal', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: null } },
-        });
-
-        expect(result.status).to.equal(200);
-        expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('cwv', null);
-      });
-
-      it('should validate configuration structure - non-object', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: 'invalid-string' } },
-        });
-        const error = await result.json();
-
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('Configuration for audit type "cwv" must be an object or null');
-      });
-
-      it('should validate missing enabled field', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: { expire: '5' } } },
-        });
-        const error = await result.json();
-
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('"enabled" field is required for audit type "cwv"');
-      });
-
-      it('should validate enabled field type', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: { enabled: 'not-boolean', expire: '5' } } },
-        });
-        const error = await result.json();
-
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('"enabled" for audit type "cwv" must be a boolean');
-      });
-
-      it('should validate missing expire field', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: { enabled: true } } },
-        });
-        const error = await result.json();
-
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('"expire" field is required for audit type "cwv"');
-      });
-
-      it('should validate expire field type', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: { enabled: true, expire: true } } },
-        });
-        const error = await result.json();
-
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('"expire" for audit type "cwv" must be a string or number');
-      });
-
-      it('should validate negative expire number', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: { enabled: true, expire: -5 } } },
-        });
-        const error = await result.json();
-
-        expect(result.status).to.equal(400);
-        expect(error.message).to.include('"expire" for audit type "cwv" must be a non-negative number');
-      });
-
-      it('should accept valid configuration with required fields', async () => {
-        const validConfig = {
-          enabled: true,
-          expire: '10',
-        };
-
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: validConfig } },
-        });
-
-        expect(result.status).to.equal(200);
-        expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('cwv', validConfig);
-      });
-
-      it('should accept your exact schema format', async () => {
-        const result = await configurationsController.updateSandboxConfig({
-          data: {
-            sandboxConfigs: {
-              'alt-text': {
-                expire: '3',
-                enabled: true,
-              },
-              'meta-tags': {
-                expire: '1',
-                enabled: true,
-              },
+    it('should accept your exact schema format', async () => {
+      const result = await configurationsController.updateSandboxConfig({
+        data: {
+          sandboxConfigs: {
+            'alt-text': {
+              expire: '3',
+              enabled: true,
+            },
+            'meta-tags': {
+              expire: '1',
+              enabled: true,
             },
           },
-        });
-
-        expect(result.status).to.equal(200);
-        expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('alt-text', { expire: '3', enabled: true });
-        expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('meta-tags', { expire: '1', enabled: true });
+        },
       });
 
-      it('should accept expire as number', async () => {
-        const validConfig = {
-          enabled: false,
-          expire: 5,
-        };
-
-        const result = await configurationsController.updateSandboxConfig({
-          data: { sandboxConfigs: { cwv: validConfig } },
-        });
-
-        expect(result.status).to.equal(200);
-        expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('cwv', validConfig);
-      });
-    });
-
-    // Tests for extracted applySandboxConfigUpdates function
-    it('should log configuration updates', async () => {
-      context.attributes.authInfo.withProfile({ is_admin: true });
-      const sandboxConfigs = { cwv: { enabled: true, expire: '5' } };
-
-      await configurationsController.updateSandboxConfig({
-        data: { sandboxConfigs },
-      });
-
-      // Verify structured logging is used
-      expect(context.log.info).to.have.been.called;
-      expect(context.log.info.getCall(0).args[0]).to.include('Updating sandbox config');
+      expect(result.status).to.equal(200);
+      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('alt-text', { expire: '3', enabled: true });
+      expect(mockConfig.updateSandboxAuditConfig).to.have.been.calledWith('meta-tags', { expire: '1', enabled: true });
     });
   });
 });
