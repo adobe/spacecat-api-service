@@ -1,3 +1,11 @@
+## [1.177.14](https://github.com/adobe/spacecat-api-service/compare/v1.177.13...v1.177.14) (2025-09-16)
+
+
+### Bug Fixes
+
+* Tier client adapt and remove IDPs from AuthZ ([#1256](https://github.com/adobe/spacecat-api-service/issues/1256)) ([79bfea6](https://github.com/adobe/spacecat-api-service/commit/79bfea678a73a5ed010c70020e8525400447b99b))
+* update package-lock.json for new tier client ([#1257](https://github.com/adobe/spacecat-api-service/issues/1257)) ([e8a7b21](https://github.com/adobe/spacecat-api-service/commit/e8a7b21066502ac406a696347d94aef7ded5927e))
+
 ## [1.177.13](https://github.com/adobe/spacecat-api-service/compare/v1.177.12...v1.177.13) (2025-09-16)
 
 
