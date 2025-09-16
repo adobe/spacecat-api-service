@@ -138,6 +138,9 @@
     "sinon-chai": "4.0.1",
     "yaml": "2.8.1"
   },
+  "overrides": {
+    "@adobe/fetch": "4.2.3"
+  },
   "lint-staged": {
     "*.js": "eslint",
     "*.cjs": "eslint"
