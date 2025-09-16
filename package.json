@@ -98,7 +98,7 @@
     "csv-writer": "1.6.0",
     "fuse.js": "7.1.0",
     "js-yaml": "4.1.0",
-    "jsdom": "26.1.0",
+    "jsdom": "27.0.0",
     "patch-package": "^8.0.0",
     "slack-block-builder": "2.8.0",
     "tldts": "7.0.14",
