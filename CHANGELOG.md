@@ -1,3 +1,10 @@
+## [1.177.16](https://github.com/adobe/spacecat-api-service/compare/v1.177.15...v1.177.16) (2025-09-16)
+
+
+### Bug Fixes
+
+* revert lorem ipsum check name for preflight ([#1262](https://github.com/adobe/spacecat-api-service/issues/1262)) ([ffb9949](https://github.com/adobe/spacecat-api-service/commit/ffb9949644566ce8fcf8b1cc06cdeb2ab17b5c09))
+
 ## [1.177.15](https://github.com/adobe/spacecat-api-service/compare/v1.177.14...v1.177.15) (2025-09-16)
 
 
