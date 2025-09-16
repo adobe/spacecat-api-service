@@ -42,6 +42,9 @@
     "externals": [
       "jsdom"
     ],
+    "modules": [
+      "jsdom"
+    ],
     "fastlyServiceId!important": "",
     "timeout": 900000,
     "nodeVersion": 22,
