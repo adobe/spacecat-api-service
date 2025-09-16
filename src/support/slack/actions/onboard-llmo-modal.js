@@ -15,6 +15,7 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { OrganizationIdentityProvider as OrganizationIdentityProviderModel } from '@adobe/spacecat-shared-data-access/src/models/organization-identity-provider/index.js';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
@@ -237,17 +238,14 @@ async function elmoOnboardingModal(body, client, respond, brandURL) {
   });
 }
 
-// site is already onboarded - offer re-onboarding options
-async function reOnboardingOptionsModal(body, client, respond, brandURL, site, existingBrand) {
+async function reonboardingOptionsModal(body, client, respond, brandURL, site, existingBrand) {
   const { user } = body;
 
-  // Update the original message to show user's choice
   await respond({
-    text: `:gear: ${user.name} is reviewing re-onboarding options...`,
+    text: `:gear: ${user.name} is reviewing reonboarding options...`,
     replace_original: true,
   });
 
-  // Capture original channel and thread context
   const originalChannel = body.channel?.id;
   const originalThreadTs = body.message?.thread_ts || body.message?.ts;
 
@@ -258,7 +256,7 @@ async function reOnboardingOptionsModal(body, client, respond, brandURL, site, e
     trigger_id: body.trigger_id,
     view: {
       type: 'modal',
-      callback_id: 're_onboard_options_modal',
+      callback_id: 'reonboard_options_modal',
       private_metadata: JSON.stringify({
         originalChannel,
         originalThreadTs,
@@ -269,7 +267,7 @@ async function reOnboardingOptionsModal(body, client, respond, brandURL, site, e
       }),
       title: {
         type: 'plain_text',
-        text: 'Re-onboarding Options',
+        text: 'Reonboarding Options',
       },
       close: {
         type: 'plain_text',
@@ -420,9 +418,9 @@ export function startLLMOOnboarding(lambdaContext) {
       const brand = config.getLlmoBrand();
 
       if (brand) {
-        // Site is already onboarded - offer re-onboarding options
-        await reOnboardingOptionsModal(body, client, respond, brandURL, site, brand);
-        log.debug(`User ${user.id} requested re-onboarding options for ${brandURL} with existing brand ${brand}`);
+        // Site is already onboarded - offer reonboarding options
+        await reonboardingOptionsModal(body, client, respond, brandURL, site, brand);
+        log.debug(`User ${user.id} requested reonboarding options for ${brandURL} with existing brand ${brand}`);
         return;
       }
 
@@ -587,87 +585,7 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
 }
 
 /**
- * Ensures an organization has an LLMO entitlement, creating one if it doesn't exist.
- * @param {Object} site - The site object
- * @param {Object} lambdaCtx - Lambda context containing dataAccess and log
- * @param {Object} slackCtx - Slack context containing say function
- * @returns {Promise<Object>} The entitlement object (existing or newly created)
- */
-async function ensureOrganizationEntitlement(site, lambdaCtx, slackCtx) {
-  const { dataAccess, log } = lambdaCtx;
-  const { say } = slackCtx;
-  const { Entitlement } = dataAccess;
-
-  const orgId = site.getOrganizationId();
-
-  // Check if organization already has an LLMO entitlement
-  const existingEntitlement = await Entitlement.findByOrganizationIdAndProductCode(
-    orgId,
-    LLMO_PRODUCT_CODE,
-  );
-
-  if (existingEntitlement) {
-    log.info(`Organization ${orgId} already has LLMO entitlement ${existingEntitlement.getId()}`);
-    return existingEntitlement;
-  }
-
-  // Create new entitlement for the organization
-  const newEntitlement = await Entitlement.create({
-    organizationId: orgId,
-    productCode: LLMO_PRODUCT_CODE,
-    tier: LLMO_TIER,
-    quotas: { llmo_trial_prompts: 200 },
-  });
-  await newEntitlement.save();
-
-  log.info(`Created new LLMO entitlement ${newEntitlement.getId()} for organization ${orgId}`);
-  await say(`Created LLMO entitlement for organization ${orgId}`);
-
-  return newEntitlement;
-}
-
-/**
- * Ensures a site has an enrollment for the given entitlement, creating one if it doesn't exist.
- * @param {Object} site - The site object
- * @param {Object} entitlement - The entitlement object to enroll the site in
- * @param {Object} lambdaCtx - Lambda context containing dataAccess and log
- * @param {Object} slackCtx - Slack context containing say function
- * @returns {Promise<Object>} The enrollment object (existing or newly created)
- */
-async function ensureSiteEnrollment(site, entitlement, lambdaCtx, slackCtx) {
-  const { dataAccess, log } = lambdaCtx;
-  const { say } = slackCtx;
-  const { SiteEnrollment } = dataAccess;
-
-  const siteId = site.getId();
-  const entitlementId = entitlement.getId();
-
-  // Check if site is already enrolled in this entitlement
-  const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
-  const existingEnrollment = existingEnrollments.find(
-    (enrollment) => enrollment.getEntitlementId() === entitlementId,
-  );
-
-  if (existingEnrollment) {
-    log.info(`Site ${siteId} already enrolled in entitlement ${entitlementId}`);
-    return existingEnrollment;
-  }
-
-  // Create new enrollment for the site
-  const newEnrollment = await SiteEnrollment.create({
-    entitlementId,
-    siteId,
-  });
-  await newEnrollment.save();
-
-  log.info(`Created new enrollment ${newEnrollment.getId()} for site ${siteId} in entitlement ${entitlementId}`);
-  await say(`Enrolled site ${siteId} in LLMO entitlement`);
-
-  return newEnrollment;
-}
-
-/**
- * Creates or ensures both entitlement and enrollment for LLMO.
+ * Creates or ensures both entitlement and enrollment for LLMO using TierClient.
  * Organizations can have entitlements without site enrollments, and sites can be enrolled
  * in existing entitlements from their organization.
  * @param {Object} site - The site object
@@ -681,18 +599,18 @@ async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
   const { say } = slackCtx;
 
   try {
-    // Step 1: Ensure organization has an LLMO entitlement
-    const entitlement = await ensureOrganizationEntitlement(site, lambdaCtx, slackCtx);
+    const tierClient = TierClient.createForSite(lambdaCtx, site, LLMO_PRODUCT_CODE);
+    const { entitlement, siteEnrollment } = await tierClient.createEntitlement(LLMO_TIER);
+    log.info(`Successfully ensured LLMO access for site ${site.getId()} via entitlement ${entitlement.getId()} and enrollment ${siteEnrollment.getId()}`);
+    await say('✅ LLMO entitlement and enrollment ready');
 
-    // Step 2: Ensure site is enrolled in the entitlement
-    const enrollment = await ensureSiteEnrollment(site, entitlement, lambdaCtx, slackCtx);
-
-    log.info(`Successfully ensured LLMO access for site ${site.getId()} via entitlement ${entitlement.getId()}`);
-
-    return { entitlement, enrollment };
+    return {
+      entitlement,
+      enrollment: siteEnrollment,
+    };
   } catch (error) {
-    log.error(`Failed to create entitlement and enrollment for site ${site.getId()}: ${error.message}`);
-    await say(`❌ Failed to set up LLMO access for site ${site.getId()}: ${error.message}`);
+    log.info(`Ensuring LLMO entitlement and enrollment failed: ${error.message}`);
+    await say(`❌ Ensuring LLMO entitlement and enrollment failed: ${error.message}`);
     throw error;
   }
 }
@@ -761,11 +679,11 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
     }
 
-    // create entitlement
-    await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx);
-
     // create OrganizationIdentiyProvider
     await createOrganizationIdentityProvider(site, lambdaCtx, slackCtx);
+
+    // create entitlement
+    await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx);
 
     // upload and publish the query index file
     await copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx);
@@ -944,55 +862,66 @@ export function onboardLLMOModal(lambdaContext) {
 export function addEntitlementsAction(lambdaContext) {
   const { log, dataAccess } = lambdaContext;
 
-  return async ({ ack, body, respond }) => {
+  return async ({ ack, body, client }) => {
     try {
       await ack();
-
       const { user, actions } = body;
       const actionData = JSON.parse(actions[0].value);
       const { brandURL, siteId, existingBrand } = actionData;
 
-      // Update the original message
-      await respond({
-        text: `:gear: ${user.name} is adding missing entitlements for ${brandURL}...`,
-        replace_original: true,
+      // Capture original channel and thread context
+      const originalChannel = body.channel?.id;
+      const originalThreadTs = body.message?.thread_ts || body.message?.ts;
+
+      // Post initial message to thread
+      await client.chat.postMessage({
+        channel: originalChannel,
+        text: `:gear: ${user.name} is adding missing entitlements for *${brandURL}*...`,
+        thread_ts: originalThreadTs,
       });
 
       const { Site } = dataAccess;
       const site = await Site.findById(siteId);
 
       if (!site) {
-        await respond({
+        await client.chat.postMessage({
+          channel: originalChannel,
           text: ':x: Site not found. Please try again.',
-          replace_original: true,
+          thread_ts: originalThreadTs,
         });
         return;
       }
 
-      // Create slack context for the entitlement process
       const slackContext = {
         say: async (message) => {
-          await respond({
+          await client.chat.postMessage({
+            channel: originalChannel,
             text: message,
-            replace_original: false,
+            thread_ts: originalThreadTs,
           });
         },
       };
 
-      // Only add entitlements, don't change organization or brand
       await createEntitlementAndEnrollment(site, lambdaContext, slackContext);
 
-      await respond({
+      await client.chat.postMessage({
+        channel: originalChannel,
         text: `:white_check_mark: Successfully ensured LLMO entitlements for *${brandURL}* (brand: *${existingBrand}*)`,
-        replace_original: true,
+        thread_ts: originalThreadTs,
       });
 
       log.debug(`Added entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
     } catch (error) {
       log.error('Error adding entitlements:', error);
-      await respond({
+
+      // Capture channel context for error posting
+      const originalChannel = body.channel?.id;
+      const originalThreadTs = body.message?.thread_ts || body.message?.ts;
+
+      await client.chat.postMessage({
+        channel: originalChannel,
         text: `:x: Failed to add entitlements: ${error.message}`,
-        replace_original: true,
+        thread_ts: originalThreadTs,
       });
     }
   };
@@ -1152,29 +1081,10 @@ export function updateIMSOrgModal(lambdaContext) {
     } catch (error) {
       log.error('Error updating organization:', error);
 
-      // Try to get metadata for error reporting
-      let brandURL = 'unknown site';
-      try {
-        /* c8 ignore next 2 */
-        const metadata = JSON.parse(body.view?.private_metadata || '{}');
-        brandURL = metadata.brandURL || brandURL;
-        const { originalChannel, originalThreadTs } = metadata;
-
-        if (originalChannel) {
-          await client.chat.postMessage({
-            channel: originalChannel,
-            text: `:x: Failed to update IMS organization for *${brandURL}*: ${error.message}`,
-            thread_ts: originalThreadTs,
-          });
-        }
-      } catch (metadataError) {
-        log.error('Error parsing metadata for error reporting:', metadataError);
-      }
-
       await ack({
         response_action: 'errors',
         errors: {
-          new_ims_org_input: 'Failed to update IMS organization. Please try again.',
+          brand_name_input: 'There was an error while updating the IMS Organization.',
         },
       });
     }
