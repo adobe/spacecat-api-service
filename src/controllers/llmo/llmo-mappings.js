@@ -10,17 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-/**
- * LLMO Sheet Data Mapping Configurations
- *
- * This file contains mapping configurations for transforming LLMO sheet data.
- * Each mapping can transform field names.
- *
- * Structure:
- * - Key: Sheet name (for multi-sheet data) or 'default' (for single sheet data)
- * - Value: Object containing field mappings
- */
-
+// LLMO Sheet Data Mapping Configurations
 export const LLMO_SHEET_MAPPINGS = [{
   name: 'Brand Presence',
   type: 'multi-sheet',
