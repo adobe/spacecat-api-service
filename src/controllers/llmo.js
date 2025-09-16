@@ -302,17 +302,18 @@ function LlmoController(ctx) {
         const mappedItem = { ...item };
 
         Object.entries(mappings).forEach(([originalField, newField]) => {
-          mappedItem[newField] = item[originalField];
-          delete mappedItem[originalField];
+          const value = item[originalField];
+          if (value) {
+            mappedItem[newField] = item[originalField];
+            delete mappedItem[originalField];
+          }
         });
 
         return mappedItem;
       });
 
       Object.keys(data).forEach((key) => {
-        log.info(`Checking if the are mappings for key: ${key}`);
         if (key !== ':type' && data[key]?.data && mappingConfig.mappings?.[key]) {
-          log.info(`Found mappings for key: ${key}, mappings ${JSON.stringify(mappingConfig.mappings[key])}`);
           const mappings = mappingConfig.mappings[key];
           data[key].data = mapArray(data[key].data, mappings);
         }
