@@ -180,7 +180,12 @@ export default class AccessControlUtil {
       } else if (entity instanceof Organization) {
         org = entity;
       }
-      await this.validateEntitlement(org, site, productCode);
+      try {
+        await this.validateEntitlement(org, site, productCode);
+      } catch (e) {
+        this.log.error(`Error validating entitlement for ${entity.getId()}: ${e.message}`);
+        return false;
+      }
     }
     if (subService.length > 0) {
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
