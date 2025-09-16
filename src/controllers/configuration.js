@@ -28,7 +28,7 @@ function ConfigurationController(ctx) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { log, dataAccess } = ctx;
+  const { dataAccess } = ctx;
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -69,8 +69,6 @@ function ConfigurationController(ctx) {
     if (!configuration) {
       return notFound('Configuration not found');
     }
-
-    log.info('****** Configuration ******', configuration);
 
     return ok(ConfigurationDto.toJSON(configuration));
   };
