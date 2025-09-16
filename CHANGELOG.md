@@ -1,3 +1,24 @@
+## [1.177.12](https://github.com/adobe/spacecat-api-service/compare/v1.177.11...v1.177.12) (2025-09-16)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1249](https://github.com/adobe/spacecat-api-service/issues/1249)) ([e94266e](https://github.com/adobe/spacecat-api-service/commit/e94266e950403a653e218614309e18a2c5bd21ec))
+
+## [1.177.11](https://github.com/adobe/spacecat-api-service/compare/v1.177.10...v1.177.11) (2025-09-16)
+
+
+### Bug Fixes
+
+* **deps:** update dependency jsdom to v27 ([#1251](https://github.com/adobe/spacecat-api-service/issues/1251)) ([ec2d0fd](https://github.com/adobe/spacecat-api-service/commit/ec2d0fdafe07c2ffd2aa5c9b3d139a6b43e9f5d9))
+
+## [1.177.10](https://github.com/adobe/spacecat-api-service/compare/v1.177.9...v1.177.10) (2025-09-15)
+
+
+### Bug Fixes
+
+* dont cache empty result ([#1252](https://github.com/adobe/spacecat-api-service/issues/1252)) ([cabe008](https://github.com/adobe/spacecat-api-service/commit/cabe008d769f2567a8773604a7f314554e089dd1))
+
 ## [1.177.9](https://github.com/adobe/spacecat-api-service/compare/v1.177.8...v1.177.9) (2025-09-14)
 
 
