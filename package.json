@@ -29,7 +29,7 @@
     "docs:serve": "npx @redocly/cli preview-docs --config docs/openapi/redocly-config.yaml",
     "prepare": "husky"
   },
-  "wsk": {
+  "hlx": {
     "target": "aws",
     "name": "spacecat-services/api-service@${version}",
     "memory": 4096,
@@ -39,6 +39,9 @@
     "dev": {
       "params-file": "secrets/dev-secrets.json"
     },
+    "externals": [
+      "jsdom"
+    ],
     "fastlyServiceId!important": "",
     "timeout": 900000,
     "nodeVersion": 22,
@@ -97,7 +100,7 @@
     "csv-writer": "1.6.0",
     "fuse.js": "7.1.0",
     "js-yaml": "4.1.0",
-    "jsdom": "26.1.0",
+    "jsdom": "27.0.0",
     "slack-block-builder": "2.8.0",
     "tldts": "7.0.14",
     "urijs": "1.19.11",
