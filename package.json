@@ -27,8 +27,7 @@
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
     "docs:lint": "npx @redocly/cli lint --config docs/openapi/redocly-config.yaml",
     "docs:serve": "npx @redocly/cli preview-docs --config docs/openapi/redocly-config.yaml",
-    "prepare": "husky",
-    "postinstall": "patch-package"
+    "prepare": "husky"
   },
   "wsk": {
     "target": "aws",
@@ -99,7 +98,6 @@
     "fuse.js": "7.1.0",
     "js-yaml": "4.1.0",
     "jsdom": "26.1.0",
-    "patch-package": "^8.0.0",
     "slack-block-builder": "2.8.0",
     "tldts": "7.0.14",
     "urijs": "1.19.11",
