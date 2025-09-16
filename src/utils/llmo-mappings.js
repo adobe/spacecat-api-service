@@ -31,7 +31,9 @@ export const LLMO_SHEET_MAPPINGS = [{
       Topic: 'Category',
       Keyword: 'Topics',
       'Sources Contain Brand Domain': 'Citations',
+      sources_contain_branddomain: 'Citations',
       'Answer Contains Brand Name': 'Mentions',
+      answer_contains_brandname: 'Mentions',
       Url: 'URL',
     },
     brand_vs_competitors: {
