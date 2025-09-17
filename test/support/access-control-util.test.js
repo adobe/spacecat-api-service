@@ -228,6 +228,18 @@ describe('Access Control Util', () => {
   });
 
   it('should handle Organization entity type with productCode validation', async () => {
+    // Mock TierClient for this test
+    const mockTierClient = {
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: {
+          getId: () => 'entitlement-123',
+          getProductCode: () => 'llmo',
+          getTier: () => 'paid',
+        },
+      }),
+    };
+    sandbox.stub(TierClient, 'createForOrg').returns(mockTierClient);
+
     const util = AccessControlUtil.fromContext(context);
 
     // Test with Organization entity directly
@@ -240,18 +252,12 @@ describe('Access Control Util', () => {
     // Mock the authInfo.hasOrganization to return true for test-org-id
     util.authInfo.hasOrganization = sinon.stub().returns(true);
 
-    // Mock the entitlement validation to succeed
-    util.Entitlement.findByOrganizationIdAndProductCode = sinon.stub().resolves({
-      getId: () => 'entitlement-123',
-      getProductCode: () => 'llmo',
-      getTier: () => 'paid',
-    });
-
     const result = await util.hasAccess(org, '', 'llmo');
 
     expect(result).to.be.true;
     expect(util.authInfo.hasOrganization).to.have.been.calledWith('test-org-id');
-    expect(util.Entitlement.findByOrganizationIdAndProductCode).to.have.been.calledWith('test-org-id', 'llmo');
+    expect(TierClient.createForOrg).to.have.been.calledWith(context, org, 'llmo');
+    expect(mockTierClient.checkValidEntitlement).to.have.been.called;
   });
 
   // Test constructor error cases

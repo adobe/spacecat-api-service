@@ -38,6 +38,10 @@ describe('onboard-llmo-modal', () => {
       setOrganizationId: sinonSandbox.stub().callsFake((newOrgId) => {
         organizationId = newOrgId;
       }),
+      getOrganization: sinonSandbox.stub().resolves({
+        getId: sinonSandbox.stub().returns('org123'),
+        getImsOrgId: sinonSandbox.stub().returns('ABC123@AdobeOrg'),
+      }),
       getConfig: sinonSandbox.stub().returns({
         updateLlmoBrand: sinonSandbox.stub(),
         updateLlmoDataFolder: sinonSandbox.stub(),
@@ -89,14 +93,6 @@ describe('onboard-llmo-modal', () => {
     }),
   });
 
-  const createDefaultMockOrganizationIdentityProvider = (sinonSandbox) => ({
-    allByOrganizationId: sinonSandbox.stub().resolves([]),
-    create: sinonSandbox.stub().returns({
-      save: sinonSandbox.stub().resolves(),
-      getId: sinonSandbox.stub().returns('idp123'),
-    }),
-  });
-
   const createDefaultMockSiteModel = (sinonSandbox, mockSite) => ({
     findByBaseURL: sinonSandbox.stub().resolves(null), // New site by default
     findById: sinonSandbox.stub().resolves(mockSite),
@@ -127,8 +123,7 @@ describe('onboard-llmo-modal', () => {
       || createDefaultMockEntitlement(sinonSandbox);
     const mockSiteEnrollment = overrides.mockSiteEnrollment
       || createDefaultMockSiteEnrollment(sinonSandbox);
-    const mockOrganizationIdentityProvider = overrides.mockOrganizationIdentityProvider
-      || createDefaultMockOrganizationIdentityProvider(sinonSandbox);
+
     const mockSiteModel = overrides.mockSiteModel
       || createDefaultMockSiteModel(sinonSandbox, mockSite);
     const mockImsClient = overrides.mockImsClient
@@ -148,7 +143,7 @@ describe('onboard-llmo-modal', () => {
         Organization: mockOrganization,
         Entitlement: mockEntitlement,
         SiteEnrollment: mockSiteEnrollment,
-        OrganizationIdentityProvider: mockOrganizationIdentityProvider,
+
       },
       imsClient: mockImsClient,
       sqs: mockSqs,
@@ -322,12 +317,6 @@ describe('onboard-llmo-modal', () => {
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.allByOrganizationId).to.have.been.calledWith('org123');
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.create).to.have.been.calledWith({
-        organizationId: 'org123',
-        provider: 'IMS',
-        externalId: 'ABC123@AdobeOrg',
-      });
       expect(lambdaCtx.sqs.sendMessage).to.have.been.calledWith('audit-queue', {
         type: 'llmo-customer-analysis',
         siteId: 'site123',
@@ -494,14 +483,6 @@ describe('onboard-llmo-modal', () => {
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
-
-      // Verify that organization identity provider was created
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.allByOrganizationId).to.have.been.calledWith('org123');
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.create).to.have.been.calledWith({
-        organizationId: 'org123',
-        provider: 'IMS',
-        externalId: 'ABC123@AdobeOrg',
-      });
     });
 
     it('should handle existing site with different organization ID and update it', async () => {
@@ -548,14 +529,6 @@ describe('onboard-llmo-modal', () => {
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
-
-      // Verify that organization identity provider was created
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.allByOrganizationId).to.have.been.calledWith('new-org-456');
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.create).to.have.been.calledWith({
-        organizationId: 'new-org-456',
-        provider: 'IMS',
-        externalId: 'ABC123@AdobeOrg',
-      });
     });
 
     it('should handle existing site with non-existent organization and create new org', async () => {
@@ -619,14 +592,6 @@ describe('onboard-llmo-modal', () => {
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
-
-      // Verify that organization identity provider was created
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.allByOrganizationId).to.have.been.calledWith('new-org-789');
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.create).to.have.been.calledWith({
-        organizationId: 'new-org-789',
-        provider: 'IMS',
-        externalId: 'ABC123@AdobeOrg',
-      });
     });
 
     it('should handle createOrg error when IMS client throws an error', async () => {
@@ -870,16 +835,6 @@ describe('onboard-llmo-modal', () => {
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
-
-      // Verify that organization identity provider was created
-      expect(lambdaCtxWithNewOrg.dataAccess.OrganizationIdentityProvider.allByOrganizationId)
-        .to.have.been.calledWith('new-org-789');
-      expect(lambdaCtxWithNewOrg.dataAccess.OrganizationIdentityProvider.create)
-        .to.have.been.calledWith({
-          organizationId: 'new-org-789',
-          provider: 'IMS',
-          externalId: 'ABC123@AdobeOrg',
-        });
     });
 
     it('should handle LLMO entitlement creation via TierClient', async () => {
@@ -904,45 +859,6 @@ describe('onboard-llmo-modal', () => {
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
-    });
-
-    it('should skip organization identity provider creation when it already exists', async () => {
-      // Mock data
-      const input = {
-        baseURL: 'https://example.com',
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-        deliveryType: 'aem_edge',
-      };
-
-      // Use default mocks
-      const mockSite = createDefaultMockSite(sandbox);
-      const slackCtx = createDefaultMockSlackCtx(sandbox);
-
-      // Mock fetch for admin.hlx.page calls
-      global.fetch = createDefaultMockFetch(sandbox);
-
-      // Mock existing organization identity provider
-      const existingIdp = {
-        getProvider: sandbox.stub().returns('IMS'),
-      };
-
-      const mockOrganizationIdentityProvider = createDefaultMockOrganizationIdentityProvider(
-        sandbox,
-      );
-      mockOrganizationIdentityProvider.allByOrganizationId.resolves([existingIdp]);
-
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
-        mockSite,
-        mockOrganizationIdentityProvider,
-      });
-
-      // Execute the function
-      await onboardSite(input, lambdaCtx, slackCtx);
-
-      // Verify that IDP creation was skipped
-      expect(lambdaCtx.dataAccess.OrganizationIdentityProvider.create).to.not.have.been.called;
-      expect(lambdaCtx.log.info).to.have.been.calledWith('Organization identity provider already exists for organization org123, skipping creation');
     });
 
     it('should log warning when HLX_ADMIN_TOKEN is not set', async () => {
