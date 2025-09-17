@@ -28,4 +28,90 @@ site-enrollments-by-site:
     security:
       - ims_key: [ ]
 
+site-enrollment-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: enrollmentId
+      in: path
+      description: The unique identifier of the site enrollment
+      required: true
+      schema:
+        $ref: './schemas.yaml#/Id'
+  get:
+    tags:
+      - site-enrollments
+    summary: Get configuration for a specific site enrollment
+    description: |
+      This endpoint retrieves the configuration object for a specific site enrollment.
+    operationId: getSiteEnrollmentConfig
+    responses:
+      '200':
+        description: Site enrollment configuration retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+              example:
+                dataFolder: "example-site-data"
+                brand: "Example Brand"
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+  put:
+    tags:
+      - site-enrollments
+    summary: Update configuration for a specific site enrollment
+    description: |
+      This endpoint updates the configuration object for a specific site enrollment.
+      The configuration should be an object with string key-value pairs.
+    operationId: updateSiteEnrollmentConfig
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+            example:
+              dataFolder: "updated-site-data"
+              brand: "Updated Brand"
+              customKey: "customValue"
+    responses:
+      '200':
+        description: Site enrollment configuration updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+              example:
+                dataFolder: "updated-site-data"
+                brand: "Updated Brand"
+                customKey: "customValue"
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
 

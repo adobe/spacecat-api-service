@@ -264,6 +264,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
+    'GET /sites/:siteId/site-enrollments/:enrollmentId/config': siteEnrollmentController.getConfigByEnrollmentID,
+    'PUT /sites/:siteId/site-enrollments/:enrollmentId/config': siteEnrollmentController.updateConfigByEnrollmentID,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
