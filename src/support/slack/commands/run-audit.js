@@ -45,14 +45,15 @@ const ALL_AUDITS = [
 
 /**
  * Parses keyword arguments from command input.
- * Supports formats like "audit:geo-brand-presence", "audit: geo-brand-presence", "date-start:2025-09-07", "source:google-ai-overviews"
+ * Supports formats like "audit:geo-brand-presence", "audit: geo-brand-presence",
+ * "date-start:2025-09-07", "source:google-ai-overviews"
  * @param {string[]} args - The command arguments
  * @returns {Object} Parsed arguments with keywords and remaining positional args
  */
 const parseKeywordArguments = (args) => {
   const keywords = {};
   const positionalArgs = [];
-  
+
   args.forEach((arg) => {
     if (arg && arg.includes(':')) {
       const [key, ...valueParts] = arg.split(':');
@@ -62,7 +63,7 @@ const parseKeywordArguments = (args) => {
       positionalArgs.push(arg);
     }
   });
-  
+
   return { keywords, positionalArgs };
 };
 
@@ -154,23 +155,25 @@ function RunAuditCommand(context) {
     try {
       // Parse keyword arguments
       const { keywords, positionalArgs } = parseKeywordArguments(args);
-      
+
       // Determine if we're using keyword format or positional format
       const isKeywordFormat = Object.keys(keywords).length > 0;
-      
-      let baseURLInputArg, auditTypeInputArg, auditDataInputArg;
-      
+
+      let baseURLInputArg;
+      let auditTypeInputArg;
+      let auditDataInputArg;
+
       if (isKeywordFormat) {
         // New keyword format: site audit:type date-start:value source:value
         [baseURLInputArg] = positionalArgs;
         auditTypeInputArg = keywords.audit;
-        
+
         // Build audit data from remaining keywords (excluding 'audit')
         const auditDataKeywords = { ...keywords };
         delete auditDataKeywords.audit;
-        
-        auditDataInputArg = Object.keys(auditDataKeywords).length > 0 
-          ? JSON.stringify(auditDataKeywords) 
+
+        auditDataInputArg = Object.keys(auditDataKeywords).length > 0
+          ? JSON.stringify(auditDataKeywords)
           : undefined;
       } else {
         // Old positional format: site auditType auditData

@@ -306,7 +306,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
       expect(sqsStub.sendMessage).called;
-      
+
       // Verify the audit data contains the additional parameters
       const sendMessageCall = sqsStub.sendMessage.firstCall;
       const auditData = sendMessageCall.args[1].data;
@@ -325,7 +325,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
       expect(sqsStub.sendMessage).called;
-      
+
       // Verify the audit data contains the additional parameters (values should be trimmed)
       const sendMessageCall = sqsStub.sendMessage.firstCall;
       const auditData = sendMessageCall.args[1].data;
@@ -364,7 +364,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
       expect(sqsStub.sendMessage).called;
-      
+
       // Verify the audit data contains the parameters
       const sendMessageCall = sqsStub.sendMessage.firstCall;
       const auditData = sendMessageCall.args[1].data;
