@@ -49,7 +49,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`');
+      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits.');
     });
   });
 
