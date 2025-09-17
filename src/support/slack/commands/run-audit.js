@@ -40,7 +40,31 @@ const ALL_AUDITS = [
   'structured-data',
   'forms-opportunities',
   'alt-text',
+  'geo-brand-presence',
 ];
+
+/**
+ * Parses keyword arguments from command input.
+ * Supports formats like "audit:geo-brand-presence", "audit: geo-brand-presence", "date-start:2025-09-07", "source:google-ai-overviews"
+ * @param {string[]} args - The command arguments
+ * @returns {Object} Parsed arguments with keywords and remaining positional args
+ */
+const parseKeywordArguments = (args) => {
+  const keywords = {};
+  const positionalArgs = [];
+  
+  args.forEach((arg) => {
+    if (arg && arg.includes(':')) {
+      const [key, ...valueParts] = arg.split(':');
+      const value = valueParts.join(':').trim(); // Handle cases where value contains colons and trim whitespace
+      keywords[key] = value;
+    } else {
+      positionalArgs.push(arg);
+    }
+  });
+  
+  return { keywords, positionalArgs };
+};
 
 /**
  * Factory function to create the RunAuditCommand object.
@@ -53,9 +77,9 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType (optional)] [auditData (optional)]`,
+    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
@@ -128,7 +152,30 @@ function RunAuditCommand(context) {
     const { say, files, botToken } = slackContext;
 
     try {
-      const [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = args;
+      // Parse keyword arguments
+      const { keywords, positionalArgs } = parseKeywordArguments(args);
+      
+      // Determine if we're using keyword format or positional format
+      const isKeywordFormat = Object.keys(keywords).length > 0;
+      
+      let baseURLInputArg, auditTypeInputArg, auditDataInputArg;
+      
+      if (isKeywordFormat) {
+        // New keyword format: site audit:type date-start:value source:value
+        [baseURLInputArg] = positionalArgs;
+        auditTypeInputArg = keywords.audit;
+        
+        // Build audit data from remaining keywords (excluding 'audit')
+        const auditDataKeywords = { ...keywords };
+        delete auditDataKeywords.audit;
+        
+        auditDataInputArg = Object.keys(auditDataKeywords).length > 0 
+          ? JSON.stringify(auditDataKeywords) 
+          : undefined;
+      } else {
+        // Old positional format: site auditType auditData
+        [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = positionalArgs;
+      }
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);

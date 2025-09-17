@@ -279,4 +279,99 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: CSV processing failed: Authentication failed: Invalid Slack token.')).to.be.true;
     });
   });
+
+  describe('Keyword Arguments Support', () => {
+    beforeEach(() => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'siteId' });
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+      });
+    });
+
+    it('handles keyword format with audit type', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:geo-brand-presence'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+    });
+
+    it('handles keyword format with audit type and additional parameters', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:geo-brand-presence', 'date-start:2025-09-07', 'source:google-ai-overviews'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+      
+      // Verify the audit data contains the additional parameters
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        'date-start': '2025-09-07',
+        source: 'google-ai-overviews',
+      });
+    });
+
+    it('handles keyword format with spaces after colon', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit: geo-brand-presence', 'date-start: 2025-09-07', 'source: google-ai-overviews'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+      
+      // Verify the audit data contains the additional parameters (values should be trimmed)
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        'date-start': '2025-09-07',
+        source: 'google-ai-overviews',
+      });
+    });
+
+    it('handles keyword format with all audit type', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:all'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering all audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+    });
+
+    it('falls back to positional format when no keywords are provided', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'geo-brand-presence'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+    });
+
+    it('uses default audit type when no audit keyword is provided', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'date-start:2025-09-07'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+      
+      // Verify the audit data contains the parameters
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        'date-start': '2025-09-07',
+      });
+    });
+  });
 });
