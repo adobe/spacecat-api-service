@@ -117,6 +117,7 @@ function RunAuditCommand(context) {
           return;
         }
 
+        await say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
         await Promise.all(
           enabledAudits.map(async (enabledAuditType) => {
             try {
@@ -132,6 +133,7 @@ function RunAuditCommand(context) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
           return;
         }
+        await say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
         await triggerAuditForSite(site, auditType, auditData, slackContext, context);
       }
     } catch (error) {
@@ -225,7 +227,6 @@ function RunAuditCommand(context) {
         );
       } else if (hasValidBaseURL) {
         const auditType = auditTypeInputArg || LHS_MOBILE;
-        say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
         await runAuditForSite(baseURL, auditType, auditDataInputArg, slackContext);
       }
     } catch (error) {
