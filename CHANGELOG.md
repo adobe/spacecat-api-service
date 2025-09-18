@@ -1,3 +1,10 @@
+## [1.178.1](https://github.com/adobe/spacecat-api-service/compare/v1.178.0...v1.178.1) (2025-09-18)
+
+
+### Bug Fixes
+
+* **slack/onboarding-llmo:** allow rerun of onboarding command ([#1242](https://github.com/adobe/spacecat-api-service/issues/1242)) ([429c73f](https://github.com/adobe/spacecat-api-service/commit/429c73f3462ed0026b826a9fbd4aa5741e9434e0))
+
 # [1.178.0](https://github.com/adobe/spacecat-api-service/compare/v1.177.17...v1.178.0) (2025-09-17)
 
 
