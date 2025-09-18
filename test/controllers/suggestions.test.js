@@ -401,9 +401,13 @@ describe('Suggestions Controller', () => {
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
-    const suggestions = await response.json();
-    expect(suggestions).to.be.an('array').with.lengthOf(1);
-    expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+    const result = await response.json();
+    expect(result).to.be.an('object');
+    expect(result).to.have.property('suggestions');
+    expect(result).to.have.property('metadata');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(1);
+    expect(result.suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+    expect(result.metadata).to.have.property('total', 1);
   });
 
   it('gets all suggestions for an opportunity and a site for non belonging to the organization', async () => {
@@ -482,9 +486,13 @@ describe('Suggestions Controller', () => {
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
-    const suggestions = await response.json();
-    expect(suggestions).to.be.an('array').with.lengthOf(1);
-    expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+    const result = await response.json();
+    expect(result).to.be.an('object');
+    expect(result).to.have.property('suggestions');
+    expect(result).to.have.property('metadata');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(1);
+    expect(result.suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+    expect(result.metadata).to.have.property('total', 1);
   });
 
   it('gets all suggestions for an opportunity by status returns bad request if no Site ID is passed', async () => {
