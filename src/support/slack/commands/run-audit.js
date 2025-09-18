@@ -50,19 +50,39 @@ const ALL_AUDITS = [
  * @param {string[]} args - The command arguments
  * @returns {Object} Parsed arguments with keywords and remaining positional args
  */
-const parseKeywordArguments = (args) => {
+const parseKeywordArguments = (args, say = null) => {
   const keywords = {};
   const positionalArgs = [];
 
-  args.forEach((arg) => {
+  if (say) {
+    say(`:bug: DEBUG: parseKeywordArguments called with: ${JSON.stringify(args)}`);
+  }
+
+  args.forEach((arg, index) => {
+    if (say) {
+      say(`:bug: DEBUG: Processing arg ${index}: "${arg}"`);
+    }
+
     if (arg && arg.includes(':')) {
       const [key, ...valueParts] = arg.split(':');
       const value = valueParts.join(':').trim(); // Handle cases where value contains colons and trim whitespace
       keywords[key] = value;
+
+      if (say) {
+        say(`:bug: DEBUG: Found keyword - key: "${key}", value: "${value}"`);
+      }
     } else {
       positionalArgs.push(arg);
+
+      if (say) {
+        say(`:bug: DEBUG: Added to positional args: "${arg}"`);
+      }
     }
   });
+
+  if (say) {
+    say(`:bug: DEBUG: parseKeywordArguments result - keywords: ${JSON.stringify(keywords)}, positionalArgs: ${JSON.stringify(positionalArgs)}`);
+  }
 
   return { keywords, positionalArgs };
 };
@@ -97,20 +117,32 @@ function RunAuditCommand(context) {
   const runAuditForSite = async (baseURL, auditType, auditData, slackContext) => {
     const { say } = slackContext;
 
+    await say(`:bug: DEBUG: runAuditForSite called with baseURL=${baseURL}, auditType=${auditType}, auditData=${auditData}`);
+
     try {
+      await say(`:bug: DEBUG: Looking up site for baseURL: ${baseURL}`);
       const site = await Site.findByBaseURL(baseURL);
+      await say(`:bug: DEBUG: Site found: ${site ? 'YES' : 'NO'}, site data: ${JSON.stringify(site, null, 2)}`);
+
+      await say(':bug: DEBUG: Fetching latest configuration');
       const configuration = await Configuration.findLatest();
+      await say(`:bug: DEBUG: Configuration found: ${configuration ? 'YES' : 'NO'}`);
 
       if (!isNonEmptyObject(site)) {
         await postSiteNotFoundMessage(say, baseURL);
         return;
       }
 
+      await say(`:bug: DEBUG: Checking audit type: ${auditType}`);
+
       if (auditType === 'all') {
+        await say(':bug: DEBUG: Running \'all\' audits');
         // const enabledAudits = configuration.getEnabledAuditsForSite(site);
         const enabledAudits = ALL_AUDITS.filter(
           (audit) => configuration.isHandlerEnabledForSite(audit, site),
         );
+
+        await say(`:bug: DEBUG: Enabled audits: ${JSON.stringify(enabledAudits)}`);
 
         if (!isNonEmptyArray(enabledAudits)) {
           await say(`:warning: No audits configured for site \`${baseURL}\``);
@@ -121,6 +153,7 @@ function RunAuditCommand(context) {
         await Promise.all(
           enabledAudits.map(async (enabledAuditType) => {
             try {
+              await say(`:bug: DEBUG: Triggering audit: ${enabledAuditType}`);
               await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
@@ -129,14 +162,24 @@ function RunAuditCommand(context) {
           }),
         );
       } else {
-        if (!configuration.isHandlerEnabledForSite(auditType, site)) {
+        await say(`:bug: DEBUG: Running single audit type: ${auditType}`);
+        await say(`:bug: DEBUG: Checking if handler is enabled for audit type: ${auditType}`);
+
+        const isHandlerEnabled = configuration.isHandlerEnabledForSite(auditType, site);
+        await say(`:bug: DEBUG: Handler enabled: ${isHandlerEnabled}`);
+
+        if (!isHandlerEnabled) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
           return;
         }
         await say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
+        await say(`:bug: DEBUG: About to call triggerAuditForSite with auditData: ${auditData}`);
         await triggerAuditForSite(site, auditType, auditData, slackContext, context);
+        await say(':bug: DEBUG: triggerAuditForSite completed successfully');
       }
     } catch (error) {
+      await say(`:bug: DEBUG: Error in runAuditForSite: ${error.message}`);
+      await say(`:bug: DEBUG: Error stack: ${error.stack}`);
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
       await postErrorMessage(say, error);
     }
@@ -154,12 +197,18 @@ function RunAuditCommand(context) {
   const handleExecution = async (args, slackContext) => {
     const { say, files, botToken } = slackContext;
 
+    await say(`:bug: DEBUG: handleExecution called with args: ${JSON.stringify(args)}`);
+
     try {
       // Parse keyword arguments
-      const { keywords, positionalArgs } = parseKeywordArguments(args);
+      const { keywords, positionalArgs } = parseKeywordArguments(args, say);
+
+      await say(`:bug: DEBUG: Parsed keywords: ${JSON.stringify(keywords)}`);
+      await say(`:bug: DEBUG: Parsed positionalArgs: ${JSON.stringify(positionalArgs)}`);
 
       // Determine if we're using keyword format or positional format
       const isKeywordFormat = Object.keys(keywords).length > 0;
+      await say(`:bug: DEBUG: Using keyword format: ${isKeywordFormat}`);
 
       let baseURLInputArg;
       let auditTypeInputArg;
@@ -170,23 +219,39 @@ function RunAuditCommand(context) {
         [baseURLInputArg] = positionalArgs;
         auditTypeInputArg = keywords.audit;
 
+        await say(`:bug: DEBUG: Keyword format - baseURLInputArg: ${baseURLInputArg}`);
+        await say(`:bug: DEBUG: Keyword format - auditTypeInputArg: ${auditTypeInputArg}`);
+
         // Build audit data from remaining keywords (excluding 'audit')
         const auditDataKeywords = { ...keywords };
         delete auditDataKeywords.audit;
 
+        await say(`:bug: DEBUG: Audit data keywords: ${JSON.stringify(auditDataKeywords)}`);
+
         auditDataInputArg = Object.keys(auditDataKeywords).length > 0
           ? JSON.stringify(auditDataKeywords)
           : undefined;
+
+        await say(`:bug: DEBUG: Final auditDataInputArg: ${auditDataInputArg}`);
       } else {
         // Old positional format: site auditType auditData
         [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = positionalArgs;
+
+        await say(`:bug: DEBUG: Positional format - baseURLInputArg: ${baseURLInputArg}`);
+        await say(`:bug: DEBUG: Positional format - auditTypeInputArg: ${auditTypeInputArg}`);
+        await say(`:bug: DEBUG: Positional format - auditDataInputArg: ${auditDataInputArg}`);
       }
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
       const hasValidBaseURL = isValidUrl(baseURL);
 
+      await say(`:bug: DEBUG: hasFiles: ${hasFiles}`);
+      await say(`:bug: DEBUG: baseURL extracted: ${baseURL}`);
+      await say(`:bug: DEBUG: hasValidBaseURL: ${hasValidBaseURL}`);
+
       if (!hasValidBaseURL && !hasFiles) {
+        await say(':bug: DEBUG: No valid baseURL and no files - showing usage');
         await say(baseCommand.usage());
         return;
       }
@@ -197,8 +262,11 @@ function RunAuditCommand(context) {
       }
 
       if (hasFiles) {
+        await say(':bug: DEBUG: Processing files');
         const [, auditTypeInput, auditData] = ['', baseURLInputArg, auditTypeInputArg];
         const auditType = auditTypeInput || LHS_MOBILE;
+
+        await say(`:bug: DEBUG: File processing - auditType: ${auditType}, auditData: ${auditData}`);
 
         if (files.length > 1) {
           await say(':warning: Please provide only one CSV file.');
@@ -226,10 +294,14 @@ function RunAuditCommand(context) {
           }),
         );
       } else if (hasValidBaseURL) {
+        await say(':bug: DEBUG: Processing single baseURL');
         const auditType = auditTypeInputArg || LHS_MOBILE;
+        await say(`:bug: DEBUG: Single URL processing - auditType: ${auditType}, auditDataInputArg: ${auditDataInputArg}`);
         await runAuditForSite(baseURL, auditType, auditDataInputArg, slackContext);
       }
     } catch (error) {
+      await say(`:bug: DEBUG: Error caught in handleExecution: ${error.message}`);
+      await say(`:bug: DEBUG: Error stack: ${error.stack}`);
       log.error(error);
       await postErrorMessage(say, error);
     }
