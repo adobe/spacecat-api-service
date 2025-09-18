@@ -88,7 +88,11 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+    // Add limit parameter support for testing pagination behavior
+    const limit = context.query?.limit ? parseInt(context.query.limit, 10) : undefined;
+    const options = limit ? { limit } : {};
+
+    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId, options);
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
@@ -97,7 +101,17 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
-    return ok(suggestions);
+
+    // Add metadata to show if limit was applied
+    const response = {
+      suggestions,
+      metadata: {
+        total: suggestions.length,
+        ...(limit && { appliedLimit: limit }),
+      },
+    };
+
+    return ok(response);
   };
 
   /**
@@ -128,7 +142,15 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
+    // Add limit parameter support for testing pagination behavior
+    const limit = context.query?.limit ? parseInt(context.query.limit, 10) : undefined;
+    const options = limit ? { limit } : {};
+
+    const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(
+      opptyId,
+      status,
+      options,
+    );
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
@@ -137,7 +159,17 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
-    return ok(suggestions);
+
+    // Add metadata to show if limit was applied
+    const response = {
+      suggestions,
+      metadata: {
+        total: suggestions.length,
+        ...(limit && { appliedLimit: limit }),
+      },
+    };
+
+    return ok(response);
   };
 
   /**
