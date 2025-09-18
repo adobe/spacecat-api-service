@@ -54,7 +54,7 @@ describe('RunAuditCommand', () => {
   });
 
   describe('Handle Execution Method', () => {
-    it.skip('triggers an audit for a valid site', async () => {
+    it('triggers an audit for a valid site', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
@@ -70,7 +70,7 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage).called;
     });
 
-    it.skip('does not trigger an audit when audit for type is disabled', async () => {
+    it('does not trigger an audit when audit for type is disabled', async () => {
       const site = {
         getId: () => '123',
       };
@@ -113,7 +113,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: Test Error')).to.be.true;
     });
 
-    it.skip('trigger all audits for a valid site', async () => {
+    it('trigger all audits for a valid site', async () => {
       const handlerEnabledStub = sinon.stub().onCall(0).returns(true).onCall(1)
         .returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
@@ -131,7 +131,7 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage).called;
     });
 
-    it.skip('triggers all audits for all sites specified in a CSV file', async () => {
+    it('triggers all audits for all sites specified in a CSV file', async () => {
       const handlerEnabledStub = sinon.stub().onCall(0).returns(true).onCall(1)
         .returns(true)
         .onCall(22)
@@ -218,7 +218,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.calledWith(':warning: Invalid URL found in CSV file: invalid-url')).to.be.true;
     });
 
-    it.skip('handles site with no enable audits', async () => {
+    it('handles site with no enable audits', async () => {
       const handlerEnabledStub = sinon.stub().onCall(0).returns(false);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
@@ -234,7 +234,7 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.firstCall.args[0]).to.equal(':warning: No audits configured for site `https://validsite.com`');
     });
 
-    it.skip('handles error while triggering audits', async () => {
+    it('handles error while triggering audits', async () => {
       const errorMessage = 'Failed to trigger';
       const handlerEnabledStub = sinon.stub().onCall(0).returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
