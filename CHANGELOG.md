@@ -1,3 +1,10 @@
+## [1.178.2](https://github.com/adobe/spacecat-api-service/compare/v1.178.1...v1.178.2) (2025-09-18)
+
+
+### Bug Fixes
+
+* support backfill cdn-analysis and current week for report ([#1272](https://github.com/adobe/spacecat-api-service/issues/1272)) ([c98ae48](https://github.com/adobe/spacecat-api-service/commit/c98ae48e72c5d2fbb47fcc8e2e896bab3fe9530f))
+
 ## [1.178.1](https://github.com/adobe/spacecat-api-service/compare/v1.178.0...v1.178.1) (2025-09-18)
 
 
