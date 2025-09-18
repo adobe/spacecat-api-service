@@ -371,5 +371,35 @@ describe('RunAuditCommand', () => {
         'date-start': '2025-09-07',
       });
     });
+
+    it.skip('handles Slack-formatted URLs correctly with keyword arguments', async () => {
+      const command = RunAuditCommand(context);
+
+      // Simulate the exact scenario from the bug report
+      await command.handleExecution(['<http://adobe.com|adobe.com>', 'audit:geo-brand-presence', 'endDate:2025-09-07', 'aiPlatform:google-ai-overviews'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://adobe.com');
+      expect(sqsStub.sendMessage).called;
+
+      // Verify the audit data contains the additional parameters
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        endDate: '2025-09-07',
+        aiPlatform: 'google-ai-overviews',
+      });
+    });
+
+    it.skip('handles Slack-formatted HTTPS URLs correctly', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['<https://example.com|example.com>', 'audit:cwv'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering cwv audit for https://example.com');
+      expect(sqsStub.sendMessage).called;
+    });
   });
 });

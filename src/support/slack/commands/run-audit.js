@@ -47,6 +47,7 @@ const ALL_AUDITS = [
  * Parses keyword arguments from command input.
  * Supports formats like "audit:geo-brand-presence", "audit: geo-brand-presence",
  * "date-start:2025-09-07", "source:google-ai-overviews"
+ * Handles Slack-formatted URLs like <http://example.com|example.com>
  * @param {string[]} args - The command arguments
  * @returns {Object} Parsed arguments with keywords and remaining positional args
  */
@@ -63,7 +64,14 @@ const parseKeywordArguments = (args, say = null) => {
       say(`:bug: DEBUG: Processing arg ${index}: "${arg}"`);
     }
 
-    if (arg && arg.includes(':')) {
+    // Check if this is a Slack-formatted URL (e.g., <http://example.com|example.com>)
+    const isSlackFormattedUrl = arg && arg.match(/^<https?:\/\/[^|>]+\|[^>]+>$/);
+
+    if (say && isSlackFormattedUrl) {
+      say(`:bug: DEBUG: Detected Slack-formatted URL: "${arg}"`);
+    }
+
+    if (arg && arg.includes(':') && !isSlackFormattedUrl) {
       const [key, ...valueParts] = arg.split(':');
       const value = valueParts.join(':').trim(); // Handle cases where value contains colons and trim whitespace
       keywords[key] = value;
