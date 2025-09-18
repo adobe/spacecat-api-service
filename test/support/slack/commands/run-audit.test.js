@@ -83,8 +83,7 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
-      expect(slackContext.say.secondCall.args[0]).to.include(':x: Will not audit site \'https://validsite.com\' because audits of type \'lhs-mobile\' are disabled for this site.');
+      expect(slackContext.say.firstCall.args[0]).to.include(':x: Will not audit site \'https://validsite.com\' because audits of type \'lhs-mobile\' are disabled for this site.');
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
@@ -232,8 +231,7 @@ describe('RunAuditCommand', () => {
       await command.handleExecution(['validsite.com', 'all'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for https://validsite.com');
-      expect(slackContext.say.secondCall.args[0]).to.equal(':warning: No audits configured for site `https://validsite.com`');
+      expect(slackContext.say.firstCall.args[0]).to.equal(':warning: No audits configured for site `https://validsite.com`');
     });
 
     it('handles error while triggering audits', async () => {
