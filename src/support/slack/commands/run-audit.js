@@ -104,7 +104,7 @@ function RunAuditCommand(context) {
         );
       } else {
         if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-          await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
+          await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site..`);
           return;
         }
         await triggerAuditForSite(site, auditType, auditData, slackContext, context);
