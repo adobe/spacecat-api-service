@@ -410,6 +410,29 @@ describe('Suggestions Controller', () => {
     expect(result.metadata).to.have.property('total', 1);
   });
 
+  it('gets all suggestions for an opportunity with limit parameter', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      query: {
+        limit: '5',
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.allByOpportunityId.calledOnce).to.be.true;
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.be.an('object');
+    expect(result).to.have.property('suggestions');
+    expect(result).to.have.property('metadata');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(1);
+    expect(result.suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+    expect(result.metadata).to.have.property('total', 1);
+    expect(result.metadata).to.have.property('appliedLimit', 5);
+  });
+
   it('gets all suggestions for an opportunity and a site for non belonging to the organization', async () => {
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
     sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
@@ -493,6 +516,30 @@ describe('Suggestions Controller', () => {
     expect(result.suggestions).to.be.an('array').with.lengthOf(1);
     expect(result.suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
     expect(result.metadata).to.have.property('total', 1);
+  });
+
+  it('gets all suggestions for an opportunity by status with limit parameter', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      query: {
+        limit: '3',
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.be.an('object');
+    expect(result).to.have.property('suggestions');
+    expect(result).to.have.property('metadata');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(1);
+    expect(result.suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+    expect(result.metadata).to.have.property('total', 1);
+    expect(result.metadata).to.have.property('appliedLimit', 3);
   });
 
   it('gets all suggestions for an opportunity by status returns bad request if no Site ID is passed', async () => {
