@@ -119,7 +119,7 @@ IMPORT_CONFIGURATION=JSON document which includes the following configuration pr
   - allowedApiKeys: array of allowed API keys, used to authenticate import requests
   - queues: array of queue names to use for import jobs. If a queue name is removed from this array, it will no longer be available for new import jobs
   - queueUrlPrefix: prefix for import queue URLs (eg. https://sqs.us-east-1.amazonaws.com/1234567890/), used to create the complete queue URL for import jobs
-  - s3Bucket: the S3 bucket to store import job artifacts
+  - s3Bucket: the S3 bucket to store import job artifacts.
 ```
 
 The `multipartFormData` wrapper uses the following optional env variables:
