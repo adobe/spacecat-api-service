@@ -1,3 +1,10 @@
+# [1.179.0](https://github.com/adobe/spacecat-api-service/compare/v1.178.2...v1.179.0) (2025-09-18)
+
+
+### Features
+
+* migrate Slack file upload from deprecated API to new upload API ([#1264](https://github.com/adobe/spacecat-api-service/issues/1264)) ([b4a423b](https://github.com/adobe/spacecat-api-service/commit/b4a423ba6182973ed9510f8df1bbfc7a4ea23263))
+
 ## [1.178.2](https://github.com/adobe/spacecat-api-service/compare/v1.178.1...v1.178.2) (2025-09-18)
 
 
