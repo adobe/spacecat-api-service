@@ -1,3 +1,52 @@
+## [1.179.4](https://github.com/adobe/spacecat-api-service/compare/v1.179.3...v1.179.4) (2025-09-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.64.0 ([#1277](https://github.com/adobe/spacecat-api-service/issues/1277)) ([42751b3](https://github.com/adobe/spacecat-api-service/commit/42751b398d8574886e513a2fbe1f0370e248e0fa))
+
+## [1.179.3](https://github.com/adobe/spacecat-api-service/compare/v1.179.2...v1.179.3) (2025-09-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.63.0 ([#1276](https://github.com/adobe/spacecat-api-service/issues/1276)) ([c57ad32](https://github.com/adobe/spacecat-api-service/commit/c57ad32b20ce3bc1135a0c0a6fd872646c514375))
+
+## [1.179.2](https://github.com/adobe/spacecat-api-service/compare/v1.179.1...v1.179.2) (2025-09-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.50.7 ([#1274](https://github.com/adobe/spacecat-api-service/issues/1274)) ([1e3c9ff](https://github.com/adobe/spacecat-api-service/commit/1e3c9ff0b2d7f045667e4b69b6a1baa00bb9dee3))
+
+## [1.179.1](https://github.com/adobe/spacecat-api-service/compare/v1.179.0...v1.179.1) (2025-09-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.50.7 ([#1271](https://github.com/adobe/spacecat-api-service/issues/1271)) ([c4bca7a](https://github.com/adobe/spacecat-api-service/commit/c4bca7a3185a20cbb528775c07befa093707366b))
+
+# [1.179.0](https://github.com/adobe/spacecat-api-service/compare/v1.178.2...v1.179.0) (2025-09-18)
+
+
+### Features
+
+* migrate Slack file upload from deprecated API to new upload API ([#1264](https://github.com/adobe/spacecat-api-service/issues/1264)) ([b4a423b](https://github.com/adobe/spacecat-api-service/commit/b4a423ba6182973ed9510f8df1bbfc7a4ea23263))
+
+## [1.178.2](https://github.com/adobe/spacecat-api-service/compare/v1.178.1...v1.178.2) (2025-09-18)
+
+
+### Bug Fixes
+
+* support backfill cdn-analysis and current week for report ([#1272](https://github.com/adobe/spacecat-api-service/issues/1272)) ([c98ae48](https://github.com/adobe/spacecat-api-service/commit/c98ae48e72c5d2fbb47fcc8e2e896bab3fe9530f))
+
+## [1.178.1](https://github.com/adobe/spacecat-api-service/compare/v1.178.0...v1.178.1) (2025-09-18)
+
+
+### Bug Fixes
+
+* **slack/onboarding-llmo:** allow rerun of onboarding command ([#1242](https://github.com/adobe/spacecat-api-service/issues/1242)) ([429c73f](https://github.com/adobe/spacecat-api-service/commit/429c73f3462ed0026b826a9fbd4aa5741e9434e0))
+
 # [1.178.0](https://github.com/adobe/spacecat-api-service/compare/v1.177.17...v1.178.0) (2025-09-17)
 
 
