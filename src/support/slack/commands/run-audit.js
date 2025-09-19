@@ -19,7 +19,7 @@ import {
   postErrorMessage,
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
-// eslint-disable-next-line no-unused-vars
+
 import { triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
@@ -97,7 +97,7 @@ function RunAuditCommand(context) {
    * @param {object} slackContext - The Slack context object.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
-  const _ = async (baseURL, auditType, auditData, slackContext) => {
+  const runAuditForSite = async (baseURL, auditType, auditData, slackContext) => {
     const { say } = slackContext;
 
     try {
@@ -220,8 +220,7 @@ function RunAuditCommand(context) {
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             if (isValidUrl(csvBaseURL)) {
-              say(`debug logs: baseURL: ${baseURL}, auditType: ${auditType}, auditData: ${auditData}`);
-              // await runAuditForSite(csvBaseURL, auditType, auditData, slackContext);
+              await runAuditForSite(csvBaseURL, auditType, auditData, slackContext);
             } else {
               await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
             }
@@ -230,8 +229,7 @@ function RunAuditCommand(context) {
       } else if (hasValidBaseURL) {
         const auditType = auditTypeInputArg || LHS_MOBILE;
         say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
-        say(`debug logs: baseURL: ${baseURL}, auditType: ${auditType}, auditDataInputArg: ${auditDataInputArg}`);
-        // await runAuditForSite(baseURL, auditType, auditDataInputArg, slackContext);
+        await runAuditForSite(baseURL, auditType, auditDataInputArg, slackContext);
       }
     } catch (error) {
       log.error(error);
