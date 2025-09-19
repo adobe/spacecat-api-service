@@ -116,7 +116,7 @@ describe('RunReportCommand', () => {
         { input: 'a', expected: 'A' },
       ];
 
-      const testPromises = testCases.map(async (testCase) => {
+      for (const testCase of testCases) {
         const args = [
           'https://example.com',
           'performance',
@@ -127,6 +127,7 @@ describe('RunReportCommand', () => {
           '2024-12-31',
         ];
 
+        // eslint-disable-next-line no-await-in-loop
         await command.handleExecution(args, slackContext);
 
         const fetchCall = global.fetch.lastCall;
@@ -136,9 +137,7 @@ describe('RunReportCommand', () => {
         // Reset for next iteration
         global.fetch.resetHistory();
         slackContext.say.resetHistory();
-      });
-
-      await Promise.all(testPromises);
+      }
     });
 
     it('should handle empty and whitespace-only names', async () => {
@@ -159,7 +158,7 @@ describe('RunReportCommand', () => {
         { input: '   ', expected: '' }, // Whitespace-only gets trimmed to empty
       ];
 
-      const testPromises = testCases.map(async (testCase) => {
+      for (const testCase of testCases) {
         const args = [
           'https://example.com',
           'performance',
@@ -170,6 +169,7 @@ describe('RunReportCommand', () => {
           '2024-12-31',
         ];
 
+        // eslint-disable-next-line no-await-in-loop
         await command.handleExecution(args, slackContext);
 
         const fetchCall = global.fetch.lastCall;
@@ -179,9 +179,7 @@ describe('RunReportCommand', () => {
         // Reset for next iteration
         global.fetch.resetHistory();
         slackContext.say.resetHistory();
-      });
-
-      await Promise.all(testPromises);
+      }
     });
 
     it('should handle null and undefined names gracefully', async () => {
@@ -190,7 +188,7 @@ describe('RunReportCommand', () => {
       // Test null and undefined cases - these should be caught by the missing arguments validation
       const testCases = [null, undefined];
 
-      const testPromises = testCases.map(async (testCase) => {
+      for (const testCase of testCases) {
         const args = [
           'https://example.com',
           'performance',
@@ -201,6 +199,7 @@ describe('RunReportCommand', () => {
           '2024-12-31',
         ];
 
+        // eslint-disable-next-line no-await-in-loop
         await command.handleExecution(args, slackContext);
         // Should get missing arguments error, not a sanitization error
         expect(slackContext.say).to.have.been.calledOnce;
@@ -208,9 +207,7 @@ describe('RunReportCommand', () => {
 
         // Reset for next iteration
         slackContext.say.resetHistory();
-      });
-
-      await Promise.all(testPromises);
+      }
     });
   });
 
