@@ -962,5 +962,29 @@ describe('onboard-modal', () => {
       const hasDeliveryConfigWithProgramId = successMessages.some((call) => call.args[0].text.includes(':gear: *Delivery Config:* Program 12345'));
       expect(hasDeliveryConfigWithProgramId).to.be.true;
     });
+
+    it('should fallback tier to free trial if not provided', async () => {
+      body.view.state.values.tier_input.tier.selected_option = {
+        value: undefined,
+      };
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+      configurationMock.findLatest.resolves(configurationMock);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      const postMessageCalls = clientMock.chat.postMessage.getCalls();
+      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding completed successfully'));
+      expect(successMessages.length).to.be.greaterThan(0);
+
+      const hasTierInput = successMessages.some((call) => call.args[0].text.includes(':paid: *Entitlement Tier:* free_trial'));
+      expect(hasTierInput).to.be.true;
+    });
   });
 });
