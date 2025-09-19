@@ -1,3 +1,10 @@
+# [1.180.0](https://github.com/adobe/spacecat-api-service/compare/v1.179.4...v1.180.0) (2025-09-19)
+
+
+### Features
+
+* new prerender audit type ([#1253](https://github.com/adobe/spacecat-api-service/issues/1253)) ([51035a6](https://github.com/adobe/spacecat-api-service/commit/51035a62670d148714f3db8d83d48551c96ae255))
+
 ## [1.179.4](https://github.com/adobe/spacecat-api-service/compare/v1.179.3...v1.179.4) (2025-09-19)
 
 

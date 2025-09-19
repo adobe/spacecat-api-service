@@ -58,6 +58,7 @@ AuditType:
     - 'broken-internal-links'
     - 'experimentation-opportunities'
     - 'llm-error-pages'
+    - 'prerender'
   example: 'cwv'
 URL:
   type: string
