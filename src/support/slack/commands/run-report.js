@@ -18,17 +18,30 @@ import { REPORT_TYPES } from '../../../utils/constants.js';
 const PHRASES = ['run report'];
 
 /**
- * Validates a date string in YYYY-MM-DD format
+ * Validates a date string in YYYY-MM-DD format and returns the Date object if valid
  * @param {string} dateString - The date string to validate
- * @returns {boolean} True if valid, false otherwise
+ * @returns {Date|null} Date object if valid, null otherwise
  */
-function isValidDate(dateString) {
+function validateAndCreateDate(dateString) {
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(dateString)) {
-    return false;
+    return null;
   }
   const date = new Date(dateString);
-  return !Number.isNaN(date.getTime());
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Sanitizes and formats a report name for consistency
+ * @param {string} name - The raw name input from user
+ * @returns {string} Sanitized name with first letter uppercase and trimmed
+ */
+function sanitizeReportName(name) {
+  // Trim whitespace and normalize spaces
+  const trimmed = name.trim().replace(/\s+/g, ' ');
+  // Convert to lowercase first, then capitalize first letter
+  const lowercased = trimmed.toLowerCase();
+  return lowercased.charAt(0).toUpperCase() + lowercased.slice(1);
 }
 
 /**
@@ -46,17 +59,18 @@ function isValidPeriod(period, periodName) {
     return `${periodName} end date is required`;
   }
 
-  if (!isValidDate(period.startDate)) {
+  // Validate and create Date objects once
+  const startDate = validateAndCreateDate(period.startDate);
+  if (!startDate) {
     return `${periodName} start date must be in YYYY-MM-DD format`;
   }
 
-  if (!isValidDate(period.endDate)) {
+  const endDate = validateAndCreateDate(period.endDate);
+  if (!endDate) {
     return `${periodName} end date must be in YYYY-MM-DD format`;
   }
 
   // Validate that start date is not after end date
-  const startDate = new Date(period.startDate);
-  const endDate = new Date(period.endDate);
   if (startDate > endDate) {
     return `${periodName} start date must be less than or equal to end date`;
   }
@@ -175,10 +189,13 @@ function RunReportCommand(context) {
         return;
       }
 
+      // Sanitize the report name for consistency
+      const sanitizedName = sanitizeReportName(name);
+
       // Build report data object
       const reportData = {
         reportType,
-        name,
+        name: sanitizedName,
         reportPeriod: {
           startDate: reportStartDate,
           endDate: reportEndDate,
@@ -190,7 +207,7 @@ function RunReportCommand(context) {
       };
 
       // Send initial message
-      await say(`:adobe-run: Generating ${reportType} report "${name}" for site ${baseURL}...`);
+      await say(`:adobe-run: Generating ${reportType} report "${sanitizedName}" for site ${baseURL}...`);
 
       // Validate periods
       const reportPeriodError = isValidPeriod(reportData.reportPeriod, 'Report period');
@@ -212,7 +229,7 @@ function RunReportCommand(context) {
       await say(':white_check_mark: Report generation job queued successfully!\n'
         + `• Site: ${baseURL}\n`
         + `• Report Type: ${reportType}\n`
-        + `• Report Name: ${name}\n`
+        + `• Report Name: ${sanitizedName}\n`
         + `• Report Period: ${reportStartDate} to ${reportEndDate}\n`
         + `• Comparison Period: ${comparisonStartDate} to ${comparisonEndDate}\n`
         + `• Report ID: ${apiResponse.reportId || 'N/A'}\n`
