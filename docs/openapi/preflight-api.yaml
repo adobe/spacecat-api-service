@@ -7,7 +7,6 @@ preflight-jobs:
       - ims_key: [ ]
     summary: Submit a new preflight async job
     description: |
-      ⚠️ **EXPERIMENTAL / PROTOTYPE**
       This endpoint is useful for submitting a new preflight async job.
       The job will process the provided URL and return the results.
       The jobId can be used to poll for the status of the job.
@@ -45,7 +44,7 @@ preflight-jobs:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/CreateAsyncJobAcceptedResponse'
+              $ref: './schemas.yaml#/CreatePreflightJobResponse'
       '400':
         description: Invalid request (missing urls array, step field, or other required fields)
 
@@ -60,11 +59,10 @@ preflight-job-status:
       - ims_key: [ ]
     summary: Get preflight job status and result
     description: |
-      ⚠️ **EXPERIMENTAL / PROTOTYPE**
       This endpoint is used to retrieve the status and results of a preflight async job.
       The jobId must be provided in the path parameter.
       If the job is completed, the result will be included in the response.
-      If the job is still in progress, a 202 response will be returned.
+      If the job is still in progress, a 200 response will be returned.
     operationId: getPreflightJobStatus
     responses:
       '200':
@@ -72,6 +70,6 @@ preflight-job-status:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/AsyncJob'
+              $ref: './schemas.yaml#/PreflightJobResponse'
       '404':
         description: Job not found
