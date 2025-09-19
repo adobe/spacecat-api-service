@@ -244,32 +244,27 @@ prerender-audit:
     deliveryType: 'aem_edge'
     fullAuditRef: "https://example.com/prerender-audit"
     auditResult:
-      status: "OPPORTUNITIES_FOUND"
-      summary: "Analyzed 15 URLs, found 3 with significant client-side rendering"
-      totalUrlsChecked: 15
-      successfulComparisons: 15
-      urlsNeedingPrerender: 3
-      averageSimilarity: 0.85
+      totalUrlsChecked: 3
+      urlsNeedingPrerender: 2
       results:
         - url: "https://example.com/products"
+          organicTraffic: 15420
           needsPrerender: true
           contentGainRatio: 2.3
-          initialWords: 50
-          finalWords: 115
-          recommendation: "Content increased 2.3x after JS execution (50 → 115 words) - consider implementing prerendering"
+          wordCountBefore: 50
+          wordCountAfter: 115
         - url: "https://example.com/services"
+          organicTraffic: 8950
           needsPrerender: true
           contentGainRatio: 1.8
-          initialWords: 80
-          finalWords: 144
-          recommendation: "Content increased 1.8x after JS execution (80 → 144 words) - consider implementing prerendering"
+          wordCountBefore: 80
+          wordCountAfter: 144
         - url: "https://example.com/about"
+          organicTraffic: 3200
           needsPrerender: false
           contentGainRatio: 1.1
-          initialWords: 120
-          finalWords: 132
-          recommendation: "No significant client-side content increase detected (gain ratio: 1.1)"
-      finalUrl: "https://example.com/"
+          wordCountBefore: 120
+          wordCountAfter: 132
 analytics-site-integration-aa-tags:
   summary: Example for an integration with Adobe Analytics via Adobe Tags
   value:
