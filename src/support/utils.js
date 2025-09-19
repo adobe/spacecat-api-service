@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
@@ -21,6 +22,8 @@ import {
   resolveCanonicalUrl, isValidIMSOrgId,
   detectAEMVersion,
 } from '@adobe/spacecat-shared-utils';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
@@ -578,6 +581,52 @@ const createSiteAndOrganization = async (
 };
 
 /**
+ * Creates an entitlement and enrollment for a site.
+ *
+ * @param {Site} site - The site to create an entitlement and enrollment for.
+ * @param {Object} lambdaCtx - The Lambda context.
+ * @param {Object} slackCtx - The Slack context.
+ * @param {Object} reportLine - The report line object to update.
+ * @param {string} productCode - The product code to create an entitlement for.
+ * @param {string} tier - The tier to create an entitlement for.
+ * @returns {Promise<Object>} - The entitlement and site enrollment.
+ */
+export const createEntitlementAndEnrollment = async (
+  site,
+  lambdaCtx,
+  slackCtx,
+  reportLine,
+  productCode,
+  tier,
+) => {
+  const { log } = lambdaCtx;
+  const { say } = slackCtx;
+
+  // Create a local copy to avoid modifying the parameter directly
+  const localReportLine = { ...reportLine };
+
+  try {
+    const tierClient = await TierClient.createForSite(lambdaCtx, site, productCode);
+    const { entitlement, siteEnrollment } = await tierClient.createEntitlement(tier);
+    log.info(`Successfully created ${productCode} entitlement ${entitlement.getId()} (${tier}) and enrollment ${siteEnrollment.getId()} for site ${site.getId()}`);
+
+    const message = `:white_check_mark: A new ${productCode} entitlement ${entitlement.getId()} (${tier}) and enrollment ${siteEnrollment.getId()} has been created for site ${site.getId()}`;
+    await say(message);
+
+    return {
+      entitlement,
+      siteEnrollment,
+    };
+  } catch (error) {
+    log.error(`Creating ${productCode} entitlement and enrollment failed: ${error.message}`);
+    await say(`❌ Creating ${productCode} entitlement and site enrollment failed`);
+    localReportLine.errors = `Creating ${productCode} entitlement and site enrollment failed`;
+    localReportLine.status = 'Failed';
+    throw error;
+  }
+};
+
+/**
  * Shared onboarding function used by both modal and command implementations.
  *
  * @param {string} baseURLInput - The site URL input
@@ -588,6 +637,7 @@ const createSiteAndOrganization = async (
  * @param {Object} slackContext - Slack context object with say function
  * @param {Object} context - Lambda context containing dataAccess, log, etc.
  * @param {Object} additionalParams - Additional parameters
+ * @param {string} additionalParams.tier - Entitlement tier
  * @param {Object} options - Additional options
  * @param {Function} options.urlProcessor - Function to process the URL
  *                                          (e.g., extractURLFromSlackInput)
@@ -617,6 +667,8 @@ export const onboardSingleSite = async (
 
   const profileName = options.profileName || 'unknown';
 
+  const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
+
   await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
@@ -633,6 +685,7 @@ export const onboardSingleSite = async (
     errors: '',
     status: 'Success',
     existingSite: 'No',
+    tier,
   };
 
   try {
@@ -658,6 +711,23 @@ export const onboardSingleSite = async (
       reportLine,
       context,
       additionalParams.deliveryConfig,
+    );
+
+    // Validate tier
+    if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
+      reportLine.errors = `Invalid tier: ${tier}`;
+      reportLine.status = 'Failed';
+      return reportLine;
+    }
+
+    // Create entitlement and enrollment
+    await createEntitlementAndEnrollment(
+      site,
+      context,
+      slackContext,
+      reportLine,
+      EntitlementModel.PRODUCT_CODES.ASO,
+      tier,
     );
 
     const siteID = site.getId();

@@ -52,6 +52,7 @@ describe('onboard-modal', () => {
           audits: 'scrape-top-pages, broken-backlinks, broken-internal-links, experimentation-opportunities, meta-tags, sitemap, cwv, alt-text, broken-backlinks-auto-suggest, meta-tags-auto-suggest, broken-internal-links-auto-suggest',
           imports: 'organic-traffic, top-pages, organic-keywords, all-traffic',
           errors: [],
+          tier: 'free_trial',
         }),
       },
     });
@@ -336,6 +337,8 @@ describe('onboard-modal', () => {
     let configurationMock;
     let organizationMock;
     let configMock;
+    let entitlementMock;
+    let siteEnrollmentMock;
 
     beforeEach(() => {
       ackMock = sandbox.stub().resolves();
@@ -387,6 +390,12 @@ describe('onboard-modal', () => {
         }),
       };
 
+      entitlementMock = {
+      };
+
+      siteEnrollmentMock = {
+      };
+
       context = {
         log: {
           info: sandbox.stub(),
@@ -400,6 +409,8 @@ describe('onboard-modal', () => {
           Site: siteMock,
           Configuration: configurationMock,
           Organization: organizationMock,
+          Entitlement: entitlementMock,
+          SiteEnrollment: siteEnrollmentMock,
         },
         env: {
           DEMO_IMS_ORG: '1234567894ABCDEF12345678@AdobeOrg',
@@ -450,6 +461,13 @@ describe('onboard-modal', () => {
                 authoring_type: {
                   selected_option: {
                     value: 'documentauthoring',
+                  },
+                },
+              },
+              tier_input: {
+                tier: {
+                  selected_option: {
+                    value: 'paid',
                   },
                 },
               },
@@ -560,7 +578,8 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.called;
+      expect(ackMock).to.have.been.calledTwice;
+
       // Note: delivery config is now set during site creation, not afterward
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
@@ -579,6 +598,7 @@ describe('onboard-modal', () => {
           + ':writing_hand: *Authoring Type:* documentauthoring\n'
           + ':gear: *Delivery Config:* Program 12345, Environment 67890\n'
           + ':globe_with_meridians: *Preview Environment:* Configured with Program 12345, Environment 67890\n'
+          + ':paid: *Entitlement Tier:* free_trial\n'
           + ':question: *Already existing:* No\n'
           + ':gear: *Profile:* demo\n'
           + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
@@ -685,6 +705,7 @@ describe('onboard-modal', () => {
           + ':cat-egory-white: *Delivery Type:* aem_edge\n'
           + ':writing_hand: *Authoring Type:* documentauthoring\n'
           + '\n'
+          + ':paid: *Entitlement Tier:* free_trial\n'
           + ':question: *Already existing:* No\n'
           + ':gear: *Profile:* demo\n'
           + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
@@ -940,6 +961,30 @@ describe('onboard-modal', () => {
 
       const hasDeliveryConfigWithProgramId = successMessages.some((call) => call.args[0].text.includes(':gear: *Delivery Config:* Program 12345'));
       expect(hasDeliveryConfigWithProgramId).to.be.true;
+    });
+
+    it('should fallback tier to free trial if not provided', async () => {
+      body.view.state.values.tier_input.tier.selected_option = {
+        value: undefined,
+      };
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+      configurationMock.findLatest.resolves(configurationMock);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      const postMessageCalls = clientMock.chat.postMessage.getCalls();
+      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding completed successfully'));
+      expect(successMessages.length).to.be.greaterThan(0);
+
+      const hasTierInput = successMessages.some((call) => call.args[0].text.includes(':paid: *Entitlement Tier:* free_trial'));
+      expect(hasTierInput).to.be.true;
     });
   });
 });
