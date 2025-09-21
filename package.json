@@ -81,7 +81,7 @@
     "@adobe/spacecat-shared-rum-api-client": "2.37.6",
     "@adobe/spacecat-shared-scrape-client": "2.1.4",
     "@adobe/spacecat-shared-slack-client": "1.5.26",
-    "@adobe/spacecat-shared-tier-client": "1.0.1",
+    "@adobe/spacecat-shared-tier-client": "https://gitpkg.vercel.app/adobe/spacecat-shared/packages/spacecat-shared-tier-client?tier-client-upgrade",
     "@adobe/spacecat-shared-utils": "1.50.8",
     "@aws-sdk/client-s3": "3.893.0",
     "@aws-sdk/client-sfn": "3.893.0",
