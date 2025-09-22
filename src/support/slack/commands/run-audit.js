@@ -56,11 +56,16 @@ const parseKeywordArguments = (args) => {
   const positionalArgs = [];
 
   args.forEach((arg) => {
-    // Check if this is a Slack-formatted URL (e.g., <http://example.com|example.com>)
-    const isSlackFormattedUrl = arg && arg.match(/^<https?:\/\/[^|>]+\|[^>]+>$/);
-    const isRegularUrl = arg && arg.match(/^https?:\/\//);
+    // Check if this is any type of URL (more comprehensive detection)
+    const isAnyUrl = arg && (
+      arg.startsWith('<http://')
+      || arg.startsWith('<https://')
+      || arg.startsWith('http://')
+      || arg.startsWith('https://')
+      || (arg.includes('://') && arg.includes('.'))
+    );
 
-    if (arg && arg.includes(':') && !isSlackFormattedUrl && !isRegularUrl) {
+    if (arg && arg.includes(':') && !isAnyUrl) {
       const [key, ...valueParts] = arg.split(':');
       const value = valueParts.join(':').trim(); // Handle cases where value contains colons and trim whitespace
       keywords[key] = value;
