@@ -1,3 +1,15 @@
+# [1.182.0](https://github.com/adobe/spacecat-api-service/compare/v1.181.0...v1.182.0) (2025-09-22)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tier-client to v1.1.0 ([#1281](https://github.com/adobe/spacecat-api-service/issues/1281)) ([a20cb55](https://github.com/adobe/spacecat-api-service/commit/a20cb55d67854d394975779ee0d169353314195f))
+
+
+### Features
+
+* Add tier config option to ASO onboarding command ([#1270](https://github.com/adobe/spacecat-api-service/issues/1270)) ([fb5e414](https://github.com/adobe/spacecat-api-service/commit/fb5e4147e4889a9943c36a86d20c0e4aadc6e75e))
+
 # [1.181.0](https://github.com/adobe/spacecat-api-service/compare/v1.180.2...v1.181.0) (2025-09-22)
 
 
