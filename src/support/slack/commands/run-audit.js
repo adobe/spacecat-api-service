@@ -158,14 +158,12 @@ function RunAuditCommand(context) {
     const { say, files, botToken } = slackContext;
 
     try {
-      // DEBUG: Show what we're receiving
-      await say(`🔧 DEBUG: Received ${args.length} args: [${args.map((arg, i) => `${i}:"${arg}"`).join(', ')}]`);
+      log.info(`DEBUG run-audit: args=[${args.map((arg, i) => `${i}:"${arg}"`).join(', ')}]`);
 
       // Parse keyword arguments
       const { keywords, positionalArgs } = parseKeywordArguments(args);
 
-      // DEBUG: Show parsing results
-      await say(`🔧 DEBUG: keywords=${JSON.stringify(keywords)}, positionalArgs=[${positionalArgs.map((arg) => `"${arg}"`).join(', ')}]`);
+      log.info(`DEBUG run-audit: keywords=${JSON.stringify(keywords)}, positionalArgs=[${positionalArgs.map((arg) => `"${arg}"`).join(', ')}]`);
 
       // Determine if we're using keyword format or positional format
       const isKeywordFormat = Object.keys(keywords).length > 0;
@@ -191,8 +189,7 @@ function RunAuditCommand(context) {
         [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = positionalArgs;
       }
 
-      // DEBUG: Show final variable assignments
-      await say(`🔧 DEBUG: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
+      log.info(`DEBUG run-audit: final assignments - baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
