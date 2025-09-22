@@ -235,22 +235,7 @@ describe('approveSiteCandidate', () => {
     expect(orgDetectionMsg.blocks[2].elements[1].action_id).to.equal('rejectOrg');
   });
 
-  it('should not post org detection prompt if no org is detected or if it is FnF', async () => {
-    // Scenario A: No org detected
-    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
-    context.dataAccess.Site.findByBaseURL.resolves(null);
-    context.dataAccess.Site.create.resolves(site);
-
-    fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({ uuid: 'job-uuid' }) });
-    fetchMock.onSecondCall().resolves({ ok: true, json: async () => ({ status: 'completed', matchedCompany: null }) });
-
-    const approveFunction = approveSiteCandidate(context);
-    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
-
-    // postMessage call for site announcement
-    expect(slackClient.postMessage).to.have.been.calledOnce;
-
-    // Scenario B: Friends & Family - should not trigger org detection
+  it('should not post org detection prompt if it is FnF', async () => {
     sinon.restore();
 
     clock = sinon.useFakeTimers();
@@ -266,6 +251,21 @@ describe('approveSiteCandidate', () => {
 
     expect(slackClient.postMessage).to.have.been.calledOnce;
     expect(fetchMock).not.to.have.been.called;
+  });
+
+  it('should post "no org detected" message if org detection fails', async () => {
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+
+    fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({ uuid: 'job-uuid' }) });
+    fetchMock.onSecondCall().resolves({ ok: true, json: async () => ({ status: 'completed', matchedCompany: null }) });
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    // postMessage call for site announcement
+    expect(slackClient.postMessage).to.have.been.calledTwice;
   });
 
   it('logs and throws the error again if something goes wrong', async () => {

@@ -16,7 +16,12 @@ import {
   SiteCandidate as SiteCandidateModel,
 } from '@adobe/spacecat-shared-data-access';
 import { BaseSlackClient, SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
-import { Blocks, Elements, Message } from 'slack-block-builder';
+import {
+  Blocks,
+  Elements,
+  Message,
+  Md,
+} from 'slack-block-builder';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
@@ -104,6 +109,7 @@ export default function approveSiteCandidate(lambdaContext) {
       log.info(`Creating a new site: ${baseURL}`);
 
       const isFnF = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY;
+      log.info(`DEBUG: actions[0]?.text?.text = "${actions[0]?.text?.text}", BUTTON_LABELS.APPROVE_FRIENDS_FAMILY = "${BUTTON_LABELS.APPROVE_FRIENDS_FAMILY}", isFnF = ${isFnF}`);
 
       let site = await Site.findByBaseURL(siteCandidate.getBaseURL());
 
@@ -211,6 +217,23 @@ export default function approveSiteCandidate(lambdaContext) {
             SLACK_TARGETS.WORKSPACE_INTERNAL,
           );
           await slackClient.postMessage(orgMsg);
+        } else {
+          const followUpMessage = Message()
+            .channel(channel.id)
+            .threadTs(threadTs)
+            .blocks(
+              Blocks.Section()
+                .text(`I wasn not able to detect an IMS organization for *<${baseURL}|${baseURL}>*. Please let me know about the correct organization details using ${Md.codeInline('@spacecat set imsorg [url] [imsOrgId]')}. Example:`),
+              Blocks.Section()
+                .text(Md.codeBlock('@spacecat set imsorg spacecat.com XXXX@AdobeOrg')),
+            )
+            .buildToObject();
+
+          const slackClient = BaseSlackClient.createFrom(
+            lambdaContext,
+            SLACK_TARGETS.WORKSPACE_INTERNAL,
+          );
+          await slackClient.postMessage(followUpMessage);
         }
       }
     } catch (e) {
