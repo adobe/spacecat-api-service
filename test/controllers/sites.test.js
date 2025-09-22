@@ -255,6 +255,7 @@ describe('Sites Controller', () => {
   });
 
   it('creates a site', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
     const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
 
     expect(mockDataAccess.Site.create).to.have.been.calledOnce;
@@ -263,6 +264,15 @@ describe('Sites Controller', () => {
     const site = await response.json();
     expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('creates site returns 409 if a site with baseURL exists', async () => {
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(409);
+    const respJson = await response.json();
+    expect(respJson).to.have.property('message', 'Site with baseURL https://site1.com exists');
   });
 
   it('creates a site for a non-admin user', async () => {
