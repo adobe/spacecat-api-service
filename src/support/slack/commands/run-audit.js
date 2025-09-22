@@ -56,13 +56,11 @@ const parseKeywordArguments = (args) => {
   const positionalArgs = [];
 
   args.forEach((arg) => {
-    // Check if this is any type of URL (more comprehensive detection)
+    // Check if this is any type of URL (focused on HTTP/HTTPS only)
     const isAnyUrl = arg && (
-      arg.startsWith('<http://')
-      || arg.startsWith('<https://')
+      arg.startsWith('<http')
       || arg.startsWith('http://')
       || arg.startsWith('https://')
-      || arg.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
     );
 
     if (arg && arg.includes(':') && !isAnyUrl) {
