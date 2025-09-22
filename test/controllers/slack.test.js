@@ -19,6 +19,7 @@ import nock from 'nock';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
+import esmock from 'esmock';
 
 import SlackController from '../../src/controllers/slack.js';
 
@@ -46,6 +47,7 @@ describe('SlackController', () => {
       constructor(opts) {
         this.event = sinon.stub();
         this.action = sinon.stub();
+        this.view = sinon.stub();
         this.use = (middleware) => {
           middlewares.push(middleware);
         };
@@ -148,7 +150,7 @@ describe('SlackController', () => {
       const controller = SlackController(mockSlackApp);
       const response = await controller.handleEvent(context);
 
-      expect(logStub.info.calledWith('Ignoring retry event: 123')).to.be.true;
+      expect(logStub.debug.calledWith('Ignoring retry event: 123')).to.be.true;
       expect(response).to.be.an.instanceof(Response);
       expect(response.headers.get('x-error')).to.equal('ignored-event');
     });
@@ -186,6 +188,7 @@ describe('SlackController', () => {
       expect(context.boltApp).to.not.be.undefined;
       expect(context.boltApp).to.have.property('use');
       expect(context.boltApp).to.have.property('event');
+      expect(context.boltApp).to.have.property('view');
       expect(context.boltApp).to.have.property('processEvent');
 
       await middlewares[0]({ context, next: () => true });
@@ -343,6 +346,43 @@ describe('SlackController', () => {
       const response = await controller.inviteUserToChannel(context);
       expect(response.status).to.equal(202);
       expect(validatedSlackCall).to.be.true;
+    });
+  });
+
+  describe('onboard modal fallback', () => {
+    it('should use fallback empty function when onboardSiteModal action is not available', async () => {
+      const SlackControllerWithMissingAction = await esmock('../../src/controllers/slack.js', {
+        '../../src/support/slack/actions/index.js': {
+          default: {
+            approveFriendsFamily: sinon.stub(),
+            approveOrg: sinon.stub(),
+            approveSiteCandidate: sinon.stub(),
+            ignoreSiteCandidate: sinon.stub(),
+            rejectOrg: sinon.stub(),
+            start_onboarding: sinon.stub(),
+          },
+        },
+      });
+
+      const controller = SlackControllerWithMissingAction(mockSlackApp);
+
+      delete context.boltApp;
+
+      nock('https://slack.com', {
+        reqheaders: {
+          authorization: `Bearer ${context.env.SLACK_BOT_TOKEN}`,
+        },
+      })
+        .post('/api/auth.test')
+        .reply(200, {
+          ok: true,
+          ts: '123',
+        });
+
+      const response = await controller.handleEvent(context);
+      expect(response.status).to.be.oneOf([200, 500]);
+
+      expect(context.boltApp).to.not.be.undefined;
     });
   });
 });

@@ -33,6 +33,154 @@ llmo-sheet-data:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Query LLMO sheet data with filters, exclusions, and grouping
+    description: |
+      Retrieves and processes data from the external LLMO data endpoint for a specific site with advanced querying capabilities.
+      This endpoint allows filtering data with case-insensitive exact matching, excluding specific fields from the response,
+      and grouping data by specified attributes. The endpoint fetches all available data (up to 1M records) to apply
+      the query operations effectively.
+    operationId: queryLlmoSheetData
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetDataQuery'
+    responses:
+      '200':
+        description: LLMO sheet data queried and processed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The processed data returned from the external LLMO endpoint after applying filters, exclusions, and grouping
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-sheet-data-with-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: sheetType
+      in: path
+      required: true
+      description: The sheet type identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'analytics'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'questions'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO sheet data with sheet type
+    description: |
+      Retrieves data from the external LLMO data endpoint for a specific site with a specified sheet type.
+      This endpoint proxies data from the external HLX API based on the site's LLMO configuration.
+      The data is fetched from the path: {dataFolder}/{sheetType}/{dataSource}.json
+    operationId: getLlmoSheetDataWithType
+    responses:
+      '200':
+        description: LLMO sheet data retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The data returned from the external LLMO endpoint
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Query LLMO sheet data with sheet type using filters, exclusions, and grouping
+    description: |
+      Retrieves and processes data from the external LLMO data endpoint for a specific site with a specified sheet type
+      and advanced querying capabilities. This endpoint allows filtering data with case-insensitive exact matching,
+      excluding specific fields from the response, and grouping data by specified attributes.
+      The data is fetched from the path: {dataFolder}/{sheetType}/{dataSource}.json
+      The endpoint fetches all available data (up to 1M records) to apply the query operations effectively.
+    operationId: queryLlmoSheetDataWithType
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetDataQuery'
+    responses:
+      '200':
+        description: LLMO sheet data queried and processed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The processed data returned from the external LLMO endpoint after applying filters, exclusions, and grouping
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-global-sheet-data:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: configName
+      in: path
+      required: true
+      description: The data source identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'questions'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO global sheet data
+    description: |
+      Retrieves data from the external LLMO global data endpoint for a specific site.
+      This endpoint proxies data from the external HLX API using the global 'llmo-global' folder,
+      independent of the site's LLMO configuration dataFolder.
+    operationId: getLlmoGlobalSheetData
+    responses:
+      '200':
+        description: LLMO global sheet data retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The data returned from the external LLMO endpoint
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 
 llmo-config:
   parameters:
@@ -179,4 +327,193 @@ llmo-question:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ] 
+      - api_key: [ ]
+
+llmo-customer-intent:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO customer intent
+    description: |
+      Retrieves all LLMO customer intent key-value pairs for a specific site.
+      Returns an array of customer intent items with key and value properties.
+    operationId: getLlmoCustomerIntent
+    responses:
+      '200':
+        description: LLMO customer intent retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCustomerIntent'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Add LLMO customer intent
+    description: |
+      Adds new customer intent items to the LLMO configuration for a specific site.
+      Customer intent items are key-value pairs that define customer targeting and goals.
+    operationId: addLlmoCustomerIntent
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoCustomerIntentInput'
+    responses:
+      '200':
+        description: LLMO customer intent added successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCustomerIntent'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-customer-intent-item:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: intentKey
+      in: path
+      required: true
+      description: The unique key of the customer intent item to modify
+      schema:
+        type: string
+        example: 'target_audience'
+  delete:
+    tags:
+      - llmo
+    summary: Remove LLMO customer intent item
+    description: |
+      Removes a specific customer intent item from the LLMO configuration by its key.
+      The key should match an existing customer intent item.
+    operationId: removeLlmoCustomerIntent
+    responses:
+      '200':
+        description: LLMO customer intent item removed successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCustomerIntent'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  patch:
+    tags:
+      - llmo
+    summary: Update LLMO customer intent item
+    description: |
+      Updates a specific customer intent item in the LLMO configuration by its key.
+      You can update either the key, value, or both properties.
+    operationId: patchLlmoCustomerIntent
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoCustomerIntentUpdate'
+    responses:
+      '200':
+        description: LLMO customer intent item updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCustomerIntent'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-cdn-logs-filter:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - llmo
+    summary: Update LLMO CDN logs filter configuration
+    description: |
+      Updates the CDN logs filter configuration for a specific site.
+    operationId: patchLlmoCdnLogsFilter
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cdnlogsFilter:
+                $ref: './schemas.yaml#/LlmoCdnLogsFilter'
+    responses:
+      '200':
+        description: LLMO CDN logs filter updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCdnLogsFilter'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-cdn-logs-bucket-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - llmo
+    summary: Update LLMO CDN bucket config configuration
+    description: |
+      Updates the CDN bucket config configuration for a specific site.
+    operationId: patchLlmoCdnBucketConfig
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cdnBucketConfig:
+                $ref: './schemas.yaml#/LlmoCdnBucketConfig'
+    responses:
+      '200':
+        description: LLMO CDN bucket config updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCdnBucketConfig'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

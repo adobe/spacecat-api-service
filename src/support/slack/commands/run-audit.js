@@ -34,12 +34,42 @@ const ALL_AUDITS = [
   'canonical',
   'broken-backlinks',
   'broken-internal-links',
+  'llm-error-pages',
   'experimentation-opportunities',
   'meta-tags',
   'structured-data',
   'forms-opportunities',
   'alt-text',
+  'prerender',
 ];
+
+/**
+ * Parses keyword arguments from command input.
+ * Supports formats like "audit:geo-brand-presence", "audit: geo-brand-presence",
+ * "date-start:2025-09-07", "source:google-ai-overviews"
+ * Handles Slack-formatted URLs like <http://example.com|example.com>
+ * @param {string[]} args - The command arguments
+ * @returns {Object} Parsed arguments with keywords and remaining positional args
+ */
+const parseKeywordArguments = (args) => {
+  const keywords = {};
+  const positionalArgs = [];
+
+  args.forEach((arg) => {
+    // Check if this is a Slack-formatted URL (e.g., <http://example.com|example.com>)
+    const isSlackFormattedUrl = arg && arg.match(/^<https?:\/\/[^|>]+\|[^>]+>$/);
+
+    if (arg && arg.includes(':') && !isSlackFormattedUrl) {
+      const [key, ...valueParts] = arg.split(':');
+      const value = valueParts.join(':').trim(); // Handle cases where value contains colons and trim whitespace
+      keywords[key] = value;
+    } else {
+      positionalArgs.push(arg);
+    }
+  });
+
+  return { keywords, positionalArgs };
+};
 
 /**
  * Factory function to create the RunAuditCommand object.
@@ -52,9 +82,9 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} [auditType (optional)]`,
+    usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
@@ -64,10 +94,11 @@ function RunAuditCommand(context) {
    * Runs an audit for the given site.
    * @param {string} baseURL - The base URL of the site.
    * @param {string} auditType - The type of audit to run.
+   * @param {undefined|string} auditData - Extra data to pass to the audit.
    * @param {object} slackContext - The Slack context object.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
-  const runAuditForSite = async (baseURL, auditType, slackContext) => {
+  const runAuditForSite = async (baseURL, auditType, auditData, slackContext) => {
     const { say } = slackContext;
 
     try {
@@ -93,7 +124,7 @@ function RunAuditCommand(context) {
         await Promise.all(
           enabledAudits.map(async (enabledAuditType) => {
             try {
-              await triggerAuditForSite(site, enabledAuditType, slackContext, context);
+              await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
               await postErrorMessage(say, error);
@@ -105,7 +136,7 @@ function RunAuditCommand(context) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
           return;
         }
-        await triggerAuditForSite(site, auditType, slackContext, context);
+        await triggerAuditForSite(site, auditType, auditData, slackContext, context);
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -126,7 +157,32 @@ function RunAuditCommand(context) {
     const { say, files, botToken } = slackContext;
 
     try {
-      const [baseURLInputArg, auditTypeInputArg] = args;
+      // Parse keyword arguments
+      const { keywords, positionalArgs } = parseKeywordArguments(args);
+
+      // Determine if we're using keyword format or positional format
+      const isKeywordFormat = Object.keys(keywords).length > 0;
+
+      let baseURLInputArg;
+      let auditTypeInputArg;
+      let auditDataInputArg;
+
+      if (isKeywordFormat) {
+        // New keyword format: site audit:type date-start:value source:value
+        [baseURLInputArg] = positionalArgs;
+        auditTypeInputArg = keywords.audit;
+
+        // Build audit data from remaining keywords (excluding 'audit')
+        const auditDataKeywords = { ...keywords };
+        delete auditDataKeywords.audit;
+
+        auditDataInputArg = Object.keys(auditDataKeywords).length > 0
+          ? JSON.stringify(auditDataKeywords)
+          : undefined;
+      } else {
+        // Old positional format: site auditType auditData
+        [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = positionalArgs;
+      }
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
@@ -143,7 +199,7 @@ function RunAuditCommand(context) {
       }
 
       if (hasFiles) {
-        const [, auditTypeInput] = ['', baseURLInputArg];
+        const [, auditTypeInput, auditData] = ['', baseURLInputArg, auditTypeInputArg];
         const auditType = auditTypeInput || LHS_MOBILE;
 
         if (files.length > 1) {
@@ -165,7 +221,7 @@ function RunAuditCommand(context) {
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             if (isValidUrl(csvBaseURL)) {
-              await runAuditForSite(csvBaseURL, auditType, slackContext);
+              await runAuditForSite(csvBaseURL, auditType, auditData, slackContext);
             } else {
               await say(`:warning: Invalid URL found in CSV file: ${csvBaseURL}`);
             }
@@ -174,7 +230,7 @@ function RunAuditCommand(context) {
       } else if (hasValidBaseURL) {
         const auditType = auditTypeInputArg || LHS_MOBILE;
         say(`:adobe-run: Triggering ${auditType} audit for ${baseURL}`);
-        await runAuditForSite(baseURL, auditType, slackContext);
+        await runAuditForSite(baseURL, auditType, auditDataInputArg, slackContext);
       }
     } catch (error) {
       log.error(error);

@@ -98,15 +98,11 @@ export default function approveSiteCandidate(lambdaContext) {
       } = body;
       const { blocks, ts: threadTs } = message;
 
-      log.info(JSON.stringify(body));
-
       await ack(); // slack expects acknowledgement within 3s
 
       const baseURL = extractURLFromSlackMessage(blocks[0]?.text?.text);
 
       const siteCandidate = await SiteCandidate.findByBaseURL(baseURL);
-
-      log.info(`Creating a new site: ${baseURL}`);
 
       const isFnF = actions[0]?.text?.text === BUTTON_LABELS.APPROVE_FRIENDS_FAMILY;
       log.info(`DEBUG: actions[0]?.text?.text = "${actions[0]?.text?.text}", BUTTON_LABELS.APPROVE_FRIENDS_FAMILY = "${BUTTON_LABELS.APPROVE_FRIENDS_FAMILY}", isFnF = ${isFnF}`);
@@ -154,8 +150,6 @@ export default function approveSiteCandidate(lambdaContext) {
         approved: true,
       });
 
-      log.info(`Responding site candidate approval with: ${JSON.stringify(reply)}`);
-
       await respond(reply);
 
       await announceSiteDiscovery(
@@ -184,8 +178,6 @@ export default function approveSiteCandidate(lambdaContext) {
 
         // Poll the mystique API to check the status of the Org Detector Agent job
         const org = await pollOrgDetectorAgent(jobId, mystiqueApiBaseUrl);
-
-        log.info(`Detected org: ${JSON.stringify(org)}`);
 
         if (hasText(org?.name) && hasText(org?.imsOrgId)) {
           const { name, imsOrgId } = org;

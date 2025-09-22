@@ -15,6 +15,16 @@ import approveOrg from './approve-org.js';
 import approveSiteCandidate from './approve-site-candidate.js';
 import ignoreSiteCandidate from './ignore-site-candidate.js';
 import rejectOrg from './reject-org.js';
+import {
+  startLLMOOnboarding,
+  onboardLLMOModal,
+  addEntitlementsAction,
+  updateOrgAction,
+  updateIMSOrgModal,
+} from './onboard-llmo-modal.js';
+import { onboardSiteModal, startOnboarding } from './onboard-modal.js';
+import { preflightConfigModal } from './preflight-config-modal.js';
+import openPreflightConfig from './open-preflight-config.js';
 
 const actions = {
   approveFriendsFamily,
@@ -22,6 +32,15 @@ const actions = {
   approveSiteCandidate,
   ignoreSiteCandidate,
   rejectOrg,
+  onboardSiteModal,
+  onboardLLMOModal,
+  updateIMSOrgModal,
+  start_onboarding: startOnboarding,
+  start_llmo_onboarding: startLLMOOnboarding,
+  preflight_config_modal: preflightConfigModal,
+  open_preflight_config: openPreflightConfig,
+  add_entitlements_action: addEntitlementsAction,
+  update_org_action: updateOrgAction,
 };
 
 export default actions;

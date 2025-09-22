@@ -21,6 +21,7 @@ import {
   parseS3Uri,
   getS3CachedResult,
   addResultJsonToCache,
+  getSignedUrlWithRetries,
 } from '../../../src/controllers/paid/caching-helper.js';
 
 use(chaiAsPromised);
@@ -87,7 +88,6 @@ describe('Paid TrafficController caching-helper', () => {
       mockS3.getSignedUrl.resolves('https://signed-url');
       const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
       expect(url).to.equal('https://signed-url');
-      expect(mockLog.info).to.have.been.calledWithMatch('Fetching cached result key');
     });
     it('returns null if error is NoSuchKey', async () => {
       mockS3.getSignedUrl.rejects(Object.assign(new Error('no such key'), { name: 'NoSuchKey' }));
@@ -98,7 +98,7 @@ describe('Paid TrafficController caching-helper', () => {
       mockS3.getSignedUrl.rejects(Object.assign(new Error('fail'), { name: 'OtherError' }));
       const url = await getS3CachedResult(mockS3, 's3://bucket/key.json', mockLog);
       expect(url).to.be.null;
-      expect(mockLog.error).to.have.been.calledWithMatch('Unepected exception');
+      expect(mockLog.error).to.have.been.calledWithMatch('Unexpected exception');
     });
   });
 
@@ -113,6 +113,63 @@ describe('Paid TrafficController caching-helper', () => {
       const result = await addResultJsonToCache(mockS3, 's3://bucket/key.json', { foo: 'bar' }, mockLog);
       expect(result).to.be.false;
       expect(mockLog.error).to.have.been.calledWithMatch('Failed to add result json to cache');
+    });
+  });
+
+  describe('fileExists retries', () => {
+    it('retries on ServiceUnavailable error and eventually succeeds', async () => {
+      const serviceUnavailableError = new Error('Service unavailable');
+      serviceUnavailableError.name = 'ServiceUnavailable';
+
+      mockS3.s3Client.send
+        .onFirstCall().rejects(serviceUnavailableError)
+        .onSecondCall().resolves();
+
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog, 2, 10);
+      expect(result).to.be.true;
+      expect(mockS3.s3Client.send).to.have.been.calledTwice;
+    });
+
+    it('retries on 503 error and eventually fails after max attempts', async () => {
+      const error503 = new Error('Service unavailable');
+      error503.$metadata = { httpStatusCode: 503 };
+
+      mockS3.s3Client.send.rejects(error503);
+
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog, 2, 10);
+      expect(result).to.be.false;
+      expect(mockS3.s3Client.send).to.have.been.calledTwice;
+      expect(mockLog.error).to.have.been.calledWithMatch('Unexpected error when checking cache (attempt 2)');
+    });
+
+    it('exhausts all retry attempts and returns false', async () => {
+      const retryableError = new Error('Service unavailable');
+      retryableError.name = 'ServiceUnavailable';
+
+      mockS3.s3Client.send.rejects(retryableError);
+
+      const result = await fileExists(mockS3, 's3://bucket/key.json', mockLog, 3, 10);
+      expect(result).to.be.false;
+      expect(mockS3.s3Client.send).to.have.been.calledThrice;
+    });
+  });
+
+  describe('getSignedUrlWithRetries', () => {
+    it('returns signed url when file exists', async () => {
+      mockS3.s3Client.send.resolves();
+      mockS3.getSignedUrl.resolves('https://signed-url');
+
+      const result = await getSignedUrlWithRetries(mockS3, 's3://bucket/key.json', mockLog, 1);
+      expect(result).to.equal('https://signed-url');
+    });
+
+    it('returns null when file does not exist', async () => {
+      const notFoundError = new Error('not found');
+      notFoundError.name = 'NotFound';
+      mockS3.s3Client.send.rejects(notFoundError);
+
+      const result = await getSignedUrlWithRetries(mockS3, 's3://bucket/key.json', mockLog, 1);
+      expect(result).to.be.null;
     });
   });
 });

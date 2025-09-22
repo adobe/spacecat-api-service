@@ -28,24 +28,40 @@ function parseS3Uri(s3Uri) {
   };
 }
 
-async function fileExists(s3, key, log) {
-  try {
-    log.info(`Checking if cached result exists with key: ${key}`);
-    const { bucket, prefix } = parseS3Uri(key);
-    await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: prefix }));
-    return true;
-  } catch (err) {
-    if (err.name === 'NotFound') {
-      return false;
+async function fileExists(s3, key, log, maxAttempts = 3, delayMs = 200) {
+  const { bucket, prefix } = parseS3Uri(key);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      log.info(`Checking if cached result exists with key: ${key} (attempt ${attempt})`);
+      // eslint-disable-next-line no-await-in-loop
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: prefix }));
+      return true;
+    } catch (err) {
+      if (err.name === 'NotFound') {
+        return false;
+      }
+
+      const isRetryable = err.$metadata?.httpStatusCode === 503 || err.name === 'ServiceUnavailable';
+
+      if (!isRetryable || attempt === maxAttempts) {
+        log.error(`Unexpected error when checking cache (attempt ${attempt}): ${err}. Skipping cache.`);
+        return false;
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise(
+        (resolve) => {
+          setTimeout(resolve, delayMs);
+        },
+      );
     }
-    log.error(`Unexpected error when checking if cached result exists: ${err}. Continuing execution without using cache`);
-    return false;
   }
+
+  return false;
 }
 
-async function getS3CachedResult(s3, key, log) {
+async function getS3CachedResult(s3, key, log, ignoreNotFound = true) {
   try {
-    log.info(`Fetching cached result key: ${key}`);
     const { bucket, prefix } = parseS3Uri(key);
 
     const getCachedFile = new GetObjectCommand({ Bucket: bucket, Key: prefix });
@@ -58,12 +74,21 @@ async function getS3CachedResult(s3, key, log) {
     );
     return presignedUrl;
   } catch (err) {
-    if (err.name === 'NoSuchKey') {
+    if (err.name === 'NoSuchKey' && ignoreNotFound) {
       return null;
     }
-    log.error(`Unepected exception when trying to fetch cached results on key: ${key}. Ignoring error and continuing with normal query. Exception was ${err}`);
+    log.error(`Unexpected exception when trying to fetch cached results on key: ${key}. Ignoring error and continuing with normal query. Exception was ${err}`);
     return null;
   }
+}
+
+async function getSignedUrlWithRetries(s3, key, log, maxAttempts) {
+  const exists = await fileExists(s3, key, log, maxAttempts);
+  if (exists) {
+    return getS3CachedResult(s3, key, log, false);
+  }
+
+  return null;
 }
 
 async function addResultJsonToCache(s3, cacheKey, result, log) {
@@ -93,4 +118,5 @@ export {
   parseS3Uri,
   getS3CachedResult,
   addResultJsonToCache,
+  getSignedUrlWithRetries,
 };

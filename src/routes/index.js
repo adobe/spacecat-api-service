@@ -63,6 +63,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} brandsController - The brands controller.
  * @param {Object} preflightController - The preflight controller.
  * @param {Object} demoController - The demo controller.
+ * @param {Object} consentBannerController - The consent banner controller.
  * @param {Object} scrapeController - The scrape controller.
  * @param {Object} scrapeJobController - The scrape job controller.
  * @param {Object} mcpController - The MCP controller.
@@ -70,6 +71,14 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} organizationIdentityProviderController - The organization identity
+ * provider controller.
+ * @param {Object} userActivityController - The user activity controller.
+ * @param {Object} siteEnrollmentController - The site enrollment controller.
+ * @param {Object} trialUserController - The trial user controller.
+ * @param {Object} entitlementController - The entitlement controller.
+ * @param {Object} sandboxAuditController - The sandbox audit controller.
+ * @param {Object} reportsController - The reports controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -90,13 +99,20 @@ export default function getRouteHandlers(
   brandsController,
   preflightController,
   demoController,
+  consentBannerController,
   scrapeController,
   scrapeJobController,
-  mcpController,
   paidController,
   trafficController,
   fixesController,
   llmoController,
+  organizationIdentityProviderController,
+  userActivityController,
+  siteEnrollmentController,
+  trialUserController,
+  entitlementController,
+  sandboxAuditController,
+  reportsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -163,12 +179,16 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
+    'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,
+    'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device': trafficController.getPaidTrafficByUrlPageTypePlatformCampaignDevice,
+    'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device': trafficController.getPaidTrafficByPageTypePlatformCampaignDevice,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device': trafficController.getPaidTrafficByUrlPageTypeCampaignDevice,
     'GET /sites/:siteId/traffic/paid/url-page-type-device': trafficController.getPaidTrafficByUrlPageTypeDevice,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign': trafficController.getPaidTrafficByUrlPageTypeCampaign,
     'GET /sites/:siteId/traffic/paid/url-page-type-platform': trafficController.getPaidTrafficByUrlPageTypePlatform,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform': trafficController.getPaidTrafficByUrlPageTypeCampaignPlatform,
     'GET /sites/:siteId/traffic/paid/url-page-type-platform-device': trafficController.getPaidTrafficByUrlPageTypePlatformDevice,
+    'GET /sites/:siteId/traffic/paid/page-type': trafficController.getPaidTrafficByPageType,
     'GET /sites/:siteId/traffic/paid/page-type-campaign-device': trafficController.getPaidTrafficByPageTypeCampaignDevice,
     'GET /sites/:siteId/traffic/paid/page-type-device': trafficController.getPaidTrafficByPageTypeDevice,
     'GET /sites/:siteId/traffic/paid/page-type-campaign': trafficController.getPaidTrafficByPageTypeCampaign,
@@ -200,12 +220,10 @@ export default function getRouteHandlers(
     'GET /tools/import/jobs/:jobId/progress': importController.getImportJobProgress,
     'POST /tools/import/jobs/:jobId/result': importController.getImportJobResult,
     'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs': importController.getImportJobsByDateRange,
-    'GET /screenshots': demoController.getScreenshots,
-    'POST /screenshots': demoController.takeScreenshots,
+    'POST /consent-banner': consentBannerController.takeScreenshots,
+    'GET /consent-banner/:jobId': consentBannerController.getScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
-    'GET /mcp': mcpController.handleSseRequest,
-    'POST /mcp': mcpController.handleRpc,
 
     // Scrape Jobs
     'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
@@ -227,11 +245,40 @@ export default function getRouteHandlers(
 
     // LLMO Specific Routes
     'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
+    'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.getLlmoSheetData,
+    'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
+    'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
     'PATCH /sites/:siteId/llmo/questions/:questionKey': llmoController.patchLlmoQuestion,
+    'GET /sites/:siteId/llmo/customer-intent': llmoController.getLlmoCustomerIntent,
+    'POST /sites/:siteId/llmo/customer-intent': llmoController.addLlmoCustomerIntent,
+    'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
+    'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
+    'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
+    'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
+    'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
+
+    // Tier Specific Routes
+    'GET /organizations/:organizationId/organization-identity-provider': organizationIdentityProviderController.getByOrganizationID,
+    'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
+    'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
+    'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
+    'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
+    'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
+
+    // Sandbox audit route
+    'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
+
+    // Reports
+    'POST /sites/:siteId/reports': reportsController.createReport,
+    'GET /sites/:siteId/reports': reportsController.getAllReportsBySiteId,
+    'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
+    'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
+    'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
   };
 
   // Initialization of static and dynamic routes

@@ -227,9 +227,9 @@ weekNumber:
     maximum: 53
 month:
   name: month
-  description: The month number (1-12)
+  description: The month number (1-12). Provide either weekNumber or month.
   in: query
-  required: true
+  required: false
   schema:
     type: integer
     minimum: 1
@@ -243,3 +243,104 @@ year:
   schema:
     type: integer
     example: 2024
+
+trafficType:
+  name: trafficType
+  description: Filter by traffic type (owned, earned, paid) or all
+  in: query
+  required: false
+  schema:
+    type: string
+    enum:
+      - 'all'
+      - 'owned'
+      - 'earned' 
+      - 'paid'
+    example: 'paid'
+ 
+# New parameters for entitlements API
+entitlementId:
+  name: entitlementId
+  description: The entitlement ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+productCode:
+  name: productCode
+  description: The product code (LLMO or ASO)
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'LLMO'
+      - 'ASO'
+
+# New parameters for site enrollments API
+siteEnrollmentId:
+  name: siteEnrollmentId
+  description: The site enrollment ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+# New parameters for trial users API
+trialUserId:
+  name: trialUserId
+  description: The trial user ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+provider:
+  name: provider
+  description: The identity provider (IMS, Microsoft, Google, etc.)
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'IMS'
+
+externalUserId:
+  name: externalUserId
+  description: The external user ID from the identity provider
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'user123@adobe.com'
+
+externalId:
+  name: externalId
+  description: The external ID from the identity provider
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'user123@adobe.com'
+
+# New parameters for organization identity providers API
+organizationIdentityProviderId:
+  name: organizationIdentityProviderId
+  description: The organization identity provider ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+sandboxAuditType:
+  name: auditType
+  description: Comma-separated list of audit types to run
+  in: query
+  required: false
+  schema:
+    type: string
+    description: Comma-separated list of audit types
+    example: "meta-tags,alt-text"
+    enum:
+      - 'meta-tags'
+      - 'alt-text'
