@@ -82,7 +82,8 @@
 			"broken-internal-links-auto-suggest": {},
 			"broken-backlinks-auto-fix": {},
 			"meta-tags-auto-fix": {},
-			"broken-internal-links-auto-fix": {}
+			"broken-internal-links-auto-fix": {},
+			"forms-opportunities": {}
 		},
 		"imports": {
 			"organic-traffic" : {},

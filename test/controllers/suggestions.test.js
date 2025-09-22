@@ -191,6 +191,7 @@ describe('Suggestions Controller', () => {
       getId: sandbox.stub().returns(OPPORTUNITY_ID),
       getSiteId: sandbox.stub().returns(SITE_ID),
       getType: sandbox.stub().returns('broken-backlinks'),
+      getData: sandbox.stub().returns({}),
     };
     opportunityNotEnabled = {
       getId: sandbox.stub().returns(OPPORTUNITY_ID_NOT_ENABLED),
@@ -351,7 +352,11 @@ describe('Suggestions Controller', () => {
       sendMessage: sandbox.stub().resolves(),
     };
 
-    suggestionsController = SuggestionsController({ dataAccess: mockSuggestionDataAccess, ...authContext }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    suggestionsController = SuggestionsController({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
   });
 
   afterEach(() => {
@@ -1601,7 +1606,8 @@ describe('Suggestions Controller', () => {
     });
   });
 
-  describe('auto-fix suggestions for CS', () => {
+  describe('auto-fix suggestions for CS', function () {
+    this.timeout(10000);
     let spySqs;
     let sqsSpy;
     let imsPromiseClient;
@@ -1635,6 +1641,7 @@ describe('Suggestions Controller', () => {
       });
       suggestionsControllerWithIms = SuggestionsControllerWithIms({
         dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
       }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
     });
@@ -1743,6 +1750,7 @@ describe('Suggestions Controller', () => {
       });
       const suggestionsControllerWithFailedIms = SuggestionsControllerWithFailedIms({
         dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
       }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
       mockSuggestion.allByOpportunityId.resolves(

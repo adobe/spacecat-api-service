@@ -16,7 +16,6 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import LlmoOnboardCommand from '../../../../src/support/slack/commands/llmo-onboard.js';
 
 use(sinonChai);
@@ -24,66 +23,35 @@ use(sinonChai);
 describe('LlmoOnboardCommand', () => {
   let command;
   let mockContext;
-  let mockSite;
-  let mockConfig;
-  let mockDataAccess;
   let mockLog;
-  let mockConfiguration;
+  let mockDataAccess;
   let slackContext;
 
   beforeEach(() => {
-    // Create mock config
-    mockConfig = sinon.stub({ ...Config() }); // spread needed b/c the config object gets frozen
-
-    // Create mock site
-    mockSite = {
-      getId: sinon.stub().returns('test-site-id'),
-      getOrganizationId: sinon.stub().returns('test-org-id'),
-      getConfig: sinon.stub().returns(mockConfig),
-      setConfig: sinon.stub(),
-      save: sinon.stub().resolves(),
-    };
-
-    // Mock global Configuration
-    mockConfiguration = {
-      enableHandlerForSite: sinon.stub(),
-      save: sinon.stub().resolves(),
-      getQueues: sinon.stub().returns({ imports: 'queue-imports' }),
-      isHandlerEnabledForSite: sinon.stub().returns(false),
-    };
-
-    // Create mock data access
-    mockDataAccess = {
-      Site: {
-        findByBaseURL: sinon.stub().resolves(mockSite),
-        allByOrganizationId: sinon.stub().resolves([]),
-      },
-      Configuration: {
-        findLatest: sinon.stub().resolves(mockConfiguration),
-      },
-    };
-
     // Create mock log
     mockLog = {
       info: sinon.stub(),
       error: sinon.stub(),
     };
 
+    // Create mock data access
+    mockDataAccess = {
+      Site: {
+        findByBaseURL: sinon.stub(),
+      },
+    };
+
     // Create mock context
     mockContext = {
-      dataAccess: mockDataAccess,
       log: mockLog,
-      sqs: {
-        sendMessage: sinon.stub(),
-      },
+      dataAccess: mockDataAccess,
     };
 
     // Create slack context
     slackContext = {
       say: sinon.stub(),
+      threadTs: '1234567890.123456',
     };
-
-    mockDataAccess.Site.allByOrganizationId.resolves([mockSite]);
 
     command = LlmoOnboardCommand(mockContext);
   });
@@ -107,175 +75,155 @@ describe('LlmoOnboardCommand', () => {
   });
 
   describe('Handle Execution Method', () => {
-    it('should show usage when insufficient arguments provided', async () => {
-      await command.handleExecution(['https://example.com'], slackContext);
+    it('should show usage when no site URL provided', async () => {
+      await command.handleExecution([], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
-        ':warning: Missing required arguments. Please provide: `baseURL`, `dataFolder`, and `brandName`.',
+        'Usage: _onboard-llmo <site url>_',
       );
     });
 
-    it('should reject invalid URLs', async () => {
-      await command.handleExecution(['invalid-url', 'adobe', 'Adobe'], slackContext);
+    it('should show usage when invalid URL provided', async () => {
+      await command.handleExecution(['invalid-url'], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
-        ':warning: Please provide a valid site base URL.',
+        'Usage: _onboard-llmo <site url>_',
       );
     });
 
-    it('should reject empty brand name', async () => {
-      await command.handleExecution(['https://example.com', 'adobe', ''], slackContext);
-
-      expect(slackContext.say).to.have.been.calledWith(
-        ':warning: Brand name cannot be empty.',
-      );
-    });
-
-    it('should handle site not found', async () => {
+    it('should show onboarding button for new site URL', async () => {
+      // Mock Site.findByBaseURL to return null (site doesn't exist)
       mockDataAccess.Site.findByBaseURL.resolves(null);
 
-      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
+      await command.handleExecution(['https://example.com'], slackContext);
 
-      expect(slackContext.say).to.have.been.calledWith(
-        ':x: Site \'https://example.com\' not found. Please add the site first using the regular onboard command.',
-      );
+      expect(slackContext.say).to.have.been.calledOnce;
+      const message = slackContext.say.getCall(0).args[0];
+
+      expect(message).to.have.property('blocks');
+      expect(message).to.have.property('thread_ts', '1234567890.123456');
+
+      // Check for the section block with onboarding text
+      const sectionBlock = message.blocks.find((block) => block.type === 'section');
+      expect(sectionBlock).to.exist;
+      expect(sectionBlock.text.text).to.include('LLMO Onboarding');
+
+      // Check for the actions block with the button
+      const actionsBlock = message.blocks.find((block) => block.type === 'actions');
+      expect(actionsBlock).to.exist;
+      expect(actionsBlock.elements).to.have.length(1);
+
+      const button = actionsBlock.elements[0];
+      expect(button.type).to.equal('button');
+      expect(button.text.text).to.equal('Start Onboarding');
+      expect(button.action_id).to.equal('start_llmo_onboarding');
+      expect(button.value).to.equal('https://example.com');
+      expect(button.style).to.equal('primary');
     });
 
-    it('should successfully onboard LLMO for a valid site (first site in org) and enable all audits', async () => {
-      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
-
-      // site lookup and config update
-      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
-      expect(mockSite.setConfig).to.have.been.called;
-
-      // enable traffic-analysis import on the site config
-      expect(mockConfig.enableImport).to.have.been.calledWith('traffic-analysis');
-
-      // enable llmo-prompts-ahrefs import on the site confing
-      expect(mockConfig.enableImport).calledWith('llmo-prompts-ahrefs', { limit: 50 });
-      // check organization sites for existing agentic traffic config
-      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith('test-org-id');
-
-      // enable handler for site in Configuration and save it
-      expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
-      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
-      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('cdn-analysis', mockSite);
-      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
-      expect(mockConfiguration.save).to.have.been.calledOnce;
-      // configuration was saved
-
-      // save site config after configuration saved
-      expect(mockSite.save).to.have.been.calledOnce;
-      sinon.assert.callOrder(mockConfiguration.save, mockSite.save);
-
-      // referral-traffic backfill should enqueue 4 messages (last 4 weeks)
-      expect(mockContext.sqs.sendMessage.callCount).to.equal(4);
-      const calls = mockContext.sqs.sendMessage.getCalls();
-      calls.forEach((call) => {
-        const [queue, payload] = call.args;
-        expect(queue).to.equal('queue-imports');
-        expect(payload).to.include({ type: 'traffic-analysis', siteId: 'test-site-id' });
-        expect(payload.auditContext).to.include({ auditType: 'llmo-referral-traffic' });
-        expect(payload.auditContext.week).to.be.a('number');
-        expect(payload.auditContext.year).to.be.a('number');
-      });
-
-      // success message
-      expect(slackContext.say).to.have.been.calledWith(
-        sinon.match.string.and(sinon.match(/LLMO onboarding completed successfully/)),
-      );
-    });
-
-    it('should skip enabling cdn-analysis when already enabled in organization', async () => {
-      const existingSite = {
-        getId: sinon.stub().returns('existing-site-id'),
-        getOrganizationId: sinon.stub().returns('test-org-id'),
-        getConfig: sinon.stub().returns(mockConfig),
-        setConfig: sinon.stub(),
-        save: sinon.stub().resolves(),
+    it('should show reonboarding options for existing site with LLMO brand', async () => {
+      // Mock existing site with LLMO brand
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getOrganizationId: sinon.stub().returns('org123'),
+        getConfig: sinon.stub().returns({
+          getLlmoBrand: sinon.stub().returns('Test Brand'),
+        }),
       };
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
 
-      mockConfiguration.isHandlerEnabledForSite.callsFake((auditType, site) => auditType === 'cdn-analysis' && site.getId() === 'existing-site-id');
+      await command.handleExecution(['https://example.com'], slackContext);
 
-      mockDataAccess.Site.allByOrganizationId.resolves([existingSite, mockSite]);
+      expect(slackContext.say).to.have.been.calledOnce;
+      const message = slackContext.say.getCall(0).args[0];
 
-      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
+      expect(message).to.have.property('blocks');
+      expect(message).to.have.property('thread_ts', '1234567890.123456');
 
-      expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledWith('test-org-id');
+      // Check for the section block with reonboarding text
+      const sectionBlock = message.blocks.find((block) => block.type === 'section');
+      expect(sectionBlock).to.exist;
+      expect(sectionBlock.text.text).to.include('Site Already Onboarded');
+      expect(sectionBlock.text.text).to.include('Test Brand');
 
-      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
-      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
+      // Check for the actions block with two buttons
+      const actionsBlock = message.blocks.find((block) => block.type === 'actions');
+      expect(actionsBlock).to.exist;
+      expect(actionsBlock.elements).to.have.length(2);
 
-      expect(mockConfiguration.enableHandlerForSite).to.not.have.been.calledWith('cdn-analysis', mockSite);
+      const addEntitlementsButton = actionsBlock.elements[0];
+      expect(addEntitlementsButton.type).to.equal('button');
+      expect(addEntitlementsButton.text.text).to.equal('Add Entitlements');
+      expect(addEntitlementsButton.action_id).to.equal('add_entitlements_action');
+      expect(addEntitlementsButton.style).to.equal('primary');
 
-      expect(mockConfiguration.save).to.have.been.calledOnce;
-      expect(mockSite.save).to.have.been.calledOnce;
+      const updateOrgButton = actionsBlock.elements[1];
+      expect(updateOrgButton.type).to.equal('button');
+      expect(updateOrgButton.text.text).to.equal('Update IMS Org');
+      expect(updateOrgButton.action_id).to.equal('update_org_action');
+
+      // Check that button values contain the necessary metadata
+      const addEntitlementsValue = JSON.parse(addEntitlementsButton.value);
+      expect(addEntitlementsValue.brandURL).to.equal('https://example.com');
+      expect(addEntitlementsValue.siteId).to.equal('site123');
+      expect(addEntitlementsValue.existingBrand).to.equal('Test Brand');
+
+      const updateOrgValue = JSON.parse(updateOrgButton.value);
+      expect(updateOrgValue.brandURL).to.equal('https://example.com');
+      expect(updateOrgValue.siteId).to.equal('site123');
+      expect(updateOrgValue.currentOrgId).to.equal('org123');
     });
 
-    it('should handle brand names with spaces', async () => {
-      await command.handleExecution(['https://example.com', 'adobe', 'Adobe Experience Cloud'], slackContext);
-
-      expect(mockSite.setConfig).to.have.been.called;
-      expect(mockSite.save).to.have.been.called;
-      expect(slackContext.say).to.have.been.calledWith(
-        sinon.match(/Brand.*Adobe Experience Cloud/),
-      );
-    });
-
-    it('should preserve existing questions when updating LLMO config', async () => {
-      const existingQuestions = {
-        Human: [{ key: 'test-key', question: 'Test question?' }],
+    it('should show onboarding button for existing site without LLMO brand', async () => {
+      // Mock existing site without LLMO brand
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          getLlmoBrand: sinon.stub().returns(null),
+        }),
       };
-      mockConfig.getLlmoConfig.returns({ questions: existingQuestions });
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
 
-      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
+      await command.handleExecution(['https://example.com'], slackContext);
 
-      const setConfigCall = mockSite.setConfig.getCall(0);
-      expect(setConfigCall).to.not.be.null;
-      // The config should include the existing questions
-      expect(mockSite.save).to.have.been.called;
+      expect(slackContext.say).to.have.been.calledOnce;
+      const message = slackContext.say.getCall(0).args[0];
+
+      // Check for the section block with onboarding text for existing site
+      const sectionBlock = message.blocks.find((block) => block.type === 'section');
+      expect(sectionBlock).to.exist;
+      expect(sectionBlock.text.text).to.include('LLMO Onboarding');
+
+      // Check for the actions block with the button
+      const actionsBlock = message.blocks.find((block) => block.type === 'actions');
+      expect(actionsBlock).to.exist;
+      expect(actionsBlock.elements).to.have.length(1);
+
+      const button = actionsBlock.elements[0];
+      expect(button.type).to.equal('button');
+      expect(button.text.text).to.equal('Start Onboarding');
+      expect(button.action_id).to.equal('start_llmo_onboarding');
+      expect(button.value).to.equal('https://example.com');
+      expect(button.style).to.equal('primary');
     });
 
-    it('should handle site save errors gracefully', async () => {
-      const saveError = new Error('Database error');
-      mockSite.save.rejects(saveError);
-
-      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
-
-      expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/Error saving LLMO config for site test-site-id/),
-      );
-      expect(slackContext.say).to.have.been.calledWith(
-        ':x: Failed to save LLMO configuration: Database error',
-      );
-    });
-
-    it('should handle configuration save errors gracefully', async () => {
-      const saveError = new Error('Conf DB error');
-      mockConfiguration.save.rejects(saveError);
-
-      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
-
-      expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/Error saving LLMO config for site test-site-id/),
-      );
-      expect(slackContext.say).to.have.been.calledWith(
-        ':x: Failed to save LLMO configuration: Conf DB error',
-      );
-      // site.save should not be called when configuration.save fails
-      expect(mockSite.save).to.not.have.been.called;
-    });
-
-    it('sends a message for all other errors', async () => {
+    it('should handle errors gracefully', async () => {
       const error = new Error('Unexpected error');
-      mockDataAccess.Site.findByBaseURL.rejects(error);
+      // Mock the say function to reject on the first call (the error case)
+      slackContext.say.onFirstCall().rejects(error);
 
-      await command.handleExecution(['https://example.com', 'adobe', 'Adobe'], slackContext);
+      await command.handleExecution(['https://example.com'], slackContext);
 
       expect(mockLog.error).to.have.been.calledWith('Error in LLMO onboarding:', error);
-      expect(slackContext.say).to.have.been.calledWith(
-        ':nuclear-warning: Oops! Something went wrong: Unexpected error',
-      );
+    });
+
+    it('should normalize URLs correctly', async () => {
+      await command.handleExecution(['example.com'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledOnce;
+      const message = slackContext.say.getCall(0).args[0];
+      const button = message.blocks.find((block) => block.type === 'actions').elements[0];
+      expect(button.value).to.equal('https://example.com');
     });
   });
 });

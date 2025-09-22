@@ -29,7 +29,7 @@ site-traffic-paid-type-channel-campaign:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-type-channel:
   parameters:
@@ -62,7 +62,7 @@ site-traffic-paid-type-channel:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-type-campaign:
   parameters:
@@ -95,7 +95,7 @@ site-traffic-paid-type-campaign:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-type:
   parameters:
@@ -128,7 +128,7 @@ site-traffic-paid-type:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-top-pages:
   parameters:
@@ -156,7 +156,7 @@ site-traffic-paid-top-pages:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-campaign-url-device:
   parameters:
@@ -189,7 +189,7 @@ site-traffic-paid-campaign-url-device:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-campaign-device:
   parameters:
@@ -222,7 +222,7 @@ site-traffic-paid-campaign-device:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-campaign-url:
   parameters:
@@ -255,7 +255,7 @@ site-traffic-paid-campaign-url:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-campaign:
   parameters:
@@ -288,7 +288,7 @@ site-traffic-paid-campaign:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 PaidTrafficTypeChannelCampaignData:
   type: object
@@ -651,7 +651,7 @@ site-traffic-paid-url-page-type-platform-campaign-device:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 site-traffic-paid-page-type-platform-campaign-device:
   parameters:
@@ -684,7 +684,40 @@ site-traffic-paid-page-type-platform-campaign-device:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
+
+site-traffic-paid-url-page-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get paid traffic data grouped by URL and page type
+    description: Returns paid traffic data for a site, grouped by URL and page type for a given week or month and year.
+    operationId: getPaidTrafficByUrlPageType
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array matching the PaidTrafficUrlPageTypeData schema (see schema definition below).
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
 
 site-traffic-paid-page-type:
   parameters:
@@ -717,7 +750,7 @@ site-traffic-paid-page-type:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - api_key: [ ]
+      - api_key: []
 
 PaidTrafficUrlPageTypePlatformCampaignDeviceData:
   type: object
@@ -796,6 +829,59 @@ PaidTrafficPageTypePlatformCampaignDeviceData:
     device:
       type: string
       description: The device type (e.g., desktop, mobile)
+    pageviews:
+      type: integer
+      description: Number of pageviews
+    pct_pageviews:
+      type: number
+      format: float
+      description: Percentage of total pageviews
+    click_rate:
+      type: number
+      format: float
+      description: Click rate
+    engagement:
+      type: number
+      format: float
+      description: Engagement metric
+    bounce_rate:
+      type: number
+      format: float
+      description: Bounce rate
+    p70_lcp:
+      type: number
+      format: float
+      description: 70th percentile Largest Contentful Paint
+    p70_cls:
+      type: number
+      format: float
+      description: 70th percentile Cumulative Layout Shift
+    p70_inp:
+      type: number
+      format: float
+      description: 70th percentile Interaction to Next Paint
+    lcp_score:
+      type: string
+      description: LCP score (good, needs improvement, poor)
+    inp_score:
+      type: string
+      description: INP score (good, needs improvement, poor)
+    cls_score:
+      type: string
+      description: CLS score (good, needs improvement, poor)
+    overall_cwv_score:
+      type: string
+      description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+PaidTrafficUrlPageTypeData:
+  type: object
+  properties:
+    url:
+      type: string
+      description: The URL
+    page_type:
+      type: string
+      description: The page type classification
     pageviews:
       type: integer
       description: Number of pageviews

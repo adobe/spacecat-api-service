@@ -19,10 +19,21 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import AccessControlUtil from '../../support/access-control-util.js';
+import {
+  applyFilters,
+  applyInclusions,
+  applyExclusions,
+  applyGroups,
+  applyMappings,
+} from './llmo-utils.js';
+import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
-function LlmoController() {
+function LlmoController(ctx) {
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
@@ -36,7 +47,9 @@ function LlmoController() {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-
+    if (!await accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO)) {
+      throw new Error('Only users belonging to the organization can view its sites');
+    }
     return { site, config, llmoConfig };
   };
 
@@ -110,13 +123,219 @@ function LlmoController() {
       // Get the response data
       const data = await response.json();
 
-      log.info(`Successfully proxied data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
       // Return the data and let the framework handle the compression
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  // Handles POST requests to the LLMO sheet data endpoint
+  // with query capabilities (filtering, exclusions, grouping)
+  const queryLlmoSheetData = async (context) => {
+    const { log } = context;
+    const { siteId, dataSource, sheetType } = context.params;
+    const { env } = context;
+
+    // Start timing for the entire method
+    const methodStartTime = Date.now();
+
+    // Extract and validate request body structure
+    const {
+      sheets = [],
+      filters = {},
+      include = [],
+      exclude = [],
+      groupBy = [],
+    } = context.data || {};
+
+    // Validate request body structure
+    if (sheets && !Array.isArray(sheets)) {
+      return badRequest('sheets must be an array');
+    }
+
+    if (filters && typeof filters !== 'object') {
+      return badRequest('filters must be an object');
+    }
+    if (exclude && !Array.isArray(exclude)) {
+      return badRequest('exclude must be an array');
+    }
+    if (groupBy && !Array.isArray(groupBy)) {
+      return badRequest('groupBy must be an array');
+    }
+    if (include && !Array.isArray(include)) {
+      return badRequest('include must be an array');
+    }
+
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+
+      // Add limit, offset and sheet query params to the url
+      const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+
+      // This endpoint does not support limit as it needs to go through
+      // all records to apply filters, exclusions and grouping
+      const FIXED_LLMO_LIMIT = 1000000;
+      url.searchParams.set('limit', FIXED_LLMO_LIMIT);
+
+      // Log setup completion time
+      const setupTime = Date.now();
+      log.info(`LLMO query setup completed - elapsed: ${setupTime - methodStartTime}ms`);
+
+      // Fetch data from the external endpoint using the dataFolder from config
+      const fetchStartTime = Date.now();
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+          'User-Agent': SPACECAT_USER_AGENT,
+          'Accept-Encoding': 'gzip',
+        },
+      });
+
+      if (!response.ok) {
+        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the response data
+      let data = await response.json();
+      const fetchEndTime = Date.now();
+      const fetchDuration = fetchEndTime - fetchStartTime;
+      log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
+
+      // Keep only the required sheets
+      if (sheets.length > 0 && (data[':type'] === 'multi-sheet')) {
+        Object.keys(data).filter((key) => !key.startsWith(':')).forEach((key) => {
+          if (sheets.indexOf(key) === -1) {
+            delete data[key];
+          }
+        });
+      }
+
+      // Apply mappings using external configuration
+      let mappingDuration = 0;
+      log.info(`Looking for mapping for dataSource: ${dataSource} mappings ${JSON.stringify(LLMO_SHEET_MAPPINGS)}`);
+      const mapping = LLMO_SHEET_MAPPINGS.find((m) => dataSource.toLowerCase().includes(m.pattern));
+      if (mapping) {
+        log.info(`Found mapping for dataSource: ${dataSource} mapping ${JSON.stringify(mapping)}`);
+        const mappingStartTime = Date.now();
+        data = applyMappings(data, mapping);
+        const mappingEndTime = Date.now();
+        mappingDuration = mappingEndTime - mappingStartTime;
+        log.info(`Mapping completed - elapsed: ${mappingEndTime - methodStartTime}ms, duration: ${mappingDuration}ms`);
+      }
+
+      // Apply inclusions if any are provided
+      let inclusionDuration = 0;
+      if (Object.keys(include).length > 0) {
+        const inclusionStartTime = Date.now();
+        data = applyInclusions(data, include);
+        const inclusionEndTime = Date.now();
+        inclusionDuration = inclusionEndTime - inclusionStartTime;
+        log.info(`Inclusion processing completed - elapsed: ${inclusionEndTime - methodStartTime}ms, duration: ${inclusionDuration}ms`);
+      }
+
+      // Apply filters if any are provided
+      let filterDuration = 0;
+      if (Object.keys(filters).length > 0) {
+        const filterStartTime = Date.now();
+        data = applyFilters(data, filters);
+        const filterEndTime = Date.now();
+        filterDuration = filterEndTime - filterStartTime;
+        log.info(`Filtering completed - elapsed: ${filterEndTime - methodStartTime}ms, duration: ${filterDuration}ms`);
+      }
+
+      // Apply exclusions if any are provided
+      let exclusionDuration = 0;
+      if (exclude.length > 0) {
+        const exclusionStartTime = Date.now();
+        data = applyExclusions(data, exclude);
+        const exclusionEndTime = Date.now();
+        exclusionDuration = exclusionEndTime - exclusionStartTime;
+        log.info(`Exclusion processing completed - elapsed: ${exclusionEndTime - methodStartTime}ms, duration: ${exclusionDuration}ms`);
+      }
+
+      // Apply grouping if any are provided
+      let groupingDuration = 0;
+      if (groupBy.length > 0) {
+        const groupingStartTime = Date.now();
+        data = applyGroups(data, groupBy);
+        const groupingEndTime = Date.now();
+        groupingDuration = groupingEndTime - groupingStartTime;
+        log.info(`Grouping completed - elapsed: ${groupingEndTime - methodStartTime}ms, duration: ${groupingDuration}ms`);
+      }
+
+      // Log final completion time with summary
+      const methodEndTime = Date.now();
+      const totalDuration = methodEndTime - methodStartTime;
+      log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
+
+      // Return the data and let the framework handle the compression
+      return ok(data, {
+        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
+      });
+    } catch (error) {
+      const errorTime = Date.now();
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
+      return badRequest(error.message);
+    }
+  };
+
+  // Handles requests to the LLMO global sheet data endpoint
+  const getLlmoGlobalSheetData = async (context) => {
+    const { log } = context;
+    const { siteId, configName } = context.params;
+    const { env } = context;
+    try {
+      log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
+      // Validate LLMO access but don't use the site-specific dataFolder
+      await getSiteAndValidateLlmo(context);
+
+      // Use 'llmo-global' folder
+      const sheetURL = `llmo-global/${configName}.json`;
+
+      // Add limit, offset and sheet query params to the url
+      const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+      const { limit, offset, sheet } = context.data;
+      if (limit) {
+        url.searchParams.set('limit', limit);
+      }
+      if (offset) {
+        url.searchParams.set('offset', offset);
+      }
+      // allow fetching a specific sheet from the sheet data source
+      if (sheet) {
+        url.searchParams.set('sheet', sheet);
+      }
+
+      // Fetch data from the external endpoint using the global llmo-global folder
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+          'User-Agent': SPACECAT_USER_AGENT,
+          'Accept-Encoding': 'gzip',
+        },
+      });
+
+      if (!response.ok) {
+        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the response data
+      const data = await response.json();
+
+      log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
+      // Return the data and let the framework handle the compression
+      return ok(data, {
+        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
+      });
+    } catch (error) {
+      log.error(`Error proxying global data for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
     }
   };
@@ -331,8 +550,36 @@ function LlmoController() {
     }
   };
 
+  // Handles requests to the LLMO CDN bucket config endpoint, updates CDN bucket configuration
+  const patchLlmoCdnBucketConfig = async (context) => {
+    const { log } = context;
+    const { data } = context;
+    const { siteId } = context.params;
+
+    try {
+      const { site, config } = await getSiteAndValidateLlmo(context);
+
+      if (!isObject(data)) {
+        return badRequest('Update data must be provided as an object');
+      }
+
+      const { cdnBucketConfig } = data;
+
+      config.updateLlmoCdnBucketConfig(cdnBucketConfig);
+
+      await saveSiteConfig(site, config, log, 'updating CDN logs bucket config');
+
+      return ok(config.getLlmoConfig().cdnBucketConfig || {});
+    } catch (error) {
+      log.error(`Error updating CDN bucket config for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
+    queryLlmoSheetData,
+    getLlmoGlobalSheetData,
     getLlmoConfig,
     getLlmoQuestions,
     addLlmoQuestion,
@@ -343,6 +590,7 @@ function LlmoController() {
     removeLlmoCustomerIntent,
     patchLlmoCustomerIntent,
     patchLlmoCdnLogsFilter,
+    patchLlmoCdnBucketConfig,
   };
 }
 

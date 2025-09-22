@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
 import URI from 'urijs';
@@ -21,6 +22,8 @@ import {
   resolveCanonicalUrl, isValidIMSOrgId,
   detectAEMVersion,
 } from '@adobe/spacecat-shared-utils';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
@@ -136,12 +139,14 @@ export const sendAutofixMessage = async (
   opportunityId,
   suggestionIds,
   promiseToken,
+  variation,
   { url } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
   suggestionIds,
   promiseToken,
+  variation,
   url,
 });
 /* c8 ignore end */
@@ -154,6 +159,16 @@ export const sendInternalReportRunMessage = async (
 ) => sqs.sendMessage(queueUrl, {
   type: ReportType,
   slackContext,
+});
+
+export const sendReportTriggerMessage = async (
+  sqs,
+  queueUrl,
+  data,
+  ReportType,
+) => sqs.sendMessage(queueUrl, {
+  type: ReportType,
+  data,
 });
 
 /**
@@ -506,17 +521,12 @@ const createSiteAndOrganization = async (
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 
-  // Check if site already exists
   if (site) {
     const siteOrgId = site.getOrganizationId();
     organizationId = siteOrgId; // Set organizationId for existing sites
     const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
     await say(message);
-    log.info(message);
   } else {
-    // New site - handle organization logic
-    log.info(`Site ${baseURL} doesn't exist. Processing organization...`);
-
     // Check if the organization with IMS Org ID already exists; create if it doesn't
     let organization = await Organization.findByImsOrgId(imsOrgID);
     if (!organization) {
@@ -526,7 +536,6 @@ const createSiteAndOrganization = async (
         localReportLine.status = 'Failed';
         throw new Error(localReportLine.errors);
       }
-      log.info(`IMS Org Details: ${imsOrgDetails}`);
       organization = await Organization.create({
         name: imsOrgDetails.orgName,
         imsOrgId: imsOrgID,
@@ -534,17 +543,13 @@ const createSiteAndOrganization = async (
 
       const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
       await say(message);
-      log.info(message);
     }
 
-    organizationId = organization.getId(); // Set organizationId for new site
-    log.info(`Organization ${organizationId} was successfully retrieved or created`);
+    organizationId = organization.getId();
     localReportLine.spacecatOrgId = organizationId;
 
-    // Create new site
-    log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
     const deliveryType = customDeliveryType || await findDeliveryType(baseURL);
-    log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
+
     localReportLine.deliveryType = deliveryType;
     const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
@@ -560,7 +565,6 @@ const createSiteAndOrganization = async (
           site.setAuthoringType(authoringType);
         }
         await site.save();
-        log.info(`Applied delivery configuration for site ${site.getId()}:`, { deliveryConfig, authoringType });
       }
     } catch (error) {
       log.error(`Error creating site: ${error.message}`);
@@ -577,6 +581,52 @@ const createSiteAndOrganization = async (
 };
 
 /**
+ * Creates an entitlement and enrollment for a site.
+ *
+ * @param {Site} site - The site to create an entitlement and enrollment for.
+ * @param {Object} lambdaCtx - The Lambda context.
+ * @param {Object} slackCtx - The Slack context.
+ * @param {Object} reportLine - The report line object to update.
+ * @param {string} productCode - The product code to create an entitlement for.
+ * @param {string} tier - The tier to create an entitlement for.
+ * @returns {Promise<Object>} - The entitlement and site enrollment.
+ */
+export const createEntitlementAndEnrollment = async (
+  site,
+  lambdaCtx,
+  slackCtx,
+  reportLine,
+  productCode,
+  tier,
+) => {
+  const { log } = lambdaCtx;
+  const { say } = slackCtx;
+
+  // Create a local copy to avoid modifying the parameter directly
+  const localReportLine = { ...reportLine };
+
+  try {
+    const tierClient = await TierClient.createForSite(lambdaCtx, site, productCode);
+    const { entitlement, siteEnrollment } = await tierClient.createEntitlement(tier);
+    log.info(`Successfully created ${productCode} entitlement ${entitlement.getId()} (${tier}) and enrollment ${siteEnrollment.getId()} for site ${site.getId()}`);
+
+    const message = `:white_check_mark: A new ${productCode} entitlement ${entitlement.getId()} (${tier}) and enrollment ${siteEnrollment.getId()} has been created for site ${site.getId()}`;
+    await say(message);
+
+    return {
+      entitlement,
+      siteEnrollment,
+    };
+  } catch (error) {
+    log.error(`Creating ${productCode} entitlement and enrollment failed: ${error.message}`);
+    await say(`❌ Creating ${productCode} entitlement and site enrollment failed`);
+    localReportLine.errors = `Creating ${productCode} entitlement and site enrollment failed`;
+    localReportLine.status = 'Failed';
+    throw error;
+  }
+};
+
+/**
  * Shared onboarding function used by both modal and command implementations.
  *
  * @param {string} baseURLInput - The site URL input
@@ -587,6 +637,7 @@ const createSiteAndOrganization = async (
  * @param {Object} slackContext - Slack context object with say function
  * @param {Object} context - Lambda context containing dataAccess, log, etc.
  * @param {Object} additionalParams - Additional parameters
+ * @param {string} additionalParams.tier - Entitlement tier
  * @param {Object} options - Additional options
  * @param {Function} options.urlProcessor - Function to process the URL
  *                                          (e.g., extractURLFromSlackInput)
@@ -611,14 +662,13 @@ export const onboardSingleSite = async (
   const { Configuration } = dataAccess;
   const sfnClient = new SFNClient();
 
-  // Process URL - allow customization for different input formats
   const baseURL = options.urlProcessor ? options.urlProcessor(baseURLInput) : baseURLInput.trim();
   const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
 
-  // Extract profile name for logging and reporting (assume it's passed in options)
   const profileName = options.profileName || 'unknown';
 
-  log.info(`Starting ${profileName} environment setup for site ${baseURL}`);
+  const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
+
   await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
@@ -635,6 +685,7 @@ export const onboardSingleSite = async (
     errors: '',
     status: 'Success',
     existingSite: 'No',
+    tier,
   };
 
   try {
@@ -662,11 +713,25 @@ export const onboardSingleSite = async (
       additionalParams.deliveryConfig,
     );
 
-    const siteID = site.getId();
-    log.info(`Site ${baseURL} was successfully retrieved or created. Site ID: ${siteID}`);
-    reportLine.siteId = siteID;
+    // Validate tier
+    if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
+      reportLine.errors = `Invalid tier: ${tier}`;
+      reportLine.status = 'Failed';
+      return reportLine;
+    }
 
-    log.info(`Profile ${profileName} was successfully loaded`);
+    // Create entitlement and enrollment
+    await createEntitlementAndEnrollment(
+      site,
+      context,
+      slackContext,
+      reportLine,
+      EntitlementModel.PRODUCT_CODES.ASO,
+      tier,
+    );
+
+    const siteID = site.getId();
+    reportLine.siteId = siteID;
 
     if (!isObject(profile)) {
       const error = `Profile "${profileName}" not found or invalid.`;
@@ -702,31 +767,23 @@ export const onboardSingleSite = async (
     for (const importType of importTypes) {
       const isEnabled = isImportEnabled(importType, imports);
       if (!isEnabled) {
-        log.info(`Enabling import: ${importType}`);
         siteConfig.enableImport(importType);
         importsEnabled.push(importType);
-      } else {
-        log.info(`Import '${importType}' is already enabled, skipping`);
       }
     }
 
-    if (importsEnabled.length > 0) {
-      log.info(`Enabled the following imports for ${siteID}: ${importsEnabled.join(', ')}`);
-    } else {
-      log.info(`All imports are already enabled for ${siteID}`);
-    }
-
-    log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
-
     // Resolve canonical URL for the site from the base URL
-    const resolvedUrl = await resolveCanonicalUrl(baseURL);
-    const { pathname: baseUrlPathName } = new URL(baseURL);
+    let resolvedUrl = await resolveCanonicalUrl(baseURL);
+    if (resolvedUrl === null) {
+      log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+      resolvedUrl = baseURL;
+    }
+    const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
+    log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
 
-    log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
-
-    // Update the fetch configuration only if the pathname is different from the resolved URL
-    if (baseUrlPathName !== resolvedUrlPathName) {
+    // Update the fetch configuration only if the pathname/origin is different from the resolved URL
+    if (baseUrlPathName !== resolvedUrlPathName || baseUrlOrigin !== resolvedUrlOrigin) {
       siteConfig.updateFetchConfig({
         overrideBaseURL: resolvedUrlOrigin,
       });
@@ -742,8 +799,6 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
-    log.info(`Site config successfully saved for site ${siteID}`);
-
     for (const importType of importTypes) {
       /* eslint-disable no-await-in-loop */
       await triggerImportRun(
@@ -756,8 +811,6 @@ export const onboardSingleSite = async (
         context,
       );
     }
-
-    log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
 
     const auditTypes = Object.keys(profile.audits);
 
@@ -777,20 +830,19 @@ export const onboardSingleSite = async (
     if (auditsEnabled.length > 0) {
       try {
         await latestConfiguration.save();
-        log.info(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+        log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
       }
     } else {
-      log.info(`All audits are already enabled for site ${siteID}`);
+      log.debug(`All audits are already enabled for site ${siteID}`);
     }
 
     reportLine.audits = auditTypes.join(', ');
     await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
 
     // trigger audit runs
-    log.info(`Starting audits for site ${baseURL}. Audit list: ${auditTypes}`);
     await say(`:gear: Starting audits: ${auditTypes}`);
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */

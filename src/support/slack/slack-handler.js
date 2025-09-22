@@ -23,7 +23,7 @@ import {
  * @return {SlackHandler} The slack handler.
  * @constructor
  */
-function SlackHandler(commands, log) {
+function SlackHandler(commands) {
   /**
    * Handles app_mention event.
    *
@@ -49,8 +49,6 @@ function SlackHandler(commands, log) {
       botToken: context.botToken || process.env.SLACK_BOT_TOKEN,
       files: event?.files || [],
     };
-
-    log.info(`App_mention event received: ${JSON.stringify(event)} in thread ${threadTs} with context ${JSON.stringify(context)}`);
 
     const command = commands.find((cmd) => cmd.accepts(message));
     if (command) {

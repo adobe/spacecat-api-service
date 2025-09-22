@@ -11,6 +11,7 @@
  */
 
 import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
 
@@ -339,6 +340,39 @@ export function startOnboarding(lambdaContext) {
               optional: true,
             },
             {
+              type: 'input',
+              block_id: 'tier_input',
+              element: {
+                type: 'static_select',
+                action_id: 'tier',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select entitlement tier',
+                },
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Free Trial',
+                    },
+                    value: EntitlementModel.TIERS.FREE_TRIAL,
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Paid',
+                    },
+                    value: EntitlementModel.TIERS.PAID,
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Entitlement Tier',
+              },
+              optional: true,
+            },
+            {
               type: 'divider',
             },
             {
@@ -369,7 +403,7 @@ export function startOnboarding(lambdaContext) {
         },
       });
 
-      log.info(`User ${user.id} started onboarding process`);
+      log.debug(`User ${user.id} started onboarding process`);
     } catch (error) {
       log.error('Error handling start onboarding:', error);
       await respond({
@@ -410,6 +444,8 @@ export function onboardSiteModal(lambdaContext) {
       const authoringType = values.authoring_type_input.authoring_type.selected_option?.value;
       const waitTime = values.wait_time_input.wait_time.value;
       const previewUrl = values.preview_url_input.preview_url.value;
+      const tier = values.tier_input.tier.selected_option?.value
+        || EntitlementModel.TIERS.FREE_TRIAL;
 
       // Validation
       if (!siteUrl) {
@@ -480,6 +516,10 @@ export function onboardSiteModal(lambdaContext) {
         additionalParams.deliveryConfig = deliveryConfigFromPreview;
       }
 
+      if (tier) {
+        additionalParams.tier = tier;
+      }
+
       const parsedWaitTime = waitTime ? parseInt(waitTime, 10) : undefined;
 
       await client.chat.postMessage({
@@ -528,6 +568,7 @@ export function onboardSiteModal(lambdaContext) {
 :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
 ${reportLine.authoringType ? `:writing_hand: *Authoring Type:* ${reportLine.authoringType}` : ''}
 ${deliveryConfigInfo}${previewConfigInfo}
+:paid: *Entitlement Tier:* ${reportLine.tier || 'n/a'}
 :question: *Already existing:* ${reportLine.existingSite}
 :gear: *Profile:* ${reportLine.profile}
 :hourglass_flowing_sand: *Wait Time:* ${parsedWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS} seconds
@@ -542,7 +583,7 @@ ${deliveryConfigInfo}${previewConfigInfo}
         });
       }
 
-      log.info(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
+      log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
     } catch (error) {
       log.error('Error handling onboard site modal:', error);
       await ack({
