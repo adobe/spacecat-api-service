@@ -62,7 +62,7 @@ const parseKeywordArguments = (args) => {
       || arg.startsWith('<https://')
       || arg.startsWith('http://')
       || arg.startsWith('https://')
-      || (arg.includes('://') && arg.includes('.'))
+      || arg.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
     );
 
     if (arg && arg.includes(':') && !isAnyUrl) {
