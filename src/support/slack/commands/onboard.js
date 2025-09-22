@@ -22,6 +22,7 @@ import {
   postErrorMessage,
   loadProfileConfig,
   parseCSV,
+  sendFile,
 } from '../../../utils/slack/base.js';
 
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
@@ -135,7 +136,7 @@ function OnboardCommand(context) {
    */
   const handleExecution = async (args, slackContext) => {
     const {
-      say, botToken, files, channelId, client, threadTs,
+      say, botToken, files, channelId, threadTs,
     } = slackContext;
 
     try {
@@ -201,14 +202,19 @@ function OnboardCommand(context) {
 
         fileStream.on('finish', async () => {
           try {
-            client.files.upload({
-              channels: channelId,
-              file: fs.createReadStream(tempFilePath),
-              filename: 'spacecat_onboarding_report.csv',
-              title: 'Spacecat Onboarding Report',
-              initial_comment: ':spacecat: *Batch onboarding in progress!* :satellite:\nHere you can find the *execution report*. :memo:',
-              thread_ts: threadTs,
-            });
+            const stats = fs.statSync(tempFilePath);
+            const fileWithSize = {
+              ...fs.createReadStream(tempFilePath),
+              size: stats.size,
+            };
+            await sendFile(
+              slackContext,
+              fileWithSize,
+              'spacecat_onboarding_report.csv',
+              'Spacecat Onboarding Report',
+              ':spacecat: *Batch onboarding in progress!* :satellite:\nHere you can find the *execution report*. :memo:',
+              channelId,
+            );
           } catch (error) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
           }

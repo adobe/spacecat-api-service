@@ -40,6 +40,7 @@ const ALL_AUDITS = [
   'structured-data',
   'forms-opportunities',
   'alt-text',
+  'prerender',
 ];
 
 /**
