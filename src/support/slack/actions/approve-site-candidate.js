@@ -22,9 +22,8 @@ import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
 import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
 
-// With a 5s base interval and 8 retries using exponential backoff, the last delay is ~21 minutes
-export const POLLING_BASE_INTERVAL = 5000;
-export const POLLING_NUM_RETRIES = 8;
+export const POLLING_INTERVAL = 1000 * 60 * 3; // 3 minutes
+export const POLLING_NUM_RETRIES = 5;
 
 async function pollOrgDetectorAgent(jobId, mystiqueApiBaseUrl) {
   let result = null;
@@ -52,9 +51,8 @@ async function pollOrgDetectorAgent(jobId, mystiqueApiBaseUrl) {
     retryCount += 1;
 
     if (polling && retryCount < POLLING_NUM_RETRIES) {
-      const currentInterval = (2 ** retryCount) * POLLING_BASE_INTERVAL;
       await new Promise((resolve) => {
-        setTimeout(resolve, currentInterval);
+        setTimeout(resolve, POLLING_INTERVAL);
       });
     } else if (polling && retryCount >= POLLING_NUM_RETRIES) {
       throw new Error(`Polling for OrgDetectorAgent job ${jobId} exceeded maximum retries (${POLLING_NUM_RETRIES})`);

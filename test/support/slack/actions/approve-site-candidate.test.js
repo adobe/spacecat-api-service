@@ -17,7 +17,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import approveSiteCandidate, { POLLING_NUM_RETRIES, POLLING_BASE_INTERVAL } from '../../../../src/support/slack/actions/approve-site-candidate.js';
+import approveSiteCandidate, { POLLING_NUM_RETRIES, POLLING_INTERVAL } from '../../../../src/support/slack/actions/approve-site-candidate.js';
 import {
   expectedAnnouncedMessage,
   expectedApprovedReply,
@@ -318,7 +318,7 @@ describe('approveSiteCandidate', () => {
     context.dataAccess.Site.create.resolves(site);
 
     fetchMock.onFirstCall().resolves({ ok: true, json: async () => ({ uuid: 'job-uuid' }) });
-    for (let i = 1; i <= 11; i += 1) {
+    for (let i = 1; i <= POLLING_NUM_RETRIES; i += 1) {
       fetchMock.onCall(i).resolves({ ok: true, json: async () => ({ status: 'processing', matchedCompany: null }) });
     }
 
@@ -329,13 +329,10 @@ describe('approveSiteCandidate', () => {
       respond: respondMock,
     });
 
-    // Calculate total time for exponential backoff delays
-    let totalTime = 0;
-    for (let i = 0; i < POLLING_NUM_RETRIES; i += 1) {
-      totalTime += (2 ** i) * POLLING_BASE_INTERVAL;
-    }
+    // Calculate total time to advance the clock
+    const totalTime = POLLING_NUM_RETRIES * POLLING_INTERVAL;
 
     await clock.tickAsync(totalTime);
-    await expect(approvePromise).to.be.rejectedWith('Polling for OrgDetectorAgent job job-uuid exceeded maximum retries (8)');
+    await expect(approvePromise).to.be.rejectedWith(`Polling for OrgDetectorAgent job job-uuid exceeded maximum retries (${POLLING_NUM_RETRIES})`);
   });
 });
