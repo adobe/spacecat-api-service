@@ -49,7 +49,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Runs lhs-mobile by default if no audit type parameter is provided. Runs all audits if audit type is `all`');
+      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits.');
     });
   });
 
@@ -277,6 +277,186 @@ describe('RunAuditCommand', () => {
 
       await command.handleExecution(['', 'all'], slackContext);
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: CSV processing failed: Authentication failed: Invalid Slack token.')).to.be.true;
+    });
+  });
+  describe('Keyword Arguments Support', () => {
+    beforeEach(() => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'siteId' });
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+      });
+    });
+
+    it('handles keyword format with audit type', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:geo-brand-presence'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+    });
+
+    it('handles keyword format with audit type and additional parameters', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:geo-brand-presence', 'date-start:2025-09-07', 'source:google-ai-overviews'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+
+      // Verify the audit data contains the additional parameters
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        'date-start': '2025-09-07',
+        source: 'google-ai-overviews',
+      });
+    });
+
+    it('handles keyword format with spaces after colon', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit: geo-brand-presence', 'date-start: 2025-09-07', 'source: google-ai-overviews'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+
+      // Verify the audit data contains the additional parameters (values should be trimmed)
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        'date-start': '2025-09-07',
+        source: 'google-ai-overviews',
+      });
+    });
+
+    it('handles keyword format with all audit type', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:all'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering all audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+    });
+
+    it('falls back to positional format when no keywords are provided', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'geo-brand-presence'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+    });
+
+    it('uses default audit type when no audit keyword is provided', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'date-start:2025-09-07'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+
+      // Verify the audit data contains the parameters
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        'date-start': '2025-09-07',
+      });
+    });
+
+    it('handles Slack-formatted URLs correctly with keyword arguments', async () => {
+      const command = RunAuditCommand(context);
+
+      // Simulate the exact scenario from the bug report
+      await command.handleExecution(['<http://adobe.com|adobe.com>', 'audit:geo-brand-presence', 'endDate:2025-09-07', 'aiPlatform:google-ai-overviews'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://adobe.com');
+      expect(sqsStub.sendMessage).called;
+
+      // Verify the audit data contains the additional parameters
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        endDate: '2025-09-07',
+        aiPlatform: 'google-ai-overviews',
+      });
+    });
+
+    it('handles Slack-formatted HTTPS URLs correctly', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['<https://example.com|example.com>', 'audit:cwv'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering cwv audit for https://example.com');
+      expect(sqsStub.sendMessage).called;
+    });
+
+    it('handles keyword arguments with multiple colons in value', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:geo-brand-presence', 'url:https://example.com:8080/path'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+
+      // Verify the audit data contains the URL with colons correctly parsed
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        url: 'https://example.com:8080/path',
+      });
+    });
+
+    it('handles keyword arguments with empty values after colon', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:geo-brand-presence', 'source:', 'date-start:2025-09-07'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering geo-brand-presence audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+
+      // Verify the audit data contains the empty value and other values correctly
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        source: '',
+        'date-start': '2025-09-07',
+      });
+    });
+
+    it('handles keyword format without audit keyword but with other keywords', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'date-start:2025-09-07', 'source:test-source'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
+      expect(sqsStub.sendMessage).called;
+
+      // Verify the audit data contains the keywords (should use default audit type)
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const auditData = sendMessageCall.args[1].data;
+      const parsedData = JSON.parse(auditData);
+      expect(parsedData).to.deep.include({
+        'date-start': '2025-09-07',
+        source: 'test-source',
+      });
     });
   });
 });
