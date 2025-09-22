@@ -1,3 +1,10 @@
+# [1.181.0](https://github.com/adobe/spacecat-api-service/compare/v1.180.2...v1.181.0) (2025-09-22)
+
+
+### Features
+
+* Add key word support for audit command ([#1275](https://github.com/adobe/spacecat-api-service/issues/1275)) ([295ca75](https://github.com/adobe/spacecat-api-service/commit/295ca75b8569a2bd6d8c1f38726f6a42fdb05f0e))
+
 ## [1.180.2](https://github.com/adobe/spacecat-api-service/compare/v1.180.1...v1.180.2) (2025-09-20)
 
 
