@@ -58,6 +58,7 @@ AuditType:
     - 'broken-internal-links'
     - 'experimentation-opportunities'
     - 'llm-error-pages'
+    - 'prerender'
   example: 'cwv'
 URL:
   type: string
@@ -3569,6 +3570,33 @@ LlmoConfig:
     cdnBucketConfig:
       description: The CDN bucket configuration for log storage
       $ref: '#/LlmoCdnBucketConfig'
+  additionalProperties: false
+
+LlmoSheetDataQuery:
+  type: object
+  description: Query parameters for LLMO sheet data
+  properties:
+    sheets:
+      description: Sheets to include from the data
+      type: object
+      additionalProperties: true
+    filters:
+      description: Filters to apply to the data
+      type: object
+    include:
+      description: Fields to include from the data
+      type: array
+      additionalProperties: true
+    exclude:
+      description: Fields to exclude from the data
+      type: array
+      items:
+        type: string
+    groupBy:
+      description: Fields to group the data by
+      type: array
+      items:
+        type: string
   additionalProperties: false
 
 # New schemas for entitlements, trial users, and site enrollments APIs

@@ -135,13 +135,22 @@ describe('Base Slack Utils', () => {
       say = sinon.stub();
       client = {
         files: {
-          uploadV2: sinon.stub().resolves(),
+          getUploadURLExternal: sinon.stub().resolves({
+            ok: true,
+            file_id: 'test-file-id',
+            upload_url: 'https://test-upload-url.com',
+          }),
+          completeUploadExternal: sinon.stub().resolves({
+            ok: true,
+            file: { id: 'test-file-id' },
+          }),
         },
       };
     });
 
     afterEach(() => {
       sinon.restore();
+      nock.cleanAll();
     });
 
     describe('postErrorMessage()', () => {
@@ -200,20 +209,194 @@ describe('Base Slack Utils', () => {
     describe('sendFile()', () => {
       it('sends a file', async () => {
         const channelId = 'foo';
-        const file = 'some-file';
+        const file = Buffer.from('some-file-content');
         const filename = 'some-filename';
         const threadTs = 'bar';
 
+        // Mock the HTTP request for file upload
+        nock('https://test-upload-url.com')
+          .post('/')
+          .reply(200, 'OK');
+
         await sendFile({ client, channelId, threadTs }, file, filename);
 
-        expect(client.files.uploadV2.calledOnce).to.be.true;
-        expect(client.files.uploadV2.firstCall.args[0]).to.deep.equal({
+        expect(client.files.getUploadURLExternal.calledOnce).to.be.true;
+        expect(client.files.getUploadURLExternal.firstCall.args[0]).to.deep.equal({
+          filename,
+          length: file.length,
+        });
+
+        expect(nock.isDone()).to.be.true;
+
+        expect(client.files.completeUploadExternal.calledOnce).to.be.true;
+        expect(client.files.completeUploadExternal.firstCall.args[0]).to.deep.equal({
+          files: [{
+            id: 'test-file-id',
+            title: filename,
+          }],
+          filename,
           channel_id: channelId,
           thread_ts: threadTs,
-          file,
-          filename,
-          unfurl_links: false,
+          initial_comment: '',
         });
+      });
+
+      it('handles file upload failure', async () => {
+        const channelId = 'foo';
+        const file = Buffer.from('some-file-content');
+        const filename = 'some-filename';
+        const threadTs = 'bar';
+
+        // Mock the upload URL response to return a specific URL
+        client.files.getUploadURLExternal.resolves({
+          ok: true,
+          file_id: 'test-file-id',
+          upload_url: 'https://test-upload-url.com/upload',
+        });
+
+        nock('https://test-upload-url.com')
+          .post('/upload')
+          .reply(400, 'Bad Request');
+
+        await expect(sendFile({ client, channelId, threadTs }, file, filename))
+          .to.be.rejectedWith('File upload failed: 400 Bad Request');
+
+        expect(client.files.getUploadURLExternal.calledOnce).to.be.true;
+        expect(client.files.completeUploadExternal.called).to.be.false;
+        expect(nock.isDone()).to.be.true;
+      });
+
+      it('handles complete upload failure', async () => {
+        const channelId = 'foo';
+        const file = Buffer.from('some-file-content');
+        const filename = 'some-filename';
+        const threadTs = 'bar';
+
+        // Mock the HTTP request for file upload
+        nock('https://test-upload-url.com')
+          .post('/')
+          .reply(200, 'OK');
+
+        client.files.completeUploadExternal.resolves({
+          ok: false,
+          error: 'file_not_found',
+        });
+
+        await expect(sendFile({ client, channelId, threadTs }, file, filename))
+          .to.be.rejectedWith('Failed to complete upload: file_not_found');
+
+        expect(client.files.getUploadURLExternal.calledOnce).to.be.true;
+        expect(client.files.completeUploadExternal.calledOnce).to.be.true;
+        expect(nock.isDone()).to.be.true;
+      });
+
+      it('handles getUploadURLExternal failure', async () => {
+        const channelId = 'foo';
+        const file = Buffer.from('some-file-content');
+        const filename = 'some-filename';
+        const threadTs = 'bar';
+
+        client.files.getUploadURLExternal.resolves({
+          ok: false,
+          error: 'invalid_auth',
+        });
+
+        await expect(sendFile({ client, channelId, threadTs }, file, filename))
+          .to.be.rejectedWith('Failed to get upload URL: invalid_auth');
+
+        expect(client.files.getUploadURLExternal.calledOnce).to.be.true;
+        expect(client.files.completeUploadExternal.called).to.be.false;
+      });
+
+      it('handles file size determination failure', async () => {
+        const channelId = 'foo';
+        const file = {};
+        const filename = 'some-filename';
+        const threadTs = 'bar';
+
+        await expect(sendFile({ client, channelId, threadTs }, file, filename))
+          .to.be.rejectedWith('Cannot determine file size for upload. Please provide file size.');
+
+        expect(client.files.getUploadURLExternal.called).to.be.false;
+        expect(client.files.completeUploadExternal.called).to.be.false;
+      });
+
+      it('handles non-Buffer file (Stream)', async () => {
+        const channelId = 'foo';
+        // Create a file-like object that has size property but is not a Buffer
+        // This simulates what would be passed from onboard.js (a stream with size property)
+        const file = {
+          size: 100,
+          // Add a Symbol.iterator to make it work with new Blob([file])
+          * [Symbol.iterator]() {
+            yield 'test content';
+          },
+        };
+        const filename = 'some-filename';
+        const threadTs = 'bar';
+
+        // Mock the fetch function using nock to intercept the actual network call
+        nock('https://test-upload-url.com')
+          .post('/')
+          .reply(200, 'OK');
+
+        await sendFile({ client, channelId, threadTs }, file, filename);
+
+        expect(client.files.getUploadURLExternal.calledOnce).to.be.true;
+        expect(client.files.completeUploadExternal.calledOnce).to.be.true;
+        expect(nock.isDone()).to.be.true;
+      });
+
+      it('handles file with byteLength property', async () => {
+        const channelId = 'foo';
+        // Create a file-like object that has byteLength property instead of size
+        const file = {
+          byteLength: 150,
+          // Add a Symbol.iterator to make it work with new Blob([file])
+          * [Symbol.iterator]() {
+            yield 'test content with byteLength';
+          },
+        };
+        const filename = 'some-filename';
+        const threadTs = 'bar';
+
+        // Mock the fetch function using nock to intercept the actual network call
+        nock('https://test-upload-url.com')
+          .post('/')
+          .reply(200, 'OK');
+
+        await sendFile({ client, channelId, threadTs }, file, filename);
+
+        expect(client.files.getUploadURLExternal.calledOnce).to.be.true;
+        expect(client.files.getUploadURLExternal.firstCall.args[0]).to.deep.equal({
+          filename,
+          length: 150, // Should use byteLength
+        });
+        expect(client.files.completeUploadExternal.calledOnce).to.be.true;
+        expect(nock.isDone()).to.be.true;
+      });
+
+      it('handles file that is already a Blob', async () => {
+        const channelId = 'foo';
+        // Create a proper Blob object
+        const file = new Blob(['test content'], { type: 'text/plain' });
+        const filename = 'some-filename';
+        const threadTs = 'bar';
+
+        // Mock the fetch function using nock to intercept the actual network call
+        nock('https://test-upload-url.com')
+          .post('/')
+          .reply(200, 'OK');
+
+        await sendFile({ client, channelId, threadTs }, file, filename);
+
+        expect(client.files.getUploadURLExternal.calledOnce).to.be.true;
+        expect(client.files.getUploadURLExternal.firstCall.args[0]).to.deep.equal({
+          filename,
+          length: file.size, // Blob has a size property
+        });
+        expect(client.files.completeUploadExternal.calledOnce).to.be.true;
+        expect(nock.isDone()).to.be.true;
       });
     });
 
