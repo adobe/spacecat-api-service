@@ -110,6 +110,12 @@ function SitesController(ctx, log, env) {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new sites');
     }
+    const exists = await Site.findByBaseURL(context?.data?.baseURL);
+    if (exists) {
+      return createResponse({
+        message: `Site with baseURL ${context?.data?.baseURL} exists`,
+      }, 409);
+    }
     const site = await Site.create({
       organizationId: env.DEFAULT_ORGANIZATION_ID,
       ...context.data,
@@ -588,6 +594,8 @@ function SitesController(ctx, log, env) {
       }
 
       const projectedTrafficValue = pageViewsChange * cpc;
+
+      log.info(`Got RUM metrics for site ${siteId} current: ${current.length}`);
 
       return ok({
         pageViewsChange,
