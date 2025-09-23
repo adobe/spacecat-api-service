@@ -2430,7 +2430,7 @@ describe('LlmoController', () => {
     });
 
     it('should return 403 when user does not have access to the site', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
         '../../src/support/access-control-util.js': {
           default: createMockAccessControlUtil(false),
         },
@@ -2625,7 +2625,7 @@ describe('LlmoController', () => {
     });
 
     it('should return 403 when user does not have access to the site', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
         '../../src/support/access-control-util.js': {
           default: createMockAccessControlUtil(false),
         },
@@ -2733,7 +2733,7 @@ describe('LlmoController', () => {
     });
 
     it('should return 403 when user does not have access to the site', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
         '../../src/support/access-control-util.js': {
           default: createMockAccessControlUtil(false),
         },
@@ -2873,7 +2873,7 @@ describe('LlmoController', () => {
     });
 
     it('should return 403 when user does not have access to the site', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
         '../../src/support/access-control-util.js': {
           default: createMockAccessControlUtil(false),
         },
