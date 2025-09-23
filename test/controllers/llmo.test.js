@@ -2428,6 +2428,33 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal([]);
     });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.getLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 400 for other errors from getSiteAndValidateLlmo', async () => {
+      // Mock Site.findById to throw a generic error
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.getLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
+    });
   });
 
   describe('addLlmoCustomerIntent', () => {
@@ -2596,6 +2623,41 @@ describe('LlmoController', () => {
       expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
       expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledWith(mockContext.data);
     });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      mockContext.data = [
+        { key: 'new_target', value: 'enterprise customers' },
+      ];
+
+      const result = await controllerWithAccessDenied.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 400 for other errors from getSiteAndValidateLlmo', async () => {
+      // Mock Site.findById to throw a generic error
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      mockContext.data = [
+        { key: 'new_target', value: 'enterprise customers' },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
+    });
   });
 
   describe('removeLlmoCustomerIntent', () => {
@@ -2614,15 +2676,14 @@ describe('LlmoController', () => {
       expect(mockSite.save).to.have.been.calledOnce;
     });
 
-    it('should throw error for invalid customer intent key', async () => {
+    it('should return bad request for invalid customer intent key', async () => {
       mockConfig.getLlmoCustomerIntent.returns([]);
 
-      try {
-        await controller.removeLlmoCustomerIntent(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Invalid customer intent key');
-      }
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Invalid customer intent key');
     });
 
     it('should handle save errors gracefully', async () => {
@@ -2648,12 +2709,11 @@ describe('LlmoController', () => {
       // Use an invalid intent key so the validation will fail
       mockContext.params.intentKey = 'invalid-intent-key';
 
-      try {
-        await controller.removeLlmoCustomerIntent(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Invalid customer intent key');
-      }
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Invalid customer intent key');
     });
 
     it('should handle null customer intent in response after removal', async () => {
@@ -2670,6 +2730,33 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal([]);
       expect(mockConfig.removeLlmoCustomerIntent).to.have.been.calledWith('target_audience');
+    });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 400 for other errors from getSiteAndValidateLlmo', async () => {
+      // Mock Site.findById to throw a generic error (not access control or validation error)
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
     });
   });
 
@@ -2707,15 +2794,14 @@ describe('LlmoController', () => {
       expect(mockSite.save).to.have.been.calledOnce;
     });
 
-    it('should throw error for invalid customer intent key', async () => {
+    it('should return bad request for invalid customer intent key', async () => {
       mockConfig.getLlmoCustomerIntent.returns([]);
 
-      try {
-        await controller.patchLlmoCustomerIntent(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Invalid customer intent key');
-      }
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Invalid customer intent key');
     });
 
     it('should return bad request when no update data provided', async () => {
@@ -2784,6 +2870,33 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal([]);
       expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith('target_audience', updateData);
+    });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 400 for other errors from getSiteAndValidateLlmo', async () => {
+      // Mock Site.findById to throw a generic error (not access control or validation error)
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
     });
   });
 
