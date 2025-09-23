@@ -1,3 +1,11 @@
+## [1.182.2](https://github.com/adobe/spacecat-api-service/compare/v1.182.1...v1.182.2) (2025-09-23)
+
+
+### Bug Fixes
+
+* catch error within customerIntent endpoints ([#1226](https://github.com/adobe/spacecat-api-service/issues/1226)) ([0681e62](https://github.com/adobe/spacecat-api-service/commit/0681e628a83be1df90874d974b8658e1eafffb13))
+* llmo controller tests ([#1288](https://github.com/adobe/spacecat-api-service/issues/1288)) ([ce88d60](https://github.com/adobe/spacecat-api-service/commit/ce88d60d2290258af9a8c4fa4780a05e3dc9c15c))
+
 ## [1.182.1](https://github.com/adobe/spacecat-api-service/compare/v1.182.0...v1.182.1) (2025-09-22)
 
 
