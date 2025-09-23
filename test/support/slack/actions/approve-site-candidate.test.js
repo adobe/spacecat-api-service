@@ -236,12 +236,6 @@ describe('approveSiteCandidate', () => {
   });
 
   it('should not post org detection prompt if it is FnF', async () => {
-    sinon.restore();
-
-    clock = sinon.useFakeTimers();
-    slackClient.postMessage = sinon.stub().resolves();
-    fetchMock = sinon.stub(global, 'fetch');
-
     context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
     context.dataAccess.Site.findByBaseURL.resolves(null);
     context.dataAccess.Site.create.resolves(site);
