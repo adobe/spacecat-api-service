@@ -107,13 +107,13 @@ describe('approveSiteCandidate', () => {
     ackMock = sinon.stub().resolves();
     respondMock = sinon.stub().resolves();
 
-    fetchMock = sinon.stub(global, 'fetch');
+    fetchMock = sinon.stub();
+    global.fetch = fetchMock;
   });
 
   afterEach(() => {
     sinon.restore();
     clock.restore();
-    fetchMock.restore();
   });
 
   it('should approve site candidate (customer) and announce site discovery', async () => {
