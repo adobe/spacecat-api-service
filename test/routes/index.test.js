@@ -302,7 +302,6 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/sites',
-      'GET /organizations/:organizationId/organization-identity-provider',
       'GET /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
       'POST /organizations/:organizationId/trial-user-invite',
