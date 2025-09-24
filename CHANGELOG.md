@@ -1,3 +1,31 @@
+## [1.183.3](https://github.com/adobe/spacecat-api-service/compare/v1.183.2...v1.183.3) (2025-09-24)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1291](https://github.com/adobe/spacecat-api-service/issues/1291)) ([ba1d51f](https://github.com/adobe/spacecat-api-service/commit/ba1d51f0b7970908b17fe95a01ba7e26f4c88f63))
+
+## [1.183.2](https://github.com/adobe/spacecat-api-service/compare/v1.183.1...v1.183.2) (2025-09-24)
+
+
+### Bug Fixes
+
+* collaboration UI ([#1292](https://github.com/adobe/spacecat-api-service/issues/1292)) ([4b61e14](https://github.com/adobe/spacecat-api-service/commit/4b61e14c963c962f3fd0cc1ef491d78f35f387a8))
+
+## [1.183.1](https://github.com/adobe/spacecat-api-service/compare/v1.183.0...v1.183.1) (2025-09-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.64.3 ([#1286](https://github.com/adobe/spacecat-api-service/issues/1286)) ([ae39851](https://github.com/adobe/spacecat-api-service/commit/ae39851874dd59cf3300a24cb7496dd344f9a76c))
+
+# [1.183.0](https://github.com/adobe/spacecat-api-service/compare/v1.182.2...v1.183.0) (2025-09-24)
+
+
+### Features
+
+* redirect-chains audit ([#1290](https://github.com/adobe/spacecat-api-service/issues/1290)) ([9f06d14](https://github.com/adobe/spacecat-api-service/commit/9f06d148f916d0cf9c623f8410b9f5d703085963))
+
 ## [1.182.2](https://github.com/adobe/spacecat-api-service/compare/v1.182.1...v1.182.2) (2025-09-23)
 
 

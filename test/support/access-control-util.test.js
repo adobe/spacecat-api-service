@@ -14,10 +14,10 @@
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import {
-  Site, Organization,
+  Site,
+  Organization,
   Entitlement as EntitlementModel,
   TrialUser as TrialUserModel,
-  OrganizationIdentityProvider as OrganizationIdentityProviderModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
@@ -578,12 +578,6 @@ describe('Access Control Util', () => {
 
       sandbox.stub(TrialUserModel, 'STATUSES').value({
         REGISTERED: 'registered',
-      });
-
-      sandbox.stub(OrganizationIdentityProviderModel, 'PROVIDER_TYPES').value({
-        IMS: 'IMS',
-        MICROSOFT: 'MICROSOFT',
-        GOOGLE: 'GOOGLE',
       });
 
       mockOrg = {
