@@ -367,6 +367,11 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
+    if (isObject(requestBody.code)) {
+      site.setCode(requestBody.code);
+      updates = true;
+    }
+
     if (requestBody.gitHubURL !== site.getGitHubURL() && validateRepoUrl(requestBody.gitHubURL)) {
       site.setGitHubURL(requestBody.gitHubURL);
       updates = true;
