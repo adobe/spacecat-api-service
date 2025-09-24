@@ -1,3 +1,10 @@
+# [1.183.0](https://github.com/adobe/spacecat-api-service/compare/v1.182.2...v1.183.0) (2025-09-24)
+
+
+### Features
+
+* redirect-chains audit ([#1290](https://github.com/adobe/spacecat-api-service/issues/1290)) ([9f06d14](https://github.com/adobe/spacecat-api-service/commit/9f06d148f916d0cf9c623f8410b9f5d703085963))
+
 ## [1.182.2](https://github.com/adobe/spacecat-api-service/compare/v1.182.1...v1.182.2) (2025-09-23)
 
 
