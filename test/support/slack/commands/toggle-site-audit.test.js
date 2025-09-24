@@ -301,7 +301,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(20);
+        .to.equal(22);
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -320,7 +320,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(20);
+        .to.equal(22);
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });

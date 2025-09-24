@@ -68,7 +68,6 @@ import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
-import OrganizationIdentityProvidersController from './controllers/organization-identity-providers.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -131,7 +130,6 @@ async function run(request, context) {
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
-    const orgIdentityProvidersController = OrganizationIdentityProvidersController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
     const trialUsersController = TrialUsersController(context);
@@ -163,7 +161,6 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
-      orgIdentityProvidersController,
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,
