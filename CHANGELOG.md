@@ -1,3 +1,10 @@
+## [1.183.2](https://github.com/adobe/spacecat-api-service/compare/v1.183.1...v1.183.2) (2025-09-24)
+
+
+### Bug Fixes
+
+* collaboration UI ([#1292](https://github.com/adobe/spacecat-api-service/issues/1292)) ([4b61e14](https://github.com/adobe/spacecat-api-service/commit/4b61e14c963c962f3fd0cc1ef491d78f35f387a8))
+
 ## [1.183.1](https://github.com/adobe/spacecat-api-service/compare/v1.183.0...v1.183.1) (2025-09-24)
 
 
