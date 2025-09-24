@@ -47,7 +47,17 @@ preflight-jobs:
               $ref: './schemas.yaml#/CreatePreflightJobResponse'
       '400':
         description: Invalid request (missing urls array, step field, or other required fields)
-
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
 preflight-job-status:
   parameters:
     - $ref: './parameters.yaml#/jobId'
@@ -71,5 +81,25 @@ preflight-job-status:
           application/json:
             schema:
               $ref: './schemas.yaml#/PreflightJobResponse'
+      '400':
+        description: Invalid jobId format
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
       '404':
         description: Job not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'
