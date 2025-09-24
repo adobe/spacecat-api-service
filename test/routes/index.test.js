@@ -194,10 +194,6 @@ describe('getRouteHandlers', () => {
     triggerAudit: sinon.stub(),
   };
 
-  const mockOrganizationIdentityProviderController = {
-    getByOrganizationID: () => null,
-  };
-
   const mockUserActivityController = {
     getBySiteID: () => null,
     createTrialUserActivity: () => null,
@@ -250,7 +246,6 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
-      mockOrganizationIdentityProviderController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,

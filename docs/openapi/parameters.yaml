@@ -254,10 +254,10 @@ trafficType:
     enum:
       - 'all'
       - 'owned'
-      - 'earned' 
+      - 'earned'
       - 'paid'
     example: 'paid'
- 
+
 # New parameters for entitlements API
 entitlementId:
   name: entitlementId
@@ -296,15 +296,6 @@ trialUserId:
   schema:
     $ref: './schemas.yaml#/Id'
 
-provider:
-  name: provider
-  description: The identity provider (IMS, Microsoft, Google, etc.)
-  in: path
-  required: true
-  schema:
-    type: string
-    example: 'IMS'
-
 externalUserId:
   name: externalUserId
   description: The external user ID from the identity provider
@@ -322,15 +313,6 @@ externalId:
   schema:
     type: string
     example: 'user123@adobe.com'
-
-# New parameters for organization identity providers API
-organizationIdentityProviderId:
-  name: organizationIdentityProviderId
-  description: The organization identity provider ID in uuid format
-  in: path
-  required: true
-  schema:
-    $ref: './schemas.yaml#/Id'
 
 sandboxAuditType:
   name: auditType
