@@ -505,7 +505,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { hostname } = new URL(baseURL);
   const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
   /* c8 ignore next */
-  const dataFolder = env.ENV === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+  const dataFolder = env.ENV === 'prod' ? dataFolderName : `${dataFolderName}-dev`;
 
   const {
     Site, Configuration,
