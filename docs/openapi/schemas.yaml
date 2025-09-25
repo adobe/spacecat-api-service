@@ -657,6 +657,131 @@ AuditResult:
                 The final URL for the audited page.
               type: string
     - type: object
+      description: |
+        The result of a product-metatags audit targeting Product Detail Pages (PDP).
+        This audit focuses specifically on e-commerce product pages and analyzes
+        product-specific metadata including SKU, product images, and catalog information.
+      properties:
+        auditResult:
+          type: object
+          properties:
+            detectedTags:
+              description: |
+                A mapping of Product Detail Page (PDP) URLs to their detected meta-tags issues and recommendations.
+                Only product pages with SKU meta tags are analyzed and included in results.
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  title:
+                    type: object
+                    properties:
+                      seoRecommendation:
+                        description: |
+                          SEO recommendation for the title tag.
+                        type: string
+                      issue:
+                        description: |
+                          The issue detected in the title tag.
+                        type: string
+                      issueDetails:
+                        description: |
+                          Detailed explanation of the issue detected in the title tag.
+                        type: string
+                      seoImpact:
+                        description: |
+                          The impact of the detected issue on SEO.
+                        type: string
+                  description:
+                    type: object
+                    properties:
+                      seoRecommendation:
+                        description: |
+                          SEO recommendation for the description meta tag.
+                        type: string
+                      issue:
+                        description: |
+                          The issue detected in the description meta tag.
+                        type: string
+                      issueDetails:
+                        description: |
+                          Detailed explanation of the issue detected in the description meta tag.
+                        type: string
+                      seoImpact:
+                        description: |
+                          The impact of the detected issue on SEO.
+                        type: string
+                  h1:
+                    type: object
+                    properties:
+                      seoRecommendation:
+                        description: |
+                          SEO recommendation for the H1 tag.
+                        type: string
+                      issue:
+                        description: |
+                          The issue detected in the H1 tag.
+                        type: string
+                      issueDetails:
+                        description: |
+                          Detailed explanation of the issue detected in the H1 tag.
+                        type: string
+                      seoImpact:
+                        description: |
+                          The impact of the detected issue on SEO.
+                        type: string
+                  productTags:
+                    type: object
+                    description: |
+                      Product-specific meta tags extracted from Product Detail Pages (PDP).
+                      Includes SKU, thumbnail images, and catalog/storeview information.
+                    properties:
+                      sku:
+                        description: |
+                          The product SKU (Stock Keeping Unit) identifier from meta tag.
+                          Required for PDP identification and catalog tracking.
+                        type: string
+                      'og:image':
+                        description: |
+                          The Open Graph product image URL (thumbnail/hero image).
+                        type: string
+                      'twitter:image':
+                        description: |
+                          The Twitter card product image URL (thumbnail).
+                        type: string
+                      'product:image':
+                        description: |
+                          The dedicated product image URL (catalog thumbnail).
+                        type: string
+                      image:
+                        description: |
+                          The generic product image URL (fallback thumbnail).
+                        type: string
+            sourceS3Folder:
+              description: |
+                The S3 folder containing the scraped content used for the audit.
+              type: string
+            finalUrl:
+              description: |
+                The final URL for the audited site.
+              type: string
+            projectedTrafficLost:
+              description: |
+                The estimated number of page views that could be lost due to meta tag issues.
+              type: number
+            projectedTrafficValue:
+              description: |
+                The estimated monetary value of the projected traffic loss.
+              type: number
+            notes:
+              description: |
+                Additional context about the Product Detail Page audit:
+                - Only processes pages with SKU meta tags (mandatory for PDP identification)
+                - Extracts product thumbnails from various image meta tags
+                - Supports catalog and storeview context through URL structure analysis
+                - Focuses on e-commerce product page optimization
+              type: string
+    - type: object
       description: The result of CWV audit
       properties:
         cwv:
