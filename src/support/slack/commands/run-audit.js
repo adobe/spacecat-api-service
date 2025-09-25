@@ -36,6 +36,7 @@ const ALL_AUDITS = [
   'broken-internal-links',
   'experimentation-opportunities',
   'meta-tags',
+  'product-metatags',
   'structured-data',
   'forms-opportunities',
   'alt-text',

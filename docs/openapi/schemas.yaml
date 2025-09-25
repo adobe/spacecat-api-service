@@ -55,6 +55,7 @@ AuditType:
     - 'structured-data'
     - 'costs'
     - 'meta-tags'
+    - 'product-metatags'
     - 'broken-internal-links'
     - 'experimentation-opportunities'
   example: 'cwv'
